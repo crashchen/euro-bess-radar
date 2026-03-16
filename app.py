@@ -51,12 +51,15 @@ selected_zones = st.sidebar.multiselect(
     format_func=lambda x: zone_options[x],
 )
 
-# Date range
+# Date range (inclusive calendar dates → exclusive end for API calls)
 col1, col2 = st.sidebar.columns(2)
 default_end = pd.Timestamp.now().normalize()
 default_start = default_end - pd.Timedelta(days=30)
 start_date = col1.date_input("Start", value=default_start.date())
 end_date = col2.date_input("End", value=default_end.date())
+# API contracts use exclusive end: add 1 day so the user's end date is fully included
+api_start = str(start_date)
+api_end = str(end_date + pd.Timedelta(days=1))
 
 # BESS parameters
 st.sidebar.subheader("BESS Parameters")
@@ -125,8 +128,8 @@ with st.sidebar.expander("Auto-Fetch Ancillary Data"):
             with st.spinner(
                 f"Fetching from {', '.join(f['source'] for f in fetchers)}..."
             ):
-                auto_start = pd.Timestamp(str(start_date), tz="UTC")
-                auto_end = pd.Timestamp(str(end_date), tz="UTC")
+                auto_start = pd.Timestamp(api_start, tz="UTC")
+                auto_end = pd.Timestamp(api_end, tz="UTC")
                 results = run_auto_fetch(primary_zone_for_fetch, auto_start, auto_end)
                 if results:
                     st.session_state["auto_fetch_results"] = results
@@ -176,7 +179,7 @@ if fetch_btn or "zone_data" in st.session_state:
         for i, zone in enumerate(selected_zones):
             with st.spinner(f"Fetching data for {zone}..."):
                 try:
-                    df = load_zone_data(zone, str(start_date), str(end_date))
+                    df = load_zone_data(zone, api_start, api_end)
                     if not df.empty:
                         zone_data[zone] = df
                     else:
@@ -361,7 +364,7 @@ if fetch_btn or "zone_data" in st.session_state:
         st.subheader(f"Renewable Correlation — {primary_zone}")
 
         with st.spinner("Fetching generation data..."):
-            gen_df = load_generation(primary_zone, str(start_date), str(end_date))
+            gen_df = load_generation(primary_zone, api_start, api_end)
 
         if gen_df.empty:
             st.info("Generation data not available for this zone.")
@@ -451,6 +454,7 @@ if fetch_btn or "zone_data" in st.session_state:
         percentiles=percentiles,
         revenue_estimate=revenue,
         negative_stats=neg_stats,
+        tz=zone_tz,
     )
     st.download_button(
         label="Export to Excel",

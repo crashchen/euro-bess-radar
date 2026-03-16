@@ -58,6 +58,7 @@ def _build_summary_sheet(
     percentiles: dict[str, float],
     revenue_estimate: dict[str, float],
     negative_stats: dict[str, float],
+    tz: str | None = None,
 ) -> None:
     """Populate the Summary sheet with key-value metrics."""
     ws.title = "Summary"
@@ -67,8 +68,9 @@ def _build_summary_sheet(
     )
     row = 3
 
-    dates = price_df.index
+    dates = price_df.index.tz_convert(tz) if tz else price_df.index
     row = _write_kv_pair(ws, row, "Zone", zone)
+    row = _write_kv_pair(ws, row, "Timezone", tz or "UTC")
     row = _write_kv_pair(ws, row, "Date Range Start", str(dates.min().date()))
     row = _write_kv_pair(ws, row, "Date Range End", str(dates.max().date()))
     total_days = (dates.max() - dates.min()).days + 1
@@ -147,6 +149,7 @@ def export_to_excel(
     revenue_estimate: dict[str, float],
     negative_stats: dict[str, float],
     output_path: Path | None = None,
+    tz: str | None = None,
 ) -> Path:
     """Export all analytics to a formatted Excel workbook.
 
@@ -159,6 +162,7 @@ def export_to_excel(
         revenue_estimate: Revenue estimate dict.
         negative_stats: Negative price stats dict.
         output_path: Optional output path. Auto-generated if None.
+        tz: IANA timezone for local-time date display and heatmap.
 
     Returns:
         Path to the created .xlsx file.
@@ -168,6 +172,7 @@ def export_to_excel(
     # Sheet 1: Summary
     _build_summary_sheet(
         wb.active, zone, price_df, percentiles, revenue_estimate, negative_stats,
+        tz=tz,
     )
 
     # Sheet 2: Daily Spreads
@@ -181,13 +186,13 @@ def export_to_excel(
     hourly["timestamp"] = hourly["timestamp"].astype(str)
     _build_table_sheet(wb.create_sheet(), "Hourly Prices", hourly)
 
-    # Sheet 5: Price Heatmap
-    heatmap = build_price_heatmap(price_df)
+    # Sheet 5: Price Heatmap (local time)
+    heatmap = build_price_heatmap(price_df, tz=tz)
     _build_heatmap_sheet(wb.create_sheet(), "Price Heatmap", heatmap)
 
     # Determine output path
     if output_path is None:
-        dates = price_df.index
+        dates = price_df.index.tz_convert(tz) if tz else price_df.index
         start_str = dates.min().strftime("%Y%m%d")
         end_str = dates.max().strftime("%Y%m%d")
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -205,11 +210,12 @@ def export_to_bytes(
     percentiles: dict[str, float],
     revenue_estimate: dict[str, float],
     negative_stats: dict[str, float],
+    tz: str | None = None,
 ) -> bytes:
     """Export to in-memory bytes for Streamlit download button.
 
     Args:
-        Same as export_to_excel.
+        Same as export_to_excel, plus tz for local-time display.
 
     Returns:
         Bytes content of the .xlsx file.
@@ -217,6 +223,7 @@ def export_to_bytes(
     wb = Workbook()
     _build_summary_sheet(
         wb.active, zone, price_df, percentiles, revenue_estimate, negative_stats,
+        tz=tz,
     )
     _build_table_sheet(wb.create_sheet(), "Daily Spreads", daily_spreads)
     _build_table_sheet(wb.create_sheet(), "Monthly Summary", monthly_spreads)
@@ -225,7 +232,7 @@ def export_to_bytes(
     hourly["timestamp"] = hourly["timestamp"].astype(str)
     _build_table_sheet(wb.create_sheet(), "Hourly Prices", hourly)
 
-    heatmap = build_price_heatmap(price_df)
+    heatmap = build_price_heatmap(price_df, tz=tz)
     _build_heatmap_sheet(wb.create_sheet(), "Price Heatmap", heatmap)
 
     buf = BytesIO()

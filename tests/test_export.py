@@ -116,3 +116,25 @@ class TestExportToBytes:
         assert len(result) > 0
         # xlsx magic bytes: PK (zip)
         assert result[:2] == b"PK"
+
+    def test_with_timezone(self, sample_data) -> None:
+        """Export with tz parameter should produce valid xlsx with timezone in summary."""
+        price_df, daily, monthly, pctls, rev, neg = sample_data
+        result = export_to_bytes(
+            zone="DE_LU",
+            price_df=price_df,
+            daily_spreads=daily,
+            monthly_spreads=monthly,
+            percentiles=pctls,
+            revenue_estimate=rev,
+            negative_stats=neg,
+            tz="Europe/Berlin",
+        )
+        assert isinstance(result, bytes)
+        assert len(result) > 0
+
+        from io import BytesIO
+        wb = load_workbook(BytesIO(result))
+        ws = wb["Summary"]
+        values = [ws.cell(row=r, column=2).value for r in range(1, 20)]
+        assert "Europe/Berlin" in values

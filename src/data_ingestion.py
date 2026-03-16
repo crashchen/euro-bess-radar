@@ -296,14 +296,23 @@ def read_cache(
     df.index.name = "timestamp"
     df["zone"] = zone
 
-    # Validate coverage: reject partial cache that doesn't span the request
+    # Validate coverage: reject partial cache (span + density)
     requested_hours = (end - start).total_seconds() / 3600
     if requested_hours > 48:
         cached_span = (df.index.max() - df.index.min()).total_seconds() / 3600
+        # Span check: cached range must cover >=80% of the requested range
         if cached_span < requested_hours * 0.8:
             logger.info(
-                "Cache partial for %s: %.0fh cached vs %.0fh requested, re-fetching",
+                "Cache span too short for %s: %.0fh cached vs %.0fh requested",
                 zone, cached_span, requested_hours,
+            )
+            return None
+        # Density check: expect at least 1 row per 2 hours on average
+        expected_rows = requested_hours / 2
+        if len(df) < expected_rows:
+            logger.info(
+                "Cache too sparse for %s: %d rows vs %.0f expected minimum",
+                zone, len(df), expected_rows,
             )
             return None
 
