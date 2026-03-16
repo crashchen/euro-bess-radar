@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
@@ -133,8 +134,90 @@ class TestExportToBytes:
         assert isinstance(result, bytes)
         assert len(result) > 0
 
-        from io import BytesIO
         wb = load_workbook(BytesIO(result))
         ws = wb["Summary"]
         values = [ws.cell(row=r, column=2).value for r in range(1, 20)]
         assert "Europe/Berlin" in values
+
+    def test_summary_dates_follow_local_timezone(self) -> None:
+        """Summary dates should reflect local calendar dates, not raw UTC dates."""
+        idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+        price_df = pd.DataFrame({"price_eur_mwh": [50.0] * len(idx)}, index=idx)
+        price_df.index.name = "timestamp"
+
+        daily = calculate_daily_spreads(price_df, tz="Europe/Berlin")
+        monthly = calculate_monthly_spreads(price_df, tz="Europe/Berlin")
+        pctls = calculate_spread_percentiles(daily)
+        rev = estimate_annual_arbitrage_revenue(daily)
+        neg = calculate_negative_price_hours(price_df)
+
+        result = export_to_bytes(
+            zone="DE_LU",
+            price_df=price_df,
+            daily_spreads=daily,
+            monthly_spreads=monthly,
+            percentiles=pctls,
+            revenue_estimate=rev,
+            negative_stats=neg,
+            tz="Europe/Berlin",
+        )
+
+        wb = load_workbook(BytesIO(result))
+        ws = wb["Summary"]
+        summary = {ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value for r in range(1, 20)}
+
+        assert summary["Timezone"] == "Europe/Berlin"
+        assert summary["Date Range Start"] == "2025-01-01"
+        assert summary["Date Range End"] == "2025-01-03"
+        assert summary["Total Days"] == 3
+
+    def test_heatmap_respects_local_hour_shift(self) -> None:
+        """Price Heatmap sheet should reflect the requested local timezone."""
+        idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+        prices = [50.0] * 48
+        prices[23] = 200.0  # UTC 23:00 Jan 1 = Europe/Berlin 00:00 Jan 2
+        price_df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+        price_df.index.name = "timestamp"
+
+        daily = calculate_daily_spreads(price_df, tz="Europe/Berlin")
+        monthly = calculate_monthly_spreads(price_df, tz="Europe/Berlin")
+        pctls = calculate_spread_percentiles(daily)
+        rev = estimate_annual_arbitrage_revenue(daily)
+        neg = calculate_negative_price_hours(price_df)
+
+        result = export_to_bytes(
+            zone="DE_LU",
+            price_df=price_df,
+            daily_spreads=daily,
+            monthly_spreads=monthly,
+            percentiles=pctls,
+            revenue_estimate=rev,
+            negative_stats=neg,
+            tz="Europe/Berlin",
+        )
+
+        wb = load_workbook(BytesIO(result), data_only=True)
+        ws = wb["Price Heatmap"]
+
+        january_col = None
+        for col in range(2, ws.max_column + 1):
+            if ws.cell(row=1, column=col).value == "2025-01":
+                january_col = col
+                break
+
+        assert january_col is not None
+
+        local_midnight_value = None
+        utc_23_value = None
+        for row in range(2, ws.max_row + 1):
+            hour = ws.cell(row=row, column=1).value
+            value = ws.cell(row=row, column=january_col).value
+            if hour == 0:
+                local_midnight_value = value
+            if hour == 23:
+                utc_23_value = value
+
+        assert local_midnight_value is not None
+        assert utc_23_value is not None
+        assert local_midnight_value > utc_23_value
+        assert local_midnight_value > 100

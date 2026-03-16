@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 import functools
 import logging
 import sqlite3
@@ -21,6 +22,7 @@ from src.config import (
     ELEXON_MARKET_INDEX_ENDPOINT,
     GBP_TO_EUR,
     get_api_key,
+    get_zone_timezone,
     is_elexon_zone,
 )
 
@@ -73,6 +75,51 @@ def _to_utc_timestamp(value: str | pd.Timestamp) -> pd.Timestamp:
     if ts.tzinfo is None:
         ts = ts.tz_localize(DEFAULT_QUERY_TIMEZONE)
     return ts.tz_convert("UTC")
+
+
+def _to_local_midnight(
+    value: str | date | pd.Timestamp,
+    timezone: str,
+) -> pd.Timestamp:
+    """Interpret a calendar date as local midnight in the given timezone."""
+    ts = pd.Timestamp(value)
+    if ts.tzinfo is None:
+        return ts.normalize().tz_localize(timezone)
+    return ts.tz_convert(timezone).normalize()
+
+
+def build_zone_query_window(
+    zone: str,
+    start_date: str | date | pd.Timestamp,
+    end_date: str | date | pd.Timestamp,
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    """Convert inclusive local calendar dates into a UTC [start, end) window."""
+    timezone = get_zone_timezone(zone)
+    start_local = _to_local_midnight(start_date, timezone)
+    end_local = _to_local_midnight(end_date, timezone) + pd.Timedelta(days=1)
+
+    if end_local <= start_local:
+        raise ValueError("end_date must be on or after start_date.")
+
+    return start_local.tz_convert("UTC"), end_local.tz_convert("UTC")
+
+
+def _expected_cache_interval(
+    zone: str,
+    index: pd.DatetimeIndex,
+) -> pd.Timedelta:
+    """Infer the finest credible cache cadence for the zone."""
+    fallback = pd.Timedelta(minutes=30) if is_elexon_zone(zone) else pd.Timedelta(hours=1)
+    if len(index) < 2:
+        return fallback
+
+    deltas = pd.Series(index).sort_values().diff().dropna()
+    positive = deltas[deltas > pd.Timedelta(0)]
+    if positive.empty:
+        return fallback
+
+    observed = positive.mode().iloc[0]
+    return min(observed, fallback)
 
 
 # ── Cleaning ──────────────────────────────────────────────────────────────────
@@ -222,6 +269,10 @@ def fetch_elexon_prices(
     df = df.groupby("timestamp", as_index=True)["price_gbp"].mean().to_frame()
     df["price_eur_mwh"] = df["price_gbp"] * GBP_TO_EUR
     df = df[["price_eur_mwh"]].sort_index()
+
+    if end > start:
+        df = df[(df.index >= start) & (df.index < end)]
+
     return df
 
 
@@ -296,25 +347,17 @@ def read_cache(
     df.index.name = "timestamp"
     df["zone"] = zone
 
-    # Validate coverage: reject partial cache (span + density)
-    requested_hours = (end - start).total_seconds() / 3600
-    if requested_hours > 48:
-        cached_span = (df.index.max() - df.index.min()).total_seconds() / 3600
-        # Span check: cached range must cover >=80% of the requested range
-        if cached_span < requested_hours * 0.8:
-            logger.info(
-                "Cache span too short for %s: %.0fh cached vs %.0fh requested",
-                zone, cached_span, requested_hours,
-            )
-            return None
-        # Density check: expect at least 1 row per 2 hours on average
-        expected_rows = requested_hours / 2
-        if len(df) < expected_rows:
-            logger.info(
-                "Cache too sparse for %s: %d rows vs %.0f expected minimum",
-                zone, len(df), expected_rows,
-            )
-            return None
+    interval = _expected_cache_interval(zone, df.index)
+    expected_points = max(int(round((end - start) / interval)), 1)
+    expected_index = pd.date_range(start=start, periods=expected_points, freq=interval)
+    missing_points = int(df.reindex(expected_index)["price_eur_mwh"].isna().sum())
+
+    if missing_points:
+        logger.info(
+            "Cache incomplete for %s: %d missing points at %s cadence",
+            zone, missing_points, interval,
+        )
+        return None
 
     return df
 
@@ -839,6 +882,10 @@ def fetch_elexon_system_prices(
     out["system_sell_price_eur"] = out["system_sell_price_gbp"] * GBP_TO_EUR
     out["spread_eur"] = out["system_buy_price_eur"] - out["system_sell_price_eur"]
     out = out.set_index("timestamp").sort_index()
+
+    if end > start:
+        out = out[(out.index >= start) & (out.index < end)]
+
     return out
 
 

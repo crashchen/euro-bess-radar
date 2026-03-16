@@ -73,7 +73,7 @@ def _build_summary_sheet(
     row = _write_kv_pair(ws, row, "Timezone", tz or "UTC")
     row = _write_kv_pair(ws, row, "Date Range Start", str(dates.min().date()))
     row = _write_kv_pair(ws, row, "Date Range End", str(dates.max().date()))
-    total_days = (dates.max() - dates.min()).days + 1
+    total_days = (dates.max().date() - dates.min().date()).days + 1
     row = _write_kv_pair(ws, row, "Total Days", total_days)
     row += 1
 

@@ -11,6 +11,7 @@ import pytest
 
 from src.config import ELEXON_ZONES, ENTSOE_ZONES, GBP_TO_EUR, is_elexon_zone
 from src.data_ingestion import (
+    build_zone_query_window,
     clean_prices,
     fetch_elexon_prices,
     fetch_elexon_system_prices,
@@ -69,6 +70,29 @@ class TestFetchElexonPrices:
         original_gbp = mock_elexon_json[0]["price"]
         expected_eur = original_gbp * GBP_TO_EUR
         assert abs(df["price_eur_mwh"].iloc[0] - expected_eur) < 0.01
+
+    @patch("src.data_ingestion._call_elexon_api")
+    def test_filters_to_requested_window(self, mock_api: MagicMock) -> None:
+        """Partial-day windows should be trimmed back to [start, end)."""
+        day_1 = [
+            {"startTime": "2025-01-01T00:00:00Z", "price": 40.0},
+            {"startTime": "2025-01-01T00:30:00Z", "price": 41.0},
+        ]
+        day_2 = [
+            {"startTime": "2025-01-02T00:00:00Z", "price": 42.0},
+            {"startTime": "2025-01-02T00:30:00Z", "price": 43.0},
+        ]
+        mock_api.side_effect = [day_1, day_2]
+
+        df = fetch_elexon_prices(
+            start=pd.Timestamp("2025-01-01T00:30:00Z"),
+            end=pd.Timestamp("2025-01-02T00:30:00Z"),
+        )
+
+        assert list(df.index.astype(str)) == [
+            "2025-01-01 00:30:00+00:00",
+            "2025-01-02 00:00:00+00:00",
+        ]
 
 
 # ── Test 3: GB routes to Elexon ─────────────────────────────────────────────
@@ -161,6 +185,42 @@ class TestCacheRoundtrip:
             check_names=False,
         )
 
+    def test_rejects_sparse_cache(self, tmp_path: Path) -> None:
+        """Caches missing every other hour should force a refetch."""
+        zone = "DE_LU"
+        start = pd.Timestamp("2025-01-01", tz="UTC")
+        end = pd.Timestamp("2025-01-08", tz="UTC")
+        idx = pd.date_range(start, end, freq="2h", inclusive="left")
+        sparse_df = pd.DataFrame({"price_eur_mwh": range(len(idx))}, index=idx)
+        sparse_df.index.name = "timestamp"
+
+        with patch("src.data_ingestion.DB_PATH", tmp_path / "test.db"), \
+             patch("src.data_ingestion.CACHE_DIR", tmp_path):
+            write_cache(sparse_df, zone)
+            result = read_cache(zone, start, end)
+
+        assert result is None
+
+    def test_rejects_cache_with_large_hole(self, tmp_path: Path) -> None:
+        """Caches with a day-sized hole in the middle should be rejected."""
+        zone = "DE_LU"
+        start = pd.Timestamp("2025-01-01", tz="UTC")
+        end = pd.Timestamp("2025-01-08", tz="UTC")
+        full_idx = pd.date_range(start, end, freq="h", inclusive="left")
+        hole_idx = full_idx.delete(slice(72, 96))
+        holey_df = pd.DataFrame(
+            {"price_eur_mwh": range(len(hole_idx))},
+            index=hole_idx,
+        )
+        holey_df.index.name = "timestamp"
+
+        with patch("src.data_ingestion.DB_PATH", tmp_path / "test.db"), \
+             patch("src.data_ingestion.CACHE_DIR", tmp_path):
+            write_cache(holey_df, zone)
+            result = read_cache(zone, start, end)
+
+        assert result is None
+
 
 # ── Test 7: invalid zone raises error ────────────────────────────────────────
 
@@ -227,6 +287,18 @@ class TestConfigZoneClassification:
     def test_all_elexon_zones_are_elexon(self) -> None:
         for code in ELEXON_ZONES.values():
             assert is_elexon_zone(code) is True
+
+
+class TestBuildZoneQueryWindow:
+    def test_de_lu_uses_local_midnight_in_winter(self) -> None:
+        start, end = build_zone_query_window("DE_LU", "2025-01-01", "2025-01-31")
+        assert start == pd.Timestamp("2024-12-31T23:00:00Z")
+        assert end == pd.Timestamp("2025-01-31T23:00:00Z")
+
+    def test_gb_uses_local_midnight_in_bst(self) -> None:
+        start, end = build_zone_query_window("GB", "2025-07-01", "2025-07-31")
+        assert start == pd.Timestamp("2025-06-30T23:00:00Z")
+        assert end == pd.Timestamp("2025-07-31T23:00:00Z")
 
 
 # ── Test 10: Fingrid data fetcher ─────────────────────────────────────────────
@@ -336,6 +408,53 @@ class TestFetchElexonSystemPrices:
         assert "system_sell_price_gbp" in df.columns
         assert "spread_eur" in df.columns
         assert len(df) == 2
+
+    @patch("src.data_ingestion.requests.get")
+    def test_filters_to_requested_window(self, mock_get: MagicMock) -> None:
+        """System price fetches should be trimmed back to [start, end)."""
+        day_1 = MagicMock()
+        day_1.raise_for_status = MagicMock()
+        day_1.json.return_value = [
+            {
+                "settlementDate": "2025-01-01",
+                "settlementPeriod": 1,
+                "systemBuyPrice": 55.0,
+                "systemSellPrice": 45.0,
+            },
+            {
+                "settlementDate": "2025-01-01",
+                "settlementPeriod": 2,
+                "systemBuyPrice": 56.0,
+                "systemSellPrice": 46.0,
+            },
+        ]
+        day_2 = MagicMock()
+        day_2.raise_for_status = MagicMock()
+        day_2.json.return_value = [
+            {
+                "settlementDate": "2025-01-02",
+                "settlementPeriod": 1,
+                "systemBuyPrice": 57.0,
+                "systemSellPrice": 47.0,
+            },
+            {
+                "settlementDate": "2025-01-02",
+                "settlementPeriod": 2,
+                "systemBuyPrice": 58.0,
+                "systemSellPrice": 48.0,
+            },
+        ]
+        mock_get.side_effect = [day_1, day_2]
+
+        df = fetch_elexon_system_prices(
+            start=pd.Timestamp("2025-01-01T00:30:00Z"),
+            end=pd.Timestamp("2025-01-02T00:30:00Z"),
+        )
+
+        assert list(df.index.astype(str)) == [
+            "2025-01-01 00:30:00+00:00",
+            "2025-01-02 00:00:00+00:00",
+        ]
 
     @patch("src.data_ingestion.requests.get")
     def test_empty_response(self, mock_get: MagicMock) -> None:

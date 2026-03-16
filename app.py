@@ -30,7 +30,11 @@ from src.ancillary import (
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
 from src.config import ALL_ZONES, ZONE_TIMEZONES, get_zone_timezone, is_elexon_zone
-from src.data_ingestion import fetch_generation_data, fetch_prices
+from src.data_ingestion import (
+    build_zone_query_window,
+    fetch_generation_data,
+    fetch_prices,
+)
 from src.export import export_to_bytes
 
 logging.basicConfig(level=logging.INFO)
@@ -51,15 +55,12 @@ selected_zones = st.sidebar.multiselect(
     format_func=lambda x: zone_options[x],
 )
 
-# Date range (inclusive calendar dates → exclusive end for API calls)
+# Date range (inclusive local calendar dates per selected bidding zone)
 col1, col2 = st.sidebar.columns(2)
 default_end = pd.Timestamp.now().normalize()
 default_start = default_end - pd.Timedelta(days=30)
 start_date = col1.date_input("Start", value=default_start.date())
 end_date = col2.date_input("End", value=default_end.date())
-# API contracts use exclusive end: add 1 day so the user's end date is fully included
-api_start = str(start_date)
-api_end = str(end_date + pd.Timedelta(days=1))
 
 # BESS parameters
 st.sidebar.subheader("BESS Parameters")
@@ -128,8 +129,11 @@ with st.sidebar.expander("Auto-Fetch Ancillary Data"):
             with st.spinner(
                 f"Fetching from {', '.join(f['source'] for f in fetchers)}..."
             ):
-                auto_start = pd.Timestamp(api_start, tz="UTC")
-                auto_end = pd.Timestamp(api_end, tz="UTC")
+                auto_start, auto_end = build_zone_query_window(
+                    primary_zone_for_fetch,
+                    start_date,
+                    end_date,
+                )
                 results = run_auto_fetch(primary_zone_for_fetch, auto_start, auto_end)
                 if results:
                     st.session_state["auto_fetch_results"] = results
@@ -153,10 +157,11 @@ fetch_btn = st.sidebar.button("Fetch Data", type="primary", width="stretch")
 @st.cache_data(show_spinner=False)
 def load_zone_data(zone: str, start: str, end: str) -> pd.DataFrame:
     """Fetch price data for a zone (cached by Streamlit)."""
+    api_start, api_end = build_zone_query_window(zone, start, end)
     return fetch_prices(
         zone=zone,
-        start=pd.Timestamp(start, tz="UTC"),
-        end=pd.Timestamp(end, tz="UTC"),
+        start=api_start,
+        end=api_end,
         use_cache=True,
     )
 
@@ -164,10 +169,11 @@ def load_zone_data(zone: str, start: str, end: str) -> pd.DataFrame:
 @st.cache_data(show_spinner=False)
 def load_generation(zone: str, start: str, end: str) -> pd.DataFrame:
     """Fetch generation data for a zone (cached by Streamlit)."""
+    api_start, api_end = build_zone_query_window(zone, start, end)
     return fetch_generation_data(
         zone=zone,
-        start=pd.Timestamp(start, tz="UTC"),
-        end=pd.Timestamp(end, tz="UTC"),
+        start=api_start,
+        end=api_end,
     )
 
 
@@ -179,7 +185,7 @@ if fetch_btn or "zone_data" in st.session_state:
         for i, zone in enumerate(selected_zones):
             with st.spinner(f"Fetching data for {zone}..."):
                 try:
-                    df = load_zone_data(zone, api_start, api_end)
+                    df = load_zone_data(zone, str(start_date), str(end_date))
                     if not df.empty:
                         zone_data[zone] = df
                     else:
@@ -364,7 +370,7 @@ if fetch_btn or "zone_data" in st.session_state:
         st.subheader(f"Renewable Correlation — {primary_zone}")
 
         with st.spinner("Fetching generation data..."):
-            gen_df = load_generation(primary_zone, api_start, api_end)
+            gen_df = load_generation(primary_zone, str(start_date), str(end_date))
 
         if gen_df.empty:
             st.info("Generation data not available for this zone.")
