@@ -29,7 +29,7 @@ from src.ancillary import (
     parse_ancillary_csv,
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
-from src.config import ALL_ZONES, is_elexon_zone
+from src.config import ALL_ZONES, ZONE_TIMEZONES, get_zone_timezone, is_elexon_zone
 from src.data_ingestion import fetch_generation_data, fetch_prices
 from src.export import export_to_bytes
 
@@ -199,9 +199,10 @@ if fetch_btn or "zone_data" in st.session_state:
     # ── Compute analytics for primary zone ───────────────────────────────────
     primary_zone = selected_zones[0] if selected_zones else list(zone_data.keys())[0]
     primary_df = zone_data[primary_zone]
+    zone_tz = get_zone_timezone(primary_zone)
 
-    daily_spreads = calculate_daily_spreads(primary_df)
-    monthly_spreads = calculate_monthly_spreads(primary_df)
+    daily_spreads = calculate_daily_spreads(primary_df, tz=zone_tz)
+    monthly_spreads = calculate_monthly_spreads(primary_df, tz=zone_tz)
     percentiles = calculate_spread_percentiles(daily_spreads)
     neg_stats = calculate_negative_price_hours(primary_df)
     revenue = estimate_annual_arbitrage_revenue(
@@ -255,11 +256,11 @@ if fetch_btn or "zone_data" in st.session_state:
     with tabs[1]:
         st.subheader(f"Heatmaps — {primary_zone}")
 
-        price_hm = build_price_heatmap(primary_df)
+        price_hm = build_price_heatmap(primary_df, tz=zone_tz)
         fig_phm = px.imshow(
             price_hm,
-            title="Average Price by Hour & Month",
-            labels=dict(x="Month", y="Hour", color="EUR/MWh"),
+            title=f"Average Price by Hour & Month ({zone_tz})",
+            labels=dict(x="Month", y="Hour (local)", color="EUR/MWh"),
             color_continuous_scale="Viridis",
             aspect="auto",
             template=chart_template,
@@ -267,11 +268,11 @@ if fetch_btn or "zone_data" in st.session_state:
         fig_phm.update_yaxes(dtick=1)
         st.plotly_chart(fig_phm, width="stretch")
 
-        spread_hm = build_spread_heatmap(primary_df)
+        spread_hm = build_spread_heatmap(primary_df, tz=zone_tz)
         fig_shm = px.imshow(
             spread_hm,
-            title="Spread Contribution (Deviation from Daily Mean)",
-            labels=dict(x="Month", y="Hour", color="EUR/MWh"),
+            title=f"Spread Contribution — Deviation from Daily Mean ({zone_tz})",
+            labels=dict(x="Month", y="Hour (local)", color="EUR/MWh"),
             color_continuous_scale="RdBu_r",
             color_continuous_midpoint=0,
             aspect="auto",
@@ -376,7 +377,7 @@ if fetch_btn or "zone_data" in st.session_state:
             st.caption("Negative correlation = BESS-friendly market")
 
             # Scatter plot
-            scatter_df = build_renewable_price_scatter(primary_df, gen_df)
+            scatter_df = build_renewable_price_scatter(primary_df, gen_df, tz=zone_tz)
             if not scatter_df.empty:
                 fig_scatter = px.scatter(
                     scatter_df.reset_index(),
@@ -411,7 +412,7 @@ if fetch_btn or "zone_data" in st.session_state:
             st.info("Select multiple zones to see comparison.")
         else:
             st.subheader("Zone Comparison")
-            comp = compare_zones(zone_data)
+            comp = compare_zones(zone_data, zone_timezones=ZONE_TIMEZONES)
             st.dataframe(
                 comp.style.format({
                     "avg_price": "\u20ac{:.2f}",
@@ -427,7 +428,7 @@ if fetch_btn or "zone_data" in st.session_state:
 
             all_daily = []
             for zone, df in zone_data.items():
-                ds = calculate_daily_spreads(df)
+                ds = calculate_daily_spreads(df, tz=get_zone_timezone(zone))
                 ds["zone"] = zone
                 all_daily.append(ds)
             combined = pd.concat(all_daily, ignore_index=True)

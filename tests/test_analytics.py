@@ -18,6 +18,7 @@ from src.analytics import (
     compare_zones,
     estimate_annual_arbitrage_revenue,
 )
+from src.config import get_zone_timezone
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -268,3 +269,89 @@ class TestRenewableCorrelation:
         assert "renewable_pct" in result.columns
         assert "hour" in result.columns
         assert len(result) > 0
+
+
+# ── Local timezone analytics ────────────────────────────────────────────────
+
+@pytest.fixture
+def cet_boundary_prices() -> pd.DataFrame:
+    """Prices that straddle a UTC/CET day boundary.
+
+    UTC 2025-01-01 22:00 = CET 2025-01-01 23:00  (still Jan 1 in CET)
+    UTC 2025-01-01 23:00 = CET 2025-01-02 00:00  (Jan 2 in CET, Jan 1 in UTC)
+    UTC 2025-01-02 00:00 = CET 2025-01-02 01:00  (Jan 2 in both)
+
+    We create 48h of data (Jan 1 00:00 UTC to Jan 2 23:00 UTC).
+    In UTC: two days (Jan 1, Jan 2).
+    In CET: the last hour of UTC Jan 1 (23:00) belongs to CET Jan 2.
+    """
+    idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+    # Make Jan 1 UTC 23:00 an extreme spike (200). In UTC grouping this
+    # lands on Jan 1; in CET grouping it lands on Jan 2.
+    prices = [50.0] * 48
+    prices[23] = 200.0  # UTC 23:00 Jan 1 = CET 00:00 Jan 2
+    df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+    df.index.name = "timestamp"
+    return df
+
+
+class TestLocalTimezoneAnalytics:
+    def test_daily_spread_utc_vs_cet(self, cet_boundary_prices: pd.DataFrame) -> None:
+        """The 200 spike at UTC 23:00 Jan 1 belongs to Jan 1 in UTC but Jan 2 in CET."""
+        utc_result = calculate_daily_spreads(cet_boundary_prices)
+        cet_result = calculate_daily_spreads(cet_boundary_prices, tz="Europe/Berlin")
+
+        # In UTC: Jan 1 includes the spike → spread=150
+        utc_jan1 = utc_result[utc_result["date"].astype(str) == "2025-01-01"]
+        assert utc_jan1["spread"].iloc[0] == 150.0
+
+        # In CET: Jan 1 does NOT include the spike (it moved to Jan 2)
+        cet_jan1 = cet_result[cet_result["date"].astype(str) == "2025-01-01"]
+        assert cet_jan1["spread"].iloc[0] == 0.0  # all 50.0 in CET Jan 1
+
+        # In CET: Jan 2 includes the spike
+        cet_jan2 = cet_result[cet_result["date"].astype(str) == "2025-01-02"]
+        assert cet_jan2["spread"].iloc[0] == 150.0
+
+    def test_heatmap_hour_shifted(self, cet_boundary_prices: pd.DataFrame) -> None:
+        """Heatmap hour should reflect local time, not UTC."""
+        utc_hm = build_price_heatmap(cet_boundary_prices)
+        cet_hm = build_price_heatmap(cet_boundary_prices, tz="Europe/Berlin")
+
+        # The spike is at UTC hour 23. In CET it's hour 0 (next day).
+        # UTC heatmap: hour 23 should have the spike
+        assert utc_hm.loc[23].max() > 100
+        # CET heatmap: hour 0 should have the spike
+        assert cet_hm.loc[0].max() > 100
+
+    def test_spread_heatmap_uses_local_time(self, cet_boundary_prices: pd.DataFrame) -> None:
+        """Spread heatmap deviation should use local-time day mean."""
+        utc_shm = build_spread_heatmap(cet_boundary_prices)
+        cet_shm = build_spread_heatmap(cet_boundary_prices, tz="Europe/Berlin")
+        # Both should produce 24 rows
+        assert utc_shm.shape[0] == 24
+        assert cet_shm.shape[0] == 24
+
+    def test_backward_compat_no_tz(self, seven_day_prices: pd.DataFrame) -> None:
+        """Passing tz=None should behave identically to the old code."""
+        result_none = calculate_daily_spreads(seven_day_prices, tz=None)
+        result_default = calculate_daily_spreads(seven_day_prices)
+        pd.testing.assert_frame_equal(result_none, result_default)
+
+    def test_get_zone_timezone_known(self) -> None:
+        assert get_zone_timezone("DE_LU") == "Europe/Berlin"
+        assert get_zone_timezone("GB") == "Europe/London"
+        assert get_zone_timezone("FI") == "Europe/Helsinki"
+
+    def test_get_zone_timezone_unknown_falls_back(self) -> None:
+        assert get_zone_timezone("UNKNOWN") == "UTC"
+
+    def test_compare_zones_with_timezones(
+        self, seven_day_prices: pd.DataFrame,
+    ) -> None:
+        """compare_zones should accept zone_timezones dict."""
+        result = compare_zones(
+            {"DE_LU": seven_day_prices},
+            zone_timezones={"DE_LU": "Europe/Berlin"},
+        )
+        assert len(result) == 1

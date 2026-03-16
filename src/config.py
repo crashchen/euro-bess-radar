@@ -85,6 +85,55 @@ ELEXON_ZONES: dict[str, str] = {
 # Combined for UI display
 ALL_ZONES: dict[str, str] = {**ENTSOE_ZONES, **ELEXON_ZONES}
 
+# --- Zone Timezones ---
+# Each bidding zone's local IANA timezone.
+# DA prices are defined in local time; analytics must group by local day/hour.
+ZONE_TIMEZONES: dict[str, str] = {
+    # CET/CEST
+    "DE_LU": "Europe/Berlin",
+    "FR": "Europe/Paris",
+    "NL": "Europe/Amsterdam",
+    "BE": "Europe/Brussels",
+    "AT": "Europe/Vienna",
+    "DK_1": "Europe/Copenhagen",
+    "DK_2": "Europe/Copenhagen",
+    "SE_1": "Europe/Stockholm",
+    "SE_2": "Europe/Stockholm",
+    "SE_3": "Europe/Stockholm",
+    "SE_4": "Europe/Stockholm",
+    "NO_1": "Europe/Oslo",
+    "NO_2": "Europe/Oslo",
+    "NO_3": "Europe/Oslo",
+    "NO_4": "Europe/Oslo",
+    "NO_5": "Europe/Oslo",
+    "ES": "Europe/Madrid",
+    "IT_NORD": "Europe/Rome",
+    "IT_CSUD": "Europe/Rome",
+    "IT_SUD": "Europe/Rome",
+    "IT_SICI": "Europe/Rome",
+    "IT_SARD": "Europe/Rome",
+    "PL": "Europe/Warsaw",
+    "CZ": "Europe/Prague",
+    "HU": "Europe/Budapest",
+    "SK": "Europe/Bratislava",
+    "SI": "Europe/Ljubljana",
+    "HR": "Europe/Zagreb",
+    "CH": "Europe/Zurich",
+    # WET/WEST
+    "PT": "Europe/Lisbon",
+    "IE_SEM": "Europe/Dublin",
+    # GMT/BST
+    "GB": "Europe/London",
+    # EET/EEST
+    "FI": "Europe/Helsinki",
+    "RO": "Europe/Bucharest",
+    "BG": "Europe/Sofia",
+    "GR": "Europe/Athens",
+    "EE": "Europe/Tallinn",
+    "LV": "Europe/Riga",
+    "LT": "Europe/Vilnius",
+}
+
 
 def get_api_key() -> str:
     """Load and validate ENTSO-E API key from environment."""
@@ -99,6 +148,11 @@ def get_api_key() -> str:
 def is_elexon_zone(zone_code: str) -> bool:
     """Check if a zone code should use the Elexon API."""
     return zone_code in ELEXON_ZONES.values()
+
+
+def get_zone_timezone(zone_code: str) -> str:
+    """Return IANA timezone for a bidding zone. Falls back to UTC."""
+    return ZONE_TIMEZONES.get(zone_code, "UTC")
 
 
 def get_zone_display_name(zone_code: str) -> str:

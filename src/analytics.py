@@ -6,17 +6,31 @@ import numpy as np
 import pandas as pd
 
 
-def calculate_daily_spreads(df: pd.DataFrame) -> pd.DataFrame:
+def _to_local(df: pd.DataFrame, tz: str | None) -> pd.DataFrame:
+    """Return a copy with index converted to local time, or as-is if tz is None."""
+    if tz is None:
+        return df
+    out = df.copy()
+    out.index = out.index.tz_convert(tz)
+    return out
+
+
+def calculate_daily_spreads(
+    df: pd.DataFrame,
+    tz: str | None = None,
+) -> pd.DataFrame:
     """Calculate daily max-min spread for arbitrage potential.
 
     Args:
         df: DataFrame with DatetimeIndex 'timestamp' and column 'price_eur_mwh'.
+        tz: IANA timezone for local-time day/hour grouping. None = use index as-is.
 
     Returns:
         DataFrame with columns:
         [date, daily_min, daily_max, spread, max_hour, min_hour].
     """
-    prices = df["price_eur_mwh"]
+    local = _to_local(df, tz)
+    prices = local["price_eur_mwh"]
     daily = prices.groupby(prices.index.date)
 
     result = pd.DataFrame({
@@ -30,18 +44,22 @@ def calculate_daily_spreads(df: pd.DataFrame) -> pd.DataFrame:
     return result.reset_index()
 
 
-def calculate_monthly_spreads(df: pd.DataFrame) -> pd.DataFrame:
+def calculate_monthly_spreads(
+    df: pd.DataFrame,
+    tz: str | None = None,
+) -> pd.DataFrame:
     """Aggregate daily spreads to monthly averages.
 
     Args:
         df: Raw price DataFrame (not daily spreads).
+        tz: IANA timezone for local-time grouping. None = use index as-is.
 
     Returns:
         DataFrame with columns:
         [year_month, avg_spread, median_spread, max_spread, min_spread,
          avg_daily_max, avg_daily_min].
     """
-    daily = calculate_daily_spreads(df)
+    daily = calculate_daily_spreads(df, tz=tz)
     daily["year_month"] = pd.to_datetime(daily["date"]).dt.to_period("M").astype(str)
 
     monthly = daily.groupby("year_month").agg(
@@ -76,16 +94,21 @@ def calculate_spread_percentiles(
     }
 
 
-def build_price_heatmap(df: pd.DataFrame) -> pd.DataFrame:
+def build_price_heatmap(
+    df: pd.DataFrame,
+    tz: str | None = None,
+) -> pd.DataFrame:
     """Build hour-of-day vs year-month average price matrix.
 
     Args:
         df: Price DataFrame with DatetimeIndex.
+        tz: IANA timezone for local-time hour grouping. None = use index as-is.
 
     Returns:
         DataFrame with rows=hours 0-23, columns=year-month strings.
     """
-    tmp = df[["price_eur_mwh"]].copy()
+    local = _to_local(df, tz)
+    tmp = local[["price_eur_mwh"]].copy()
     tmp["hour"] = tmp.index.hour
     tmp["year_month"] = tmp.index.tz_localize(None).to_period("M").astype(str)
 
@@ -95,7 +118,10 @@ def build_price_heatmap(df: pd.DataFrame) -> pd.DataFrame:
     return pivot.reindex(range(24))
 
 
-def build_spread_heatmap(df: pd.DataFrame) -> pd.DataFrame:
+def build_spread_heatmap(
+    df: pd.DataFrame,
+    tz: str | None = None,
+) -> pd.DataFrame:
     """Build hour-of-day vs year-month spread contribution matrix.
 
     For each hour-month cell: average(price - daily_mean_price).
@@ -103,11 +129,13 @@ def build_spread_heatmap(df: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         df: Price DataFrame with DatetimeIndex.
+        tz: IANA timezone for local-time grouping. None = use index as-is.
 
     Returns:
         DataFrame with rows=hours 0-23, columns=year-month strings.
     """
-    tmp = df[["price_eur_mwh"]].copy()
+    local = _to_local(df, tz)
+    tmp = local[["price_eur_mwh"]].copy()
     daily_mean = tmp["price_eur_mwh"].groupby(tmp.index.date).transform("mean")
     tmp["deviation"] = tmp["price_eur_mwh"] - daily_mean
     tmp["hour"] = tmp.index.hour
@@ -248,12 +276,14 @@ def analyze_price_renewable_correlation(
 def build_renewable_price_scatter(
     price_df: pd.DataFrame,
     generation_df: pd.DataFrame,
+    tz: str | None = None,
 ) -> pd.DataFrame:
     """Prepare data for renewable output vs price scatter plot.
 
     Args:
         price_df: Price DataFrame.
         generation_df: Generation DataFrame.
+        tz: IANA timezone for local-time hour/month extraction.
 
     Returns:
         DataFrame with [price_eur_mwh, renewable_pct, hour, month].
@@ -262,8 +292,9 @@ def build_renewable_price_scatter(
     if merged.empty:
         return merged
 
-    merged["hour"] = merged.index.hour
-    merged["month"] = merged.index.month
+    local_idx = merged.index.tz_convert(tz) if tz else merged.index
+    merged["hour"] = local_idx.hour
+    merged["month"] = local_idx.month
     return merged
 
 
@@ -271,11 +302,13 @@ def build_renewable_price_scatter(
 
 def compare_zones(
     zone_data: dict[str, pd.DataFrame],
+    zone_timezones: dict[str, str] | None = None,
 ) -> pd.DataFrame:
     """Compare key metrics across multiple zones.
 
     Args:
         zone_data: Dict mapping zone_code -> price DataFrame.
+        zone_timezones: Optional dict mapping zone_code -> IANA timezone.
 
     Returns:
         Summary DataFrame with one row per zone.
@@ -285,7 +318,8 @@ def compare_zones(
         if df.empty or "price_eur_mwh" not in df.columns:
             continue
 
-        daily = calculate_daily_spreads(df)
+        tz = zone_timezones.get(zone) if zone_timezones else None
+        daily = calculate_daily_spreads(df, tz=tz)
         pctls = calculate_spread_percentiles(daily)
         neg = calculate_negative_price_hours(df)
         rev = estimate_annual_arbitrage_revenue(daily)

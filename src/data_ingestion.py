@@ -295,6 +295,18 @@ def read_cache(
     df = df.set_index("timestamp")
     df.index.name = "timestamp"
     df["zone"] = zone
+
+    # Validate coverage: reject partial cache that doesn't span the request
+    requested_hours = (end - start).total_seconds() / 3600
+    if requested_hours > 48:
+        cached_span = (df.index.max() - df.index.min()).total_seconds() / 3600
+        if cached_span < requested_hours * 0.8:
+            logger.info(
+                "Cache partial for %s: %.0fh cached vs %.0fh requested, re-fetching",
+                zone, cached_span, requested_hours,
+            )
+            return None
+
     return df
 
 
