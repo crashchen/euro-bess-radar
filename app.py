@@ -308,6 +308,35 @@ if fetch_btn or "zone_data" in st.session_state:
     # ── Tab 3: Revenue Estimation ────────────────────────────────────────────
     with tabs[2]:
         st.subheader(f"Revenue Estimation — {primary_zone}")
+        sample_days = (pd.Timestamp(end_date) - pd.Timestamp(start_date)).days + 1
+        if sample_days < 365:
+            st.warning(
+                f"Annualisation note: this revenue is extrapolated from the selected "
+                f"sample window ({sample_days} days, {start_date} to {end_date}). "
+                "For market screening, prefer at least 12 months of data to reduce "
+                "seasonality bias."
+            )
+        else:
+            st.caption(
+                f"Annualisation note: this revenue is extrapolated from the selected "
+                f"sample window ({sample_days} days)."
+            )
+
+        with st.expander("How ancillary works"):
+            st.markdown(
+                """
+                This ancillary layer is a screening model that sits on top of day-ahead arbitrage.
+
+                - You can load ancillary data by manual CSV upload or zone-specific auto-fetch.
+                - If both are present, manual uploads override auto-fetched rows for the same product name only.
+                - Reserve products are kept separate where possible, for example `FCR-N`, `FCR-D Up`, `FCR-D Down`, `aFRR Up`, and `aFRR Down`.
+                - Capacity-style products are annualised from average `EUR/MW` prices using the selected BESS power and a fixed availability assumption.
+                - Explicit single-sided energy prices are annualised using the selected BESS power, duration, and a simplified activation-hours assumption.
+                - Two-sided balancing or system-price signals, such as GB `system buy` and `system sell`, are stored and shown but are not auto-monetised because dispatch direction and activation volume are still unknown.
+                - The revenue stack chart shows `DA Arbitrage` plus each ancillary product as separate colored components.
+                - This output is intended for market screening and prioritisation, not as a dispatch-grade settlement model.
+                """
+            )
 
         # Check for ancillary data
         manual_anc_df = st.session_state.get("ancillary_df")

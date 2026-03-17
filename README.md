@@ -6,6 +6,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 
 - **Day-ahead price analysis** across 35+ European bidding zones (ENTSO-E + Elexon)
 - **Revenue estimation** for 1h, 2h, and 4h BESS using chronology-aware charge/discharge windows
+- **Inline revenue guidance** with sample-window annualisation notes and ancillary methodology help in the dashboard
 - **Renewable correlation analysis** — quantify how wind/solar drives price spreads
 - **Ancillary services integration** — manual CSV upload + auto-fetch for DE, FI, GB with per-product reserve lines, manual-over-auto product overrides, and preserved directional/system price fields
 - **Multi-zone comparison** for market screening
