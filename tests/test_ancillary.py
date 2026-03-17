@@ -69,6 +69,11 @@ class TestParsing:
         df = parse_ancillary_csv(gb_balancing_csv, "GB_BALANCING")
         assert len(df) == 2
         assert "energy_price_eur_mwh" in df.columns
+        assert "system_buy_price_eur_mwh" in df.columns
+        assert "system_sell_price_eur_mwh" in df.columns
+        assert df["system_buy_price_eur_mwh"].iloc[0] == 55.0
+        assert df["system_sell_price_eur_mwh"].iloc[0] == 45.0
+        assert df["energy_price_eur_mwh"].iloc[0] == 10.0
 
     def test_column_mapping(self, de_fcr_csv: str) -> None:
         df = parse_ancillary_csv(de_fcr_csv, "DE_FCR")
@@ -92,8 +97,26 @@ class TestAncillaryRevenue:
     def test_with_capacity_prices(self, de_fcr_csv: str) -> None:
         df = parse_ancillary_csv(de_fcr_csv, "DE_FCR")
         result = calculate_ancillary_revenue(df, power_mw=10.0, duration_hours=1.0)
-        assert result["total_ancillary_eur"] > 0
-        assert result["fcr_annual_eur"] > 0
+        assert result["total_ancillary_eur"] == 1289910.0
+        assert result["fcr_annual_eur"] == 1289910.0
+
+    def test_energy_prices_use_eur_units(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=2, freq="h", tz="UTC")
+        df = pd.DataFrame({
+            "energy_price_eur_mwh": [100.0, 100.0],
+            "capacity_price_eur_mw": [float("nan"), float("nan")],
+            "product_type": ["GB_BALANCING", "GB_BALANCING"],
+            "direction": ["", ""],
+            "zone": ["GB", "GB"],
+        }, index=idx)
+
+        result = calculate_ancillary_revenue(df, power_mw=1.0, duration_hours=1.0)
+        assert result["mfrr_annual_eur"] == 87600.0
+
+    def test_gb_balancing_uses_bid_ask_spread(self, gb_balancing_csv: str) -> None:
+        df = parse_ancillary_csv(gb_balancing_csv, "GB_BALANCING")
+        result = calculate_ancillary_revenue(df, power_mw=1.0, duration_hours=1.0)
+        assert result["mfrr_annual_eur"] == 8760.0
 
     def test_empty_df_returns_zeros(self) -> None:
         df = pd.DataFrame(columns=["capacity_price_eur_mw", "energy_price_eur_mwh",

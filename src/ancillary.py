@@ -110,7 +110,8 @@ def parse_ancillary_csv(
     Returns:
         DataFrame with standardised columns:
         [timestamp, product_type, direction, capacity_price_eur_mw,
-         energy_price_eur_mwh, zone].
+         energy_price_eur_mwh, zone] plus preserved directional/system-price
+         columns where available.
     """
     if template_key not in ANCILLARY_TEMPLATES:
         raise ValueError(f"Unknown template: {template_key}")
@@ -149,22 +150,66 @@ def parse_ancillary_csv(
     else:
         out["timestamp"] = pd.NaT
 
-    # Map price columns
-    price_cols = {
-        "capacity_price_eur_mw": "capacity_price_eur_mw",
-        "fcr_n_price": "capacity_price_eur_mw",
-        "fcr_d_price": "capacity_price_eur_mw",
-        "system_buy_price": "energy_price_eur_mwh",
-        "system_sell_price": "energy_price_eur_mwh",
-        "marginal_price_up": "energy_price_eur_mwh",
-        "marginal_price_down": "energy_price_eur_mwh",
-    }
     out["capacity_price_eur_mw"] = float("nan")
     out["energy_price_eur_mwh"] = float("nan")
+    out["energy_price_up_eur_mwh"] = float("nan")
+    out["energy_price_down_eur_mwh"] = float("nan")
+    out["system_buy_price_eur_mwh"] = float("nan")
+    out["system_sell_price_eur_mwh"] = float("nan")
 
-    for src_col, dst_col in price_cols.items():
-        if src_col in df.columns:
-            out[dst_col] = pd.to_numeric(df[src_col], errors="coerce")
+    if "capacity_price_eur_mw" in df.columns:
+        out["capacity_price_eur_mw"] = pd.to_numeric(
+            df["capacity_price_eur_mw"], errors="coerce",
+        )
+    else:
+        fcr_prices = []
+        for col in ["fcr_n_price", "fcr_d_price"]:
+            if col in df.columns:
+                fcr_prices.append(pd.to_numeric(df[col], errors="coerce"))
+        if fcr_prices:
+            out["capacity_price_eur_mw"] = pd.concat(fcr_prices, axis=1).mean(axis=1)
+
+    if "energy_price_eur_mwh" in df.columns:
+        out["energy_price_eur_mwh"] = pd.to_numeric(
+            df["energy_price_eur_mwh"], errors="coerce",
+        )
+
+    if "marginal_price_up" in df.columns:
+        out["energy_price_up_eur_mwh"] = pd.to_numeric(
+            df["marginal_price_up"], errors="coerce",
+        )
+    if "marginal_price_down" in df.columns:
+        out["energy_price_down_eur_mwh"] = pd.to_numeric(
+            df["marginal_price_down"], errors="coerce",
+        )
+    if "system_buy_price" in df.columns:
+        out["system_buy_price_eur_mwh"] = pd.to_numeric(
+            df["system_buy_price"], errors="coerce",
+        )
+    if "system_sell_price" in df.columns:
+        out["system_sell_price_eur_mwh"] = pd.to_numeric(
+            df["system_sell_price"], errors="coerce",
+        )
+
+    if out["energy_price_eur_mwh"].isna().all():
+        if (
+            out["system_buy_price_eur_mwh"].notna().any()
+            and out["system_sell_price_eur_mwh"].notna().any()
+        ):
+            out["energy_price_eur_mwh"] = (
+                out["system_buy_price_eur_mwh"] - out["system_sell_price_eur_mwh"]
+            )
+        elif (
+            out["energy_price_up_eur_mwh"].notna().any()
+            and out["energy_price_down_eur_mwh"].notna().any()
+        ):
+            out["energy_price_eur_mwh"] = (
+                out["energy_price_up_eur_mwh"] - out["energy_price_down_eur_mwh"]
+            )
+        elif out["energy_price_up_eur_mwh"].notna().any():
+            out["energy_price_eur_mwh"] = out["energy_price_up_eur_mwh"]
+        elif out["energy_price_down_eur_mwh"].notna().any():
+            out["energy_price_eur_mwh"] = out["energy_price_down_eur_mwh"]
 
     out["product_type"] = df.get("product", template_key)
     out["direction"] = df.get("direction", "")
@@ -208,7 +253,7 @@ def calculate_ancillary_revenue(
     if not cap_prices.empty:
         avg_cap = float(cap_prices.mean())
         hours_per_year = 8760
-        cap_revenue = avg_cap * power_mw * hours_per_year * availability / 1000
+        cap_revenue = avg_cap * power_mw * hours_per_year * availability
 
         product = str(ancillary_df.get("product_type", pd.Series([""])).iloc[0]).upper()
         if "FCR" in product:
@@ -224,7 +269,7 @@ def calculate_ancillary_revenue(
         energy_mwh = power_mw * duration_hours
         # Assume balancing activations ~10% of hours
         activation_hours = 8760 * 0.10
-        energy_revenue = avg_energy * energy_mwh * activation_hours / 1000
+        energy_revenue = avg_energy * energy_mwh * activation_hours
         result["mfrr_annual_eur"] = round(energy_revenue, 2)
 
     result["total_ancillary_eur"] = round(

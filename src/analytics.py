@@ -15,51 +15,164 @@ def _to_local(df: pd.DataFrame, tz: str | None) -> pd.DataFrame:
     return out
 
 
+def _infer_interval_hours(index: pd.DatetimeIndex) -> float:
+    """Infer the dominant sampling interval in hours from a DatetimeIndex."""
+    if len(index) < 2:
+        return 1.0
+
+    deltas = index.to_series().diff().dropna().dt.total_seconds() / 3600.0
+    deltas = deltas[deltas > 0]
+    if deltas.empty:
+        return 1.0
+
+    mode = deltas.mode()
+    if not mode.empty:
+        return float(mode.iloc[0])
+    return float(deltas.median())
+
+
+def _window_length(index: pd.DatetimeIndex, duration_hours: float) -> int:
+    """Convert BESS duration in hours to an integer number of intervals."""
+    interval_hours = _infer_interval_hours(index)
+    return max(int(round(duration_hours / interval_hours)), 1)
+
+
+def _calculate_daily_ordered_spread(
+    prices: pd.Series,
+    duration_hours: float,
+) -> dict[str, float | int]:
+    """Find the best non-overlapping charge/discharge window within one day."""
+    if prices.empty:
+        return {
+            "daily_min": 0.0,
+            "daily_max": 0.0,
+            "spread": 0.0,
+            "max_hour": 0,
+            "min_hour": 0,
+        }
+
+    window = _window_length(prices.index, duration_hours)
+    if len(prices) < window * 2:
+        baseline = float(prices.iloc[:window].mean())
+        start_hour = int(prices.index[0].hour)
+        return {
+            "daily_min": baseline,
+            "daily_max": baseline,
+            "spread": 0.0,
+            "max_hour": start_hour,
+            "min_hour": start_hour,
+        }
+
+    window_values = np.array([
+        float(prices.iloc[i:i + window].mean())
+        for i in range(len(prices) - window + 1)
+    ])
+    window_starts = prices.index[: len(window_values)]
+    future_best_values = np.empty(len(window_values))
+    future_best_indices = np.empty(len(window_values), dtype=int)
+
+    best_future_value = -np.inf
+    best_future_idx = 0
+    for i in range(len(window_values) - 1, -1, -1):
+        if window_values[i] >= best_future_value:
+            best_future_value = window_values[i]
+            best_future_idx = i
+        future_best_values[i] = best_future_value
+        future_best_indices[i] = best_future_idx
+
+    best_spread = 0.0
+    best_buy_idx = int(np.argmin(window_values))
+    best_sell_idx = best_buy_idx
+
+    for buy_idx, buy_value in enumerate(window_values):
+        sell_start = buy_idx + window
+        if sell_start >= len(window_values):
+            continue
+
+        sell_idx = future_best_indices[sell_start]
+        spread = future_best_values[sell_start] - buy_value
+        if spread > best_spread:
+            best_spread = float(spread)
+            best_buy_idx = buy_idx
+            best_sell_idx = int(sell_idx)
+
+    buy_value = float(window_values[best_buy_idx])
+    if best_spread <= 0:
+        return {
+            "daily_min": buy_value,
+            "daily_max": buy_value,
+            "spread": 0.0,
+            "max_hour": int(window_starts[best_buy_idx].hour),
+            "min_hour": int(window_starts[best_buy_idx].hour),
+        }
+
+    sell_value = float(window_values[best_sell_idx])
+    return {
+        "daily_min": buy_value,
+        "daily_max": sell_value,
+        "spread": round(sell_value - buy_value, 10),
+        "max_hour": int(window_starts[best_sell_idx].hour),
+        "min_hour": int(window_starts[best_buy_idx].hour),
+    }
+
+
 def calculate_daily_spreads(
     df: pd.DataFrame,
     tz: str | None = None,
+    duration_hours: float = 1.0,
 ) -> pd.DataFrame:
-    """Calculate daily max-min spread for arbitrage potential.
+    """Calculate the best daily ordered spread for arbitrage potential.
 
     Args:
         df: DataFrame with DatetimeIndex 'timestamp' and column 'price_eur_mwh'.
         tz: IANA timezone for local-time day/hour grouping. None = use index as-is.
+        duration_hours: Charge/discharge window length for spread calculation.
 
     Returns:
         DataFrame with columns:
-        [date, daily_min, daily_max, spread, max_hour, min_hour].
+        [date, daily_min, daily_max, spread, max_hour, min_hour], where
+        daily_min/max are the average buy/sell window prices and the spread
+        respects charge-before-discharge ordering.
     """
     local = _to_local(df, tz)
     prices = local["price_eur_mwh"]
     daily = prices.groupby(prices.index.date)
 
-    result = pd.DataFrame({
-        "daily_min": daily.min(),
-        "daily_max": daily.max(),
-        "spread": daily.max() - daily.min(),
-        "max_hour": daily.apply(lambda g: g.idxmax().hour),
-        "min_hour": daily.apply(lambda g: g.idxmin().hour),
-    })
+    records = []
+    for date, group in daily:
+        metrics = _calculate_daily_ordered_spread(group.sort_index(), duration_hours)
+        metrics["date"] = date
+        records.append(metrics)
+
+    result = pd.DataFrame.from_records(records)
+    if result.empty:
+        return pd.DataFrame(
+            columns=["date", "daily_min", "daily_max", "spread", "max_hour", "min_hour"],
+        )
+
+    result = result[["date", "daily_min", "daily_max", "spread", "max_hour", "min_hour"]]
     result.index.name = "date"
-    return result.reset_index()
+    return result
 
 
 def calculate_monthly_spreads(
     df: pd.DataFrame,
     tz: str | None = None,
+    duration_hours: float = 1.0,
 ) -> pd.DataFrame:
     """Aggregate daily spreads to monthly averages.
 
     Args:
         df: Raw price DataFrame (not daily spreads).
         tz: IANA timezone for local-time grouping. None = use index as-is.
+        duration_hours: Charge/discharge window length for spread calculation.
 
     Returns:
         DataFrame with columns:
         [year_month, avg_spread, median_spread, max_spread, min_spread,
          avg_daily_max, avg_daily_min].
     """
-    daily = calculate_daily_spreads(df, tz=tz)
+    daily = calculate_daily_spreads(df, tz=tz, duration_hours=duration_hours)
     daily["year_month"] = pd.to_datetime(daily["date"]).dt.to_period("M").astype(str)
 
     monthly = daily.groupby("year_month").agg(
@@ -157,7 +270,8 @@ def estimate_annual_arbitrage_revenue(
     """Estimate annualised BESS arbitrage revenue from daily spreads.
 
     Args:
-        daily_spreads: DataFrame with 'spread' column.
+        daily_spreads: DataFrame with 'spread' column for the relevant
+            charge/discharge duration.
         power_mw: BESS power rating in MW.
         duration_hours: BESS duration in hours.
         roundtrip_efficiency: Round-trip efficiency (0-1).
@@ -192,7 +306,7 @@ def calculate_negative_price_hours(df: pd.DataFrame) -> dict[str, float]:
         df: Price DataFrame with 'price_eur_mwh' column.
 
     Returns:
-        Dict with total_negative_hours, pct_negative,
+        Dict with negative_hours, negative_intervals, pct_negative,
         avg_negative_price, most_negative_price.
     """
     prices = df["price_eur_mwh"]
@@ -200,9 +314,13 @@ def calculate_negative_price_hours(df: pd.DataFrame) -> dict[str, float]:
 
     total = len(prices)
     neg_count = len(negative)
+    interval_hours = _infer_interval_hours(df.index)
+    negative_hours = round(neg_count * interval_hours, 2)
 
     return {
-        "total_negative_hours": neg_count,
+        "negative_hours": negative_hours,
+        "negative_intervals": int(neg_count),
+        "total_negative_hours": negative_hours,
         "pct_negative": round(100.0 * neg_count / total, 2) if total > 0 else 0.0,
         "avg_negative_price": round(float(negative.mean()), 2) if neg_count > 0 else 0.0,
         "most_negative_price": round(float(negative.min()), 2) if neg_count > 0 else 0.0,
@@ -303,12 +421,14 @@ def build_renewable_price_scatter(
 def compare_zones(
     zone_data: dict[str, pd.DataFrame],
     zone_timezones: dict[str, str] | None = None,
+    duration_hours: float = 1.0,
 ) -> pd.DataFrame:
     """Compare key metrics across multiple zones.
 
     Args:
         zone_data: Dict mapping zone_code -> price DataFrame.
         zone_timezones: Optional dict mapping zone_code -> IANA timezone.
+        duration_hours: Charge/discharge window length for spread calculation.
 
     Returns:
         Summary DataFrame with one row per zone.
@@ -319,10 +439,10 @@ def compare_zones(
             continue
 
         tz = zone_timezones.get(zone) if zone_timezones else None
-        daily = calculate_daily_spreads(df, tz=tz)
+        daily = calculate_daily_spreads(df, tz=tz, duration_hours=duration_hours)
         pctls = calculate_spread_percentiles(daily)
         neg = calculate_negative_price_hours(df)
-        rev = estimate_annual_arbitrage_revenue(daily)
+        rev = estimate_annual_arbitrage_revenue(daily, duration_hours=duration_hours)
 
         rows.append({
             "zone": zone,

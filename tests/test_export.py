@@ -221,3 +221,39 @@ class TestExportToBytes:
         assert utc_23_value is not None
         assert local_midnight_value > utc_23_value
         assert local_midnight_value > 100
+
+    def test_negative_summary_tracks_hours_and_intervals(self) -> None:
+        """Summary should distinguish sub-hourly negative intervals from hours."""
+        idx = pd.date_range("2025-03-01", periods=48, freq="30min", tz="UTC")
+        price_df = pd.DataFrame(
+            {"price_eur_mwh": [-10.0] * 24 + [40.0] * 24},
+            index=idx,
+        )
+        price_df.index.name = "timestamp"
+
+        daily = calculate_daily_spreads(price_df)
+        monthly = calculate_monthly_spreads(price_df)
+        pctls = calculate_spread_percentiles(daily)
+        rev = estimate_annual_arbitrage_revenue(daily)
+        neg = calculate_negative_price_hours(price_df)
+
+        result = export_to_bytes(
+            zone="GB",
+            price_df=price_df,
+            daily_spreads=daily,
+            monthly_spreads=monthly,
+            percentiles=pctls,
+            revenue_estimate=rev,
+            negative_stats=neg,
+        )
+
+        wb = load_workbook(BytesIO(result))
+        ws = wb["Summary"]
+        summary = {
+            ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value
+            for r in range(1, 25)
+        }
+
+        assert summary["Negative Price Hours"] == 12
+        assert summary["Negative Price Intervals"] == 24
+        assert summary["Negative Price % of Intervals"] == 0.5

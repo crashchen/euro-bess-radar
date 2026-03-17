@@ -91,9 +91,15 @@ def _build_summary_sheet(
     row = _write_kv_pair(ws, row, "Capture Rate Assumption", revenue_estimate["capture_rate_assumption"])
     row += 1
 
-    row = _write_kv_pair(ws, row, "Negative Price Hours", negative_stats["total_negative_hours"])
-    row = _write_kv_pair(ws, row, "Negative Price %", negative_stats["pct_negative"] / 100, _PCT_FMT)
-    if negative_stats["total_negative_hours"] > 0:
+    row = _write_kv_pair(ws, row, "Negative Price Hours", negative_stats["negative_hours"])
+    row = _write_kv_pair(
+        ws, row, "Negative Price Intervals", negative_stats["negative_intervals"],
+    )
+    row = _write_kv_pair(
+        ws, row, "Negative Price % of Intervals", negative_stats["pct_negative"] / 100,
+        _PCT_FMT,
+    )
+    if negative_stats["negative_intervals"] > 0:
         row = _write_kv_pair(ws, row, "Avg Negative Price", negative_stats["avg_negative_price"], _PRICE_FMT)
         row = _write_kv_pair(ws, row, "Most Negative Price", negative_stats["most_negative_price"], _PRICE_FMT)
 

@@ -30,7 +30,7 @@ def seven_day_prices() -> pd.DataFrame:
     Price = 60 + 40*sin(2*pi*hour/24), giving:
     - daily max = 100 (at hour 6)
     - daily min = 20  (at hour 18)
-    - daily spread = 80
+    - best ordered daily spread = 40 (buy at hour 0, sell at hour 6)
     """
     idx = pd.date_range("2025-01-01", periods=7 * 24, freq="h", tz="UTC")
     hours = np.arange(7 * 24) % 24
@@ -59,6 +59,16 @@ def negative_prices() -> pd.DataFrame:
     return df
 
 
+@pytest.fixture
+def half_hour_negative_prices() -> pd.DataFrame:
+    """24h of 30-min prices with half the intervals negative."""
+    idx = pd.date_range("2025-03-01", periods=48, freq="30min", tz="UTC")
+    prices = [-20.0] * 24 + [40.0] * 24
+    df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+    df.index.name = "timestamp"
+    return df
+
+
 # ── Daily spreads ────────────────────────────────────────────────────────────
 
 class TestDailySpreads:
@@ -66,14 +76,27 @@ class TestDailySpreads:
         result = calculate_daily_spreads(seven_day_prices)
         assert len(result) == 7
         assert "spread" in result.columns
-        # Sine wave: max ≈ 100, min ≈ 20, spread ≈ 80
-        assert all(result["spread"] > 70)
+        assert result["spread"].between(39.9, 40.1).all()
 
     def test_single_day(self, single_day_prices: pd.DataFrame) -> None:
         result = calculate_daily_spreads(single_day_prices)
         assert len(result) == 1
         assert result["spread"].iloc[0] == 23.0  # max=23, min=0
         assert result["max_hour"].iloc[0] == 23
+        assert result["min_hour"].iloc[0] == 0
+
+    def test_descending_day_has_zero_ordered_spread(self) -> None:
+        idx = pd.date_range("2025-06-15", periods=24, freq="h", tz="UTC")
+        df = pd.DataFrame({"price_eur_mwh": list(range(23, -1, -1))}, index=idx)
+        df.index.name = "timestamp"
+
+        result = calculate_daily_spreads(df)
+        assert result["spread"].iloc[0] == 0.0
+
+    def test_two_hour_window_uses_rolling_average(self, single_day_prices: pd.DataFrame) -> None:
+        result = calculate_daily_spreads(single_day_prices, duration_hours=2.0)
+        assert result["spread"].iloc[0] == 22.0
+        assert result["max_hour"].iloc[0] == 22
         assert result["min_hour"].iloc[0] == 0
 
     def test_columns(self, seven_day_prices: pd.DataFrame) -> None:
@@ -89,7 +112,7 @@ class TestMonthlySpreads:
         result = calculate_monthly_spreads(seven_day_prices)
         assert len(result) >= 1
         assert "avg_spread" in result.columns
-        assert result["avg_spread"].iloc[0] > 70
+        assert result["avg_spread"].iloc[0] > 39
 
     def test_columns(self, seven_day_prices: pd.DataFrame) -> None:
         result = calculate_monthly_spreads(seven_day_prices)
@@ -163,22 +186,29 @@ class TestNegativePrices:
     def test_all_positive(self, seven_day_prices: pd.DataFrame) -> None:
         result = calculate_negative_price_hours(seven_day_prices)
         # Sine: min is 20, no negatives
-        assert result["total_negative_hours"] == 0
+        assert result["negative_hours"] == 0
         assert result["pct_negative"] == 0.0
 
     def test_half_negative(self, negative_prices: pd.DataFrame) -> None:
         result = calculate_negative_price_hours(negative_prices)
-        assert result["total_negative_hours"] == 12
+        assert result["negative_hours"] == 12.0
+        assert result["negative_intervals"] == 12
         assert result["pct_negative"] == 50.0
         assert result["avg_negative_price"] == -20.0
         assert result["most_negative_price"] == -20.0
+
+    def test_half_negative_subhourly(self, half_hour_negative_prices: pd.DataFrame) -> None:
+        result = calculate_negative_price_hours(half_hour_negative_prices)
+        assert result["negative_hours"] == 12.0
+        assert result["negative_intervals"] == 24
+        assert result["pct_negative"] == 50.0
 
     def test_all_zero_prices(self) -> None:
         idx = pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC")
         df = pd.DataFrame({"price_eur_mwh": [0.0] * 24}, index=idx)
         df.index.name = "timestamp"
         result = calculate_negative_price_hours(df)
-        assert result["total_negative_hours"] == 0
+        assert result["negative_hours"] == 0
 
 
 # ── Zone comparison ──────────────────────────────────────────────────────────
@@ -297,7 +327,7 @@ def cet_boundary_prices() -> pd.DataFrame:
 
 class TestLocalTimezoneAnalytics:
     def test_daily_spread_utc_vs_cet(self, cet_boundary_prices: pd.DataFrame) -> None:
-        """The 200 spike at UTC 23:00 Jan 1 belongs to Jan 1 in UTC but Jan 2 in CET."""
+        """The Jan 1 UTC spike is not capturable once it shifts to the next CET day."""
         utc_result = calculate_daily_spreads(cet_boundary_prices)
         cet_result = calculate_daily_spreads(cet_boundary_prices, tz="Europe/Berlin")
 
@@ -309,9 +339,10 @@ class TestLocalTimezoneAnalytics:
         cet_jan1 = cet_result[cet_result["date"].astype(str) == "2025-01-01"]
         assert cet_jan1["spread"].iloc[0] == 0.0  # all 50.0 in CET Jan 1
 
-        # In CET: Jan 2 includes the spike
+        # In CET: Jan 2 includes the spike at local midnight, so there is still
+        # no profitable charge-before-discharge pair within that day.
         cet_jan2 = cet_result[cet_result["date"].astype(str) == "2025-01-02"]
-        assert cet_jan2["spread"].iloc[0] == 150.0
+        assert cet_jan2["spread"].iloc[0] == 0.0
 
     def test_heatmap_hour_shifted(self, cet_boundary_prices: pd.DataFrame) -> None:
         """Heatmap hour should reflect local time, not UTC."""

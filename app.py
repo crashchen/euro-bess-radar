@@ -210,8 +210,12 @@ if fetch_btn or "zone_data" in st.session_state:
     primary_df = zone_data[primary_zone]
     zone_tz = get_zone_timezone(primary_zone)
 
-    daily_spreads = calculate_daily_spreads(primary_df, tz=zone_tz)
-    monthly_spreads = calculate_monthly_spreads(primary_df, tz=zone_tz)
+    daily_spreads = calculate_daily_spreads(
+        primary_df, tz=zone_tz, duration_hours=duration_hours,
+    )
+    monthly_spreads = calculate_monthly_spreads(
+        primary_df, tz=zone_tz, duration_hours=duration_hours,
+    )
     percentiles = calculate_spread_percentiles(daily_spreads)
     neg_stats = calculate_negative_price_hours(primary_df)
     revenue = estimate_annual_arbitrage_revenue(
@@ -236,9 +240,17 @@ if fetch_btn or "zone_data" in st.session_state:
 
         k1, k2, k3, k4 = st.columns(4)
         k1.metric("Avg Price", f"\u20ac{primary_df['price_eur_mwh'].mean():.2f}/MWh")
-        k2.metric("Avg Spread", f"\u20ac{percentiles['mean']:.2f}/MWh")
-        k3.metric("P90 Spread", f"\u20ac{percentiles['p90']:.2f}/MWh")
-        k4.metric("Neg Hours", f"{neg_stats['pct_negative']:.1f}%")
+        k2.metric("Avg Ordered Spread", f"\u20ac{percentiles['mean']:.2f}/MWh")
+        k3.metric("P90 Ordered Spread", f"\u20ac{percentiles['p90']:.2f}/MWh")
+        k4.metric(
+            "Neg Price Hours",
+            f"{neg_stats['negative_hours']:.1f}h",
+            delta=f"{neg_stats['pct_negative']:.1f}% of intervals",
+        )
+        st.caption(
+            f"Spreads use chronology-aware {duration_hours}h charge/discharge windows "
+            f"in {zone_tz}."
+        )
 
         fig_price = px.line(
             primary_df.reset_index(),
@@ -253,7 +265,7 @@ if fetch_btn or "zone_data" in st.session_state:
         fig_spread = px.bar(
             daily_spreads,
             x="date", y="spread",
-            title="Daily Spread (Max - Min)",
+            title=f"Daily Ordered Spread ({duration_hours}h windows)",
             labels={"spread": "EUR/MWh", "date": ""},
             color="spread",
             color_continuous_scale="Viridis",
@@ -341,8 +353,11 @@ if fetch_btn or "zone_data" in st.session_state:
         st.markdown("**Duration Sensitivity (per MW)**")
         sens_rows = []
         for dur in [1, 2, 4]:
+            spreads_d = calculate_daily_spreads(
+                primary_df, tz=zone_tz, duration_hours=dur,
+            )
             rev_d = estimate_annual_arbitrage_revenue(
-                daily_spreads, power_mw=1.0, duration_hours=dur,
+                spreads_d, power_mw=1.0, duration_hours=dur,
                 roundtrip_efficiency=efficiency,
             )
             sens_rows.append({
@@ -355,8 +370,8 @@ if fetch_btn or "zone_data" in st.session_state:
         # Spread distribution
         fig_hist = px.histogram(
             daily_spreads, x="spread", nbins=30,
-            title="Spread Distribution",
-            labels={"spread": "Daily Spread (EUR/MWh)", "count": "Days"},
+            title="Ordered Spread Distribution",
+            labels={"spread": "Daily Ordered Spread (EUR/MWh)", "count": "Days"},
             template=chart_template,
         )
         fig_hist.add_vline(x=percentiles["p50"], line_dash="dash",
@@ -421,7 +436,11 @@ if fetch_btn or "zone_data" in st.session_state:
             st.info("Select multiple zones to see comparison.")
         else:
             st.subheader("Zone Comparison")
-            comp = compare_zones(zone_data, zone_timezones=ZONE_TIMEZONES)
+            comp = compare_zones(
+                zone_data,
+                zone_timezones=ZONE_TIMEZONES,
+                duration_hours=duration_hours,
+            )
             st.dataframe(
                 comp.style.format({
                     "avg_price": "\u20ac{:.2f}",
@@ -437,14 +456,18 @@ if fetch_btn or "zone_data" in st.session_state:
 
             all_daily = []
             for zone, df in zone_data.items():
-                ds = calculate_daily_spreads(df, tz=get_zone_timezone(zone))
+                ds = calculate_daily_spreads(
+                    df,
+                    tz=get_zone_timezone(zone),
+                    duration_hours=duration_hours,
+                )
                 ds["zone"] = zone
                 all_daily.append(ds)
             combined = pd.concat(all_daily, ignore_index=True)
 
             fig_comp = px.line(
                 combined, x="date", y="spread", color="zone",
-                title="Daily Spread Comparison",
+                title=f"Daily Ordered Spread Comparison ({duration_hours}h windows)",
                 labels={"spread": "EUR/MWh", "date": ""},
                 template=chart_template,
             )
