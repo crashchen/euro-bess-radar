@@ -23,6 +23,7 @@ from src.analytics import (
 )
 from src.ancillary import (
     ANCILLARY_TEMPLATES,
+    build_ancillary_dataset,
     calculate_ancillary_revenue,
     generate_template_csv,
     merge_revenue_stack,
@@ -289,10 +290,12 @@ if fetch_btn or "zone_data" in st.session_state:
         fig_phm.update_yaxes(dtick=1)
         st.plotly_chart(fig_phm, width="stretch")
 
-        spread_hm = build_spread_heatmap(primary_df, tz=zone_tz)
+        spread_hm = build_spread_heatmap(
+            primary_df, tz=zone_tz, duration_hours=duration_hours,
+        )
         fig_shm = px.imshow(
             spread_hm,
-            title=f"Spread Contribution — Deviation from Daily Mean ({zone_tz})",
+            title=f"Ordered Spread Signal ({duration_hours}h windows, {zone_tz})",
             labels=dict(x="Month", y="Hour (local)", color="EUR/MWh"),
             color_continuous_scale="RdBu_r",
             color_continuous_midpoint=0,
@@ -307,13 +310,20 @@ if fetch_btn or "zone_data" in st.session_state:
         st.subheader(f"Revenue Estimation — {primary_zone}")
 
         # Check for ancillary data
-        anc_df = st.session_state.get("ancillary_df")
+        manual_anc_df = st.session_state.get("ancillary_df")
+        auto_fetch_results = st.session_state.get("auto_fetch_results", {})
+        anc_df = build_ancillary_dataset(manual_anc_df, auto_fetch_results)
         anc_rev = None
         stack = None
+        anc_source = None
 
         if anc_df is not None and not anc_df.empty:
             anc_rev = calculate_ancillary_revenue(anc_df, power_mw, duration_hours)
             stack = merge_revenue_stack(revenue, anc_rev)
+            if manual_anc_df is not None and not manual_anc_df.empty:
+                anc_source = "manual upload"
+            elif auto_fetch_results:
+                anc_source = f"auto-fetch ({len(auto_fetch_results)} dataset(s))"
 
         r1, r2, r3 = st.columns(3)
         if stack:
@@ -339,15 +349,26 @@ if fetch_btn or "zone_data" in st.session_state:
                 template=chart_template,
             )
             st.plotly_chart(fig_stack, width="stretch")
+            if anc_source:
+                st.caption(f"Ancillary valuation source: {anc_source}")
+            if auto_fetch_results and anc_rev["total_ancillary_eur"] == 0:
+                st.info(
+                    "Auto-fetched balancing/system-price datasets are loaded, but the current "
+                    "model only monetises explicit capacity prices and single-sided energy prices."
+                )
         else:
             r1.metric(
                 "Est. Annual Revenue",
                 f"\u20ac{revenue['annual_revenue_eur']:,.0f}",
-                help=f"At {power_mw} MW, {duration_hours}h, {efficiency*100:.0f}% eff, 70% capture",
+                help=(
+                    f"At {power_mw} MW, {duration_hours}h, {efficiency*100:.0f}% eff, "
+                    f"{revenue['cycles_per_day_assumption']:.1f} modeled cycle/day, "
+                    f"{revenue['capture_rate_assumption']:.0%} capture"
+                ),
             )
             r2.metric("Revenue per MW", f"\u20ac{revenue['annual_revenue_eur_per_mw']:,.0f}/MW/yr")
             r3.metric("Avg Daily Revenue", f"\u20ac{revenue['avg_daily_revenue']:,.0f}")
-            st.info("Upload ancillary services data to see the full revenue stack.")
+            st.info("Upload or auto-fetch ancillary services data to see the full revenue stack.")
 
         # Sensitivity table
         st.markdown("**Duration Sensitivity (per MW)**")

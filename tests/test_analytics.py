@@ -147,8 +147,15 @@ class TestHeatmaps:
         result = build_spread_heatmap(seven_day_prices)
         assert result.shape[0] == 24
 
+    def test_spread_heatmap_tracks_selected_hours(self, seven_day_prices: pd.DataFrame) -> None:
+        result = build_spread_heatmap(seven_day_prices)
+        january = result.columns[0]
+        assert result.loc[0, january] < 0
+        assert result.loc[6, january] > 0
+        assert abs(result.loc[12, january]) < 1e-6
+
     def test_spread_heatmap_sums_near_zero(self, seven_day_prices: pd.DataFrame) -> None:
-        """Deviations from daily mean should roughly sum to zero per column."""
+        """Selected buy/sell window signals should roughly net to zero per column."""
         result = build_spread_heatmap(seven_day_prices)
         for col in result.columns:
             assert abs(result[col].sum()) < 1.0
@@ -158,17 +165,17 @@ class TestHeatmaps:
 
 class TestRevenue:
     def test_hand_calculated(self) -> None:
-        """Verify math with a known spread."""
+        """Verify math with a known spread and the default 1 modeled cycle/day."""
         daily = pd.DataFrame({"spread": [100.0] * 365})  # constant 100 EUR spread
 
         result = estimate_annual_arbitrage_revenue(
-            daily, power_mw=1.0, duration_hours=1.0,
-            roundtrip_efficiency=1.0, cycles_per_day=1.0,
+            daily, power_mw=1.0, duration_hours=1.0, roundtrip_efficiency=1.0,
         )
         # revenue = 100 * 1 * 1 * 1.0 * 0.70 * 1.0 * 365.25
         expected = 100 * 0.70 * 365.25
         assert abs(result["annual_revenue_eur"] - expected) < 1.0
         assert result["capture_rate_assumption"] == 0.70
+        assert result["cycles_per_day_assumption"] == 1.0
 
     def test_keys(self, seven_day_prices: pd.DataFrame) -> None:
         daily = calculate_daily_spreads(seven_day_prices)
@@ -176,6 +183,7 @@ class TestRevenue:
         expected_keys = {
             "annual_revenue_eur", "annual_revenue_eur_per_mw",
             "avg_daily_revenue", "capture_rate_assumption",
+            "cycles_per_day_assumption",
         }
         assert set(result.keys()) == expected_keys
 

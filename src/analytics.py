@@ -37,30 +37,31 @@ def _window_length(index: pd.DatetimeIndex, duration_hours: float) -> int:
     return max(int(round(duration_hours / interval_hours)), 1)
 
 
-def _calculate_daily_ordered_spread(
+def _find_daily_ordered_trade(
     prices: pd.Series,
     duration_hours: float,
 ) -> dict[str, float | int]:
-    """Find the best non-overlapping charge/discharge window within one day."""
+    """Find the best non-overlapping charge/discharge trade within one day."""
     if prices.empty:
         return {
-            "daily_min": 0.0,
-            "daily_max": 0.0,
+            "buy_value": 0.0,
+            "sell_value": 0.0,
             "spread": 0.0,
-            "max_hour": 0,
-            "min_hour": 0,
+            "buy_start_idx": 0,
+            "sell_start_idx": 0,
+            "window": 1,
         }
 
     window = _window_length(prices.index, duration_hours)
     if len(prices) < window * 2:
         baseline = float(prices.iloc[:window].mean())
-        start_hour = int(prices.index[0].hour)
         return {
-            "daily_min": baseline,
-            "daily_max": baseline,
+            "buy_value": baseline,
+            "sell_value": baseline,
             "spread": 0.0,
-            "max_hour": start_hour,
-            "min_hour": start_hour,
+            "buy_start_idx": 0,
+            "sell_start_idx": 0,
+            "window": window,
         }
 
     window_values = np.array([
@@ -99,20 +100,37 @@ def _calculate_daily_ordered_spread(
     buy_value = float(window_values[best_buy_idx])
     if best_spread <= 0:
         return {
-            "daily_min": buy_value,
-            "daily_max": buy_value,
+            "buy_value": buy_value,
+            "sell_value": buy_value,
             "spread": 0.0,
-            "max_hour": int(window_starts[best_buy_idx].hour),
-            "min_hour": int(window_starts[best_buy_idx].hour),
+            "buy_start_idx": best_buy_idx,
+            "sell_start_idx": best_buy_idx,
+            "window": window,
         }
 
     sell_value = float(window_values[best_sell_idx])
     return {
-        "daily_min": buy_value,
-        "daily_max": sell_value,
+        "buy_value": buy_value,
+        "sell_value": sell_value,
         "spread": round(sell_value - buy_value, 10),
-        "max_hour": int(window_starts[best_sell_idx].hour),
-        "min_hour": int(window_starts[best_buy_idx].hour),
+        "buy_start_idx": best_buy_idx,
+        "sell_start_idx": best_sell_idx,
+        "window": window,
+    }
+
+
+def _calculate_daily_ordered_spread(
+    prices: pd.Series,
+    duration_hours: float,
+) -> dict[str, float | int]:
+    """Summarise the best non-overlapping charge/discharge window within one day."""
+    trade = _find_daily_ordered_trade(prices, duration_hours)
+    return {
+        "daily_min": float(trade["buy_value"]),
+        "daily_max": float(trade["sell_value"]),
+        "spread": float(trade["spread"]),
+        "max_hour": int(prices.index[int(trade["sell_start_idx"])].hour),
+        "min_hour": int(prices.index[int(trade["buy_start_idx"])].hour),
     }
 
 
@@ -234,30 +252,50 @@ def build_price_heatmap(
 def build_spread_heatmap(
     df: pd.DataFrame,
     tz: str | None = None,
+    duration_hours: float = 1.0,
 ) -> pd.DataFrame:
-    """Build hour-of-day vs year-month spread contribution matrix.
+    """Build hour-of-day vs year-month ordered-spread signal matrix.
 
-    For each hour-month cell: average(price - daily_mean_price).
-    Positive = sell window, negative = buy window.
+    For each day, mark the selected charge window as negative and the selected
+    discharge window as positive using the day's ordered spread magnitude.
+    Positive = selected discharge window, negative = selected charge window.
 
     Args:
         df: Price DataFrame with DatetimeIndex.
         tz: IANA timezone for local-time grouping. None = use index as-is.
+        duration_hours: Charge/discharge window length used for selection.
 
     Returns:
         DataFrame with rows=hours 0-23, columns=year-month strings.
     """
     local = _to_local(df, tz)
-    tmp = local[["price_eur_mwh"]].copy()
-    daily_mean = tmp["price_eur_mwh"].groupby(tmp.index.date).transform("mean")
-    tmp["deviation"] = tmp["price_eur_mwh"] - daily_mean
+    prices = local["price_eur_mwh"]
+    signals = []
+
+    for _, group in prices.groupby(prices.index.date):
+        group = group.sort_index()
+        signal = pd.Series(0.0, index=group.index, name="signal")
+        trade = _find_daily_ordered_trade(group, duration_hours)
+        spread = float(trade["spread"])
+        if spread > 0:
+            window = int(trade["window"])
+            buy_start = int(trade["buy_start_idx"])
+            sell_start = int(trade["sell_start_idx"])
+            signal.iloc[buy_start:buy_start + window] = -spread
+            signal.iloc[sell_start:sell_start + window] = spread
+        signals.append(signal)
+
+    if not signals:
+        return pd.DataFrame(index=range(24))
+
+    tmp = pd.DataFrame({"signal": pd.concat(signals).sort_index()})
     tmp["hour"] = tmp.index.hour
     tmp["year_month"] = tmp.index.tz_localize(None).to_period("M").astype(str)
 
     pivot = tmp.pivot_table(
-        values="deviation", index="hour", columns="year_month", aggfunc="mean",
+        values="signal", index="hour", columns="year_month", aggfunc="mean",
     )
-    return pivot.reindex(range(24))
+    return pivot.reindex(range(24)).fillna(0.0)
 
 
 def estimate_annual_arbitrage_revenue(
@@ -265,7 +303,7 @@ def estimate_annual_arbitrage_revenue(
     power_mw: float = 1.0,
     duration_hours: float = 1.0,
     roundtrip_efficiency: float = 0.88,
-    cycles_per_day: float = 1.5,
+    cycles_per_day: float = 1.0,
 ) -> dict[str, float]:
     """Estimate annualised BESS arbitrage revenue from daily spreads.
 
@@ -279,7 +317,7 @@ def estimate_annual_arbitrage_revenue(
 
     Returns:
         Dict with annual_revenue_eur, annual_revenue_eur_per_mw,
-        avg_daily_revenue, capture_rate_assumption.
+        avg_daily_revenue, capture_rate_assumption, cycles_per_day_assumption.
     """
     capture_rate = 0.70
     avg_spread = float(daily_spreads["spread"].mean())
@@ -296,6 +334,7 @@ def estimate_annual_arbitrage_revenue(
         "annual_revenue_eur_per_mw": round(annual_revenue / power_mw, 2),
         "avg_daily_revenue": round(daily_revenue, 2),
         "capture_rate_assumption": capture_rate,
+        "cycles_per_day_assumption": cycles_per_day,
     }
 
 

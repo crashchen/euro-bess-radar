@@ -9,9 +9,11 @@ import pytest
 
 from src.ancillary import (
     ANCILLARY_TEMPLATES,
+    build_ancillary_dataset,
     calculate_ancillary_revenue,
     generate_template_csv,
     merge_revenue_stack,
+    normalize_auto_fetch_dataset,
     parse_ancillary_csv,
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
@@ -73,7 +75,19 @@ class TestParsing:
         assert "system_sell_price_eur_mwh" in df.columns
         assert df["system_buy_price_eur_mwh"].iloc[0] == 55.0
         assert df["system_sell_price_eur_mwh"].iloc[0] == 45.0
-        assert df["energy_price_eur_mwh"].iloc[0] == 10.0
+        assert df["energy_price_eur_mwh"].isna().all()
+
+    def test_normalize_auto_fetch_preserves_system_prices(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=2, freq="30min", tz="UTC")
+        raw = pd.DataFrame({
+            "timestamp": idx,
+            "system_buy_price_eur": [60.0, 65.0],
+            "system_sell_price_eur": [40.0, 45.0],
+        })
+        df = normalize_auto_fetch_dataset(raw, "System prices")
+        assert df["system_buy_price_eur_mwh"].iloc[0] == 60.0
+        assert df["system_sell_price_eur_mwh"].iloc[0] == 40.0
+        assert df["energy_price_eur_mwh"].isna().all()
 
     def test_column_mapping(self, de_fcr_csv: str) -> None:
         df = parse_ancillary_csv(de_fcr_csv, "DE_FCR")
@@ -113,10 +127,42 @@ class TestAncillaryRevenue:
         result = calculate_ancillary_revenue(df, power_mw=1.0, duration_hours=1.0)
         assert result["mfrr_annual_eur"] == 87600.0
 
-    def test_gb_balancing_uses_bid_ask_spread(self, gb_balancing_csv: str) -> None:
+    def test_gb_balancing_requires_explicit_energy_price(self, gb_balancing_csv: str) -> None:
         df = parse_ancillary_csv(gb_balancing_csv, "GB_BALANCING")
         result = calculate_ancillary_revenue(df, power_mw=1.0, duration_hours=1.0)
-        assert result["mfrr_annual_eur"] == 8760.0
+        assert result["mfrr_annual_eur"] == 0.0
+
+    def test_auto_fetch_capacity_data_flows_into_revenue(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=2, freq="h", tz="UTC")
+        auto_results = {
+            "FCR-N/D prices": pd.DataFrame({
+                "timestamp": idx,
+                "fcr_n_price": [10.0, 14.0],
+                "fcr_d_up_price": [20.0, 22.0],
+            }),
+            "aFRR prices": pd.DataFrame({
+                "timestamp": idx,
+                "afrr_up_price": [30.0, 34.0],
+            }),
+        }
+
+        anc_df = build_ancillary_dataset(auto_fetch_results=auto_results)
+        result = calculate_ancillary_revenue(anc_df, power_mw=1.0, duration_hours=1.0)
+        assert result["fcr_annual_eur"] > 0
+        assert result["afrr_annual_eur"] > 0
+
+    def test_manual_upload_takes_precedence_over_auto_fetch(self, de_fcr_csv: str) -> None:
+        manual_df = parse_ancillary_csv(de_fcr_csv, "DE_FCR")
+        idx = pd.date_range("2025-01-01", periods=2, freq="h", tz="UTC")
+        auto_results = {
+            "aFRR prices": pd.DataFrame({
+                "timestamp": idx,
+                "afrr_up_price": [30.0, 34.0],
+            }),
+        }
+
+        anc_df = build_ancillary_dataset(manual_df=manual_df, auto_fetch_results=auto_results)
+        pd.testing.assert_frame_equal(anc_df, manual_df.sort_index())
 
     def test_empty_df_returns_zeros(self) -> None:
         df = pd.DataFrame(columns=["capacity_price_eur_mw", "energy_price_eur_mwh",

@@ -11,6 +11,18 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+_STANDARD_COLUMNS = [
+    "capacity_price_eur_mw",
+    "energy_price_eur_mwh",
+    "energy_price_up_eur_mwh",
+    "energy_price_down_eur_mwh",
+    "system_buy_price_eur_mwh",
+    "system_sell_price_eur_mwh",
+    "product_type",
+    "direction",
+    "zone",
+]
+
 # ── Templates ────────────────────────────────────────────────────────────────
 
 ANCILLARY_TEMPLATES: dict[str, dict] = {
@@ -97,6 +109,160 @@ def _detect_delimiter(content: str) -> str:
     return ","
 
 
+def _empty_ancillary_frame() -> pd.DataFrame:
+    """Return an empty standardised ancillary frame with a timestamp index."""
+    return pd.DataFrame(columns=_STANDARD_COLUMNS).rename_axis("timestamp")
+
+
+def _initialise_output(index: pd.DatetimeIndex) -> pd.DataFrame:
+    """Create a standardised ancillary frame for the provided index."""
+    out = pd.DataFrame(index=index)
+    out["capacity_price_eur_mw"] = float("nan")
+    out["energy_price_eur_mwh"] = float("nan")
+    out["energy_price_up_eur_mwh"] = float("nan")
+    out["energy_price_down_eur_mwh"] = float("nan")
+    out["system_buy_price_eur_mwh"] = float("nan")
+    out["system_sell_price_eur_mwh"] = float("nan")
+    out["product_type"] = ""
+    out["direction"] = ""
+    out["zone"] = ""
+    out.index.name = "timestamp"
+    return out
+
+
+def _service_bucket(product: str) -> str:
+    """Map a product label to the output revenue bucket."""
+    product_upper = str(product).upper()
+    if "AFRR" in product_upper or "AFR" in product_upper:
+        return "afrr_annual_eur"
+    if "MFRR" in product_upper or "BALANC" in product_upper or "IMBALANCE" in product_upper:
+        return "mfrr_annual_eur"
+    return "fcr_annual_eur"
+
+
+def _timestamp_index_from_frame(df: pd.DataFrame) -> pd.DatetimeIndex:
+    """Best-effort conversion of a raw ancillary frame into a timestamp index."""
+    if isinstance(df.index, pd.DatetimeIndex):
+        idx = pd.DatetimeIndex(df.index)
+        return idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
+
+    if "timestamp" in df.columns:
+        return pd.to_datetime(df["timestamp"], utc=True)
+
+    if "date" in df.columns:
+        if "hour" in df.columns:
+            return pd.to_datetime(
+                df["date"].astype(str) + " " + df["hour"].astype(str).str.zfill(2) + ":00",
+                utc=True,
+            )
+        return pd.to_datetime(df["date"], utc=True)
+
+    if "settlement_date" in df.columns and "settlement_period" in df.columns:
+        hour_min = ((df["settlement_period"].astype(int) - 1) * 30).apply(
+            lambda m: f"{m // 60:02d}:{m % 60:02d}"
+        )
+        return pd.to_datetime(
+            df["settlement_date"].astype(str) + " " + hour_min,
+            utc=True,
+        )
+
+    return pd.DatetimeIndex([], tz="UTC", name="timestamp")
+
+
+def normalize_auto_fetch_dataset(
+    df: pd.DataFrame,
+    dataset_name: str,
+) -> pd.DataFrame:
+    """Map an auto-fetched ancillary dataset into the standard ancillary schema."""
+    if df.empty:
+        return _empty_ancillary_frame()
+
+    raw = df.copy()
+    idx = _timestamp_index_from_frame(raw)
+    if idx.empty:
+        return _empty_ancillary_frame()
+
+    out = _initialise_output(idx)
+
+    capacity_cols = [
+        "capacity_price_eur_mw",
+        "fcr_n_price",
+        "fcr_d_up_price",
+        "fcr_d_down_price",
+        "afrr_up_price",
+        "afrr_down_price",
+        "fcr_d_price",
+    ]
+    capacity_series = [
+        pd.to_numeric(raw[col], errors="coerce")
+        for col in capacity_cols
+        if col in raw.columns
+    ]
+    if capacity_series:
+        out["capacity_price_eur_mw"] = (
+            pd.concat(capacity_series, axis=1).mean(axis=1).to_numpy()
+        )
+
+    if "energy_price_eur_mwh" in raw.columns:
+        out["energy_price_eur_mwh"] = pd.to_numeric(
+            raw["energy_price_eur_mwh"], errors="coerce",
+        ).to_numpy()
+    if "system_buy_price_eur" in raw.columns:
+        out["system_buy_price_eur_mwh"] = pd.to_numeric(
+            raw["system_buy_price_eur"], errors="coerce",
+        ).to_numpy()
+    if "system_sell_price_eur" in raw.columns:
+        out["system_sell_price_eur_mwh"] = pd.to_numeric(
+            raw["system_sell_price_eur"], errors="coerce",
+        ).to_numpy()
+    if "imbalance_price_long" in raw.columns:
+        out["energy_price_up_eur_mwh"] = pd.to_numeric(
+            raw["imbalance_price_long"], errors="coerce",
+        ).to_numpy()
+    if "imbalance_price_short" in raw.columns:
+        out["energy_price_down_eur_mwh"] = pd.to_numeric(
+            raw["imbalance_price_short"], errors="coerce",
+        ).to_numpy()
+
+    product_type = raw.get("product", dataset_name)
+    direction = raw.get("direction", "")
+    zone = raw.get("zone", dataset_name.split("_")[0])
+
+    out["product_type"] = (
+        product_type.to_numpy() if isinstance(product_type, pd.Series) else product_type
+    )
+    out["direction"] = direction.to_numpy() if isinstance(direction, pd.Series) else direction
+    out["zone"] = zone.to_numpy() if isinstance(zone, pd.Series) else zone
+
+    return out.sort_index()
+
+
+def build_ancillary_dataset(
+    manual_df: pd.DataFrame | None = None,
+    auto_fetch_results: dict[str, pd.DataFrame] | None = None,
+) -> pd.DataFrame:
+    """Resolve the ancillary dataset used for valuation.
+
+    Manual uploads take precedence. If no manual upload is present, auto-fetched
+    datasets are normalised and concatenated into a single standardised frame.
+    """
+    if manual_df is not None and not manual_df.empty:
+        return manual_df.sort_index()
+
+    frames = []
+    for dataset_name, df in (auto_fetch_results or {}).items():
+        normalised = normalize_auto_fetch_dataset(df, dataset_name)
+        if not normalised.empty:
+            frames.append(normalised)
+
+    if not frames:
+        return _empty_ancillary_frame()
+
+    combined = pd.concat(frames).sort_index()
+    combined.index.name = "timestamp"
+    return combined
+
+
 def parse_ancillary_csv(
     csv_content: str | Path,
     template_key: str,
@@ -127,95 +293,71 @@ def parse_ancillary_csv(
     # Strip whitespace from column names
     df.columns = df.columns.str.strip()
 
-    # Build standardised output
-    out = pd.DataFrame()
-
     # Parse timestamp
+    idx = pd.DatetimeIndex([], tz="UTC", name="timestamp")
     if "date" in df.columns:
         if "hour" in df.columns:
-            out["timestamp"] = pd.to_datetime(
+            idx = pd.to_datetime(
                 df["date"].astype(str) + " " + df["hour"].astype(str).str.zfill(2) + ":00",
                 utc=True,
             )
         else:
-            out["timestamp"] = pd.to_datetime(df["date"], utc=True)
+            idx = pd.to_datetime(df["date"], utc=True)
     elif "settlement_date" in df.columns:
         # GB: 30-min periods, period 1 = 00:00
         df["hour_min"] = ((df["settlement_period"].astype(int) - 1) * 30).apply(
             lambda m: f"{m // 60:02d}:{m % 60:02d}"
         )
-        out["timestamp"] = pd.to_datetime(
+        idx = pd.to_datetime(
             df["settlement_date"].astype(str) + " " + df["hour_min"], utc=True,
         )
-    else:
-        out["timestamp"] = pd.NaT
 
-    out["capacity_price_eur_mw"] = float("nan")
-    out["energy_price_eur_mwh"] = float("nan")
-    out["energy_price_up_eur_mwh"] = float("nan")
-    out["energy_price_down_eur_mwh"] = float("nan")
-    out["system_buy_price_eur_mwh"] = float("nan")
-    out["system_sell_price_eur_mwh"] = float("nan")
+    out = _initialise_output(idx)
 
     if "capacity_price_eur_mw" in df.columns:
         out["capacity_price_eur_mw"] = pd.to_numeric(
             df["capacity_price_eur_mw"], errors="coerce",
-        )
+        ).to_numpy()
     else:
         fcr_prices = []
         for col in ["fcr_n_price", "fcr_d_price"]:
             if col in df.columns:
                 fcr_prices.append(pd.to_numeric(df[col], errors="coerce"))
         if fcr_prices:
-            out["capacity_price_eur_mw"] = pd.concat(fcr_prices, axis=1).mean(axis=1)
+            out["capacity_price_eur_mw"] = (
+                pd.concat(fcr_prices, axis=1).mean(axis=1).to_numpy()
+            )
 
     if "energy_price_eur_mwh" in df.columns:
         out["energy_price_eur_mwh"] = pd.to_numeric(
             df["energy_price_eur_mwh"], errors="coerce",
-        )
+        ).to_numpy()
 
     if "marginal_price_up" in df.columns:
         out["energy_price_up_eur_mwh"] = pd.to_numeric(
             df["marginal_price_up"], errors="coerce",
-        )
+        ).to_numpy()
     if "marginal_price_down" in df.columns:
         out["energy_price_down_eur_mwh"] = pd.to_numeric(
             df["marginal_price_down"], errors="coerce",
-        )
+        ).to_numpy()
     if "system_buy_price" in df.columns:
         out["system_buy_price_eur_mwh"] = pd.to_numeric(
             df["system_buy_price"], errors="coerce",
-        )
+        ).to_numpy()
     if "system_sell_price" in df.columns:
         out["system_sell_price_eur_mwh"] = pd.to_numeric(
             df["system_sell_price"], errors="coerce",
-        )
+        ).to_numpy()
 
-    if out["energy_price_eur_mwh"].isna().all():
-        if (
-            out["system_buy_price_eur_mwh"].notna().any()
-            and out["system_sell_price_eur_mwh"].notna().any()
-        ):
-            out["energy_price_eur_mwh"] = (
-                out["system_buy_price_eur_mwh"] - out["system_sell_price_eur_mwh"]
-            )
-        elif (
-            out["energy_price_up_eur_mwh"].notna().any()
-            and out["energy_price_down_eur_mwh"].notna().any()
-        ):
-            out["energy_price_eur_mwh"] = (
-                out["energy_price_up_eur_mwh"] - out["energy_price_down_eur_mwh"]
-            )
-        elif out["energy_price_up_eur_mwh"].notna().any():
-            out["energy_price_eur_mwh"] = out["energy_price_up_eur_mwh"]
-        elif out["energy_price_down_eur_mwh"].notna().any():
-            out["energy_price_eur_mwh"] = out["energy_price_down_eur_mwh"]
-
-    out["product_type"] = df.get("product", template_key)
-    out["direction"] = df.get("direction", "")
+    product_type = df.get("product", template_key)
+    direction = df.get("direction", "")
+    out["product_type"] = (
+        product_type.to_numpy() if isinstance(product_type, pd.Series) else product_type
+    )
+    out["direction"] = direction.to_numpy() if isinstance(direction, pd.Series) else direction
     out["zone"] = template_key.split("_")[0]
 
-    out = out.set_index("timestamp").sort_index()
     logger.info("Parsed %d rows from %s template", len(out), template_key)
     return out
 
@@ -249,28 +391,27 @@ def calculate_ancillary_revenue(
     if ancillary_df.empty:
         return result
 
-    cap_prices = ancillary_df["capacity_price_eur_mw"].dropna()
-    if not cap_prices.empty:
-        avg_cap = float(cap_prices.mean())
-        hours_per_year = 8760
-        cap_revenue = avg_cap * power_mw * hours_per_year * availability
+    cap_rows = ancillary_df[ancillary_df["capacity_price_eur_mw"].notna()].copy()
+    if not cap_rows.empty:
+        for product, group in cap_rows.groupby(cap_rows["product_type"].fillna("UNKNOWN")):
+            avg_cap = float(group["capacity_price_eur_mw"].mean())
+            hours_per_year = 8760
+            cap_revenue = avg_cap * power_mw * hours_per_year * availability
+            bucket = _service_bucket(str(product))
+            result[bucket] += round(cap_revenue, 2)
 
-        product = str(ancillary_df.get("product_type", pd.Series([""])).iloc[0]).upper()
-        if "FCR" in product:
-            result["fcr_annual_eur"] = round(cap_revenue, 2)
-        elif "AFRR" in product or "AFR" in product:
-            result["afrr_annual_eur"] = round(cap_revenue, 2)
-        else:
-            result["fcr_annual_eur"] = round(cap_revenue, 2)
-
-    energy_prices = ancillary_df["energy_price_eur_mwh"].dropna()
-    if not energy_prices.empty:
-        avg_energy = float(energy_prices.mean())
-        energy_mwh = power_mw * duration_hours
-        # Assume balancing activations ~10% of hours
-        activation_hours = 8760 * 0.10
-        energy_revenue = avg_energy * energy_mwh * activation_hours
-        result["mfrr_annual_eur"] = round(energy_revenue, 2)
+    energy_rows = ancillary_df[ancillary_df["energy_price_eur_mwh"].notna()].copy()
+    if not energy_rows.empty:
+        for product, group in energy_rows.groupby(energy_rows["product_type"].fillna("UNKNOWN")):
+            avg_energy = float(group["energy_price_eur_mwh"].mean())
+            energy_mwh = power_mw * duration_hours
+            # Assume balancing activations ~10% of hours only for explicit
+            # single-price energy services. Two-sided balancing signals are preserved
+            # separately and are not auto-monetised here.
+            activation_hours = 8760 * 0.10
+            energy_revenue = avg_energy * energy_mwh * activation_hours
+            bucket = _service_bucket(str(product))
+            result[bucket] += round(energy_revenue, 2)
 
     result["total_ancillary_eur"] = round(
         result["fcr_annual_eur"] + result["afrr_annual_eur"] + result["mfrr_annual_eur"], 2
