@@ -7,9 +7,10 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 - **Day-ahead price analysis** across 35+ European bidding zones (ENTSO-E + Elexon)
 - **Revenue estimation** for 1h, 2h, and 4h BESS using chronology-aware charge/discharge windows
 - **Renewable correlation analysis** — quantify how wind/solar drives price spreads
-- **Ancillary services integration** — manual CSV upload + auto-fetch for DE, FI, GB with preserved directional/system price fields
+- **Ancillary services integration** — manual CSV upload + auto-fetch for DE, FI, GB with per-product reserve lines, manual-over-auto product overrides, and preserved directional/system price fields
 - **Multi-zone comparison** for market screening
 - **Excel export** with full analytics and sub-hourly negative-price normalization
+- **GBP to EUR normalization** for GB history using yearly FX mappings
 
 ## Data Sources
 
@@ -52,7 +53,7 @@ euro-bess-radar/
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   └── export.py             # Excel report generation
-├── tests/                    # 95 unit tests, heavily mocked
+├── tests/                    # 99 unit tests, heavily mocked
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads

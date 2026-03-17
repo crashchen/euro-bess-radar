@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import pytest
 
-from src.config import ELEXON_ZONES, ENTSOE_ZONES, GBP_TO_EUR, is_elexon_zone
+from src.config import ELEXON_ZONES, ENTSOE_ZONES, GBP_EUR_YEARLY, GBP_TO_EUR, is_elexon_zone
 from src.data_ingestion import (
     build_zone_query_window,
     clean_prices,
@@ -68,8 +68,40 @@ class TestFetchElexonPrices:
 
         # Verify GBP->EUR conversion
         original_gbp = mock_elexon_json[0]["price"]
-        expected_eur = original_gbp * GBP_TO_EUR
+        expected_eur = original_gbp * GBP_EUR_YEARLY[2025]
         assert abs(df["price_eur_mwh"].iloc[0] - expected_eur) < 0.01
+
+    @patch("src.data_ingestion._call_elexon_api")
+    def test_uses_year_specific_fx_rate(self, mock_api: MagicMock) -> None:
+        mock_api.return_value = [
+            {"startTime": "2023-01-01T00:00:00Z", "price": 100.0},
+            {"startTime": "2023-01-01T00:30:00Z", "price": 100.0},
+        ]
+
+        df = fetch_elexon_prices(
+            pd.Timestamp("2023-01-01", tz="UTC"),
+            pd.Timestamp("2023-01-01", tz="UTC"),
+        )
+
+        assert df["price_eur_mwh"].iloc[0] == 100.0 * GBP_EUR_YEARLY[2023]
+
+    @patch("src.data_ingestion._call_elexon_api")
+    def test_unknown_year_uses_nearest_fx_rate(
+        self, mock_api: MagicMock, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mock_api.return_value = [
+            {"startTime": "2027-01-01T00:00:00Z", "price": 100.0},
+            {"startTime": "2027-01-01T00:30:00Z", "price": 100.0},
+        ]
+
+        with caplog.at_level(logging.WARNING):
+            df = fetch_elexon_prices(
+                pd.Timestamp("2027-01-01", tz="UTC"),
+                pd.Timestamp("2027-01-01", tz="UTC"),
+            )
+
+        assert df["price_eur_mwh"].iloc[0] == 100.0 * GBP_EUR_YEARLY[2026]
+        assert "No GBP/EUR rate configured for 2027" in caplog.text
 
     @patch("src.data_ingestion._call_elexon_api")
     def test_filters_to_requested_window(self, mock_api: MagicMock) -> None:
@@ -408,6 +440,7 @@ class TestFetchElexonSystemPrices:
         assert "system_sell_price_gbp" in df.columns
         assert "spread_eur" in df.columns
         assert len(df) == 2
+        assert df["system_buy_price_eur"].iloc[0] == 55.0 * GBP_EUR_YEARLY[2025]
 
     @patch("src.data_ingestion.requests.get")
     def test_filters_to_requested_window(self, mock_get: MagicMock) -> None:

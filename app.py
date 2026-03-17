@@ -316,10 +316,18 @@ if fetch_btn or "zone_data" in st.session_state:
         anc_rev = None
         stack = None
         anc_source = None
+        export_revenue = revenue.copy()
 
         if anc_df is not None and not anc_df.empty:
             anc_rev = calculate_ancillary_revenue(anc_df, power_mw, duration_hours)
             stack = merge_revenue_stack(revenue, anc_rev)
+            export_revenue.update(stack)
+            export_revenue["annual_revenue_eur"] = stack["total_eur"]
+            export_revenue["annual_revenue_eur_per_mw"] = stack["total_per_mw"]
+            export_revenue["da_only_annual_revenue_eur"] = revenue["annual_revenue_eur"]
+            export_revenue["da_only_annual_revenue_eur_per_mw"] = revenue[
+                "annual_revenue_eur_per_mw"
+            ]
             if manual_anc_df is not None and not manual_anc_df.empty:
                 anc_source = "manual upload"
             elif auto_fetch_results:
@@ -333,20 +341,31 @@ if fetch_btn or "zone_data" in st.session_state:
             r3.metric("Ancillary Services", f"\u20ac{stack['total_eur'] - stack['da_arbitrage_eur']:,.0f}",
                        delta=f"{stack['ancillary_pct']:.0f}% of total")
 
-            # Stacked bar
-            stack_df = pd.DataFrame([{
-                "DA Arbitrage": stack["da_arbitrage_eur"],
-                "FCR": stack["fcr_eur"],
-                "aFRR": stack["afrr_eur"],
-                "mFRR": stack["mfrr_eur"],
-            }]).T.reset_index()
-            stack_df.columns = ["Source", "EUR"]
-            fig_stack = px.bar(
-                stack_df, x="EUR", y="Source", orientation="h",
-                title="Revenue Stack",
-                color="Source",
-                color_discrete_sequence=["#2196F3", "#4CAF50", "#FF9800", "#F44336"],
+            component_rows = [
+                {"Source": source, "Annual Revenue (EUR)": value}
+                for source, value in stack["source_revenues"].items()
+                if value > 0
+            ]
+            if component_rows:
+                st.table(pd.DataFrame(component_rows))
+
+            fig_stack = go.Figure()
+            palette = px.colors.qualitative.Bold + px.colors.qualitative.Safe
+            for idx, row in enumerate(component_rows):
+                fig_stack.add_trace(go.Bar(
+                    name=row["Source"],
+                    y=["Annual Revenue"],
+                    x=[row["Annual Revenue (EUR)"]],
+                    orientation="h",
+                    marker_color=palette[idx % len(palette)],
+                ))
+            fig_stack.update_layout(
+                barmode="stack",
+                title="Revenue Stack by Product",
                 template=chart_template,
+                xaxis_title="EUR",
+                yaxis_title="",
+                legend_title_text="Source",
             )
             st.plotly_chart(fig_stack, width="stretch")
             if anc_source:
@@ -502,7 +521,7 @@ if fetch_btn or "zone_data" in st.session_state:
         daily_spreads=daily_spreads,
         monthly_spreads=monthly_spreads,
         percentiles=percentiles,
-        revenue_estimate=revenue,
+        revenue_estimate=export_revenue,
         negative_stats=neg_stats,
         tz=zone_tz,
     )

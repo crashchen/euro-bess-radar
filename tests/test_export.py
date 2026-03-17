@@ -257,3 +257,41 @@ class TestExportToBytes:
         assert summary["Negative Price Hours"] == 12
         assert summary["Negative Price Intervals"] == 24
         assert summary["Negative Price % of Intervals"] == 0.5
+
+    def test_summary_uses_full_revenue_stack_when_present(self, sample_data) -> None:
+        """Export should reflect DA+ancillary totals, not just DA-only revenue."""
+        price_df, daily, monthly, pctls, rev, neg = sample_data
+        stacked_rev = {
+            **rev,
+            "annual_revenue_eur": 120000.0,
+            "annual_revenue_eur_per_mw": 120000.0,
+            "total_eur": 120000.0,
+            "total_per_mw": 120000.0,
+            "source_revenues": {
+                "DA Arbitrage": 80000.0,
+                "FCR-N": 25000.0,
+                "aFRR Up": 15000.0,
+            },
+        }
+
+        result = export_to_bytes(
+            zone="DE_LU",
+            price_df=price_df,
+            daily_spreads=daily,
+            monthly_spreads=monthly,
+            percentiles=pctls,
+            revenue_estimate=stacked_rev,
+            negative_stats=neg,
+        )
+
+        wb = load_workbook(BytesIO(result))
+        ws = wb["Summary"]
+        summary = {
+            ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value
+            for r in range(1, 30)
+        }
+
+        assert summary["Est. Annual Revenue (EUR/MW)"] == 120000
+        assert summary["Total Annual Revenue (EUR)"] == 120000
+        assert summary["DA Arbitrage Revenue (EUR)"] == 80000
+        assert summary["FCR-N Revenue (EUR)"] == 25000

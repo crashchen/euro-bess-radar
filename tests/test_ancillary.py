@@ -89,6 +89,18 @@ class TestParsing:
         assert df["system_sell_price_eur_mwh"].iloc[0] == 40.0
         assert df["energy_price_eur_mwh"].isna().all()
 
+    def test_normalize_auto_fetch_preserves_product_dimension(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=2, freq="h", tz="UTC")
+        raw = pd.DataFrame({
+            "timestamp": idx,
+            "fcr_n_price": [10.0, 14.0],
+            "fcr_d_up_price": [20.0, 22.0],
+            "afrr_up_price": [30.0, 34.0],
+        })
+        df = normalize_auto_fetch_dataset(raw, "FI reserves")
+        assert set(df["product_type"]) == {"FCR-N", "FCR-D Up", "aFRR Up"}
+        assert len(df) == 6
+
     def test_column_mapping(self, de_fcr_csv: str) -> None:
         df = parse_ancillary_csv(de_fcr_csv, "DE_FCR")
         expected = {"product_type", "direction", "capacity_price_eur_mw",
@@ -148,13 +160,23 @@ class TestAncillaryRevenue:
 
         anc_df = build_ancillary_dataset(auto_fetch_results=auto_results)
         result = calculate_ancillary_revenue(anc_df, power_mw=1.0, duration_hours=1.0)
-        assert result["fcr_annual_eur"] > 0
-        assert result["afrr_annual_eur"] > 0
+        assert result["fcr_annual_eur"] == 274626.0
+        assert result["afrr_annual_eur"] == 266304.0
+        assert result["product_revenues"] == {
+            "FCR-D Up": 174762.0,
+            "FCR-N": 99864.0,
+            "aFRR Up": 266304.0,
+        }
 
-    def test_manual_upload_takes_precedence_over_auto_fetch(self, de_fcr_csv: str) -> None:
+    def test_manual_upload_overrides_same_product_only(self, de_fcr_csv: str) -> None:
         manual_df = parse_ancillary_csv(de_fcr_csv, "DE_FCR")
         idx = pd.date_range("2025-01-01", periods=2, freq="h", tz="UTC")
         auto_results = {
+            "FCR auctions": pd.DataFrame({
+                "timestamp": idx,
+                "capacity_price_eur_mw": [99.0, 100.0],
+                "product": ["FCR", "FCR"],
+            }),
             "aFRR prices": pd.DataFrame({
                 "timestamp": idx,
                 "afrr_up_price": [30.0, 34.0],
@@ -162,7 +184,9 @@ class TestAncillaryRevenue:
         }
 
         anc_df = build_ancillary_dataset(manual_df=manual_df, auto_fetch_results=auto_results)
-        pd.testing.assert_frame_equal(anc_df, manual_df.sort_index())
+        assert set(anc_df["product_type"]) == {"FCR", "aFRR Up"}
+        manual_fcr = anc_df[anc_df["product_type"] == "FCR"]
+        assert manual_fcr["capacity_price_eur_mw"].iloc[0] == 15.50
 
     def test_empty_df_returns_zeros(self) -> None:
         df = pd.DataFrame(columns=["capacity_price_eur_mw", "energy_price_eur_mwh",
@@ -174,7 +198,7 @@ class TestAncillaryRevenue:
         df = parse_ancillary_csv(de_fcr_csv, "DE_FCR")
         result = calculate_ancillary_revenue(df)
         expected = {"fcr_annual_eur", "afrr_annual_eur", "mfrr_annual_eur",
-                    "total_ancillary_eur", "total_ancillary_per_mw"}
+                    "total_ancillary_eur", "total_ancillary_per_mw", "product_revenues"}
         assert set(result.keys()) == expected
 
 
@@ -188,12 +212,14 @@ class TestMergeRevenueStack:
             "afrr_annual_eur": 10000.0,
             "mfrr_annual_eur": 5000.0,
             "total_ancillary_eur": 35000.0,
+            "product_revenues": {"FCR-N": 20000.0, "aFRR Up": 10000.0, "mFRR": 5000.0},
         }
         result = merge_revenue_stack(da, anc)
         assert result["total_eur"] == 85000.0
         assert result["da_arbitrage_eur"] == 50000.0
         assert abs(result["da_pct"] - 58.8) < 0.1
         assert abs(result["ancillary_pct"] - 41.2) < 0.1
+        assert result["source_revenues"]["FCR-N"] == 20000.0
 
     def test_da_only(self) -> None:
         da = {"annual_revenue_eur": 50000.0, "annual_revenue_eur_per_mw": 50000.0}
@@ -202,6 +228,7 @@ class TestMergeRevenueStack:
             "afrr_annual_eur": 0.0,
             "mfrr_annual_eur": 0.0,
             "total_ancillary_eur": 0.0,
+            "product_revenues": {},
         }
         result = merge_revenue_stack(da, anc)
         assert result["total_eur"] == 50000.0

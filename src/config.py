@@ -19,8 +19,14 @@ ENTSOE_API_KEY = os.getenv("ENTSOE_API_KEY", "")
 ELEXON_BASE_URL = "https://data.elexon.co.uk/bmrs/api/v1"
 ELEXON_MARKET_INDEX_ENDPOINT = f"{ELEXON_BASE_URL}/balancing/pricing/market-index"
 
-# --- FX Rate (static default, updatable) ---
-GBP_TO_EUR = 1.17  # approximate, update as needed
+# --- FX Rates (approximate annual averages, update as needed) ---
+GBP_EUR_YEARLY: dict[int, float] = {
+    2023: 1.15,
+    2024: 1.17,
+    2025: 1.17,
+    2026: 1.18,
+}
+GBP_TO_EUR = GBP_EUR_YEARLY[2025]
 
 # --- Default Settings ---
 DEFAULT_LOOKBACK_DAYS = 365

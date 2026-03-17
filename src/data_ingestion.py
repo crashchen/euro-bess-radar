@@ -20,6 +20,7 @@ from src.config import (
     DEFAULT_QUERY_TIMEZONE,
     ELEXON_BASE_URL,
     ELEXON_MARKET_INDEX_ENDPOINT,
+    GBP_EUR_YEARLY,
     GBP_TO_EUR,
     get_api_key,
     get_zone_timezone,
@@ -27,6 +28,8 @@ from src.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+_warned_fx_years: set[int] = set()
 
 
 # ── Retry decorator ──────────────────────────────────────────────────────────
@@ -120,6 +123,35 @@ def _expected_cache_interval(
 
     observed = positive.mode().iloc[0]
     return min(observed, fallback)
+
+
+def _get_gbp_eur_rate_for_year(year: int) -> float:
+    """Return the configured GBP/EUR rate for a year, falling back to nearest."""
+    if year in GBP_EUR_YEARLY:
+        return GBP_EUR_YEARLY[year]
+
+    nearest_year = min(GBP_EUR_YEARLY, key=lambda known: (abs(known - year), known))
+    if year not in _warned_fx_years:
+        logger.warning(
+            "No GBP/EUR rate configured for %s; using nearest known year %s",
+            year, nearest_year,
+        )
+        _warned_fx_years.add(year)
+    return GBP_EUR_YEARLY[nearest_year]
+
+
+def _convert_gbp_series_to_eur(
+    gbp_values: pd.Series,
+    timestamps,
+) -> pd.Series:
+    """Convert GBP prices to EUR using year-specific FX rates."""
+    ts_index = pd.DatetimeIndex(pd.to_datetime(timestamps, utc=True))
+    rates_by_year = {
+        int(year): _get_gbp_eur_rate_for_year(int(year))
+        for year in sorted(set(ts_index.year))
+    }
+    rates = pd.Series(ts_index.year, index=gbp_values.index).map(rates_by_year)
+    return gbp_values * rates
 
 
 # ── Cleaning ──────────────────────────────────────────────────────────────────
@@ -229,7 +261,7 @@ def fetch_elexon_prices(
 
     Returns:
         DataFrame with columns: [timestamp (index), price_eur_mwh].
-        Original GBP/MWh prices converted to EUR using GBP_TO_EUR rate.
+        Original GBP/MWh prices converted to EUR using year-specific GBP/EUR rates.
         30-min settlement periods, UTC timestamps.
     """
     all_records: list[dict[str, Any]] = []
@@ -267,7 +299,7 @@ def fetch_elexon_prices(
     # remaining duplicates per timestamp.
     df = df[df["price_gbp"] > 0]
     df = df.groupby("timestamp", as_index=True)["price_gbp"].mean().to_frame()
-    df["price_eur_mwh"] = df["price_gbp"] * GBP_TO_EUR
+    df["price_eur_mwh"] = _convert_gbp_series_to_eur(df["price_gbp"], df.index)
     df = df[["price_eur_mwh"]].sort_index()
 
     if end > start:
@@ -878,8 +910,12 @@ def fetch_elexon_system_prices(
     out["timestamp"] = df["timestamp"]
     out["system_buy_price_gbp"] = pd.to_numeric(df[sbp_col], errors="coerce")
     out["system_sell_price_gbp"] = pd.to_numeric(df[ssp_col], errors="coerce")
-    out["system_buy_price_eur"] = out["system_buy_price_gbp"] * GBP_TO_EUR
-    out["system_sell_price_eur"] = out["system_sell_price_gbp"] * GBP_TO_EUR
+    out["system_buy_price_eur"] = _convert_gbp_series_to_eur(
+        out["system_buy_price_gbp"], out["timestamp"],
+    )
+    out["system_sell_price_eur"] = _convert_gbp_series_to_eur(
+        out["system_sell_price_gbp"], out["timestamp"],
+    )
     out["spread_eur"] = out["system_buy_price_eur"] - out["system_sell_price_eur"]
     out = out.set_index("timestamp").sort_index()
 

@@ -88,6 +88,11 @@ def _build_summary_sheet(
     row += 1
 
     row = _write_kv_pair(ws, row, "Est. Annual Revenue (EUR/MW)", revenue_estimate["annual_revenue_eur_per_mw"], _PRICE_FMT)
+    if "total_eur" in revenue_estimate:
+        row = _write_kv_pair(ws, row, "Total Annual Revenue (EUR)", revenue_estimate["total_eur"], _PRICE_FMT)
+    if "source_revenues" in revenue_estimate:
+        for source, value in revenue_estimate["source_revenues"].items():
+            row = _write_kv_pair(ws, row, f"{source} Revenue (EUR)", value, _PRICE_FMT)
     row = _write_kv_pair(ws, row, "Modeled Cycles per Day", revenue_estimate["cycles_per_day_assumption"])
     row = _write_kv_pair(ws, row, "Capture Rate Assumption", revenue_estimate["capture_rate_assumption"])
     row += 1
