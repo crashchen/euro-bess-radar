@@ -303,6 +303,7 @@ def estimate_annual_arbitrage_revenue(
     power_mw: float = 1.0,
     duration_hours: float = 1.0,
     roundtrip_efficiency: float = 0.88,
+    capture_rate: float = 0.70,
     cycles_per_day: float = 1.0,
 ) -> dict[str, float]:
     """Estimate annualised BESS arbitrage revenue from daily spreads.
@@ -313,13 +314,13 @@ def estimate_annual_arbitrage_revenue(
         power_mw: BESS power rating in MW.
         duration_hours: BESS duration in hours.
         roundtrip_efficiency: Round-trip efficiency (0-1).
+        capture_rate: Share of theoretical spread assumed to be captured (0-1).
         cycles_per_day: Average cycles per day.
 
     Returns:
         Dict with annual_revenue_eur, annual_revenue_eur_per_mw,
         avg_daily_revenue, capture_rate_assumption, cycles_per_day_assumption.
     """
-    capture_rate = 0.70
     avg_spread = float(daily_spreads["spread"].mean())
     energy_mwh = power_mw * duration_hours
 
@@ -430,6 +431,36 @@ def analyze_price_renewable_correlation(
     return result
 
 
+def _quartile_averages(
+    driver: pd.Series,
+    metric: pd.Series,
+) -> dict[str, float]:
+    """Return Q1..Q4 metric averages against the supplied driver series."""
+    valid = pd.DataFrame({
+        "driver": driver,
+        "metric": metric,
+    }).dropna()
+    if len(valid) < 4 or valid["driver"].nunique() < 4:
+        return {}
+
+    quartiles = pd.qcut(
+        valid["driver"],
+        4,
+        labels=["Q1", "Q2", "Q3", "Q4"],
+        duplicates="drop",
+    )
+    if quartiles.dropna().nunique() < 4:
+        return {}
+
+    return {
+        quartile: round(
+            float(valid.loc[quartiles == quartile, "metric"].mean()),
+            2,
+        )
+        for quartile in ["Q1", "Q2", "Q3", "Q4"]
+    }
+
+
 def build_renewable_price_scatter(
     price_df: pd.DataFrame,
     generation_df: pd.DataFrame,
@@ -455,12 +486,137 @@ def build_renewable_price_scatter(
     return merged
 
 
+def build_daily_renewable_spread_view(
+    price_df: pd.DataFrame,
+    generation_df: pd.DataFrame,
+    tz: str | None = None,
+    duration_hours: float = 1.0,
+) -> pd.DataFrame:
+    """Join local-day renewable share with daily ordered spreads."""
+    if generation_df.empty:
+        return pd.DataFrame(columns=["date", "spread", "daily_avg_renewable_pct"])
+
+    local_generation = _to_local(generation_df, tz)
+    if "renewable_pct" not in local_generation.columns:
+        return pd.DataFrame(columns=["date", "spread", "daily_avg_renewable_pct"])
+
+    daily_re = (
+        local_generation[["renewable_pct"]]
+        .groupby(local_generation.index.date)
+        .mean()
+        .reset_index()
+        .rename(
+            columns={
+                "index": "date",
+                "renewable_pct": "daily_avg_renewable_pct",
+            }
+        )
+    )
+    if "date" not in daily_re.columns:
+        daily_re = daily_re.rename(columns={daily_re.columns[0]: "date"})
+
+    daily_spreads = calculate_daily_spreads(
+        price_df,
+        tz=tz,
+        duration_hours=duration_hours,
+    )
+    if daily_spreads.empty:
+        return pd.DataFrame(columns=["date", "spread", "daily_avg_renewable_pct"])
+
+    merged = (
+        daily_spreads.rename_axis(None)
+        .reset_index(drop=True)
+        .merge(daily_re.rename_axis(None), on="date", how="inner")
+    )
+    return merged
+
+
+def analyze_renewable_bess_signal(
+    price_df: pd.DataFrame,
+    generation_df: pd.DataFrame,
+    tz: str | None = None,
+    duration_hours: float = 1.0,
+) -> dict:
+    """Analyse whether renewables compress prices and widen capturable spreads."""
+    hourly = build_renewable_price_scatter(price_df, generation_df, tz=tz)
+    daily = build_daily_renewable_spread_view(
+        price_df,
+        generation_df,
+        tz=tz,
+        duration_hours=duration_hours,
+    )
+
+    result: dict = {
+        "correlation_renewable_price": None,
+        "avg_price_high_renewable": None,
+        "avg_price_low_renewable": None,
+        "avg_spread_high_renewable_day": None,
+        "avg_spread_low_renewable_day": None,
+        "spread_uplift_high_vs_low_renewable": None,
+        "price_by_renewable_quartile": {},
+        "spread_by_renewable_quartile": {},
+        "hourly_points": int(len(hourly)),
+        "daily_points": int(len(daily)),
+    }
+
+    if len(hourly) >= 10 and hourly["renewable_pct"].nunique() > 1:
+        price = hourly["price_eur_mwh"]
+        re_pct = hourly["renewable_pct"]
+        result["correlation_renewable_price"] = round(
+            float(price.corr(re_pct)),
+            4,
+        )
+
+        q75 = re_pct.quantile(0.75)
+        q25 = re_pct.quantile(0.25)
+        high_prices = price[re_pct >= q75]
+        low_prices = price[re_pct <= q25]
+        if not high_prices.empty:
+            result["avg_price_high_renewable"] = round(float(high_prices.mean()), 2)
+        if not low_prices.empty:
+            result["avg_price_low_renewable"] = round(float(low_prices.mean()), 2)
+
+        result["price_by_renewable_quartile"] = _quartile_averages(re_pct, price)
+
+    if len(daily) >= 4 and daily["daily_avg_renewable_pct"].nunique() > 1:
+        spread = daily["spread"]
+        daily_re = daily["daily_avg_renewable_pct"]
+        q75 = daily_re.quantile(0.75)
+        q25 = daily_re.quantile(0.25)
+        high_spreads = spread[daily_re >= q75]
+        low_spreads = spread[daily_re <= q25]
+        if not high_spreads.empty:
+            result["avg_spread_high_renewable_day"] = round(
+                float(high_spreads.mean()),
+                2,
+            )
+        if not low_spreads.empty:
+            result["avg_spread_low_renewable_day"] = round(
+                float(low_spreads.mean()),
+                2,
+            )
+        if (
+            result["avg_spread_high_renewable_day"] is not None
+            and result["avg_spread_low_renewable_day"] is not None
+        ):
+            result["spread_uplift_high_vs_low_renewable"] = round(
+                result["avg_spread_high_renewable_day"]
+                - result["avg_spread_low_renewable_day"],
+                2,
+            )
+
+        result["spread_by_renewable_quartile"] = _quartile_averages(daily_re, spread)
+
+    return result
+
+
 # ── Zone comparison ──────────────────────────────────────────────────────────
 
 def compare_zones(
     zone_data: dict[str, pd.DataFrame],
     zone_timezones: dict[str, str] | None = None,
     duration_hours: float = 1.0,
+    capture_rate: float = 0.70,
 ) -> pd.DataFrame:
     """Compare key metrics across multiple zones.
 
@@ -468,6 +624,7 @@ def compare_zones(
         zone_data: Dict mapping zone_code -> price DataFrame.
         zone_timezones: Optional dict mapping zone_code -> IANA timezone.
         duration_hours: Charge/discharge window length for spread calculation.
+        capture_rate: Share of theoretical spread assumed to be captured (0-1).
 
     Returns:
         Summary DataFrame with one row per zone.
@@ -481,7 +638,11 @@ def compare_zones(
         daily = calculate_daily_spreads(df, tz=tz, duration_hours=duration_hours)
         pctls = calculate_spread_percentiles(daily)
         neg = calculate_negative_price_hours(df)
-        rev = estimate_annual_arbitrage_revenue(daily, duration_hours=duration_hours)
+        rev = estimate_annual_arbitrage_revenue(
+            daily,
+            duration_hours=duration_hours,
+            capture_rate=capture_rate,
+        )
 
         rows.append({
             "zone": zone,

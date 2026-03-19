@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.analytics import (
-    analyze_price_renewable_correlation,
+    analyze_renewable_bess_signal,
     build_price_heatmap,
     build_renewable_price_scatter,
     build_spread_heatmap,
@@ -68,6 +68,7 @@ st.sidebar.subheader("BESS Parameters")
 power_mw = st.sidebar.number_input("Power (MW)", min_value=0.1, value=10.0, step=1.0)
 duration_hours = st.sidebar.selectbox("Duration (h)", [1, 2, 4], index=0)
 efficiency = st.sidebar.slider("Efficiency (%)", 85, 95, 88) / 100.0
+capture_rate = st.sidebar.slider("Capture (%)", 30, 100, 70) / 100.0
 
 # Chart theme
 chart_template = st.sidebar.selectbox(
@@ -206,8 +207,28 @@ if fetch_btn or "zone_data" in st.session_state:
         st.warning("No data available. Check zone selection and date range.")
         st.stop()
 
-    # ── Compute analytics for primary zone ───────────────────────────────────
-    primary_zone = selected_zones[0] if selected_zones else list(zone_data.keys())[0]
+    available_zones = list(zone_data.keys())
+    default_zone = (
+        selected_zones[0]
+        if selected_zones and selected_zones[0] in zone_data
+        else available_zones[0]
+    )
+
+    if len(available_zones) > 1:
+        primary_zone = st.selectbox(
+            "Display Zone",
+            options=available_zones,
+            index=available_zones.index(default_zone),
+            help="Select which fetched zone to show in the single-zone tabs below.",
+        )
+        st.caption(
+            "Market Overview, Heatmaps, Revenue Estimation, and Renewable Correlation "
+            "show the selected display zone. Zone Comparison uses all fetched zones."
+        )
+    else:
+        primary_zone = default_zone
+
+    # ── Compute analytics for selected display zone ──────────────────────────
     primary_df = zone_data[primary_zone]
     zone_tz = get_zone_timezone(primary_zone)
 
@@ -224,6 +245,7 @@ if fetch_btn or "zone_data" in st.session_state:
         power_mw=power_mw,
         duration_hours=duration_hours,
         roundtrip_efficiency=efficiency,
+        capture_rate=capture_rate,
     )
 
     # ── Tabs ─────────────────────────────────────────────────────────────────
@@ -263,8 +285,11 @@ if fetch_btn or "zone_data" in st.session_state:
         fig_price.update_xaxes(rangeslider_visible=True)
         st.plotly_chart(fig_price, width="stretch")
 
+        spread_plot_df = daily_spreads.copy()
+        spread_plot_df["date"] = pd.to_datetime(spread_plot_df["date"])
+
         fig_spread = px.bar(
-            daily_spreads,
+            spread_plot_df,
             x="date", y="spread",
             title=f"Daily Ordered Spread ({duration_hours}h windows)",
             labels={"spread": "EUR/MWh", "date": ""},
@@ -272,6 +297,7 @@ if fetch_btn or "zone_data" in st.session_state:
             color_continuous_scale="Viridis",
             template=chart_template,
         )
+        fig_spread.update_xaxes(rangeslider_visible=True, type="date")
         st.plotly_chart(fig_spread, width="stretch")
 
     # ── Tab 2: Heatmaps ─────────────────────────────────────────────────────
@@ -428,6 +454,7 @@ if fetch_btn or "zone_data" in st.session_state:
             rev_d = estimate_annual_arbitrage_revenue(
                 spreads_d, power_mw=1.0, duration_hours=dur,
                 roundtrip_efficiency=efficiency,
+                capture_rate=capture_rate,
             )
             sens_rows.append({
                 "Duration (h)": dur,
@@ -452,6 +479,12 @@ if fetch_btn or "zone_data" in st.session_state:
     # ── Tab 4: Renewable Correlation ─────────────────────────────────────────
     with tabs[3]:
         st.subheader(f"Renewable Correlation — {primary_zone}")
+        st.caption(
+            "This page asks whether renewables compress hourly prices and whether "
+            "high-renewable days widen capturable ordered spreads. Price diagnostics "
+            "use hourly renewable share; spread diagnostics use local-day average "
+            "renewable share."
+        )
 
         with st.spinner("Fetching generation data..."):
             gen_df = load_generation(primary_zone, str(start_date), str(end_date))
@@ -459,19 +492,69 @@ if fetch_btn or "zone_data" in st.session_state:
         if gen_df.empty:
             st.info("Generation data not available for this zone.")
         else:
-            corr = analyze_price_renewable_correlation(primary_df, gen_df)
+            signal = analyze_renewable_bess_signal(
+                primary_df,
+                gen_df,
+                tz=zone_tz,
+                duration_hours=duration_hours,
+            )
 
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Wind-Price Corr", f"{corr['correlation_wind_price']:.3f}")
-            c2.metric("Solar-Price Corr", f"{corr['correlation_solar_price']:.3f}")
-            c3.metric("Avg Price (High RE)", f"\u20ac{corr['avg_price_high_renewable']:.1f}")
-            c4.metric("Avg Price (Low RE)", f"\u20ac{corr['avg_price_low_renewable']:.1f}")
+            c1.metric(
+                "RE-Price Corr",
+                (
+                    f"{signal['correlation_renewable_price']:.3f}"
+                    if signal["correlation_renewable_price"] is not None
+                    else "N/A"
+                ),
+            )
+            c2.metric(
+                "Avg Price (High RE Hours)",
+                (
+                    f"\u20ac{signal['avg_price_high_renewable']:.1f}"
+                    if signal["avg_price_high_renewable"] is not None
+                    else "N/A"
+                ),
+            )
+            c3.metric(
+                "Avg Price (Low RE Hours)",
+                (
+                    f"\u20ac{signal['avg_price_low_renewable']:.1f}"
+                    if signal["avg_price_low_renewable"] is not None
+                    else "N/A"
+                ),
+            )
+            c4.metric(
+                "Spread Uplift (High RE Days vs Low RE Days)",
+                (
+                    f"\u20ac{signal['spread_uplift_high_vs_low_renewable']:.1f}/MWh"
+                    if signal["spread_uplift_high_vs_low_renewable"] is not None
+                    else "N/A"
+                ),
+            )
 
-            st.caption("Negative correlation = BESS-friendly market")
+            if (
+                signal["correlation_renewable_price"] is None
+                and signal["spread_uplift_high_vs_low_renewable"] is None
+            ):
+                st.info(
+                    "There is not enough overlapping price and generation data to build "
+                    "reliable renewable diagnostics for this sample window."
+                )
+            elif signal["spread_uplift_high_vs_low_renewable"] is None:
+                st.info(
+                    "Hourly renewable diagnostics are available, but there are not enough "
+                    "local-day observations to evaluate spread uplift by renewable quartile."
+                )
+            elif signal["correlation_renewable_price"] is None:
+                st.info(
+                    "Daily renewable-spread diagnostics are available, but hourly price vs "
+                    "renewable overlap is too sparse for a robust correlation view."
+                )
 
             # Scatter plot
             scatter_df = build_renewable_price_scatter(primary_df, gen_df, tz=zone_tz)
-            if not scatter_df.empty:
+            if signal["hourly_points"] >= 10 and not scatter_df.empty:
                 fig_scatter = px.scatter(
                     scatter_df.reset_index(),
                     x="renewable_pct", y="price_eur_mwh",
@@ -483,21 +566,57 @@ if fetch_btn or "zone_data" in st.session_state:
                     template=chart_template,
                 )
                 st.plotly_chart(fig_scatter, width="stretch")
+            else:
+                st.info("Not enough hourly overlap to show the renewable-vs-price scatter.")
 
-            # Box plot by quartile
-            if corr["price_spread_by_renewable_quartile"]:
-                q_df = pd.DataFrame([
-                    {"Quartile": k, "Avg Price (EUR/MWh)": v}
-                    for k, v in corr["price_spread_by_renewable_quartile"].items()
-                ])
-                fig_box = px.bar(
-                    q_df, x="Quartile", y="Avg Price (EUR/MWh)",
-                    title="Average Price by Renewable Quartile",
-                    color="Avg Price (EUR/MWh)",
-                    color_continuous_scale="RdYlGn_r",
-                    template=chart_template,
-                )
-                st.plotly_chart(fig_box, width="stretch")
+            qcol1, qcol2 = st.columns(2)
+            with qcol1:
+                if signal["price_by_renewable_quartile"]:
+                    q_df = pd.DataFrame([
+                        {
+                            "Quartile": quartile,
+                            "Avg Price (EUR/MWh)": signal["price_by_renewable_quartile"][quartile],
+                        }
+                        for quartile in ["Q1", "Q2", "Q3", "Q4"]
+                    ])
+                    fig_price_q = px.bar(
+                        q_df,
+                        x="Quartile",
+                        y="Avg Price (EUR/MWh)",
+                        title="Average Price by Renewable Quartile",
+                        color="Avg Price (EUR/MWh)",
+                        color_continuous_scale="RdYlGn_r",
+                        template=chart_template,
+                    )
+                    st.plotly_chart(fig_price_q, width="stretch")
+                else:
+                    st.info("Not enough hourly renewable variation to build price quartiles.")
+
+            with qcol2:
+                if signal["spread_by_renewable_quartile"]:
+                    spread_q_df = pd.DataFrame([
+                        {
+                            "Quartile": quartile,
+                            "Avg Ordered Spread (EUR/MWh)": (
+                                signal["spread_by_renewable_quartile"][quartile]
+                            ),
+                        }
+                        for quartile in ["Q1", "Q2", "Q3", "Q4"]
+                    ])
+                    fig_spread_q = px.bar(
+                        spread_q_df,
+                        x="Quartile",
+                        y="Avg Ordered Spread (EUR/MWh)",
+                        title=f"Average Ordered Spread by Daily Renewable Quartile ({duration_hours}h)",
+                        color="Avg Ordered Spread (EUR/MWh)",
+                        color_continuous_scale="Viridis",
+                        template=chart_template,
+                    )
+                    st.plotly_chart(fig_spread_q, width="stretch")
+                else:
+                    st.info(
+                        "Not enough daily renewable variation to build spread quartiles."
+                    )
 
     # ── Tab 5: Zone Comparison ───────────────────────────────────────────────
     with tabs[4]:
@@ -509,38 +628,63 @@ if fetch_btn or "zone_data" in st.session_state:
                 zone_data,
                 zone_timezones=ZONE_TIMEZONES,
                 duration_hours=duration_hours,
+                capture_rate=capture_rate,
             )
-            st.dataframe(
-                comp.style.format({
-                    "avg_price": "\u20ac{:.2f}",
-                    "std_price": "{:.2f}",
-                    "avg_spread": "\u20ac{:.2f}",
-                    "p50_spread": "\u20ac{:.2f}",
-                    "p90_spread": "\u20ac{:.2f}",
-                    "negative_pct": "{:.1f}%",
-                    "estimated_annual_revenue_per_mw": "\u20ac{:,.0f}",
-                }),
-                width="stretch",
-            )
-
-            all_daily = []
-            for zone, df in zone_data.items():
-                ds = calculate_daily_spreads(
-                    df,
-                    tz=get_zone_timezone(zone),
-                    duration_hours=duration_hours,
+            if comp.empty:
+                st.warning(
+                    "No comparison rows could be built from the fetched zone data."
                 )
-                ds["zone"] = zone
-                all_daily.append(ds)
-            combined = pd.concat(all_daily, ignore_index=True)
+            else:
+                comp = comp.sort_values(
+                    "estimated_annual_revenue_per_mw", ascending=False,
+                ).reset_index(drop=True)
+                comp_display = comp.copy()
+                comp_display["avg_price"] = comp_display["avg_price"].map(
+                    lambda x: f"\u20ac{x:.2f}"
+                )
+                comp_display["std_price"] = comp_display["std_price"].map(
+                    lambda x: f"{x:.2f}"
+                )
+                comp_display["avg_spread"] = comp_display["avg_spread"].map(
+                    lambda x: f"\u20ac{x:.2f}"
+                )
+                comp_display["p50_spread"] = comp_display["p50_spread"].map(
+                    lambda x: f"\u20ac{x:.2f}"
+                )
+                comp_display["p90_spread"] = comp_display["p90_spread"].map(
+                    lambda x: f"\u20ac{x:.2f}"
+                )
+                comp_display["negative_pct"] = comp_display["negative_pct"].map(
+                    lambda x: f"{x:.1f}%"
+                )
+                comp_display["estimated_annual_revenue_per_mw"] = (
+                    comp_display["estimated_annual_revenue_per_mw"].map(
+                        lambda x: f"\u20ac{x:,.0f}"
+                    )
+                )
+                st.dataframe(comp_display, width="stretch", hide_index=True)
 
-            fig_comp = px.line(
-                combined, x="date", y="spread", color="zone",
-                title=f"Daily Ordered Spread Comparison ({duration_hours}h windows)",
-                labels={"spread": "EUR/MWh", "date": ""},
-                template=chart_template,
-            )
-            st.plotly_chart(fig_comp, width="stretch")
+                all_daily = []
+                for zone, df in zone_data.items():
+                    ds = calculate_daily_spreads(
+                        df,
+                        tz=get_zone_timezone(zone),
+                        duration_hours=duration_hours,
+                    )
+                    if ds.empty:
+                        continue
+                    ds["zone"] = zone
+                    all_daily.append(ds)
+
+                if all_daily:
+                    combined = pd.concat(all_daily, ignore_index=True)
+                    fig_comp = px.line(
+                        combined, x="date", y="spread", color="zone",
+                        title=f"Daily Ordered Spread Comparison ({duration_hours}h windows)",
+                        labels={"spread": "EUR/MWh", "date": ""},
+                        template=chart_template,
+                    )
+                    st.plotly_chart(fig_comp, width="stretch")
 
     # ── Export button ────────────────────────────────────────────────────────
     st.divider()

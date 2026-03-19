@@ -7,8 +7,9 @@ import pandas as pd
 import pytest
 
 from src.analytics import (
-    analyze_price_renewable_correlation,
+    analyze_renewable_bess_signal,
     build_price_heatmap,
+    build_daily_renewable_spread_view,
     build_renewable_price_scatter,
     build_spread_heatmap,
     calculate_daily_spreads,
@@ -177,6 +178,19 @@ class TestRevenue:
         assert result["capture_rate_assumption"] == 0.70
         assert result["cycles_per_day_assumption"] == 1.0
 
+    def test_capture_rate_is_adjustable(self) -> None:
+        daily = pd.DataFrame({"spread": [100.0] * 365})
+        result = estimate_annual_arbitrage_revenue(
+            daily,
+            power_mw=1.0,
+            duration_hours=1.0,
+            roundtrip_efficiency=1.0,
+            capture_rate=0.55,
+        )
+        expected = 100 * 0.55 * 365.25
+        assert abs(result["annual_revenue_eur"] - expected) < 1.0
+        assert result["capture_rate_assumption"] == 0.55
+
     def test_keys(self, seven_day_prices: pd.DataFrame) -> None:
         daily = calculate_daily_spreads(seven_day_prices)
         result = estimate_annual_arbitrage_revenue(daily)
@@ -239,16 +253,47 @@ class TestCompareZones:
                     "p90_spread", "negative_pct", "estimated_annual_revenue_per_mw"}
         assert set(result.columns) == expected
 
+    def test_capture_rate_flows_into_revenue(
+        self, seven_day_prices: pd.DataFrame,
+    ) -> None:
+        low_capture = compare_zones(
+            {"DE_LU": seven_day_prices},
+            capture_rate=0.50,
+        )
+        high_capture = compare_zones(
+            {"DE_LU": seven_day_prices},
+            capture_rate=0.80,
+        )
+        assert (
+            high_capture["estimated_annual_revenue_per_mw"].iloc[0]
+            > low_capture["estimated_annual_revenue_per_mw"].iloc[0]
+        )
+
 
 # ── Renewable correlation ────────────────────────────────────────────────────
 
 @pytest.fixture
+def renewable_signal_prices() -> pd.DataFrame:
+    """Hourly prices with day-level spread variation for BESS-signal tests."""
+    idx = pd.date_range("2025-01-01", periods=8 * 24, freq="h", tz="UTC")
+    hours = np.arange(8 * 24) % 24
+    day_idx = np.arange(8 * 24) // 24
+    amplitude = 20.0 + day_idx * 5.0
+    prices = 60.0 + amplitude * np.sin(2 * np.pi * hours / 24)
+    df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+    df.index.name = "timestamp"
+    return df
+
+
+@pytest.fixture
 def generation_df() -> pd.DataFrame:
-    """Generation data inversely correlated with prices (BESS-friendly)."""
-    idx = pd.date_range("2025-01-01", periods=7 * 24, freq="h", tz="UTC")
-    hours = np.arange(7 * 24) % 24
-    # High renewables when prices are low (inverse of sine pattern)
-    renewable_pct = 50.0 - 30.0 * np.sin(2 * np.pi * hours / 24)
+    """Generation data with hourly inverse price signal and daily RE variation."""
+    idx = pd.date_range("2025-01-01", periods=8 * 24, freq="h", tz="UTC")
+    hours = np.arange(8 * 24) % 24
+    day_idx = np.arange(8 * 24) // 24
+    renewable_base = 30.0 + day_idx * 5.0
+    renewable_pct = renewable_base - 15.0 * np.sin(2 * np.pi * hours / 24)
+    renewable_pct = np.clip(renewable_pct, 5.0, 95.0)
     total_gen = 40000.0 + np.random.default_rng(42).normal(0, 500, len(idx))
     solar = total_gen * (renewable_pct / 100) * 0.4
     wind = total_gen * (renewable_pct / 100) * 0.6
@@ -267,46 +312,115 @@ def generation_df() -> pd.DataFrame:
 
 class TestRenewableCorrelation:
     def test_negative_correlation(
-        self, seven_day_prices: pd.DataFrame, generation_df: pd.DataFrame,
+        self, renewable_signal_prices: pd.DataFrame, generation_df: pd.DataFrame,
     ) -> None:
-        """BESS-friendly market should have negative wind/solar-price correlation."""
-        result = analyze_price_renewable_correlation(seven_day_prices, generation_df)
+        """BESS-friendly market should have negative renewable-price correlation."""
+        result = analyze_renewable_bess_signal(renewable_signal_prices, generation_df)
         assert result["correlation_renewable_price"] < 0
 
     def test_high_low_re_prices(
-        self, seven_day_prices: pd.DataFrame, generation_df: pd.DataFrame,
+        self, renewable_signal_prices: pd.DataFrame, generation_df: pd.DataFrame,
     ) -> None:
-        result = analyze_price_renewable_correlation(seven_day_prices, generation_df)
+        result = analyze_renewable_bess_signal(renewable_signal_prices, generation_df)
         assert result["avg_price_high_renewable"] < result["avg_price_low_renewable"]
 
-    def test_result_keys(
-        self, seven_day_prices: pd.DataFrame, generation_df: pd.DataFrame,
+    def test_positive_spread_uplift(
+        self, renewable_signal_prices: pd.DataFrame, generation_df: pd.DataFrame,
     ) -> None:
-        result = analyze_price_renewable_correlation(seven_day_prices, generation_df)
+        result = analyze_renewable_bess_signal(renewable_signal_prices, generation_df)
+        assert result["spread_uplift_high_vs_low_renewable"] > 0
+        assert (
+            result["spread_by_renewable_quartile"]["Q4"]
+            > result["spread_by_renewable_quartile"]["Q1"]
+        )
+
+    def test_result_keys(
+        self, renewable_signal_prices: pd.DataFrame, generation_df: pd.DataFrame,
+    ) -> None:
+        result = analyze_renewable_bess_signal(renewable_signal_prices, generation_df)
         expected_keys = {
-            "correlation_wind_price", "correlation_solar_price",
             "correlation_renewable_price", "avg_price_high_renewable",
-            "avg_price_low_renewable", "price_spread_by_renewable_quartile",
-            "negative_price_renewable_pct",
+            "avg_price_low_renewable", "avg_spread_high_renewable_day",
+            "avg_spread_low_renewable_day", "spread_uplift_high_vs_low_renewable",
+            "price_by_renewable_quartile", "spread_by_renewable_quartile",
+            "hourly_points", "daily_points",
         }
         assert set(result.keys()) == expected_keys
 
-    def test_empty_generation(self, seven_day_prices: pd.DataFrame) -> None:
+    def test_quartile_outputs_complete_and_stable(
+        self, renewable_signal_prices: pd.DataFrame, generation_df: pd.DataFrame,
+    ) -> None:
+        result = analyze_renewable_bess_signal(renewable_signal_prices, generation_df)
+        assert list(result["price_by_renewable_quartile"].keys()) == ["Q1", "Q2", "Q3", "Q4"]
+        assert list(result["spread_by_renewable_quartile"].keys()) == ["Q1", "Q2", "Q3", "Q4"]
+
+    def test_empty_generation(self, renewable_signal_prices: pd.DataFrame) -> None:
         empty_gen = pd.DataFrame(columns=[
             "solar_mw", "wind_onshore_mw", "wind_offshore_mw",
             "total_renewable_mw", "total_generation_mw", "renewable_pct",
         ])
-        result = analyze_price_renewable_correlation(seven_day_prices, empty_gen)
-        assert result["correlation_renewable_price"] == 0.0
+        result = analyze_renewable_bess_signal(renewable_signal_prices, empty_gen)
+        assert result["correlation_renewable_price"] is None
+        assert result["price_by_renewable_quartile"] == {}
+        assert result["spread_by_renewable_quartile"] == {}
+
+    def test_insufficient_daily_overlap(
+        self, renewable_signal_prices: pd.DataFrame, generation_df: pd.DataFrame,
+    ) -> None:
+        result = analyze_renewable_bess_signal(
+            renewable_signal_prices,
+            generation_df.iloc[:48],
+        )
+        assert result["daily_points"] == 2
+        assert result["spread_uplift_high_vs_low_renewable"] is None
+        assert result["spread_by_renewable_quartile"] == {}
 
     def test_scatter_df(
-        self, seven_day_prices: pd.DataFrame, generation_df: pd.DataFrame,
+        self, renewable_signal_prices: pd.DataFrame, generation_df: pd.DataFrame,
     ) -> None:
-        result = build_renewable_price_scatter(seven_day_prices, generation_df)
+        result = build_renewable_price_scatter(renewable_signal_prices, generation_df)
         assert "price_eur_mwh" in result.columns
         assert "renewable_pct" in result.columns
         assert "hour" in result.columns
+        assert "month" in result.columns
         assert len(result) > 0
+
+    def test_daily_view_respects_timezone(self, cet_boundary_prices: pd.DataFrame) -> None:
+        idx = cet_boundary_prices.index
+        gen_df = pd.DataFrame({
+            "solar_mw": [0.0] * len(idx),
+            "wind_onshore_mw": [10.0] * len(idx),
+            "wind_offshore_mw": [0.0] * len(idx),
+            "total_renewable_mw": [10.0] * len(idx),
+            "total_generation_mw": [100.0] * len(idx),
+            "renewable_pct": [10.0] * len(idx),
+        }, index=idx)
+        gen_df.iloc[23, gen_df.columns.get_loc("renewable_pct")] = 90.0
+
+        utc_view = build_daily_renewable_spread_view(cet_boundary_prices, gen_df)
+        cet_view = build_daily_renewable_spread_view(
+            cet_boundary_prices,
+            gen_df,
+            tz="Europe/Berlin",
+        )
+
+        assert utc_view["daily_avg_renewable_pct"].tolist() != cet_view["daily_avg_renewable_pct"].tolist()
+
+    def test_daily_view_respects_duration_hours(
+        self, renewable_signal_prices: pd.DataFrame, generation_df: pd.DataFrame,
+    ) -> None:
+        view_1h = build_daily_renewable_spread_view(
+            renewable_signal_prices,
+            generation_df,
+            duration_hours=1.0,
+        )
+        view_2h = build_daily_renewable_spread_view(
+            renewable_signal_prices,
+            generation_df,
+            duration_hours=2.0,
+        )
+
+        assert view_1h["spread"].mean() != view_2h["spread"].mean()
 
 
 # ── Local timezone analytics ────────────────────────────────────────────────
