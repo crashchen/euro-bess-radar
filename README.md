@@ -7,7 +7,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 - **Day-ahead price analysis** across 35+ European bidding zones (ENTSO-E + Elexon)
 - **Revenue estimation** for 1h, 2h, and 4h BESS using chronology-aware charge/discharge windows
 - **Inline revenue guidance** with sample-window annualisation notes and ancillary methodology help in the dashboard
-- **Renewable correlation analysis** — quantify how wind/solar drives price spreads
+- **Renewables and BESS signal analysis** — quantify how renewable share affects prices and ordered spreads
 - **Ancillary services integration** — manual CSV upload + auto-fetch for DE, FI, GB with per-product reserve lines, manual-over-auto product overrides, and preserved directional/system price fields
 - **Multi-zone comparison** for market screening
 - **Excel export** with full analytics and sub-hourly negative-price normalization
@@ -50,11 +50,11 @@ euro-bess-radar/
 ├── src/
 │   ├── config.py             # Zones, API endpoints, constants
 │   ├── data_ingestion.py     # ENTSO-E, Elexon, Fingrid fetchers
-│   ├── analytics.py          # Spread, P50/P90, heatmaps, RE correlation
+│   ├── analytics.py          # Spread, P50/P90, heatmaps, renewables/BESS signals
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   └── export.py             # Excel report generation
-├── tests/                    # 99 unit tests, heavily mocked
+├── tests/                    # 100+ unit tests, heavily mocked
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads
@@ -74,4 +74,18 @@ Optimized for BESS investment screening in:
 
 ## License
 
-Private — internal use only.
+Apache-2.0. See [LICENSE](LICENSE).
+
+## Code and Data Licensing
+
+The source code in this repository is licensed under Apache-2.0.
+
+Fetched, cached, uploaded, or exported market data is not relicensed by this repository. Data from ENTSO-E, Elexon, Fingrid, Regelleistung, and other external providers remains subject to the original source terms, access rules, attribution requirements, and permitted-use restrictions.
+
+## Security
+
+Please report suspected vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup guidance, PR expectations, and secret-handling rules.
