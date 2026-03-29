@@ -12,6 +12,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 - **Multi-zone comparison** for market screening
 - **Excel export** with full analytics and sub-hourly negative-price normalization
 - **GBP to EUR normalization** for GB history using yearly FX mappings
+- **GitHub Actions CI** for syntax validation and mocked unit tests on pushes and PRs
 
 ## Data Sources
 
