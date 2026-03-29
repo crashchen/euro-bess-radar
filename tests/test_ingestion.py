@@ -4,13 +4,24 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import sqlite3
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
+import requests
 
-from src.config import ELEXON_ZONES, ENTSOE_ZONES, GBP_EUR_YEARLY, GBP_TO_EUR, is_elexon_zone
+from src.config import (
+    ELEXON_ZONES,
+    ENTSOE_ZONES,
+    GBP_EUR_YEARLY,
+    PRICE_CACHE_TTL_HOURS,
+    is_elexon_zone,
+)
 from src.data_ingestion import (
+    DataSourceAuthError,
+    DataSourceNetworkError,
+    DataSourceParseError,
     build_zone_query_window,
     clean_prices,
     fetch_elexon_prices,
@@ -45,6 +56,15 @@ class TestFetchEntsoePrices:
         assert df.index.tz is not None  # timezone-aware
         assert str(df.index.tz) == "UTC"
         assert len(df) == 24
+
+    @patch("src.data_ingestion.get_api_key", side_effect=OSError("missing key"))
+    def test_missing_api_key_raises_auth_error(self, _mock_key: MagicMock) -> None:
+        with pytest.raises(DataSourceAuthError, match="API key is missing or invalid"):
+            fetch_entsoe_prices(
+                "DE_LU",
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
 
 
 # ── Test 2: Elexon schema ───────────────────────────────────────────────────
@@ -126,6 +146,24 @@ class TestFetchElexonPrices:
             "2025-01-02 00:00:00+00:00",
         ]
 
+    @patch("src.data_ingestion._call_elexon_api", side_effect=requests.RequestException("boom"))
+    def test_request_failure_raises_network_error(self, _mock_api: MagicMock) -> None:
+        with pytest.raises(DataSourceNetworkError, match="Elexon request failed"):
+            fetch_elexon_prices(
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-01", tz="UTC"),
+            )
+
+    @patch("src.data_ingestion._call_elexon_api")
+    def test_malformed_payload_raises_parse_error(self, mock_api: MagicMock) -> None:
+        mock_api.return_value = {"unexpected": "shape"}
+
+        with pytest.raises(DataSourceParseError, match="could not be parsed"):
+            fetch_elexon_prices(
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-01", tz="UTC"),
+            )
+
 
 # ── Test 3: GB routes to Elexon ─────────────────────────────────────────────
 
@@ -169,6 +207,27 @@ class TestFetchPricesRouting:
         mock_entsoe.assert_called_once()
         mock_elexon.assert_not_called()
         assert len(df) > 0
+
+    @patch("src.data_ingestion.read_cache")
+    @patch("src.data_ingestion.fetch_entsoe_prices")
+    def test_use_cache_false_bypasses_cache_lookup(
+        self,
+        mock_entsoe: MagicMock,
+        mock_read_cache: MagicMock,
+        mock_price_df: pd.DataFrame,
+    ) -> None:
+        mock_read_cache.return_value = mock_price_df
+        mock_entsoe.return_value = mock_price_df
+
+        fetch_prices(
+            zone="DE_LU",
+            start=pd.Timestamp("2025-01-01", tz="UTC"),
+            end=pd.Timestamp("2025-01-02", tz="UTC"),
+            use_cache=False,
+        )
+
+        mock_read_cache.assert_not_called()
+        mock_entsoe.assert_called_once()
 
 
 # ── Test 5: clean_prices fills gaps ──────────────────────────────────────────
@@ -249,6 +308,26 @@ class TestCacheRoundtrip:
         with patch("src.data_ingestion.DB_PATH", tmp_path / "test.db"), \
              patch("src.data_ingestion.CACHE_DIR", tmp_path):
             write_cache(holey_df, zone)
+            result = read_cache(zone, start, end)
+
+        assert result is None
+
+    def test_rejects_stale_cache(self, tmp_path: Path, mock_price_df: pd.DataFrame) -> None:
+        zone = "DE_LU"
+        start = pd.Timestamp("2025-01-01", tz="UTC")
+        end = pd.Timestamp("2025-01-02", tz="UTC")
+        stale_at = (
+            pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=PRICE_CACHE_TTL_HOURS + 1)
+        ).isoformat()
+
+        with patch("src.data_ingestion.DB_PATH", tmp_path / "test.db"), \
+             patch("src.data_ingestion.CACHE_DIR", tmp_path):
+            write_cache(mock_price_df, zone)
+            with sqlite3.connect(tmp_path / "test.db") as conn:
+                conn.execute(
+                    "UPDATE cache_metadata SET updated_at = ? WHERE zone = ?",
+                    (stale_at, zone),
+                )
             result = read_cache(zone, start, end)
 
         assert result is None

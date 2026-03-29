@@ -21,7 +21,7 @@ from src.config import (
     ELEXON_BASE_URL,
     ELEXON_MARKET_INDEX_ENDPOINT,
     GBP_EUR_YEARLY,
-    GBP_TO_EUR,
+    PRICE_CACHE_TTL_HOURS,
     get_api_key,
     get_zone_timezone,
     is_elexon_zone,
@@ -30,6 +30,24 @@ from src.config import (
 logger = logging.getLogger(__name__)
 
 _warned_fx_years: set[int] = set()
+
+
+# ── Exceptions ───────────────────────────────────────────────────────────────
+
+class DataSourceError(RuntimeError):
+    """Base error for user-relevant data source failures."""
+
+
+class DataSourceAuthError(DataSourceError):
+    """Raised when authentication or local configuration is invalid."""
+
+
+class DataSourceNetworkError(DataSourceError):
+    """Raised when a remote data source request fails."""
+
+
+class DataSourceParseError(DataSourceError):
+    """Raised when a remote data source response cannot be parsed safely."""
 
 
 # ── Retry decorator ──────────────────────────────────────────────────────────
@@ -140,6 +158,36 @@ def _get_gbp_eur_rate_for_year(year: int) -> float:
     return GBP_EUR_YEARLY[nearest_year]
 
 
+def _looks_like_auth_error(exc: Exception) -> bool:
+    """Best-effort detection of authentication-related upstream failures."""
+    text = str(exc).lower()
+    auth_terms = [
+        "401", "403", "unauthor", "forbidden", "security token",
+        "api key", "access denied", "invalid token",
+    ]
+    return any(term in text for term in auth_terms)
+
+
+def _cache_updated_at(
+    conn: sqlite3.Connection,
+    zone: str,
+) -> pd.Timestamp | None:
+    """Return the last write timestamp for a zone cache, or None if unknown."""
+    try:
+        row = conn.execute(
+            "SELECT updated_at FROM cache_metadata WHERE zone = ?",
+            (zone,),
+        ).fetchone()
+    except sqlite3.DatabaseError:
+        return None
+
+    if row is None or row[0] is None:
+        return None
+
+    ts = pd.Timestamp(row[0])
+    return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
+
+
 def _convert_gbp_series_to_eur(
     gbp_values: pd.Series,
     timestamps,
@@ -210,13 +258,33 @@ def fetch_entsoe_prices(
         Timestamps are UTC, timezone-aware.
     """
     if client is None:
-        client = EntsoePandasClient(api_key=get_api_key())
+        try:
+            client = EntsoePandasClient(api_key=get_api_key())
+        except OSError as exc:
+            raise DataSourceAuthError(
+                "ENTSO-E API key is missing or invalid. Check your .env configuration."
+            ) from exc
 
     start_q = start.tz_convert(DEFAULT_QUERY_TIMEZONE)
     end_q = end.tz_convert(DEFAULT_QUERY_TIMEZONE)
 
     logger.info("Fetching ENTSO-E data for %s [%s, %s)", zone, start_q, end_q)
-    raw = _call_entsoe_api(client, zone, start_q, end_q)
+    try:
+        raw = _call_entsoe_api(client, zone, start_q, end_q)
+    except requests.RequestException as exc:
+        logger.exception("ENTSO-E request failed for %s", zone)
+        raise DataSourceNetworkError(
+            f"ENTSO-E request failed for {zone}. Please retry."
+        ) from exc
+    except Exception as exc:
+        logger.exception("ENTSO-E fetch failed for %s", zone)
+        if _looks_like_auth_error(exc):
+            raise DataSourceAuthError(
+                "ENTSO-E API authentication failed. Check your token and permissions."
+            ) from exc
+        raise DataSourceParseError(
+            f"ENTSO-E returned data for {zone} in an unexpected format."
+        ) from exc
 
     if isinstance(raw, pd.DataFrame):
         series = raw.iloc[:, 0]
@@ -265,6 +333,7 @@ def fetch_elexon_prices(
         30-min settlement periods, UTC timestamps.
     """
     all_records: list[dict[str, Any]] = []
+    request_errors: list[DataSourceError] = []
     current = start.normalize()
     end_date = end.normalize()
 
@@ -280,19 +349,56 @@ def fetch_elexon_prices(
                 all_records.extend(data)
             elif isinstance(data, dict) and "data" in data:
                 all_records.extend(data["data"])
-        except Exception:
-            logger.warning("Failed to fetch Elexon data for %s", date_str)
+            else:
+                raise DataSourceParseError(
+                    f"Elexon payload for {date_str} did not contain a list of records."
+                )
+        except requests.RequestException as exc:
+            logger.warning(
+                "Failed to fetch Elexon data for %s: %s",
+                date_str,
+                exc,
+            )
+            request_errors.append(
+                DataSourceNetworkError(
+                    f"Elexon request failed for {date_str}. Please retry."
+                )
+            )
+        except (TypeError, ValueError, KeyError, DataSourceParseError) as exc:
+            logger.warning(
+                "Failed to parse Elexon data for %s: %s",
+                date_str,
+                exc,
+            )
+            request_errors.append(
+                DataSourceParseError(
+                    f"Elexon response for {date_str} could not be parsed."
+                )
+            )
 
         current = next_date
         time.sleep(0.5)
 
     if not all_records:
+        if request_errors:
+            raise request_errors[0]
         logger.warning("Elexon returned no data for [%s, %s)", start, end)
         return pd.DataFrame(columns=["price_eur_mwh"])
 
     df = pd.DataFrame(all_records)
-    df["timestamp"] = pd.to_datetime(df["startTime"], utc=True)
-    df["price_gbp"] = pd.to_numeric(df["price"], errors="coerce")
+    try:
+        df["timestamp"] = pd.to_datetime(df["startTime"], utc=True)
+        df["price_gbp"] = pd.to_numeric(df["price"], errors="coerce")
+    except KeyError as exc:
+        logger.exception("Elexon response missing expected columns")
+        raise DataSourceParseError(
+            "Elexon response is missing expected pricing fields."
+        ) from exc
+    except (TypeError, ValueError) as exc:
+        logger.exception("Elexon response could not be parsed")
+        raise DataSourceParseError(
+            "Elexon response could not be parsed into timestamps and prices."
+        ) from exc
 
     # Each settlement period has multiple data providers (e.g. one with a
     # real price and one reporting 0).  Drop zeros, then average any
@@ -336,6 +442,12 @@ def write_cache(df: pd.DataFrame, zone: str) -> None:
                 zone TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS cache_metadata (
+                zone TEXT PRIMARY KEY,
+                updated_at TEXT NOT NULL
+            )
+        """)
         rows = [
             (row.timestamp.isoformat() if hasattr(row.timestamp, "isoformat") else str(row.timestamp),
              float(row.price_eur_mwh), zone)
@@ -344,6 +456,10 @@ def write_cache(df: pd.DataFrame, zone: str) -> None:
         conn.executemany(
             f'INSERT OR REPLACE INTO "{table_name}" (timestamp, price_eur_mwh, zone) VALUES (?, ?, ?)',
             rows,
+        )
+        conn.execute(
+            'INSERT OR REPLACE INTO cache_metadata (zone, updated_at) VALUES (?, ?)',
+            (zone, pd.Timestamp.now(tz="UTC").isoformat()),
         )
 
 
@@ -359,6 +475,22 @@ def read_cache(
     table_name = f"da_prices_{zone.lower()}"
     try:
         with sqlite3.connect(DB_PATH) as conn:
+            updated_at = _cache_updated_at(conn, zone)
+            if updated_at is None:
+                logger.info("Cache metadata missing for %s; treating cache as stale", zone)
+                return None
+
+            ttl = pd.Timedelta(hours=PRICE_CACHE_TTL_HOURS)
+            age = pd.Timestamp.now(tz="UTC") - updated_at
+            if age > ttl:
+                logger.info(
+                    "Cache stale for %s: age=%s exceeds ttl=%s",
+                    zone,
+                    age,
+                    ttl,
+                )
+                return None
+
             query = (
                 f'SELECT timestamp, price_eur_mwh FROM "{table_name}" '
                 "WHERE timestamp >= ? AND timestamp < ?"
@@ -368,7 +500,7 @@ def read_cache(
                 params=(start.isoformat(), end.isoformat()),
                 parse_dates=["timestamp"],
             )
-    except Exception:
+    except (sqlite3.DatabaseError, pd.errors.ParserError, ValueError):
         return None
 
     if df.empty:
@@ -485,16 +617,32 @@ def fetch_generation_data(
     if is_elexon_zone(zone):
         return fetch_elexon_generation(start, end)
 
-    client = EntsoePandasClient(api_key=get_api_key())
+    try:
+        client = EntsoePandasClient(api_key=get_api_key())
+    except OSError as exc:
+        raise DataSourceAuthError(
+            "ENTSO-E API key is missing or invalid. Check your .env configuration."
+        ) from exc
     start_q = start.tz_convert(DEFAULT_QUERY_TIMEZONE)
     end_q = end.tz_convert(DEFAULT_QUERY_TIMEZONE)
 
     logger.info("Fetching generation data for %s", zone)
     try:
         raw = _call_entsoe_generation(client, zone, start_q, end_q)
+    except requests.RequestException as exc:
+        logger.exception("ENTSO-E generation request failed for %s", zone)
+        raise DataSourceNetworkError(
+            f"Generation data request failed for {zone}. Please retry."
+        ) from exc
     except Exception as exc:
-        logger.warning("Generation data unavailable for %s: %s", zone, exc)
-        return pd.DataFrame(columns=_RENEWABLE_COLS)
+        logger.exception("ENTSO-E generation fetch failed for %s", zone)
+        if _looks_like_auth_error(exc):
+            raise DataSourceAuthError(
+                "ENTSO-E API authentication failed while fetching generation data."
+            ) from exc
+        raise DataSourceParseError(
+            f"Generation data for {zone} could not be parsed or was unavailable."
+        ) from exc
 
     if raw.empty:
         return pd.DataFrame(columns=_RENEWABLE_COLS)
@@ -553,7 +701,10 @@ def fetch_elexon_generation(
         )
         resp.raise_for_status()
         data = resp.json()
-    except Exception as exc:
+    except requests.RequestException as exc:
+        logger.warning("Elexon FUELINST request failed: %s", exc)
+        return pd.DataFrame(columns=_RENEWABLE_COLS)
+    except ValueError as exc:
         logger.warning("Elexon FUELINST unavailable: %s", exc)
         return pd.DataFrame(columns=_RENEWABLE_COLS)
 
@@ -633,7 +784,10 @@ def fetch_fingrid_data(
             )
             resp.raise_for_status()
             payload = resp.json()
-        except Exception as exc:
+        except requests.RequestException as exc:
+            logger.warning("Fingrid request failed for dataset %d: %s", dataset_id, exc)
+            break
+        except ValueError as exc:
             logger.warning("Fingrid fetch failed for dataset %d: %s", dataset_id, exc)
             break
 
@@ -785,7 +939,14 @@ def fetch_regelleistung_results(
         )
         resp.raise_for_status()
         data = resp.json()
-    except Exception as exc:
+    except requests.RequestException as exc:
+        logger.warning(
+            "Regelleistung.net auto-fetch failed for %s: %s. "
+            "Please download manually from %s",
+            product, exc, REGELLEISTUNG_BASE_URL,
+        )
+        return None
+    except ValueError as exc:
         logger.warning(
             "Regelleistung.net auto-fetch failed for %s: %s. "
             "Please download manually from %s",
@@ -867,7 +1028,9 @@ def fetch_elexon_system_prices(
             data = resp.json()
             records = data if isinstance(data, list) else data.get("data", [])
             all_records.extend(records)
-        except Exception as exc:
+        except requests.RequestException as exc:
+            logger.warning("Elexon system prices failed for %s: %s", date_str, exc)
+        except ValueError as exc:
             logger.warning("Elexon system prices failed for %s: %s", date_str, exc)
 
         current += pd.Timedelta(days=1)
@@ -945,7 +1108,7 @@ def fetch_entsoe_imbalance_prices(
     """
     try:
         client = EntsoePandasClient(api_key=get_api_key())
-    except Exception as exc:
+    except OSError as exc:
         logger.warning("Cannot create ENTSO-E client: %s", exc)
         return None
 
@@ -955,8 +1118,14 @@ def fetch_entsoe_imbalance_prices(
     logger.info("Fetching ENTSO-E imbalance prices for %s", zone)
     try:
         raw = client.query_imbalance_prices(zone, start=start_q, end=end_q)
-    except Exception as exc:
+    except requests.RequestException as exc:
+        logger.warning("ENTSO-E imbalance request failed for %s: %s", zone, exc)
+        return None
+    except (ValueError, TypeError, KeyError) as exc:
         logger.warning("ENTSO-E imbalance data unavailable for %s: %s", zone, exc)
+        return None
+    except Exception as exc:
+        logger.warning("ENTSO-E imbalance fetch unavailable for %s: %s", zone, exc)
         return None
 
     if raw is None or (isinstance(raw, (pd.DataFrame, pd.Series)) and raw.empty):

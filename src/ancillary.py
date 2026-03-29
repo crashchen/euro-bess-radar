@@ -9,6 +9,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from src.config import (
+    ANCILLARY_CAPACITY_AVAILABILITY,
+    ANCILLARY_ENERGY_ACTIVATION_SHARE,
+    HOURS_PER_YEAR,
+)
+
 logger = logging.getLogger(__name__)
 
 _STANDARD_COLUMNS = [
@@ -522,7 +528,7 @@ def calculate_ancillary_revenue(
     Returns:
         Dict with per-service and total annual revenue estimates.
     """
-    availability = 0.95
+    availability = ANCILLARY_CAPACITY_AVAILABILITY
     result: dict[str, float] = {
         "fcr_annual_eur": 0.0,
         "afrr_annual_eur": 0.0,
@@ -545,16 +551,16 @@ def calculate_ancillary_revenue(
         cap_prices = group["capacity_price_eur_mw"].dropna()
         if not cap_prices.empty:
             avg_cap = float(cap_prices.mean())
-            annual_revenue += avg_cap * power_mw * 8760 * availability
+            annual_revenue += avg_cap * power_mw * HOURS_PER_YEAR * availability
 
         energy_prices = group["energy_price_eur_mwh"].dropna()
         if not energy_prices.empty:
             avg_energy = float(energy_prices.mean())
             energy_mwh = power_mw * duration_hours
-            # Assume balancing activations ~10% of hours only for explicit
-            # single-price energy services. Two-sided balancing signals are preserved
-            # separately and are not auto-monetised here.
-            activation_hours = 8760 * 0.10
+            # Annualise explicit single-sided energy prices with the configured
+            # screening assumption for activated hours. Two-sided balancing
+            # signals are preserved separately and are not auto-monetised here.
+            activation_hours = HOURS_PER_YEAR * ANCILLARY_ENERGY_ACTIVATION_SHARE
             annual_revenue += avg_energy * energy_mwh * activation_hours
 
         if annual_revenue <= 0:

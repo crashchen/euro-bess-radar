@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 import pandas as pd
 import plotly.express as px
@@ -30,8 +31,18 @@ from src.ancillary import (
     parse_ancillary_csv,
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
-from src.config import ALL_ZONES, ZONE_TIMEZONES, get_zone_timezone, is_elexon_zone
+from src.config import (
+    ALL_ZONES,
+    ANCILLARY_CAPACITY_AVAILABILITY,
+    ANCILLARY_ENERGY_ACTIVATION_SHARE,
+    ZONE_TIMEZONES,
+    get_zone_timezone,
+    is_elexon_zone,
+)
 from src.data_ingestion import (
+    DataSourceAuthError,
+    DataSourceNetworkError,
+    DataSourceParseError,
     build_zone_query_window,
     fetch_generation_data,
     fetch_prices,
@@ -39,6 +50,7 @@ from src.data_ingestion import (
 from src.export import export_to_bytes
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="BESS Pulse", layout="wide", page_icon="\u26a1")
 
@@ -69,6 +81,11 @@ power_mw = st.sidebar.number_input("Power (MW)", min_value=0.1, value=10.0, step
 duration_hours = st.sidebar.selectbox("Duration (h)", [1, 2, 4], index=0)
 efficiency = st.sidebar.slider("Efficiency (%)", 85, 95, 88) / 100.0
 capture_rate = st.sidebar.slider("Capture (%)", 30, 100, 70) / 100.0
+force_refresh = st.sidebar.checkbox(
+    "Force Refresh",
+    value=False,
+    help="Bypass Streamlit and local price caches for the next fetch only.",
+)
 
 # Chart theme
 chart_template = st.sidebar.selectbox(
@@ -92,8 +109,10 @@ with st.sidebar.expander("Ancillary Services Data"):
                 st.session_state["ancillary_df"] = anc_df
                 st.session_state["ancillary_template"] = anc_template
                 st.success(f"{anc_template} loaded: {len(anc_df)} rows")
-            except Exception as e:
-                st.error(f"Parse error: {e}")
+            except UnicodeDecodeError:
+                st.error("Parse error: the uploaded file is not valid UTF-8/CSV text.")
+            except (ValueError, pd.errors.ParserError) as exc:
+                st.error(f"Parse error: {exc}")
 
     if "ancillary_df" in st.session_state:
         st.caption(f"Loaded: {st.session_state['ancillary_template']} "
@@ -157,20 +176,28 @@ fetch_btn = st.sidebar.button("Fetch Data", type="primary", width="stretch")
 # ── Data fetching ────────────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
-def load_zone_data(zone: str, start: str, end: str) -> pd.DataFrame:
+def load_zone_data(
+    zone: str,
+    start: str,
+    end: str,
+    force_refresh: bool = False,
+    refresh_token: int = 0,
+) -> pd.DataFrame:
     """Fetch price data for a zone (cached by Streamlit)."""
+    del refresh_token
     api_start, api_end = build_zone_query_window(zone, start, end)
     return fetch_prices(
         zone=zone,
         start=api_start,
         end=api_end,
-        use_cache=True,
+        use_cache=not force_refresh,
     )
 
 
 @st.cache_data(show_spinner=False)
-def load_generation(zone: str, start: str, end: str) -> pd.DataFrame:
+def load_generation(zone: str, start: str, end: str, refresh_token: int = 0) -> pd.DataFrame:
     """Fetch generation data for a zone (cached by Streamlit)."""
+    del refresh_token
     api_start, api_end = build_zone_query_window(zone, start, end)
     return fetch_generation_data(
         zone=zone,
@@ -179,26 +206,55 @@ def load_generation(zone: str, start: str, end: str) -> pd.DataFrame:
     )
 
 
+def _format_data_error(exc: Exception) -> str:
+    """Convert internal fetch errors into concise user-facing messages."""
+    if isinstance(exc, DataSourceAuthError):
+        return str(exc)
+    if isinstance(exc, DataSourceNetworkError):
+        return str(exc)
+    if isinstance(exc, DataSourceParseError):
+        return str(exc)
+    if isinstance(exc, ValueError):
+        return str(exc)
+    return "Unexpected data fetch failure. Check logs for details."
+
+
 if fetch_btn or "zone_data" in st.session_state:
+    refresh_token = st.session_state.get("refresh_token", 0)
     if fetch_btn:
+        if force_refresh:
+            load_zone_data.clear()
+            load_generation.clear()
+            refresh_token = time.time_ns()
+        else:
+            refresh_token = 0
+
         zone_data: dict[str, pd.DataFrame] = {}
         progress = st.sidebar.progress(0, text="Fetching...")
 
         for i, zone in enumerate(selected_zones):
             with st.spinner(f"Fetching data for {zone}..."):
                 try:
-                    df = load_zone_data(zone, str(start_date), str(end_date))
+                    df = load_zone_data(
+                        zone,
+                        str(start_date),
+                        str(end_date),
+                        force_refresh=force_refresh,
+                        refresh_token=refresh_token,
+                    )
                     if not df.empty:
                         zone_data[zone] = df
                     else:
                         st.warning(f"No data returned for {zone}")
-                except Exception as e:
-                    st.error(f"Failed to fetch {zone}: {e}")
+                except (DataSourceAuthError, DataSourceNetworkError, DataSourceParseError, ValueError) as exc:
+                    logger.warning("Failed to fetch %s", zone, exc_info=exc)
+                    st.error(f"Failed to fetch {zone}: {_format_data_error(exc)}")
             progress.progress((i + 1) / len(selected_zones), text=f"Done: {zone}")
 
         progress.empty()
         st.session_state["zone_data"] = zone_data
         st.session_state["selected_zones"] = selected_zones
+        st.session_state["refresh_token"] = refresh_token
     else:
         zone_data = st.session_state.get("zone_data", {})
         selected_zones = st.session_state.get("selected_zones", selected_zones)
@@ -321,8 +377,8 @@ if fetch_btn or "zone_data" in st.session_state:
         )
         fig_shm = px.imshow(
             spread_hm,
-            title=f"Ordered Spread Signal ({duration_hours}h windows, {zone_tz})",
-            labels=dict(x="Month", y="Hour (local)", color="EUR/MWh"),
+            title=f"Selected-Window Spread Signal ({duration_hours}h windows, {zone_tz})",
+            labels=dict(x="Month", y="Hour (local)", color="Signed signal (EUR/MWh)"),
             color_continuous_scale="RdBu_r",
             color_continuous_midpoint=0,
             aspect="auto",
@@ -330,6 +386,11 @@ if fetch_btn or "zone_data" in st.session_state:
         )
         fig_shm.update_yaxes(dtick=1)
         st.plotly_chart(fig_shm, width="stretch")
+        st.caption(
+            "Negative hours mark windows selected for charging; positive hours mark "
+            "windows selected for discharging. Color intensity shows the average signed "
+            "ordered-spread signal assigned to those selected windows, not per-hour revenue attribution."
+        )
 
     # ── Tab 3: Revenue Estimation ────────────────────────────────────────────
     with tabs[2]:
@@ -356,8 +417,8 @@ if fetch_btn or "zone_data" in st.session_state:
                 - You can load ancillary data by manual CSV upload or zone-specific auto-fetch.
                 - If both are present, manual uploads override auto-fetched rows for the same product name only.
                 - Reserve products are kept separate where possible, for example `FCR-N`, `FCR-D Up`, `FCR-D Down`, `aFRR Up`, and `aFRR Down`.
-                - Capacity-style products are annualised from average `EUR/MW` prices using the selected BESS power and a fixed availability assumption.
-                - Explicit single-sided energy prices are annualised using the selected BESS power, duration, and a simplified activation-hours assumption.
+                - Capacity-style products are annualised from average `EUR/MW` prices using the selected BESS power and a fixed `{ANCILLARY_CAPACITY_AVAILABILITY:.0%}` availability assumption.
+                - Explicit single-sided energy prices are annualised using the selected BESS power, duration, and a simplified `{ANCILLARY_ENERGY_ACTIVATION_SHARE:.0%}` activation-hours assumption.
                 - Two-sided balancing or system-price signals, such as GB `system buy` and `system sell`, are stored and shown but are not auto-monetised because dispatch direction and activation volume are still unknown.
                 - The revenue stack chart shows `DA Arbitrage` plus each ancillary product as separate colored components.
                 - This output is intended for market screening and prioritisation, not as a dispatch-grade settlement model.
@@ -486,8 +547,18 @@ if fetch_btn or "zone_data" in st.session_state:
             "renewable share."
         )
 
-        with st.spinner("Fetching generation data..."):
-            gen_df = load_generation(primary_zone, str(start_date), str(end_date))
+        try:
+            with st.spinner("Fetching generation data..."):
+                gen_df = load_generation(
+                    primary_zone,
+                    str(start_date),
+                    str(end_date),
+                    refresh_token=refresh_token,
+                )
+        except (DataSourceAuthError, DataSourceNetworkError, DataSourceParseError, ValueError) as exc:
+            logger.warning("Failed to fetch generation data for %s", primary_zone, exc_info=exc)
+            st.error(f"Failed to fetch generation data: {_format_data_error(exc)}")
+            gen_df = pd.DataFrame()
 
         if gen_df.empty:
             st.info("Generation data not available for this zone.")

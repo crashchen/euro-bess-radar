@@ -148,15 +148,19 @@ class TestHeatmaps:
         result = build_spread_heatmap(seven_day_prices)
         assert result.shape[0] == 24
 
-    def test_spread_heatmap_tracks_selected_hours(self, seven_day_prices: pd.DataFrame) -> None:
+    def test_spread_heatmap_marks_selected_charge_and_discharge_windows(
+        self, seven_day_prices: pd.DataFrame,
+    ) -> None:
         result = build_spread_heatmap(seven_day_prices)
         january = result.columns[0]
-        assert result.loc[0, january] < 0
-        assert result.loc[6, january] > 0
+        assert result.loc[0, january] == pytest.approx(-40.0)
+        assert result.loc[6, january] == pytest.approx(40.0)
         assert abs(result.loc[12, january]) < 1e-6
 
-    def test_spread_heatmap_sums_near_zero(self, seven_day_prices: pd.DataFrame) -> None:
-        """Selected buy/sell window signals should roughly net to zero per column."""
+    def test_spread_heatmap_is_signed_signal_not_hourly_revenue(
+        self, seven_day_prices: pd.DataFrame,
+    ) -> None:
+        """Selected-window signals should net to zero within each month column."""
         result = build_spread_heatmap(seven_day_prices)
         for col in result.columns:
             assert abs(result[col].sum()) < 1.0

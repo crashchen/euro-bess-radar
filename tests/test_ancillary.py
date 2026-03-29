@@ -17,6 +17,7 @@ from src.ancillary import (
     parse_ancillary_csv,
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
+from src.config import HOURS_PER_YEAR
 
 
 # ── Template CSV generation ──────────────────────────────────────────────────
@@ -138,6 +139,30 @@ class TestAncillaryRevenue:
 
         result = calculate_ancillary_revenue(df, power_mw=1.0, duration_hours=1.0)
         assert result["mfrr_annual_eur"] == 87600.0
+
+    def test_capacity_assumption_reads_from_config_constant(self, de_fcr_csv: str) -> None:
+        df = parse_ancillary_csv(de_fcr_csv, "DE_FCR")
+
+        with patch("src.ancillary.ANCILLARY_CAPACITY_AVAILABILITY", 0.50):
+            result = calculate_ancillary_revenue(df, power_mw=1.0, duration_hours=1.0)
+
+        expected = round(df["capacity_price_eur_mw"].mean() * HOURS_PER_YEAR * 0.50, 2)
+        assert result["fcr_annual_eur"] == expected
+
+    def test_energy_activation_share_reads_from_config_constant(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=2, freq="h", tz="UTC")
+        df = pd.DataFrame({
+            "energy_price_eur_mwh": [100.0, 100.0],
+            "capacity_price_eur_mw": [float("nan"), float("nan")],
+            "product_type": ["GB_BALANCING", "GB_BALANCING"],
+            "direction": ["", ""],
+            "zone": ["GB", "GB"],
+        }, index=idx)
+
+        with patch("src.ancillary.ANCILLARY_ENERGY_ACTIVATION_SHARE", 0.25):
+            result = calculate_ancillary_revenue(df, power_mw=1.0, duration_hours=1.0)
+
+        assert result["mfrr_annual_eur"] == 100.0 * HOURS_PER_YEAR * 0.25
 
     def test_gb_balancing_requires_explicit_energy_price(self, gb_balancing_csv: str) -> None:
         df = parse_ancillary_csv(gb_balancing_csv, "GB_BALANCING")

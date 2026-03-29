@@ -258,7 +258,10 @@ def build_spread_heatmap(
 
     For each day, mark the selected charge window as negative and the selected
     discharge window as positive using the day's ordered spread magnitude.
-    Positive = selected discharge window, negative = selected charge window.
+    This is a selected-window signal for visualising which local hours are
+    repeatedly chosen by the ordered-spread model; it is not hourly revenue
+    attribution. Positive = selected discharge window, negative = selected
+    charge window.
 
     Args:
         df: Price DataFrame with DatetimeIndex.
