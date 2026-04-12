@@ -14,6 +14,7 @@ import requests
 from src.config import (
     ELEXON_ZONES,
     ENTSOE_ZONES,
+    FINGRID_BASE_URL,
     GBP_EUR_YEARLY,
     PRICE_CACHE_TTL_HOURS,
     is_elexon_zone,
@@ -24,13 +25,16 @@ from src.data_ingestion import (
     DataSourceParseError,
     build_zone_query_window,
     clean_prices,
+    fetch_elexon_generation,
     fetch_elexon_prices,
     fetch_elexon_system_prices,
     fetch_entsoe_imbalance_prices,
     fetch_entsoe_prices,
+    fetch_fingrid_afrr_prices,
     fetch_fingrid_data,
     fetch_fingrid_fcr_prices,
     fetch_prices,
+    fetch_regelleistung_results,
     read_cache,
     write_cache,
 )
@@ -265,6 +269,31 @@ class TestCleanPrices:
         result = clean_prices(df)
         assert result["price_eur_mwh"].isna().sum() == 0
         assert len(result) == 24
+        assert result.loc[df.index[5], "filled"]
+
+    def test_mixed_resolution_preserves_original_timestamps(self) -> None:
+        """Mixed 60-min / 15-min histories should not crash cleaning."""
+        idx = pd.DatetimeIndex(
+            [
+                "2025-10-01T00:00:00Z",
+                "2025-10-01T01:00:00Z",
+                "2025-10-01T02:00:00Z",
+                "2025-10-01T02:15:00Z",
+                "2025-10-01T02:30:00Z",
+                "2025-10-01T02:45:00Z",
+                "2025-10-01T03:00:00Z",
+            ]
+        )
+        df = pd.DataFrame(
+            {"price_eur_mwh": [50.0, 51.0, 52.0, 52.5, 53.0, 53.5, 54.0]},
+            index=idx,
+        )
+        df.index.name = "timestamp"
+
+        result = clean_prices(df, zone="DE_LU")
+
+        assert result["price_eur_mwh"].isna().sum() == 0
+        assert set(idx).issubset(set(result.index))
 
     def test_empty_df_passthrough(self) -> None:
         """Empty DataFrame should pass through without error."""
@@ -351,6 +380,36 @@ class TestCacheRoundtrip:
             result = read_cache(zone, start, end)
 
         assert result is None
+
+    @patch("src.data_ingestion.fetch_entsoe_prices")
+    def test_fetch_prices_does_not_persist_filled_rows(
+        self, mock_fetch: MagicMock, tmp_path: Path,
+    ) -> None:
+        zone = "DE_LU"
+        idx = pd.date_range("2025-01-01", periods=4, freq="h", tz="UTC")
+        raw = pd.DataFrame(
+            {"price_eur_mwh": [50.0, None, 70.0, 80.0]},
+            index=idx,
+        )
+        raw.index.name = "timestamp"
+        mock_fetch.return_value = raw
+
+        with patch("src.data_ingestion.DB_PATH", tmp_path / "test.db"), \
+             patch("src.data_ingestion.CACHE_DIR", tmp_path):
+            analytics = fetch_prices(
+                zone=zone,
+                start=idx[0],
+                end=idx[-1] + pd.Timedelta(hours=1),
+                use_cache=False,
+            )
+            with sqlite3.connect(tmp_path / "test.db") as conn:
+                rows = conn.execute(
+                    'SELECT timestamp FROM "da_prices_de_lu" ORDER BY timestamp'
+                ).fetchall()
+
+        assert analytics["price_eur_mwh"].isna().sum() == 0
+        assert bool(analytics.loc[idx[1], "filled"]) is True
+        assert idx[1].isoformat() not in {row[0] for row in rows}
 
 
 # ── Test 7: invalid zone raises error ────────────────────────────────────────
@@ -450,14 +509,21 @@ class TestFetchFingridData:
         }
         mock_get.return_value = mock_resp
 
-        df = fetch_fingrid_data(
-            318,
-            pd.Timestamp("2025-01-01", tz="UTC"),
-            pd.Timestamp("2025-01-02", tz="UTC"),
-        )
+        start = pd.Timestamp("2025-01-01", tz="UTC")
+        end = pd.Timestamp("2025-01-02", tz="UTC")
+        with patch.dict("os.environ", {"FINGRID_API_KEY": "test-key"}, clear=False):
+            df = fetch_fingrid_data(318, start, end)
+
         assert "timestamp" in df.columns
         assert "value" in df.columns
         assert len(df) == 3
+        mock_get.assert_called_once()
+        args, kwargs = mock_get.call_args
+        assert args[0] == f"{FINGRID_BASE_URL}/datasets/318/data"
+        assert kwargs["params"]["startTime"] == start.isoformat()
+        assert kwargs["params"]["endTime"] == end.isoformat()
+        assert "datasets" not in kwargs["params"]
+        assert kwargs["headers"] == {"x-api-key": "test-key"}
 
     @patch("src.data_ingestion.requests.get")
     def test_empty_response(self, mock_get: MagicMock) -> None:
@@ -473,6 +539,26 @@ class TestFetchFingridData:
             pd.Timestamp("2025-01-02", tz="UTC"),
         )
         assert df.empty
+
+    @patch("src.data_ingestion.requests.get")
+    def test_logs_missing_api_key_for_v2_endpoint(
+        self, mock_get: MagicMock, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"data": []}
+        mock_get.return_value = mock_resp
+
+        with patch.dict("os.environ", {}, clear=True):
+            with caplog.at_level(logging.WARNING):
+                fetch_fingrid_data(
+                    317,
+                    pd.Timestamp("2025-01-01", tz="UTC"),
+                    pd.Timestamp("2025-01-02", tz="UTC"),
+                )
+
+        assert "without FINGRID_API_KEY" in caplog.text
+        assert mock_get.call_args.kwargs["headers"] == {}
 
 
 # ── Test 11: Fingrid FCR prices ───────────────────────────────────────────────
@@ -495,6 +581,7 @@ class TestFetchFingridFcrPrices:
         # At least one of the FCR price columns should be present
         fcr_cols = {"fcr_n_price", "fcr_d_up_price", "fcr_d_down_price"}
         assert len(fcr_cols.intersection(df.columns)) > 0
+        assert [call.args[0] for call in mock_fetch.call_args_list] == [317, 318, 283]
 
     @patch("src.data_ingestion.fetch_fingrid_data")
     def test_empty_response(self, mock_fetch: MagicMock) -> None:
@@ -505,6 +592,71 @@ class TestFetchFingridFcrPrices:
             pd.Timestamp("2025-01-02", tz="UTC"),
         )
         assert df.empty
+
+
+class TestFetchFingridAfrrPrices:
+    @patch("src.data_ingestion.fetch_fingrid_data")
+    def test_uses_current_dataset_ids(self, mock_fetch: MagicMock) -> None:
+        idx = pd.date_range("2025-01-01", periods=2, freq="h", tz="UTC")
+        mock_fetch.return_value = pd.DataFrame(
+            {"timestamp": idx, "value": [5.0, 6.0]}
+        )
+
+        df = fetch_fingrid_afrr_prices(
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+        )
+
+        assert list(df.columns) == ["timestamp", "afrr_up_price", "afrr_down_price"]
+        assert [call.args[0] for call in mock_fetch.call_args_list] == [52, 51]
+
+
+class TestFetchElexonGeneration:
+    @patch("src.data_ingestion.requests.get")
+    def test_uses_business_time_params(self, mock_get: MagicMock) -> None:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = [
+            {
+                "startTime": "2025-01-01T00:00:00Z",
+                "fuelType": "WIND",
+                "generation": 100.0,
+            },
+            {
+                "startTime": "2025-01-01T00:00:00Z",
+                "fuelType": "SOLAR",
+                "generation": 10.0,
+            },
+        ]
+        mock_get.return_value = mock_resp
+
+        start = pd.Timestamp("2025-01-01T00:00:00Z")
+        end = pd.Timestamp("2025-01-01T01:00:00Z")
+        df = fetch_elexon_generation(start, end)
+
+        assert not df.empty
+        params = mock_get.call_args.kwargs["params"]
+        assert params["from"] == start.isoformat()
+        assert params["to"] == end.isoformat()
+        assert "publishDateTimeFrom" not in params
+        assert "publishDateTimeTo" not in params
+
+
+class TestFetchRegelleistungResults:
+    @patch("src.data_ingestion.requests.get")
+    def test_returns_none_with_manual_upload_warning(
+        self, mock_get: MagicMock, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        with caplog.at_level(logging.WARNING):
+            result = fetch_regelleistung_results(
+                "FCR",
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
+
+        assert result is None
+        mock_get.assert_not_called()
+        assert "manual DE_FCR" in caplog.text
 
 
 # ── Test 12: Elexon system prices ─────────────────────────────────────────────

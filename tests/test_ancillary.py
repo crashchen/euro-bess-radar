@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -398,3 +399,18 @@ class TestRunAutoFetch:
             pd.Timestamp("2025-01-02", tz="UTC"),
         )
         assert results == {}
+
+    @patch("src.data_ingestion.fetch_regelleistung_results")
+    def test_de_lu_skips_disabled_regelleistung(
+        self, mock_regelleistung: MagicMock, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        with caplog.at_level(logging.INFO):
+            results = run_auto_fetch(
+                "DE_LU",
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
+
+        assert results == {}
+        mock_regelleistung.assert_not_called()
+        assert "Regelleistung auto-fetch disabled" in caplog.text

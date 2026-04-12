@@ -18,6 +18,7 @@ ENTSOE_API_KEY = os.getenv("ENTSOE_API_KEY", "")
 
 ELEXON_BASE_URL = "https://data.elexon.co.uk/bmrs/api/v1"
 ELEXON_MARKET_INDEX_ENDPOINT = f"{ELEXON_BASE_URL}/balancing/pricing/market-index"
+FINGRID_BASE_URL = "https://data.fingrid.fi/api"
 
 # --- FX Rates (approximate annual averages, update as needed) ---
 GBP_EUR_YEARLY: dict[int, float] = {
@@ -153,6 +154,11 @@ def get_api_key() -> str:
             "ENTSOE_API_KEY not found. Add it to .env file in project root."
         )
     return key
+
+
+def get_fingrid_api_key() -> str:
+    """Load optional Fingrid API key from environment."""
+    return os.getenv("FINGRID_API_KEY", "")
 
 
 def is_elexon_zone(zone_code: str) -> bool:

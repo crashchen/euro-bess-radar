@@ -20,9 +20,11 @@ from src.config import (
     DEFAULT_QUERY_TIMEZONE,
     ELEXON_BASE_URL,
     ELEXON_MARKET_INDEX_ENDPOINT,
+    FINGRID_BASE_URL,
     GBP_EUR_YEARLY,
     PRICE_CACHE_TTL_HOURS,
     get_api_key,
+    get_fingrid_api_key,
     get_zone_timezone,
     is_elexon_zone,
 )
@@ -204,33 +206,133 @@ def _convert_gbp_series_to_eur(
 
 # ── Cleaning ──────────────────────────────────────────────────────────────────
 
-def clean_prices(df: pd.DataFrame) -> pd.DataFrame:
+def _format_distinct_deltas(positive: pd.Series) -> str:
+    """Render distinct positive deltas for logging."""
+    return ", ".join(
+        sorted(
+            {
+                str(delta)
+                for delta in positive.drop_duplicates().tolist()
+            }
+        )
+    )
+
+
+def _infer_segment_freq(
+    index: pd.DatetimeIndex,
+    zone: str | None = None,
+) -> pd.Timedelta | None:
+    """Infer a usable frequency for one contiguous resolution segment."""
+    if len(index) < 2:
+        return None
+
+    deltas = pd.Series(index).diff().dropna()
+    positive = deltas[deltas > pd.Timedelta(0)]
+    if positive.empty:
+        return None
+
+    mode = positive.mode()
+    if not mode.empty:
+        return mode.iloc[0]
+
+    inferred = pd.infer_freq(index)
+    if inferred is not None:
+        offset = pd.tseries.frequencies.to_offset(inferred)
+        return pd.Timedelta(offset.nanos, unit="ns")
+
+    logger.warning(
+        "Skipping reindex for %s: could not infer frequency from mixed deltas [%s]",
+        zone or "unknown zone",
+        _format_distinct_deltas(positive),
+    )
+    return None
+
+
+def _segment_and_reindex_prices(
+    df: pd.DataFrame,
+    zone: str | None = None,
+) -> pd.DataFrame:
+    """Reindex one or more contiguous resolution segments without crashing."""
+    if len(df) < 2:
+        df.index.name = "timestamp"
+        return df
+
+    index = pd.DatetimeIndex(df.index)
+    deltas = pd.Series(index).diff()
+    positive = deltas.dropna()[deltas.dropna() > pd.Timedelta(0)]
+
+    if positive.empty:
+        df.index.name = "timestamp"
+        return df
+
+    distinct_deltas = positive.drop_duplicates().tolist()
+    if len(distinct_deltas) == 1:
+        freq = _infer_segment_freq(index, zone=zone)
+        if freq is None:
+            df.index.name = "timestamp"
+            return df
+        full_idx = pd.date_range(start=index.min(), end=index.max(), freq=freq)
+        out = df.reindex(full_idx)
+        out.index.name = "timestamp"
+        return out
+
+    segments: list[pd.DataFrame] = []
+    run_start = 1
+    delta_values = deltas.tolist()
+
+    for pos in range(2, len(index)):
+        if delta_values[pos] != delta_values[pos - 1]:
+            segments.append(df.iloc[run_start - 1:pos])
+            run_start = pos
+    segments.append(df.iloc[run_start - 1:])
+
+    reindexed_segments: list[pd.DataFrame] = []
+    for segment in segments:
+        freq = _infer_segment_freq(pd.DatetimeIndex(segment.index), zone=zone)
+        if freq is None:
+            segment = segment.copy()
+            segment.index.name = "timestamp"
+            reindexed_segments.append(segment)
+            continue
+
+        full_idx = pd.date_range(
+            start=segment.index.min(),
+            end=segment.index.max(),
+            freq=freq,
+        )
+        reindexed = segment.reindex(full_idx)
+        reindexed.index.name = "timestamp"
+        reindexed_segments.append(reindexed)
+
+    out = pd.concat(reindexed_segments).sort_index()
+    out = out[~out.index.duplicated(keep="last")]
+    out.index.name = "timestamp"
+    return out
+
+
+def clean_prices(
+    df: pd.DataFrame,
+    zone: str | None = None,
+) -> pd.DataFrame:
     """Clean raw price data: handle gaps, outliers, timezone normalisation.
 
     Args:
         df: DataFrame with DatetimeIndex named 'timestamp' and column 'price_eur_mwh'.
+        zone: Optional zone code for more actionable logging.
 
     Returns:
-        Cleaned DataFrame with gaps forward-filled, no NaN remaining.
+        Cleaned DataFrame with gaps forward-filled, no NaN remaining, plus a
+        `filled` flag marking rows that were synthetic or missing in source data.
     """
     if df.empty:
         return df
 
     df = df.sort_index()
     df = df[~df.index.duplicated(keep="last")]
-
-    if len(df) >= 2:
-        deltas = pd.Series(df.index).diff().dropna()
-        positive = deltas[deltas > pd.Timedelta(0)]
-        freq = positive.mode().iloc[0] if not positive.empty else pd.Timedelta(hours=1)
-    else:
-        freq = pd.Timedelta(hours=1)
-
-    full_idx = pd.date_range(start=df.index.min(), end=df.index.max(), freq=freq)
-    df = df.reindex(full_idx)
-    df.index.name = "timestamp"
-
+    df = _segment_and_reindex_prices(df, zone=zone)
+    df["filled"] = df["price_eur_mwh"].isna()
     df["price_eur_mwh"] = df["price_eur_mwh"].ffill().bfill()
+    df["filled"] = df["filled"].astype(bool)
     return df
 
 
@@ -421,14 +523,22 @@ def write_cache(df: pd.DataFrame, zone: str) -> None:
     if df.empty:
         return
 
+    # Keep analytics on the filled frame, but only persist source-backed rows so
+    # synthetic bars never poison future cache reads.
+    persist_df = df.loc[~df["filled"]] if "filled" in df.columns else df
+    if persist_df.empty:
+        logger.warning("Skipping cache write for %s: no source-backed rows to persist", zone)
+        return
+
     table_name = f"da_prices_{zone.lower()}"
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     # CSV
     csv_path = CACHE_DIR / f"{table_name}.csv"
-    export = df.reset_index()
+    export = persist_df.reset_index()
     export["timestamp"] = export["timestamp"].map(lambda t: t.isoformat())
     export["zone"] = zone
+    export = export[["timestamp", "price_eur_mwh", "zone"]]
     export.to_csv(csv_path, index=False)
     logger.info("Wrote CSV cache: %s", csv_path)
 
@@ -451,7 +561,7 @@ def write_cache(df: pd.DataFrame, zone: str) -> None:
         rows = [
             (row.timestamp.isoformat() if hasattr(row.timestamp, "isoformat") else str(row.timestamp),
              float(row.price_eur_mwh), zone)
-            for row in df.reset_index().itertuples(index=False)
+            for row in persist_df.reset_index().itertuples(index=False)
         ]
         conn.executemany(
             f'INSERT OR REPLACE INTO "{table_name}" (timestamp, price_eur_mwh, zone) VALUES (?, ?, ?)',
@@ -571,7 +681,7 @@ def fetch_prices(
         return df
 
     # Clean and enrich
-    df = clean_prices(df)
+    df = clean_prices(df, zone=zone)
     df["zone"] = zone
 
     # Cache write
@@ -693,8 +803,10 @@ def fetch_elexon_generation(
         resp = requests.get(
             ELEXON_FUELINST_URL,
             params={
-                "publishDateTimeFrom": start.isoformat(),
-                "publishDateTimeTo": end.isoformat(),
+                # Use business-time windowing so we fetch by settlement period
+                # rather than by the later publish timestamp.
+                "from": start.isoformat(),
+                "to": end.isoformat(),
                 "format": "json",
             },
             timeout=60,
@@ -744,8 +856,6 @@ def fetch_elexon_generation(
 
 # ── Fingrid Open Data API (Finland FCR/aFRR) ─────────────────────────────────
 
-FINGRID_BASE_URL = "https://data.fingrid.fi/api/data"
-
 
 def fetch_fingrid_data(
     dataset_id: int,
@@ -765,10 +875,15 @@ def fetch_fingrid_data(
     all_rows: list[dict[str, Any]] = []
     page = 1
     page_size = 20000
+    api_key = get_fingrid_api_key()
+    headers = {"x-api-key": api_key} if api_key else {}
+    if not api_key:
+        logger.warning(
+            "Fingrid v2 endpoint hit without FINGRID_API_KEY; attempting unauthenticated access"
+        )
 
     while True:
         params = {
-            "datasets": str(dataset_id),
             "startTime": start.isoformat(),
             "endTime": end.isoformat(),
             "format": "json",
@@ -780,7 +895,10 @@ def fetch_fingrid_data(
         )
         try:
             resp = requests.get(
-                FINGRID_BASE_URL, params=params, timeout=30,
+                f"{FINGRID_BASE_URL}/datasets/{dataset_id}/data",
+                params=params,
+                headers=headers,
+                timeout=30,
             )
             resp.raise_for_status()
             payload = resp.json()
@@ -834,9 +952,9 @@ def fetch_fingrid_fcr_prices(
         All prices in EUR/MW/h.
     """
     datasets = {
-        "fcr_n_price": 318,
-        "fcr_d_up_price": 319,
-        "fcr_d_down_price": 320,
+        "fcr_n_price": 317,
+        "fcr_d_up_price": 318,
+        "fcr_d_down_price": 283,
     }
     merged: pd.DataFrame | None = None
     for col_name, ds_id in datasets.items():
@@ -874,8 +992,8 @@ def fetch_fingrid_afrr_prices(
         Prices in EUR/MW/h.
     """
     datasets = {
-        "afrr_up_price": 795,
-        "afrr_down_price": 796,
+        "afrr_up_price": 52,
+        "afrr_down_price": 51,
     }
     merged: pd.DataFrame | None = None
     for col_name, ds_id in datasets.items():
@@ -903,6 +1021,7 @@ def fetch_fingrid_afrr_prices(
 REGELLEISTUNG_BASE_URL = (
     "https://www.regelleistung.net/apps/datacenter/tendering-files"
 )
+REGELLEISTUNG_AUTO_FETCH_ENABLED = False
 
 
 def fetch_regelleistung_results(
@@ -922,71 +1041,11 @@ def fetch_regelleistung_results(
         [date, product, time_block, capacity_price_eur_mw, direction]
         or None if fetching fails.
     """
-    logger.info(
-        "Attempting regelleistung.net fetch for %s [%s, %s)",
-        product, start, end,
+    logger.warning(
+        "Regelleistung auto-fetch not available; upload a manual DE_%s CSV instead",
+        product,
     )
-    try:
-        resp = requests.get(
-            REGELLEISTUNG_BASE_URL,
-            params={
-                "productType": product,
-                "from": start.strftime("%Y-%m-%d"),
-                "to": end.strftime("%Y-%m-%d"),
-            },
-            headers={"Accept": "application/json"},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-    except requests.RequestException as exc:
-        logger.warning(
-            "Regelleistung.net auto-fetch failed for %s: %s. "
-            "Please download manually from %s",
-            product, exc, REGELLEISTUNG_BASE_URL,
-        )
-        return None
-    except ValueError as exc:
-        logger.warning(
-            "Regelleistung.net auto-fetch failed for %s: %s. "
-            "Please download manually from %s",
-            product, exc, REGELLEISTUNG_BASE_URL,
-        )
-        return None
-
-    if not isinstance(data, list) or not data:
-        logger.warning("Regelleistung.net returned no data for %s", product)
-        return None
-
-    df = pd.DataFrame(data)
-    # Standardise column names (best-effort)
-    col_map = {}
-    for col in df.columns:
-        cl = col.lower()
-        if "date" in cl or "delivery" in cl:
-            col_map[col] = "date"
-        elif "price" in cl and "capacity" in cl:
-            col_map[col] = "capacity_price_eur_mw"
-        elif "product" in cl:
-            col_map[col] = "product"
-        elif "direction" in cl:
-            col_map[col] = "direction"
-    df = df.rename(columns=col_map)
-
-    for required in ["date", "capacity_price_eur_mw"]:
-        if required not in df.columns:
-            logger.warning(
-                "Regelleistung.net response missing '%s' column", required,
-            )
-            return None
-
-    df["product"] = df.get("product", product)
-    df["direction"] = df.get("direction", "symmetric" if product == "FCR" else "")
-    df["time_block"] = df.get("time_block", "")
-    df["capacity_price_eur_mw"] = pd.to_numeric(
-        df["capacity_price_eur_mw"], errors="coerce",
-    )
-    return df[["date", "product", "time_block", "capacity_price_eur_mw", "direction"]]
+    return None
 
 
 # ── Elexon System Prices (GB Balancing) ───────────────────────────────────────

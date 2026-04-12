@@ -103,6 +103,12 @@ def run_auto_fetch(
         logger.info("Running auto-fetch: %s for %s via %s", name, zone, entry["source"])
         try:
             if func_name == "fetch_regelleistung_results":
+                if not getattr(_ingestion, "REGELLEISTUNG_AUTO_FETCH_ENABLED", True):
+                    logger.info(
+                        "Regelleistung auto-fetch disabled for %s; use manual DE_FCR/DE_aFRR uploads",
+                        zone,
+                    )
+                    continue
                 # Regelleistung needs product arg; try both FCR and aFRR
                 for product in ["FCR", "aFRR"]:
                     result = func(product, start, end)

@@ -58,15 +58,17 @@ euro-bess-radar/
 - Elexon returns 2 data providers per settlement period — zeros are filtered, non-zero prices averaged
 
 ### Fingrid Open Data (Finland)
-- NO API key required
-- Base URL: https://data.fingrid.fi/api/datasets
-- Dataset IDs: 318 (FCR-N), 319 (FCR-D Up), 320 (FCR-D Down), 793 (aFRR Up), 794 (aFRR Down)
+- API key recommended/required for v2 (`x-api-key` header via `FINGRID_API_KEY`)
+- Base URL: https://data.fingrid.fi/api
+- Dataset paths use `/datasets/{id}/data`
+- Dataset IDs: 317 (FCR-N), 318 (FCR-D Up), 283 (FCR-D Down), 52 (aFRR Up), 51 (aFRR Down)
 - Returns: hourly capacity prices in EUR/MW
 
 ### Regelleistung.net (Germany)
 - NO API key required — best-effort scraping
-- FCR auction results via tender API
-- Returns: capacity prices in EUR/MW
+- Auto-fetch is currently disabled because the public page hit by the legacy code is HTML, not a stable JSON API
+- Supported path is manual CSV upload (`DE_FCR`, `DE_aFRR`)
+- Returns: capacity prices in EUR/MW when supplied via manual uploads
 
 ### ENTSO-E Imbalance Prices
 - Uses same ENTSO-E API key as DA prices
@@ -87,6 +89,7 @@ Three tiers of zones:
 Zone-specific fetchers run automatically when the zone is selected:
 - **FI** — FCR-N/D + aFRR prices via Fingrid
 - **DE_LU** — FCR auction results via Regelleistung.net
+- **DE_LU** auto-fetch is best-effort only and currently disabled; use manual `DE_FCR` / `DE_aFRR` uploads
 - **GB** — System buy/sell prices via Elexon
 - **RO, SE_3, IT_SUD** — Imbalance prices via ENTSO-E
 
