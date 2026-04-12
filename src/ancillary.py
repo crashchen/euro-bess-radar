@@ -96,7 +96,10 @@ def generate_template_csv(template_key: str) -> str:
             if "date" in col:
                 row.append(f"2025-01-{1 + i:02d}")
             elif "hour" in col or "period" in col:
-                row.append(str(i + 1))
+                if template_key == "FI_FCR" and col == "hour":
+                    row.append(str(i))
+                else:
+                    row.append(str(i + 1))
             elif "price" in col:
                 row.append(f"{10.0 + i * 5:.2f}")
             elif "product" in col:
@@ -131,6 +134,32 @@ def _detect_delimiter(content: str) -> str:
 def _empty_ancillary_frame() -> pd.DataFrame:
     """Return an empty standardised ancillary frame with a timestamp index."""
     return pd.DataFrame(columns=_STANDARD_COLUMNS).rename_axis("timestamp")
+
+
+def _parse_date_hour_index(
+    dates,
+    hours,
+    *,
+    template_key: str | None = None,
+) -> pd.DatetimeIndex:
+    """Convert date/hour columns to a UTC timestamp index."""
+    hour_strings = pd.Series(hours).astype(str).str.strip()
+    if template_key == "FI_FCR":
+        numeric_hours = pd.to_numeric(hour_strings, errors="coerce")
+        invalid = numeric_hours[
+            numeric_hours.isna()
+            | (numeric_hours < 0)
+            | (numeric_hours > 23)
+            | (numeric_hours % 1 != 0)
+        ]
+        if not invalid.empty:
+            raise ValueError("FI_FCR hour values must be integers between 0 and 23.")
+        hour_strings = numeric_hours.astype(int).astype(str)
+
+    return pd.to_datetime(
+        pd.Series(dates).astype(str) + " " + hour_strings.str.zfill(2) + ":00",
+        utc=True,
+    )
 
 
 def _initialise_output(index: pd.DatetimeIndex) -> pd.DataFrame:
@@ -242,10 +271,7 @@ def _timestamp_index_from_frame(df: pd.DataFrame) -> pd.DatetimeIndex:
 
     if "date" in df.columns:
         if "hour" in df.columns:
-            return pd.to_datetime(
-                df["date"].astype(str) + " " + df["hour"].astype(str).str.zfill(2) + ":00",
-                utc=True,
-            )
+            return _parse_date_hour_index(df["date"], df["hour"])
         return pd.to_datetime(df["date"], utc=True)
 
     if "settlement_date" in df.columns and "settlement_period" in df.columns:
@@ -448,10 +474,7 @@ def parse_ancillary_csv(
     idx = pd.DatetimeIndex([], tz="UTC", name="timestamp")
     if "date" in df.columns:
         if "hour" in df.columns:
-            idx = pd.to_datetime(
-                df["date"].astype(str) + " " + df["hour"].astype(str).str.zfill(2) + ":00",
-                utc=True,
-            )
+            idx = _parse_date_hour_index(df["date"], df["hour"], template_key=template_key)
         else:
             idx = pd.to_datetime(df["date"], utc=True)
     elif "settlement_date" in df.columns:
@@ -541,6 +564,53 @@ def parse_ancillary_csv(
 
 # ── Revenue estimation ───────────────────────────────────────────────────────
 
+def _infer_capacity_duration_hours(
+    cap_prices: pd.Series,
+    product: str,
+) -> pd.Series | None:
+    """Infer per-row capacity durations in hours from timestamp spacing."""
+    if len(cap_prices) < 2 or not isinstance(cap_prices.index, pd.DatetimeIndex):
+        return None
+
+    ordered = cap_prices.sort_index()
+    deltas = ordered.index.to_series().diff()
+    positive = deltas.dropna()
+    if positive.empty or (positive <= pd.Timedelta(0)).any():
+        logger.debug(
+            "Falling back to unweighted capacity mean for %s: irregular timestamp spacing",
+            product,
+        )
+        return None
+
+    durations = deltas.ffill().bfill()
+    if durations.isna().any() or (durations <= pd.Timedelta(0)).any():
+        logger.debug(
+            "Falling back to unweighted capacity mean for %s: could not infer durations",
+            product,
+        )
+        return None
+
+    return durations.dt.total_seconds() / 3600.0
+
+
+def _capacity_price_mean(cap_prices: pd.Series, product: str) -> float:
+    """Return an inferred-duration-weighted capacity mean where possible."""
+    weights = _infer_capacity_duration_hours(cap_prices, product)
+    if weights is None:
+        return float(cap_prices.mean())
+
+    ordered = cap_prices.sort_index()
+    weighted_total = float((ordered * weights).sum())
+    total_duration = float(weights.sum())
+    if total_duration <= 0:
+        logger.debug(
+            "Falling back to unweighted capacity mean for %s: non-positive duration sum",
+            product,
+        )
+        return float(ordered.mean())
+    return weighted_total / total_duration
+
+
 def calculate_ancillary_revenue(
     ancillary_df: pd.DataFrame,
     power_mw: float = 1.0,
@@ -578,7 +648,7 @@ def calculate_ancillary_revenue(
 
         cap_prices = group["capacity_price_eur_mw"].dropna()
         if not cap_prices.empty:
-            avg_cap = float(cap_prices.mean())
+            avg_cap = _capacity_price_mean(cap_prices, product)
             annual_revenue += avg_cap * power_mw * HOURS_PER_YEAR * availability
 
         energy_prices = group["energy_price_eur_mwh"].dropna()

@@ -1,41 +1,23 @@
-# eu-bess-pulse
+# CLAUDE.md
 
-European BESS Market Screening Dashboard — local-first MVP for evaluating day-ahead arbitrage and merchant revenue potential across European bidding zones.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Tech Stack
-- Python 3.11+ / macOS (Apple Silicon)
-- Data: entsoe-py (ENTSO-E), requests (Elexon + Fingrid + Regelleistung), pandas, numpy
-- Storage: SQLite (local cache) + CSV exports
-- Dashboard: Streamlit + Plotly
-- Export: openpyxl for .xlsx reports
-- Environment: python-dotenv for API key management
+## Project
 
-## Architecture
-```
-euro-bess-radar/
-├── CLAUDE.md
-├── .env                  # ENTSOE_API_KEY=xxx (git-ignored)
-├── .gitignore
-├── requirements.txt
-├── data/
-│   ├── cache/            # SQLite DB + CSV cache files
-│   └── manual/           # Manual CSV uploads (FCR/aFRR data)
-├── src/
-│   ├── __init__.py
-│   ├── config.py         # Zones, ZONE_TIMEZONES, GBP_EUR_YEARLY, API endpoints
-│   ├── data_ingestion.py # Unified fetching (ENTSO-E + Elexon + Fingrid + Regelleistung) + caching
-│   ├── analytics.py      # Ordered spreads, P50/P90, heatmaps, revenue, RE correlation
-│   ├── ancillary.py      # Ancillary parsing, auto-fetch normalization, revenue stacking
-│   ├── ancillary_fetchers.py # Auto-fetch registry per zone (FI, DE_LU, GB, RO, SE_3, IT_SUD)
-│   └── export.py         # Excel report generation with timezone + revenue stack support
-├── app.py                # Streamlit dashboard (5 tabs, revenue-tab guidance + ancillary help expander)
-└── tests/
-    ├── conftest.py       # Shared fixtures
-    ├── test_ingestion.py # Data ingestion + zone query window + cache validation tests
-    ├── test_analytics.py # Ordered spread, duration-aware, sub-hourly, RE correlation tests
-    ├── test_ancillary.py # Ancillary parsing, auto-fetch normalization, revenue stack tests
-    └── test_export.py    # Excel export + timezone + revenue breakdown tests
-```
+`euro-bess-radar` (a.k.a. eu-bess-pulse) is a local-first Streamlit dashboard for evaluating day-ahead arbitrage and merchant revenue potential of BESS across European bidding zones. Python 3.11+, pandas/numpy, SQLite cache, Plotly, openpyxl exports.
+
+## Module Interaction (big picture)
+
+`src/config.py` is the single source of truth for zones, timezones, cache paths, and revenue-math constants (`HOURS_PER_YEAR`, `ANCILLARY_CAPACITY_AVAILABILITY=0.95`, `ANCILLARY_ENERGY_ACTIVATION_SHARE=0.10`, `GBP_EUR_YEARLY`). Nothing else should hard-code zones or FX rates.
+
+Data flow inside one dashboard run (`app.py`):
+1. `data_ingestion.fetch_da_prices()` dispatches to the right backend (entsoe-py for ENTSO-E zones, Elexon REST for GB), runs `build_zone_query_window()` to convert local calendar dates to a UTC `[start, end)` window, and caches into `da_prices_{zone}` SQLite tables. Cache validity is checked against `_expected_cache_interval()` + `reindex` so gaps are detected as missing points, not accepted as sparse data.
+2. `analytics.py` consumes the UTC price frame but groups by the zone's local calendar day via the `tz` parameter. `_find_daily_ordered_trade()` (called from `calculate_ordered_spreads()`) finds the best chronology-aware charge→discharge pair with rolling windows sized by `duration_hours`. Heatmaps, P50/P90, RE correlation, and revenue all share this ordered-spread basis.
+3. `ancillary_fetchers.py` exposes a lazy `getattr()` registry (`fetch_{zone}_ancillary`) used by `run_auto_fetch()`. Results flow into `ancillary.normalize_auto_fetch_dataset()` and then `build_ancillary_dataset()`, which merges with any user-uploaded manual CSVs — manual uploads override auto-fetch *only for the same product type*, preserving other auto-fetched products.
+4. `merge_revenue_stack()` combines DA arbitrage with per-product ancillary revenue and returns a `source_revenues` dict (e.g. `DA Arbitrage`, `FCR-N`, `aFRR Up`) that both the Revenue tab and `export.py` read from.
+5. `export.py` writes Excel reports that must respect the same `tz` parameter and stacked-revenue breakdown as the dashboard.
+
+Tests in `tests/` are heavily mocked (no live API calls) and mirror the module layout 1:1. `conftest.py` holds shared price/ancillary fixtures.
 
 ## Data Sources
 
@@ -113,18 +95,13 @@ Upload via sidebar. Template CSVs downloadable from the UI.
 - Revenue Estimation tab includes a `How ancillary works` expander explaining product-level stacking, manual-vs-auto precedence, and which ancillary signals are not auto-monetised
 
 ## Coding Conventions
-- Type hints on all function signatures
-- Docstrings: one-line summary, then Args/Returns in Google style
-- Logging via `logging` module, NOT print()
-- All bidding zone definitions live in config.py
-- pandas timestamps: UTC internally; analytics/export accept `tz` parameter for local-time grouping
-- `ZONE_TIMEZONES` in config.py maps all 37+ zones to IANA timezones (e.g. DE_LU → Europe/Berlin)
-- `build_zone_query_window()` converts inclusive local calendar dates to UTC `[start, end)` query window
-- SQLite table naming: `da_prices_{zone_code}` (lowercase, e.g. `da_prices_de_lu`)
-- Cache validation: `_expected_cache_interval()` + `reindex` to detect actual missing data points
-- GBP→EUR: `GBP_EUR_YEARLY` dict with per-year rates; `_get_gbp_eur_rate_for_year()` falls back to nearest known year
-- Error handling: retry with exponential backoff for API calls, max 3 retries
-- Functions should be <50 lines. If longer, split.
+- pandas timestamps are UTC internally; every analytics/export entry point takes a `tz` parameter for local-time grouping. Do not group by UTC day — daily spread and heatmap numbers will be wrong across DST boundaries.
+- Add new zones in `config.py` only: `ENTSOE_ZONES`/`ELEXON_ZONES` + `ZONE_TIMEZONES`. Never hard-code zone codes elsewhere.
+- SQLite table naming is `da_prices_{zone_code}` lowercase (e.g. `da_prices_de_lu`).
+- GBP→EUR conversion must use `_get_gbp_eur_rate_for_year()` (nearest-year fallback against `GBP_EUR_YEARLY`), never a single scalar rate — GB history spans multiple FX regimes.
+- API calls retry with exponential backoff, max 3 retries.
+- Keep functions under ~50 lines; split long pipelines at natural stage boundaries.
+- Logging via `logging`, Google-style docstrings, type hints on public functions.
 
 ## Key Domain Knowledge
 - **Ordered spreads**: Revenue estimation uses chronology-aware charge-before-discharge windows, not simple max-min. `_find_daily_ordered_trade()` finds best non-overlapping buy/sell pair using rolling averages and backward scan.
@@ -142,8 +119,11 @@ Upload via sidebar. Template CSVs downloadable from the UI.
 - **Annualisation caveat**: DA arbitrage revenue is extrapolated from the user-selected sample window, so short windows (for example winter-only periods) can materially overstate or understate full-year merchant potential
 
 ## Commands
-- `pip install -r requirements.txt` — install deps
-- `python -m pytest tests/ -v` — run all tests (99 tests)
-- `streamlit run app.py` — launch dashboard
-- `python -c "from src.data_ingestion import test_elexon_connection; test_elexon_connection()"` — test Elexon
-- `python -c "from src.data_ingestion import test_entsoe_connection; test_entsoe_connection()"` — test ENTSO-E
+- `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
+- `python -m pytest tests/ -v` — run all tests (113 tests, fully mocked, no network).
+- `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
+- `streamlit run app.py` — launch the dashboard.
+- `python -c "from src.data_ingestion import test_elexon_connection; test_elexon_connection()"` — smoke-test Elexon (no API key needed).
+- `python -c "from src.data_ingestion import test_entsoe_connection; test_entsoe_connection()"` — smoke-test ENTSO-E (needs `ENTSOE_API_KEY` in `.env`).
+
+CI runs `python -m pytest tests/ -v` on every push/PR via `.github/workflows/ci.yml`; keep the mocked-test suite green before pushing. See `CONTRIBUTING.md` for PR expectations and secret-handling rules.

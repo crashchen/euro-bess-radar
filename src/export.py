@@ -6,7 +6,6 @@ from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
-from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -152,6 +151,40 @@ def _build_heatmap_sheet(ws, title: str, heatmap: pd.DataFrame) -> None:
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
+def _write_excel_workbook(
+    writer: pd.ExcelWriter,
+    zone: str,
+    price_df: pd.DataFrame,
+    daily_spreads: pd.DataFrame,
+    monthly_spreads: pd.DataFrame,
+    percentiles: dict[str, float],
+    revenue_estimate: dict[str, float],
+    negative_stats: dict[str, float],
+    tz: str | None = None,
+) -> None:
+    """Populate the workbook opened via pandas ExcelWriter."""
+    wb = writer.book
+    summary_ws = wb.active if wb.active is not None else wb.create_sheet()
+
+    _build_summary_sheet(
+        summary_ws,
+        zone,
+        price_df,
+        percentiles,
+        revenue_estimate,
+        negative_stats,
+        tz=tz,
+    )
+    _build_table_sheet(wb.create_sheet(), "Daily Spreads", daily_spreads)
+    _build_table_sheet(wb.create_sheet(), "Monthly Summary", monthly_spreads)
+
+    hourly = price_df[["price_eur_mwh"]].reset_index()
+    hourly["timestamp"] = hourly["timestamp"].astype(str)
+    _build_table_sheet(wb.create_sheet(), "Hourly Prices", hourly)
+
+    heatmap = build_price_heatmap(price_df, tz=tz)
+    _build_heatmap_sheet(wb.create_sheet(), "Price Heatmap", heatmap)
+
 def export_to_excel(
     zone: str,
     price_df: pd.DataFrame,
@@ -179,30 +212,6 @@ def export_to_excel(
     Returns:
         Path to the created .xlsx file.
     """
-    wb = Workbook()
-
-    # Sheet 1: Summary
-    _build_summary_sheet(
-        wb.active, zone, price_df, percentiles, revenue_estimate, negative_stats,
-        tz=tz,
-    )
-
-    # Sheet 2: Daily Spreads
-    _build_table_sheet(wb.create_sheet(), "Daily Spreads", daily_spreads)
-
-    # Sheet 3: Monthly Summary
-    _build_table_sheet(wb.create_sheet(), "Monthly Summary", monthly_spreads)
-
-    # Sheet 4: Hourly Prices
-    hourly = price_df[["price_eur_mwh"]].reset_index()
-    hourly["timestamp"] = hourly["timestamp"].astype(str)
-    _build_table_sheet(wb.create_sheet(), "Hourly Prices", hourly)
-
-    # Sheet 5: Price Heatmap (local time)
-    heatmap = build_price_heatmap(price_df, tz=tz)
-    _build_heatmap_sheet(wb.create_sheet(), "Price Heatmap", heatmap)
-
-    # Determine output path
     if output_path is None:
         dates = price_df.index.tz_convert(tz) if tz else price_df.index
         start_str = dates.min().strftime("%Y%m%d")
@@ -210,7 +219,18 @@ def export_to_excel(
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         output_path = CACHE_DIR / f"{zone}_{start_str}_{end_str}_report.xlsx"
 
-    wb.save(output_path)
+    with pd.ExcelWriter(output_path, engine="openpyxl") as writer:
+        _write_excel_workbook(
+            writer,
+            zone,
+            price_df,
+            daily_spreads,
+            monthly_spreads,
+            percentiles,
+            revenue_estimate,
+            negative_stats,
+            tz=tz,
+        )
     return output_path
 
 
@@ -232,21 +252,17 @@ def export_to_bytes(
     Returns:
         Bytes content of the .xlsx file.
     """
-    wb = Workbook()
-    _build_summary_sheet(
-        wb.active, zone, price_df, percentiles, revenue_estimate, negative_stats,
-        tz=tz,
-    )
-    _build_table_sheet(wb.create_sheet(), "Daily Spreads", daily_spreads)
-    _build_table_sheet(wb.create_sheet(), "Monthly Summary", monthly_spreads)
-
-    hourly = price_df[["price_eur_mwh"]].reset_index()
-    hourly["timestamp"] = hourly["timestamp"].astype(str)
-    _build_table_sheet(wb.create_sheet(), "Hourly Prices", hourly)
-
-    heatmap = build_price_heatmap(price_df, tz=tz)
-    _build_heatmap_sheet(wb.create_sheet(), "Price Heatmap", heatmap)
-
     buf = BytesIO()
-    wb.save(buf)
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        _write_excel_workbook(
+            writer,
+            zone,
+            price_df,
+            daily_spreads,
+            monthly_spreads,
+            percentiles,
+            revenue_estimate,
+            negative_stats,
+            tz=tz,
+        )
     return buf.getvalue()

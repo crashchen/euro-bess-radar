@@ -407,12 +407,48 @@ def fetch_entsoe_prices(
 
 # ── Elexon fetcher ────────────────────────────────────────────────────────────
 
+def _elexon_date_bounds(
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> tuple[str, str]:
+    """Return date bounds that cover the requested [start, end) window."""
+    range_start = start.normalize()
+    range_end = end.normalize() + pd.Timedelta(days=1)
+    return range_start.strftime("%Y-%m-%d"), range_end.strftime("%Y-%m-%d")
+
+
+def _extract_elexon_records(payload: Any, label: str) -> list[dict[str, Any]]:
+    """Normalize Elexon payloads into a list of records."""
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+        return payload["data"]
+    raise DataSourceParseError(
+        f"Elexon payload for {label} did not contain a list of records."
+    )
+
+
 @retry(max_retries=3, backoff=2.0, exceptions=(requests.RequestException,))
-def _call_elexon_api(date_str: str, next_date_str: str) -> list[dict[str, Any]]:
-    """Fetch one day of Elexon market index data."""
+def _call_elexon_api(from_date_str: str, to_date_str: str) -> list[dict[str, Any]]:
+    """Fetch Elexon market index data for a date range."""
     resp = requests.get(
         ELEXON_MARKET_INDEX_ENDPOINT,
-        params={"from": date_str, "to": next_date_str, "format": "json"},
+        params={"from": from_date_str, "to": to_date_str, "format": "json"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
+@retry(max_retries=3, backoff=2.0, exceptions=(requests.RequestException,))
+def _call_elexon_system_prices_api(
+    from_date_str: str,
+    to_date_str: str,
+) -> list[dict[str, Any]]:
+    """Fetch Elexon system prices for a date range."""
+    resp = requests.get(
+        ELEXON_SYSTEM_PRICES_ENDPOINT,
+        params={"from": from_date_str, "to": to_date_str, "format": "json"},
         timeout=30,
     )
     resp.raise_for_status()
@@ -436,50 +472,27 @@ def fetch_elexon_prices(
     """
     all_records: list[dict[str, Any]] = []
     request_errors: list[DataSourceError] = []
-    current = start.normalize()
-    end_date = end.normalize()
+    from_date_str, to_date_str = _elexon_date_bounds(start, end)
+    range_label = f"[{from_date_str}, {to_date_str})"
 
-    while current <= end_date:
-        date_str = current.strftime("%Y-%m-%d")
-        next_date = current + pd.Timedelta(days=1)
-        next_date_str = next_date.strftime("%Y-%m-%d")
-
-        logger.info("Fetching Elexon data for %s", date_str)
-        try:
-            data = _call_elexon_api(date_str, next_date_str)
-            if isinstance(data, list):
-                all_records.extend(data)
-            elif isinstance(data, dict) and "data" in data:
-                all_records.extend(data["data"])
-            else:
-                raise DataSourceParseError(
-                    f"Elexon payload for {date_str} did not contain a list of records."
-                )
-        except requests.RequestException as exc:
-            logger.warning(
-                "Failed to fetch Elexon data for %s: %s",
-                date_str,
-                exc,
+    logger.info("Fetching Elexon data for %s", range_label)
+    try:
+        data = _call_elexon_api(from_date_str, to_date_str)
+        all_records.extend(_extract_elexon_records(data, range_label))
+    except requests.RequestException as exc:
+        logger.warning("Failed to fetch Elexon data for %s: %s", range_label, exc)
+        request_errors.append(
+            DataSourceNetworkError(
+                f"Elexon request failed for {range_label}. Please retry."
             )
-            request_errors.append(
-                DataSourceNetworkError(
-                    f"Elexon request failed for {date_str}. Please retry."
-                )
+        )
+    except (TypeError, ValueError, KeyError, DataSourceParseError) as exc:
+        logger.warning("Failed to parse Elexon data for %s: %s", range_label, exc)
+        request_errors.append(
+            DataSourceParseError(
+                f"Elexon response for {range_label} could not be parsed."
             )
-        except (TypeError, ValueError, KeyError, DataSourceParseError) as exc:
-            logger.warning(
-                "Failed to parse Elexon data for %s: %s",
-                date_str,
-                exc,
-            )
-            request_errors.append(
-                DataSourceParseError(
-                    f"Elexon response for {date_str} could not be parsed."
-                )
-            )
-
-        current = next_date
-        time.sleep(0.5)
+        )
 
     if not all_records:
         if request_errors:
@@ -1071,29 +1084,17 @@ def fetch_elexon_system_prices(
          system_buy_price_eur, system_sell_price_eur, spread_eur]
     """
     all_records: list[dict[str, Any]] = []
-    current = start.normalize()
-    end_date = end.normalize()
+    from_date_str, to_date_str = _elexon_date_bounds(start, end)
+    range_label = f"[{from_date_str}, {to_date_str})"
 
-    while current <= end_date:
-        date_str = current.strftime("%Y-%m-%d")
-        logger.info("Fetching Elexon system prices for %s", date_str)
-        try:
-            resp = requests.get(
-                ELEXON_SYSTEM_PRICES_ENDPOINT,
-                params={"settlementDate": date_str, "format": "json"},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            records = data if isinstance(data, list) else data.get("data", [])
-            all_records.extend(records)
-        except requests.RequestException as exc:
-            logger.warning("Elexon system prices failed for %s: %s", date_str, exc)
-        except ValueError as exc:
-            logger.warning("Elexon system prices failed for %s: %s", date_str, exc)
-
-        current += pd.Timedelta(days=1)
-        time.sleep(0.5)
+    logger.info("Fetching Elexon system prices for %s", range_label)
+    try:
+        data = _call_elexon_system_prices_api(from_date_str, to_date_str)
+        all_records.extend(_extract_elexon_records(data, range_label))
+    except requests.RequestException as exc:
+        logger.warning("Elexon system prices failed for %s: %s", range_label, exc)
+    except (TypeError, ValueError, KeyError, DataSourceParseError) as exc:
+        logger.warning("Elexon system prices failed for %s: %s", range_label, exc)
 
     if not all_records:
         return pd.DataFrame(columns=[

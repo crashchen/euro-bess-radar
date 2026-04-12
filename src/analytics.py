@@ -64,11 +64,12 @@ def _find_daily_ordered_trade(
             "window": window,
         }
 
-    window_values = np.array([
-        float(prices.iloc[i:i + window].mean())
-        for i in range(len(prices) - window + 1)
-    ])
-    window_starts = prices.index[: len(window_values)]
+    # `rolling()` labels windows by their end timestamps, but the values still
+    # arrive in start-position order 0..n-window after dropping the initial NaNs.
+    window_values = prices.rolling(
+        window=window,
+        min_periods=window,
+    ).mean().dropna().to_numpy()
     future_best_values = np.empty(len(window_values))
     future_best_indices = np.empty(len(window_values), dtype=int)
 

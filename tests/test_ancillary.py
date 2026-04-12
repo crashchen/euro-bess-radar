@@ -44,6 +44,11 @@ class TestTemplateGeneration:
         csv_str = generate_template_csv("GB_BALANCING")
         assert "GBP/MWh" in csv_str
 
+    def test_fi_fcr_template_uses_zero_indexed_hours(self) -> None:
+        csv_str = generate_template_csv("FI_FCR")
+        lines = [line for line in csv_str.strip().split("\n") if not line.startswith("#")]
+        assert lines[1].split(",")[1] == "0"
+        assert lines[2].split(",")[1] == "1"
 
 # ── Parsing ──────────────────────────────────────────────────────────────────
 
@@ -133,6 +138,20 @@ class TestParsing:
         df = parse_ancillary_csv(csv, "DE_FCR")
         assert len(df) == 1
 
+    def test_fi_fcr_hour_zero_and_twenty_three_round_trip(self) -> None:
+        csv = (
+            "date,hour,fcr_n_price,fcr_d_price\n"
+            "2025-01-01,0,10.00,20.00\n"
+            "2025-01-01,23,11.00,21.00\n"
+        )
+        df = parse_ancillary_csv(csv, "FI_FCR")
+
+        fcr_n_hours = list(df[df["product_type"] == "FCR-N"].index.hour)
+        fcr_d_hours = list(df[df["product_type"] == "FCR-D"].index.hour)
+
+        assert fcr_n_hours == [0, 23]
+        assert fcr_d_hours == [0, 23]
+
 
 # ── Revenue calculation ──────────────────────────────────────────────────────
 
@@ -164,6 +183,24 @@ class TestAncillaryRevenue:
 
         expected = round(df["capacity_price_eur_mw"].mean() * HOURS_PER_YEAR * 0.50, 2)
         assert result["fcr_annual_eur"] == expected
+
+    def test_capacity_prices_use_duration_weighted_mean(self) -> None:
+        idx = pd.to_datetime(
+            ["2025-01-01T00:00:00Z", "2025-01-01T01:00:00Z", "2025-01-01T07:00:00Z"],
+            utc=True,
+        )
+        df = pd.DataFrame({
+            "capacity_price_eur_mw": [10.0, 20.0, 30.0],
+            "energy_price_eur_mwh": [float("nan"), float("nan"), float("nan")],
+            "product_type": ["FCR", "FCR", "FCR"],
+            "direction": ["", "", ""],
+            "zone": ["FI", "FI", "FI"],
+        }, index=idx)
+
+        with patch("src.ancillary.ANCILLARY_CAPACITY_AVAILABILITY", 1.0):
+            result = calculate_ancillary_revenue(df, power_mw=1.0, duration_hours=1.0)
+
+        assert result["fcr_annual_eur"] == round(26.25 * HOURS_PER_YEAR, 2)
 
     def test_energy_activation_share_reads_from_config_constant(self) -> None:
         idx = pd.date_range("2025-01-01", periods=2, freq="h", tz="UTC")

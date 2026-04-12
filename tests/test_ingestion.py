@@ -158,13 +158,14 @@ class TestFetchElexonPrices:
             {"startTime": "2025-01-02T00:00:00Z", "price": 42.0},
             {"startTime": "2025-01-02T00:30:00Z", "price": 43.0},
         ]
-        mock_api.side_effect = [day_1, day_2]
+        mock_api.return_value = day_1 + day_2
 
         df = fetch_elexon_prices(
             start=pd.Timestamp("2025-01-01T00:30:00Z"),
             end=pd.Timestamp("2025-01-02T00:30:00Z"),
         )
 
+        mock_api.assert_called_once_with("2025-01-01", "2025-01-03")
         assert list(df.index.astype(str)) == [
             "2025-01-01 00:30:00+00:00",
             "2025-01-02 00:00:00+00:00",
@@ -696,9 +697,9 @@ class TestFetchElexonSystemPrices:
     @patch("src.data_ingestion.requests.get")
     def test_filters_to_requested_window(self, mock_get: MagicMock) -> None:
         """System price fetches should be trimmed back to [start, end)."""
-        day_1 = MagicMock()
-        day_1.raise_for_status = MagicMock()
-        day_1.json.return_value = [
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = [
             {
                 "settlementDate": "2025-01-01",
                 "settlementPeriod": 1,
@@ -711,10 +712,6 @@ class TestFetchElexonSystemPrices:
                 "systemBuyPrice": 56.0,
                 "systemSellPrice": 46.0,
             },
-        ]
-        day_2 = MagicMock()
-        day_2.raise_for_status = MagicMock()
-        day_2.json.return_value = [
             {
                 "settlementDate": "2025-01-02",
                 "settlementPeriod": 1,
@@ -728,13 +725,16 @@ class TestFetchElexonSystemPrices:
                 "systemSellPrice": 48.0,
             },
         ]
-        mock_get.side_effect = [day_1, day_2]
+        mock_get.return_value = mock_resp
 
         df = fetch_elexon_system_prices(
             start=pd.Timestamp("2025-01-01T00:30:00Z"),
             end=pd.Timestamp("2025-01-02T00:30:00Z"),
         )
 
+        params = mock_get.call_args.kwargs["params"]
+        assert params["from"] == "2025-01-01"
+        assert params["to"] == "2025-01-03"
         assert list(df.index.astype(str)) == [
             "2025-01-01 00:30:00+00:00",
             "2025-01-02 00:00:00+00:00",

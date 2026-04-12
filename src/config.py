@@ -27,7 +27,6 @@ GBP_EUR_YEARLY: dict[int, float] = {
     2025: 1.17,
     2026: 1.18,
 }
-GBP_TO_EUR = GBP_EUR_YEARLY[2025]
 
 # --- Default Settings ---
 DEFAULT_LOOKBACK_DAYS = 365

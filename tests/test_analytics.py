@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from src.analytics import (
+    _find_daily_ordered_trade,
     analyze_renewable_bess_signal,
     build_price_heatmap,
     build_daily_renewable_spread_view,
@@ -99,6 +100,15 @@ class TestDailySpreads:
         assert result["spread"].iloc[0] == 22.0
         assert result["max_hour"].iloc[0] == 22
         assert result["min_hour"].iloc[0] == 0
+
+    def test_two_hour_window_indices_still_point_to_window_start(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=6, freq="h", tz="UTC")
+        prices = pd.Series([50.0, 0.0, 0.0, 10.0, 100.0, 100.0], index=idx)
+
+        trade = _find_daily_ordered_trade(prices, duration_hours=2.0)
+
+        assert trade["buy_start_idx"] == 1
+        assert trade["sell_start_idx"] == 4
 
     def test_columns(self, seven_day_prices: pd.DataFrame) -> None:
         result = calculate_daily_spreads(seven_day_prices)
