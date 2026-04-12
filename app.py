@@ -418,7 +418,7 @@ if fetch_btn or "zone_data" in st.session_state:
                 - If both are present, manual uploads override auto-fetched rows for the same product name only.
                 - Reserve products are kept separate where possible, for example `FCR-N`, `FCR-D Up`, `FCR-D Down`, `aFRR Up`, and `aFRR Down`.
                 - Capacity-style products are annualised from average `EUR/MW` prices using the selected BESS power and a fixed `{ANCILLARY_CAPACITY_AVAILABILITY:.0%}` availability assumption.
-                - Explicit single-sided energy prices are annualised using the selected BESS power, duration, and a simplified `{ANCILLARY_ENERGY_ACTIVATION_SHARE:.0%}` activation-hours assumption.
+                - Explicit single-sided energy prices are annualised using the selected BESS power and a simplified `{ANCILLARY_ENERGY_ACTIVATION_SHARE:.0%}` activation-hours assumption.
                 - Two-sided balancing or system-price signals, such as GB `system buy` and `system sell`, are stored and shown but are not auto-monetised because dispatch direction and activation volume are still unknown.
                 - The revenue stack chart shows `DA Arbitrage` plus each ancillary product as separate colored components.
                 - This output is intended for market screening and prioritisation, not as a dispatch-grade settlement model.
@@ -436,7 +436,7 @@ if fetch_btn or "zone_data" in st.session_state:
 
         if anc_df is not None and not anc_df.empty:
             anc_rev = calculate_ancillary_revenue(anc_df, power_mw, duration_hours)
-            stack = merge_revenue_stack(revenue, anc_rev)
+            stack = merge_revenue_stack(revenue, anc_rev, power_mw=power_mw)
             export_revenue.update(stack)
             export_revenue["annual_revenue_eur"] = stack["total_eur"]
             export_revenue["annual_revenue_eur_per_mw"] = stack["total_per_mw"]

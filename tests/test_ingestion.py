@@ -106,6 +106,26 @@ class TestFetchElexonPrices:
         assert df["price_eur_mwh"].iloc[0] == 100.0 * GBP_EUR_YEARLY[2023]
 
     @patch("src.data_ingestion._call_elexon_api")
+    def test_preserves_negative_prices_while_dropping_zero_provider_rows(
+        self, mock_api: MagicMock,
+    ) -> None:
+        mock_api.return_value = [
+            {"startTime": "2025-01-01T00:00:00Z", "price": -20.0},
+            {"startTime": "2025-01-01T00:00:00Z", "price": 0.0},
+            {"startTime": "2025-01-01T00:30:00Z", "price": 50.0},
+            {"startTime": "2025-01-01T00:30:00Z", "price": 0.0},
+        ]
+
+        df = fetch_elexon_prices(
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-01", tz="UTC"),
+        )
+
+        assert len(df) == 2
+        assert df["price_eur_mwh"].iloc[0] == pytest.approx(-20.0 * GBP_EUR_YEARLY[2025])
+        assert df["price_eur_mwh"].iloc[1] == pytest.approx(50.0 * GBP_EUR_YEARLY[2025])
+
+    @patch("src.data_ingestion._call_elexon_api")
     def test_unknown_year_uses_nearest_fx_rate(
         self, mock_api: MagicMock, caplog: pytest.LogCaptureFixture,
     ) -> None:

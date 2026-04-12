@@ -57,7 +57,7 @@ ANCILLARY_TEMPLATES: dict[str, dict] = {
         "resolution": "hourly",
     },
     "GB_BALANCING": {
-        "description": "GB system prices and NIV from Elexon",
+        "description": "GB system prices and NIV from Elexon (manual upload prices in GBP/MWh)",
         "source_url": "https://bmrs.elexon.co.uk/",
         "expected_columns": [
             "settlement_date", "settlement_period",
@@ -81,6 +81,11 @@ def generate_template_csv(template_key: str) -> str:
     cols = tmpl["expected_columns"]
 
     buf = io.StringIO()
+    if template_key == "GB_BALANCING":
+        buf.write(
+            "# system_buy_price and system_sell_price must be uploaded in GBP/MWh; "
+            "year-specific GBP->EUR conversion is applied automatically.\n"
+        )
     writer = csv.writer(buf)
     writer.writerow(cols)
 
@@ -109,8 +114,16 @@ def generate_template_csv(template_key: str) -> str:
 
 def _detect_delimiter(content: str) -> str:
     """Auto-detect CSV delimiter."""
+    first_line = next(
+        (
+            line
+            for line in content.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ),
+        "",
+    )
     for delim in [",", ";", "\t"]:
-        if delim in content.split("\n")[0]:
+        if delim in first_line:
             return delim
     return ","
 
@@ -426,7 +439,7 @@ def parse_ancillary_csv(
         text = csv_content
 
     delim = _detect_delimiter(text)
-    df = pd.read_csv(io.StringIO(text), sep=delim)
+    df = pd.read_csv(io.StringIO(text), sep=delim, comment="#")
 
     # Strip whitespace from column names
     df.columns = df.columns.str.strip()
@@ -492,14 +505,29 @@ def parse_ancillary_csv(
         col in df.columns
         for col in ["marginal_price_up", "marginal_price_down", "system_buy_price", "system_sell_price"]
     ):
+        system_buy = df["system_buy_price"] if "system_buy_price" in df.columns else None
+        system_sell = df["system_sell_price"] if "system_sell_price" in df.columns else None
+        if template_key == "GB_BALANCING":
+            from src.data_ingestion import _convert_gbp_series_to_eur
+
+            if system_buy is not None:
+                system_buy = _convert_gbp_series_to_eur(
+                    pd.to_numeric(system_buy, errors="coerce"),
+                    idx,
+                )
+            if system_sell is not None:
+                system_sell = _convert_gbp_series_to_eur(
+                    pd.to_numeric(system_sell, errors="coerce"),
+                    idx,
+                )
         frames.append(_build_standard_frame(
             idx,
             _canonical_product_label(template_key),
             zone,
             energy_up=df["marginal_price_up"] if "marginal_price_up" in df.columns else None,
             energy_down=df["marginal_price_down"] if "marginal_price_down" in df.columns else None,
-            system_buy=df["system_buy_price"] if "system_buy_price" in df.columns else None,
-            system_sell=df["system_sell_price"] if "system_sell_price" in df.columns else None,
+            system_buy=system_buy,
+            system_sell=system_sell,
         ))
 
     if not frames:
@@ -556,12 +584,11 @@ def calculate_ancillary_revenue(
         energy_prices = group["energy_price_eur_mwh"].dropna()
         if not energy_prices.empty:
             avg_energy = float(energy_prices.mean())
-            energy_mwh = power_mw * duration_hours
             # Annualise explicit single-sided energy prices with the configured
             # screening assumption for activated hours. Two-sided balancing
             # signals are preserved separately and are not auto-monetised here.
             activation_hours = HOURS_PER_YEAR * ANCILLARY_ENERGY_ACTIVATION_SHARE
-            annual_revenue += avg_energy * energy_mwh * activation_hours
+            annual_revenue += avg_energy * power_mw * activation_hours
 
         if annual_revenue <= 0:
             continue
@@ -582,12 +609,15 @@ def calculate_ancillary_revenue(
 def merge_revenue_stack(
     da_revenue: dict,
     ancillary_revenue: dict,
+    power_mw: float = 1.0,
 ) -> dict:
     """Combine DA arbitrage and ancillary service revenues into total stack.
 
     Args:
         da_revenue: Dict from estimate_annual_arbitrage_revenue().
         ancillary_revenue: Dict from calculate_ancillary_revenue().
+        power_mw: Reference BESS power rating in MW used for per-MW
+            normalisation of the combined revenue stack.
 
     Returns:
         Combined revenue stack dict.
@@ -611,10 +641,7 @@ def merge_revenue_stack(
         "product_revenues": product_revenues,
         "source_revenues": source_revenues,
         "total_eur": round(total, 2),
-        "total_per_mw": round(
-            total * da_revenue.get("annual_revenue_eur_per_mw", 0.0) / da_eur
-            if da_eur > 0 else total, 2
-        ),
+        "total_per_mw": round(total / power_mw, 2) if power_mw > 0 else 0.0,
         "da_pct": round(100.0 * da_eur / total, 1) if total > 0 else 0.0,
         "ancillary_pct": round(100.0 * (total - da_eur) / total, 1) if total > 0 else 0.0,
     }

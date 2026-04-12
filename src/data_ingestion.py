@@ -401,9 +401,9 @@ def fetch_elexon_prices(
         ) from exc
 
     # Each settlement period has multiple data providers (e.g. one with a
-    # real price and one reporting 0).  Drop zeros, then average any
-    # remaining duplicates per timestamp.
-    df = df[df["price_gbp"] > 0]
+    # real price and one reporting 0). Drop zero-provider rows; keep
+    # negative prices, then average any remaining duplicates per timestamp.
+    df = df[df["price_gbp"] != 0]
     df = df.groupby("timestamp", as_index=True)["price_gbp"].mean().to_frame()
     df["price_eur_mwh"] = _convert_gbp_series_to_eur(df["price_gbp"], df.index)
     df = df[["price_eur_mwh"]].sort_index()

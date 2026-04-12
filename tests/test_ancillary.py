@@ -17,7 +17,7 @@ from src.ancillary import (
     parse_ancillary_csv,
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
-from src.config import HOURS_PER_YEAR
+from src.config import ANCILLARY_ENERGY_ACTIVATION_SHARE, GBP_EUR_YEARLY, HOURS_PER_YEAR
 
 
 # ── Template CSV generation ──────────────────────────────────────────────────
@@ -27,15 +27,21 @@ class TestTemplateGeneration:
         for key in ANCILLARY_TEMPLATES:
             csv_str = generate_template_csv(key)
             assert len(csv_str) > 0
-            lines = csv_str.strip().split("\n")
+            lines = [line for line in csv_str.strip().split("\n") if not line.startswith("#")]
             assert len(lines) == 3  # header + 2 example rows
 
     def test_template_has_correct_headers(self) -> None:
         for key, tmpl in ANCILLARY_TEMPLATES.items():
             csv_str = generate_template_csv(key)
-            header_line = csv_str.strip().split("\n")[0]
+            header_line = next(
+                line for line in csv_str.strip().split("\n") if not line.startswith("#")
+            )
             for col in tmpl["expected_columns"]:
                 assert col in header_line
+
+    def test_gb_template_mentions_gbp_units(self) -> None:
+        csv_str = generate_template_csv("GB_BALANCING")
+        assert "GBP/MWh" in csv_str
 
 
 # ── Parsing ──────────────────────────────────────────────────────────────────
@@ -74,9 +80,18 @@ class TestParsing:
         assert "energy_price_eur_mwh" in df.columns
         assert "system_buy_price_eur_mwh" in df.columns
         assert "system_sell_price_eur_mwh" in df.columns
-        assert df["system_buy_price_eur_mwh"].iloc[0] == 55.0
-        assert df["system_sell_price_eur_mwh"].iloc[0] == 45.0
+        assert df["system_buy_price_eur_mwh"].iloc[0] == pytest.approx(
+            55.0 * GBP_EUR_YEARLY[2025]
+        )
+        assert df["system_sell_price_eur_mwh"].iloc[0] == pytest.approx(
+            45.0 * GBP_EUR_YEARLY[2025]
+        )
         assert df["energy_price_eur_mwh"].isna().all()
+
+    def test_gb_balancing_parsing_ignores_template_comment_line(self) -> None:
+        csv = generate_template_csv("GB_BALANCING")
+        df = parse_ancillary_csv(csv, "GB_BALANCING")
+        assert len(df) == 2
 
     def test_normalize_auto_fetch_preserves_system_prices(self) -> None:
         idx = pd.date_range("2025-01-01", periods=2, freq="30min", tz="UTC")
@@ -164,6 +179,20 @@ class TestAncillaryRevenue:
 
         assert result["mfrr_annual_eur"] == 100.0 * HOURS_PER_YEAR * 0.25
 
+    def test_energy_prices_annualise_using_power_not_duration(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=2, freq="h", tz="UTC")
+        df = pd.DataFrame({
+            "energy_price_eur_mwh": [120.0, 120.0],
+            "capacity_price_eur_mw": [float("nan"), float("nan")],
+            "product_type": ["GB_BALANCING", "GB_BALANCING"],
+            "direction": ["", ""],
+            "zone": ["GB", "GB"],
+        }, index=idx)
+
+        result = calculate_ancillary_revenue(df, power_mw=2.0, duration_hours=4.0)
+        expected = 120.0 * 2.0 * HOURS_PER_YEAR * ANCILLARY_ENERGY_ACTIVATION_SHARE
+        assert result["mfrr_annual_eur"] == expected
+
     def test_gb_balancing_requires_explicit_energy_price(self, gb_balancing_csv: str) -> None:
         df = parse_ancillary_csv(gb_balancing_csv, "GB_BALANCING")
         result = calculate_ancillary_revenue(df, power_mw=1.0, duration_hours=1.0)
@@ -239,7 +268,7 @@ class TestMergeRevenueStack:
             "total_ancillary_eur": 35000.0,
             "product_revenues": {"FCR-N": 20000.0, "aFRR Up": 10000.0, "mFRR": 5000.0},
         }
-        result = merge_revenue_stack(da, anc)
+        result = merge_revenue_stack(da, anc, power_mw=1.0)
         assert result["total_eur"] == 85000.0
         assert result["da_arbitrage_eur"] == 50000.0
         assert abs(result["da_pct"] - 58.8) < 0.1
@@ -255,9 +284,37 @@ class TestMergeRevenueStack:
             "total_ancillary_eur": 0.0,
             "product_revenues": {},
         }
-        result = merge_revenue_stack(da, anc)
+        result = merge_revenue_stack(da, anc, power_mw=1.0)
         assert result["total_eur"] == 50000.0
         assert result["da_pct"] == 100.0
+
+    def test_total_per_mw_uses_power_when_da_is_zero(self) -> None:
+        da = {"annual_revenue_eur": 0.0, "annual_revenue_eur_per_mw": 0.0}
+        anc = {
+            "fcr_annual_eur": 12000.0,
+            "afrr_annual_eur": 6000.0,
+            "mfrr_annual_eur": 2000.0,
+            "total_ancillary_eur": 20000.0,
+            "product_revenues": {"FCR-N": 12000.0, "aFRR Up": 6000.0, "mFRR": 2000.0},
+        }
+
+        result = merge_revenue_stack(da, anc, power_mw=4.0)
+        assert result["total_eur"] == 20000.0
+        assert result["total_per_mw"] == 5000.0
+
+    def test_total_per_mw_uses_explicit_power_not_da_ratio(self) -> None:
+        da = {"annual_revenue_eur": 50000.0, "annual_revenue_eur_per_mw": 12345.0}
+        anc = {
+            "fcr_annual_eur": 10000.0,
+            "afrr_annual_eur": 0.0,
+            "mfrr_annual_eur": 0.0,
+            "total_ancillary_eur": 10000.0,
+            "product_revenues": {"FCR-N": 10000.0},
+        }
+
+        result = merge_revenue_stack(da, anc, power_mw=2.0)
+        assert result["total_eur"] == 60000.0
+        assert result["total_per_mw"] == 30000.0
 
 
 # ── Auto-fetcher registry ──────────────────────────────────────────────────
