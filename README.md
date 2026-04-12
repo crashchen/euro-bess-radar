@@ -20,8 +20,8 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 |--------|----------|---------------|
 | ENTSO-E Transparency Platform | EU-27 + NO + CH | API key (free) |
 | Elexon Insights API | Great Britain | None |
-| Fingrid Open Data | Finland | None |
-| Regelleistung.net | Germany | None (best-effort) |
+| Fingrid Open Data v2 | Finland | API key recommended (`FINGRID_API_KEY`) |
+| Regelleistung.net | Germany | Manual CSV upload only (auto-fetch disabled) |
 
 ## Quick Start
 
@@ -33,8 +33,10 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# Configure ENTSO-E API key
+# Configure API keys
 echo "ENTSOE_API_KEY=your_key_here" > .env
+# Optional: Fingrid Open Data v2 key for Finnish ancillary data
+echo "FINGRID_API_KEY=your_key_here" >> .env
 
 # Run tests
 python -m pytest tests/ -v
@@ -55,7 +57,7 @@ euro-bess-radar/
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   └── export.py             # Excel report generation
-├── tests/                    # 100+ unit tests, heavily mocked
+├── tests/                    # 130 unit tests, heavily mocked
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads
@@ -65,7 +67,7 @@ euro-bess-radar/
 ## Key Markets
 
 Optimized for BESS investment screening in:
-- Germany (DE_LU) — 15min resolution, FCR/aFRR auto-fetch
+- Germany (DE_LU) — 15min resolution, manual FCR/aFRR CSV upload
 - Finland (FI) — FCR-N/D + aFRR auto-fetch via Fingrid
 - Great Britain (GB) — Elexon MID + system prices
 - Romania (RO) — DA prices + ENTSO-E imbalance data
