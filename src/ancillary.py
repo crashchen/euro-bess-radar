@@ -28,6 +28,9 @@ _STANDARD_COLUMNS = [
     "direction",
     "zone",
 ]
+PRODUCT_ALIASES: dict[str, set[str]] = {
+    "FCR-D": {"FCR-D Up", "FCR-D Down"},
+}
 
 # ── Templates ────────────────────────────────────────────────────────────────
 
@@ -430,9 +433,12 @@ def build_ancillary_dataset(
         manual_products = set(
             manual["product_type"].dropna().astype(str).str.strip()
         )
-        if not combined.empty and manual_products:
+        expanded_manual_products = manual_products | set().union(
+            *(PRODUCT_ALIASES.get(product, set()) for product in manual_products)
+        )
+        if not combined.empty and expanded_manual_products:
             combined = combined[
-                ~combined["product_type"].astype(str).str.strip().isin(manual_products)
+                ~combined["product_type"].astype(str).str.strip().isin(expanded_manual_products)
             ]
         combined = pd.concat([combined, manual]).sort_index()
 

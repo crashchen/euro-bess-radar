@@ -54,6 +54,26 @@ logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="BESS Pulse", layout="wide", page_icon="\u26a1")
 
+ANCILLARY_STATE_KEYS = (
+    "ancillary_df",
+    "ancillary_template",
+    "auto_fetch_results",
+    "ancillary_zone",
+    "ancillary_dates",
+)
+
+
+def _clear_stale_ancillary_state() -> None:
+    """Remove ancillary data that no longer matches the active sidebar scope."""
+    for key in ANCILLARY_STATE_KEYS:
+        st.session_state.pop(key, None)
+
+
+def _store_ancillary_scope(zone: str, start: object, end: object) -> None:
+    """Persist the zone/date scope associated with ancillary data in session state."""
+    st.session_state["ancillary_zone"] = zone
+    st.session_state["ancillary_dates"] = (str(start), str(end))
+
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 
 st.sidebar.title("BESS Pulse")
@@ -74,6 +94,13 @@ default_end = pd.Timestamp.now().normalize()
 default_start = default_end - pd.Timedelta(days=30)
 start_date = col1.date_input("Start", value=default_start.date())
 end_date = col2.date_input("End", value=default_end.date())
+primary_zone_for_fetch = selected_zones[0] if selected_zones else "DE_LU"
+
+current_zone_date_scope = (tuple(selected_zones), str(start_date), str(end_date))
+previous_zone_date_scope = st.session_state.get("zone_date_scope")
+if previous_zone_date_scope is not None and previous_zone_date_scope != current_zone_date_scope:
+    _clear_stale_ancillary_state()
+st.session_state["zone_date_scope"] = current_zone_date_scope
 
 # BESS parameters
 st.sidebar.subheader("BESS Parameters")
@@ -108,6 +135,7 @@ with st.sidebar.expander("Ancillary Services Data"):
                 anc_df = parse_ancillary_csv(content, anc_template)
                 st.session_state["ancillary_df"] = anc_df
                 st.session_state["ancillary_template"] = anc_template
+                _store_ancillary_scope(primary_zone_for_fetch, start_date, end_date)
                 st.success(f"{anc_template} loaded: {len(anc_df)} rows")
             except UnicodeDecodeError:
                 st.error("Parse error: the uploaded file is not valid UTF-8/CSV text.")
@@ -136,7 +164,6 @@ with st.sidebar.expander("Ancillary Services Data"):
 # ── Auto-fetch ancillary data ───────────────────────────────────────────────
 
 with st.sidebar.expander("Auto-Fetch Ancillary Data"):
-    primary_zone_for_fetch = selected_zones[0] if selected_zones else "DE_LU"
     fetchers = get_available_fetchers(primary_zone_for_fetch)
 
     if fetchers:
@@ -158,6 +185,7 @@ with st.sidebar.expander("Auto-Fetch Ancillary Data"):
                 results = run_auto_fetch(primary_zone_for_fetch, auto_start, auto_end)
                 if results:
                     st.session_state["auto_fetch_results"] = results
+                    _store_ancillary_scope(primary_zone_for_fetch, start_date, end_date)
                     st.success(
                         f"Fetched {len(results)} dataset(s): "
                         + ", ".join(results.keys())
@@ -426,13 +454,35 @@ if fetch_btn or "zone_data" in st.session_state:
             )
 
         # Check for ancillary data
-        manual_anc_df = st.session_state.get("ancillary_df")
-        auto_fetch_results = st.session_state.get("auto_fetch_results", {})
+        stored_ancillary_zone = st.session_state.get("ancillary_zone")
+        stored_ancillary_dates = st.session_state.get("ancillary_dates")
+        current_ancillary_dates = (str(start_date), str(end_date))
+        ancillary_scope_matches = (
+            stored_ancillary_zone == primary_zone
+            and stored_ancillary_dates == current_ancillary_dates
+        )
+        ancillary_scope_mismatch = (
+            (st.session_state.get("ancillary_df") is not None)
+            or bool(st.session_state.get("auto_fetch_results"))
+        ) and not ancillary_scope_matches
+
+        manual_anc_df = st.session_state.get("ancillary_df") if ancillary_scope_matches else None
+        auto_fetch_results = (
+            st.session_state.get("auto_fetch_results", {})
+            if ancillary_scope_matches
+            else {}
+        )
         anc_df = build_ancillary_dataset(manual_anc_df, auto_fetch_results)
         anc_rev = None
         stack = None
         anc_source = None
         export_revenue = revenue.copy()
+
+        if ancillary_scope_mismatch:
+            st.info(
+                "Ancillary data was loaded for a different zone/window. Re-fetch or "
+                "re-upload to include ancillary revenue."
+            )
 
         if anc_df is not None and not anc_df.empty:
             anc_rev = calculate_ancillary_revenue(anc_df, power_mw, duration_hours)

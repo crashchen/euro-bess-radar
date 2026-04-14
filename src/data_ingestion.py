@@ -32,6 +32,15 @@ from src.config import (
 logger = logging.getLogger(__name__)
 
 _warned_fx_years: set[int] = set()
+_ZONE_RESOLUTION_TRANSITIONS: dict[str, tuple[tuple[pd.Timestamp, pd.Timedelta, pd.Timedelta], ...]] = {
+    "DE_LU": (
+        (
+            pd.Timestamp("2025-10-01T00:00:00Z"),
+            pd.Timedelta(hours=1),
+            pd.Timedelta(minutes=15),
+        ),
+    ),
+}
 
 
 # ── Exceptions ───────────────────────────────────────────────────────────────
@@ -119,7 +128,7 @@ def build_zone_query_window(
     """Convert inclusive local calendar dates into a UTC [start, end) window."""
     timezone = get_zone_timezone(zone)
     start_local = _to_local_midnight(start_date, timezone)
-    end_local = _to_local_midnight(end_date, timezone) + pd.Timedelta(days=1)
+    end_local = _to_local_midnight(pd.Timestamp(end_date) + pd.DateOffset(days=1), timezone)
 
     if end_local <= start_local:
         raise ValueError("end_date must be on or after start_date.")
@@ -308,6 +317,77 @@ def _segment_and_reindex_prices(
     out = out[~out.index.duplicated(keep="last")]
     out.index.name = "timestamp"
     return out
+
+
+def _zone_resolution_boundaries(
+    zone: str,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> list[pd.Timestamp]:
+    """Return known resolution transitions that fall inside the requested window."""
+    transitions = _ZONE_RESOLUTION_TRANSITIONS.get(zone, ())
+    return [
+        boundary
+        for boundary, _before, _after in transitions
+        if start < boundary < end
+    ]
+
+
+def _index_spans_known_resolution_boundary(zone: str, index: pd.DatetimeIndex) -> bool:
+    """Return True when the cached index crosses a known zone resolution change."""
+    if len(index) < 2:
+        return False
+
+    start = index.min()
+    end = index.max()
+    return any(
+        start < boundary <= end
+        for boundary, _before, _after in _ZONE_RESOLUTION_TRANSITIONS.get(zone, ())
+    )
+
+
+def _expected_interval_for_segment(
+    zone: str,
+    segment_start: pd.Timestamp,
+    fallback: pd.Timedelta,
+) -> pd.Timedelta:
+    """Return the expected cadence for a segment start, honoring known transitions."""
+    interval = fallback
+    for boundary, before, after in _ZONE_RESOLUTION_TRANSITIONS.get(zone, ()):
+        if segment_start < boundary:
+            return before
+        interval = after
+    return interval
+
+
+def _cache_segment_has_gaps(
+    df: pd.DataFrame,
+    zone: str,
+    segment_start: pd.Timestamp,
+    segment_end: pd.Timestamp,
+    fallback_interval: pd.Timedelta,
+) -> bool:
+    """Check whether one cache segment is complete at its own cadence."""
+    segment = df[(df.index >= segment_start) & (df.index < segment_end)]
+    inferred = _infer_segment_freq(pd.DatetimeIndex(segment.index), zone=zone)
+    expected_interval = _expected_interval_for_segment(zone, segment_start, fallback_interval)
+    interval = min(inferred, expected_interval) if inferred is not None else expected_interval
+    expected_points = max(int(round((segment_end - segment_start) / interval)), 1)
+    expected_index = pd.date_range(start=segment_start, periods=expected_points, freq=interval)
+    missing_points = int(segment.reindex(expected_index)["price_eur_mwh"].isna().sum())
+
+    if missing_points:
+        logger.info(
+            "Cache incomplete for %s: %d missing points in [%s, %s) at %s cadence",
+            zone,
+            missing_points,
+            segment_start,
+            segment_end,
+            interval,
+        )
+        return True
+
+    return False
 
 
 def clean_prices(
@@ -635,16 +715,14 @@ def read_cache(
     df["zone"] = zone
 
     interval = _expected_cache_interval(zone, df.index)
-    expected_points = max(int(round((end - start) / interval)), 1)
-    expected_index = pd.date_range(start=start, periods=expected_points, freq=interval)
-    missing_points = int(df.reindex(expected_index)["price_eur_mwh"].isna().sum())
-
-    if missing_points:
-        logger.info(
-            "Cache incomplete for %s: %d missing points at %s cadence",
-            zone, missing_points, interval,
-        )
-        return None
+    if _index_spans_known_resolution_boundary(zone, df.index):
+        split_points = [start, *_zone_resolution_boundaries(zone, start, end), end]
+        for segment_start, segment_end in zip(split_points, split_points[1:]):
+            if _cache_segment_has_gaps(df, zone, segment_start, segment_end, interval):
+                return None
+    else:
+        if _cache_segment_has_gaps(df, zone, start, end, interval):
+            return None
 
     return df
 
@@ -870,6 +948,23 @@ def fetch_elexon_generation(
 # ── Fingrid Open Data API (Finland FCR/aFRR) ─────────────────────────────────
 
 
+@retry(max_retries=3, backoff=2.0, exceptions=(requests.RequestException, ValueError))
+def _call_fingrid_api(
+    dataset_id: int,
+    params: dict[str, Any],
+    headers: dict[str, str],
+) -> Any:
+    """Fetch one Fingrid API page with retries."""
+    resp = requests.get(
+        f"{FINGRID_BASE_URL}/datasets/{dataset_id}/data",
+        params=params,
+        headers=headers,
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()
+
+
 def fetch_fingrid_data(
     dataset_id: int,
     start: pd.Timestamp,
@@ -907,20 +1002,17 @@ def fetch_fingrid_data(
             "Fetching Fingrid dataset %d page %d", dataset_id, page,
         )
         try:
-            resp = requests.get(
-                f"{FINGRID_BASE_URL}/datasets/{dataset_id}/data",
-                params=params,
-                headers=headers,
-                timeout=30,
+            payload = _call_fingrid_api(dataset_id, params, headers)
+        except (requests.RequestException, ValueError) as exc:
+            logger.warning(
+                "Fingrid fetch failed for dataset %d on page %d after retries; "
+                "discarding %d collected rows and returning empty data: %s",
+                dataset_id,
+                page,
+                len(all_rows),
+                exc,
             )
-            resp.raise_for_status()
-            payload = resp.json()
-        except requests.RequestException as exc:
-            logger.warning("Fingrid request failed for dataset %d: %s", dataset_id, exc)
-            break
-        except ValueError as exc:
-            logger.warning("Fingrid fetch failed for dataset %d: %s", dataset_id, exc)
-            break
+            return pd.DataFrame(columns=["timestamp", "value"])
 
         records = payload.get("data", payload) if isinstance(payload, dict) else payload
         if not isinstance(records, list) or not records:

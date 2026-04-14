@@ -280,6 +280,36 @@ class TestAncillaryRevenue:
         manual_fcr = anc_df[anc_df["product_type"] == "FCR"]
         assert manual_fcr["capacity_price_eur_mw"].iloc[0] == 15.50
 
+    def test_manual_fi_fcr_d_overrides_auto_fcr_d_aliases(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=1, freq="h", tz="UTC")
+        manual_df = pd.DataFrame(
+            {
+                "capacity_price_eur_mw": [50.0],
+                "energy_price_eur_mwh": [float("nan")],
+                "product_type": ["FCR-D"],
+                "direction": [""],
+                "zone": ["FI"],
+            },
+            index=idx,
+        )
+        auto_results = {
+            "Fingrid reserves": pd.DataFrame(
+                {
+                    "timestamp": idx,
+                    "fcr_n_price": [10.0],
+                    "fcr_d_up_price": [20.0],
+                    "fcr_d_down_price": [30.0],
+                }
+            )
+        }
+
+        anc_df = build_ancillary_dataset(manual_df=manual_df, auto_fetch_results=auto_results)
+
+        assert "FCR-D" in set(anc_df["product_type"])
+        assert "FCR-N" in set(anc_df["product_type"])
+        assert "FCR-D Up" not in set(anc_df["product_type"])
+        assert "FCR-D Down" not in set(anc_df["product_type"])
+
     def test_empty_df_returns_zeros(self) -> None:
         df = pd.DataFrame(columns=["capacity_price_eur_mw", "energy_price_eur_mwh",
                                     "product_type", "direction", "zone"])

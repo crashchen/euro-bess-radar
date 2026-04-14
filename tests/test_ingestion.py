@@ -362,6 +362,42 @@ class TestCacheRoundtrip:
 
         assert result is None
 
+    def test_accepts_complete_mixed_resolution_cache_and_rejects_gappy_15m_segment(
+        self, tmp_path: Path,
+    ) -> None:
+        """Mixed 60m/15m caches should validate segment-by-segment across the boundary."""
+        zone = "DE_LU"
+        start = pd.Timestamp("2025-09-30T22:00:00Z")
+        end = pd.Timestamp("2025-10-01T02:00:00Z")
+        hourly_idx = pd.date_range(start, "2025-10-01T00:00:00Z", freq="h", inclusive="left")
+        quarter_hour_idx = pd.date_range(
+            "2025-10-01T00:00:00Z",
+            end,
+            freq="15min",
+            inclusive="left",
+        )
+        full_idx = hourly_idx.append(quarter_hour_idx)
+        full_df = pd.DataFrame(
+            {"price_eur_mwh": range(len(full_idx))},
+            index=full_idx,
+        )
+        full_df.index.name = "timestamp"
+        gappy_df = full_df.drop(pd.Timestamp("2025-10-01T00:45:00Z"))
+
+        with patch("src.data_ingestion.DB_PATH", tmp_path / "valid.db"), \
+             patch("src.data_ingestion.CACHE_DIR", tmp_path / "valid-cache"):
+            write_cache(full_df, zone)
+            valid = read_cache(zone, start, end)
+
+        with patch("src.data_ingestion.DB_PATH", tmp_path / "invalid.db"), \
+             patch("src.data_ingestion.CACHE_DIR", tmp_path / "invalid-cache"):
+            write_cache(gappy_df, zone)
+            invalid = read_cache(zone, start, end)
+
+        assert valid is not None
+        assert len(valid) == len(full_df)
+        assert invalid is None
+
     def test_rejects_stale_cache(self, tmp_path: Path, mock_price_df: pd.DataFrame) -> None:
         zone = "DE_LU"
         start = pd.Timestamp("2025-01-01", tz="UTC")
@@ -491,6 +527,18 @@ class TestBuildZoneQueryWindow:
         assert start == pd.Timestamp("2025-06-30T23:00:00Z")
         assert end == pd.Timestamp("2025-07-31T23:00:00Z")
 
+    def test_de_lu_spring_forward_dst(self) -> None:
+        start, end = build_zone_query_window("DE_LU", "2025-03-30", "2025-03-30")
+        assert start == pd.Timestamp("2025-03-29T23:00:00Z")
+        assert end == pd.Timestamp("2025-03-30T22:00:00Z")
+        assert end - start == pd.Timedelta(hours=23)
+
+    def test_de_lu_fall_back_dst(self) -> None:
+        start, end = build_zone_query_window("DE_LU", "2025-10-26", "2025-10-26")
+        assert start == pd.Timestamp("2025-10-25T22:00:00Z")
+        assert end == pd.Timestamp("2025-10-26T23:00:00Z")
+        assert end - start == pd.Timedelta(hours=25)
+
 
 # ── Test 10: Fingrid data fetcher ─────────────────────────────────────────────
 
@@ -560,6 +608,34 @@ class TestFetchFingridData:
 
         assert "without FINGRID_API_KEY" in caplog.text
         assert mock_get.call_args.kwargs["headers"] == {}
+
+    @patch("src.data_ingestion.time.sleep")
+    @patch("src.data_ingestion.requests.get")
+    def test_discards_partial_rows_when_later_page_fails(
+        self, mock_get: MagicMock, _mock_sleep: MagicMock,
+    ) -> None:
+        page_1 = MagicMock()
+        page_1.raise_for_status = MagicMock()
+        page_1.json.return_value = {
+            "data": [{"startTime": "2025-01-01T00:00:00Z", "value": 10.5}] * 20000
+        }
+        mock_get.side_effect = [
+            page_1,
+            requests.RequestException("boom"),
+            requests.RequestException("boom"),
+            requests.RequestException("boom"),
+            requests.RequestException("boom"),
+        ]
+
+        with patch.dict("os.environ", {"FINGRID_API_KEY": "test-key"}, clear=False):
+            df = fetch_fingrid_data(
+                318,
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
+
+        assert df.empty
+        assert list(df.columns) == ["timestamp", "value"]
 
 
 # ── Test 11: Fingrid FCR prices ───────────────────────────────────────────────
