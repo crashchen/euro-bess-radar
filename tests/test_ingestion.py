@@ -720,19 +720,71 @@ class TestFetchElexonGeneration:
 
 
 class TestFetchRegelleistungResults:
-    @patch("src.data_ingestion.requests.get")
-    def test_returns_none_with_manual_upload_warning(
-        self, mock_get: MagicMock, caplog: pytest.LogCaptureFixture,
+    def _make_xlsx_bytes(self) -> bytes:
+        """Create a minimal xlsx that mimics Regelleistung tender export."""
+        import openpyxl
+        from io import BytesIO
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["PRODUCT_NAME", "CAPACITY PRICE [EUR/MW]", "FROM", "DIRECTION"])
+        ws.append(["FCR", 5.50, "00:00", "POS"])
+        ws.append(["FCR", 6.20, "04:00", "POS"])
+        buf = BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    @patch("src.data_ingestion._call_regelleistung_api")
+    def test_fetches_and_parses_xlsx(
+        self, mock_api: MagicMock,
     ) -> None:
+        mock_api.return_value = self._make_xlsx_bytes()
+        result = fetch_regelleistung_results(
+            "FCR",
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+        )
+        assert result is not None
+        assert len(result) == 2
+        assert "capacity_price_eur_mw" in result.columns
+        assert result["capacity_price_eur_mw"].iloc[0] == 5.50
+
+    @patch("src.data_ingestion._call_regelleistung_api")
+    def test_returns_none_on_network_error(
+        self, mock_api: MagicMock, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        mock_api.side_effect = requests.RequestException("timeout")
         with caplog.at_level(logging.WARNING):
             result = fetch_regelleistung_results(
                 "FCR",
                 pd.Timestamp("2025-01-01", tz="UTC"),
                 pd.Timestamp("2025-01-02", tz="UTC"),
             )
-
         assert result is None
-        mock_get.assert_not_called()
+        assert "Regelleistung fetch failed" in caplog.text
+
+    @patch("src.data_ingestion._call_regelleistung_api")
+    def test_returns_none_on_empty_xlsx(
+        self, mock_api: MagicMock, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Empty xlsx (headers only) returns None with fallback warning."""
+        import openpyxl
+        from io import BytesIO
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["PRODUCT_NAME", "CAPACITY PRICE [EUR/MW]", "FROM", "DIRECTION"])
+        buf = BytesIO()
+        wb.save(buf)
+        mock_api.return_value = buf.getvalue()
+
+        with caplog.at_level(logging.WARNING):
+            result = fetch_regelleistung_results(
+                "FCR",
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
+        assert result is None
         assert "manual DE_FCR" in caplog.text
 
 

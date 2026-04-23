@@ -24,7 +24,7 @@ Tests in `tests/` are heavily mocked (no live API calls) and mirror the module l
 ### ENTSO-E Transparency Platform
 - Requires API key (loaded from .env)
 - Covers: EU-27 + Norway (NO_1–NO_5) + Switzerland (CH)
-- Python library: entsoe-py (v0.7.11, uses `web-api.tp.entsoe.eu`)
+- Python library: entsoe-py (>=0.7.7, uses `web-api.tp.entsoe.eu`; endpoint overridable via `ENTSOE_ENDPOINT_URL` env var)
 - Returns: Day-ahead prices in EUR/MWh + generation by fuel type
 - Resolution: 60min (most zones), 15min (DE_LU since Oct 2025)
 - Historical data: available back to at least 2024 via the new API endpoint
@@ -47,10 +47,12 @@ Tests in `tests/` are heavily mocked (no live API calls) and mirror the module l
 - Returns: hourly capacity prices in EUR/MW
 
 ### Regelleistung.net (Germany)
-- NO API key required — best-effort scraping
-- Auto-fetch is currently disabled because the public page hit by the legacy code is HTML, not a stable JSON API
-- Supported path is manual CSV upload (`DE_FCR`, `DE_aFRR`)
-- Returns: capacity prices in EUR/MW when supplied via manual uploads
+- NO API key required — public REST API
+- Base URL: `https://www.regelleistung.net/apps/cpp-publisher/api/v1/download/tenders/resultsoverview`
+- Params: `productTypes` (FCR/aFRR), `market` (CAPACITY), `exportFormat` (xlsx), `date` (YYYY-MM-DD)
+- Auto-fetch enabled: downloads daily tender results as xlsx, parsed into standard ancillary format
+- Manual CSV upload (`DE_FCR`, `DE_aFRR`) still supported as fallback and overrides auto-fetch for same product type
+- Returns: capacity prices in EUR/MW
 
 ### ENTSO-E Imbalance Prices
 - Uses same ENTSO-E API key as DA prices
@@ -70,8 +72,7 @@ Three tiers of zones:
 ### Auto-Fetch (ancillary_fetchers.py)
 Zone-specific fetchers run automatically when the zone is selected:
 - **FI** — FCR-N/D + aFRR prices via Fingrid
-- **DE_LU** — FCR auction results via Regelleistung.net
-- **DE_LU** auto-fetch is best-effort only and currently disabled; use manual `DE_FCR` / `DE_aFRR` uploads
+- **DE_LU** — FCR/aFRR auction results via Regelleistung.net REST API (downloads daily xlsx)
 - **GB** — System buy/sell prices via Elexon
 - **RO, SE_3, IT_SUD** — Imbalance prices via ENTSO-E
 
@@ -120,7 +121,7 @@ Upload via sidebar. Template CSVs downloadable from the UI.
 
 ## Commands
 - `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
-- `python -m pytest tests/ -v` — run all tests (135 tests, fully mocked, no network).
+- `python -m pytest tests/ -v` — run all tests (137 tests, fully mocked, no network).
 - `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
 - `streamlit run app.py` — launch the dashboard.
 - `python -c "from src.data_ingestion import test_elexon_connection; test_elexon_connection()"` — smoke-test Elexon (no API key needed).

@@ -21,7 +21,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 | ENTSO-E Transparency Platform | EU-27 + NO + CH | API key (free) |
 | Elexon Insights API | Great Britain | None |
 | Fingrid Open Data v2 | Finland | API key recommended (`FINGRID_API_KEY`) |
-| Regelleistung.net | Germany | Manual CSV upload only (auto-fetch disabled) |
+| Regelleistung.net | Germany | REST API (FCR/aFRR tender results) + manual CSV fallback |
 
 ## Quick Start
 
@@ -67,7 +67,7 @@ euro-bess-radar/
 ## Key Markets
 
 Optimized for BESS investment screening in:
-- Germany (DE_LU) — 15min resolution, manual FCR/aFRR CSV upload
+- Germany (DE_LU) — 15min resolution, FCR/aFRR auto-fetch via Regelleistung REST API
 - Finland (FI) — FCR-N/D + aFRR auto-fetch via Fingrid
 - Great Britain (GB) — Elexon MID + system prices
 - Romania (RO) — DA prices + ENTSO-E imbalance data

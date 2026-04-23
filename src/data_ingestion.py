@@ -23,6 +23,7 @@ from src.config import (
     FINGRID_BASE_URL,
     GBP_EUR_YEARLY,
     PRICE_CACHE_TTL_HOURS,
+    REGELLEISTUNG_API_URL,
     get_api_key,
     get_fingrid_api_key,
     get_zone_timezone,
@@ -1123,10 +1124,85 @@ def fetch_fingrid_afrr_prices(
 
 # ── Regelleistung.net (Germany FCR/aFRR) ─────────────────────────────────────
 
-REGELLEISTUNG_BASE_URL = (
-    "https://www.regelleistung.net/apps/datacenter/tendering-files"
-)
-REGELLEISTUNG_AUTO_FETCH_ENABLED = False
+REGELLEISTUNG_AUTO_FETCH_ENABLED = True
+
+
+@retry(max_retries=3, backoff=2.0, exceptions=(requests.RequestException,))
+def _call_regelleistung_api(
+    product: str, market: str, date_str: str,
+) -> bytes:
+    """Download one day of Regelleistung tender results as xlsx bytes."""
+    resp = requests.get(
+        REGELLEISTUNG_API_URL,
+        params={
+            "productTypes": product,
+            "market": market,
+            "exportFormat": "xlsx",
+            "date": date_str,
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.content
+
+
+def _parse_regelleistung_xlsx(
+    content: bytes, product: str, target_date: str,
+) -> pd.DataFrame:
+    """Parse Regelleistung xlsx export into standard ancillary format."""
+    import openpyxl
+    from io import BytesIO
+
+    wb = openpyxl.load_workbook(BytesIO(content), read_only=True, data_only=True)
+    ws = wb.active
+    rows = list(ws.iter_rows(values_only=True))
+    wb.close()
+
+    if len(rows) < 2:
+        return pd.DataFrame(
+            columns=["date", "product", "time_block", "capacity_price_eur_mw", "direction"],
+        )
+
+    headers = [str(h).strip().lower() if h else "" for h in rows[0]]
+    records = []
+    for row in rows[1:]:
+        row_dict = dict(zip(headers, row))
+        price = None
+        for key in ("capacity price [eur/mw]", "capacity_price", "price", "ergebnispreis"):
+            if key in row_dict and row_dict[key] is not None:
+                try:
+                    price = float(row_dict[key])
+                except (ValueError, TypeError):
+                    continue
+                break
+        if price is None:
+            continue
+
+        direction = "Symmetric"
+        for key in ("direction", "richtung", "product_name"):
+            if key in row_dict and row_dict[key]:
+                val = str(row_dict[key]).strip().upper()
+                if "UP" in val or "POS" in val:
+                    direction = "Up"
+                elif "DOWN" in val or "NEG" in val:
+                    direction = "Down"
+                break
+
+        time_block = ""
+        for key in ("time_block", "von", "from", "delivery_date"):
+            if key in row_dict and row_dict[key]:
+                time_block = str(row_dict[key])
+                break
+
+        records.append({
+            "date": target_date,
+            "product": product,
+            "time_block": time_block,
+            "capacity_price_eur_mw": price,
+            "direction": direction,
+        })
+
+    return pd.DataFrame(records)
 
 
 def fetch_regelleistung_results(
@@ -1134,10 +1210,10 @@ def fetch_regelleistung_results(
     start: pd.Timestamp,
     end: pd.Timestamp,
 ) -> pd.DataFrame | None:
-    """Attempt to fetch German balancing auction results from regelleistung.net.
+    """Fetch German balancing auction results from regelleistung.net REST API.
 
     Args:
-        product: One of "FCR", "aFRR", "mFRR".
+        product: One of "FCR", "aFRR".
         start: Start timestamp (UTC).
         end: End timestamp (UTC).
 
@@ -1146,11 +1222,42 @@ def fetch_regelleistung_results(
         [date, product, time_block, capacity_price_eur_mw, direction]
         or None if fetching fails.
     """
-    logger.warning(
-        "Regelleistung auto-fetch not available; upload a manual DE_%s CSV instead",
-        product,
+    market = "CAPACITY"
+    date_range = pd.date_range(
+        start.normalize(), (end - pd.Timedelta(seconds=1)).normalize(), freq="D",
     )
-    return None
+
+    all_frames: list[pd.DataFrame] = []
+    for day in date_range:
+        date_str = day.strftime("%Y-%m-%d")
+        try:
+            content = _call_regelleistung_api(product, market, date_str)
+            df = _parse_regelleistung_xlsx(content, product, date_str)
+            if not df.empty:
+                all_frames.append(df)
+        except requests.RequestException as exc:
+            logger.warning(
+                "Regelleistung fetch failed for %s on %s: %s", product, date_str, exc,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Regelleistung parse failed for %s on %s: %s", product, date_str, exc,
+            )
+
+    if not all_frames:
+        logger.warning(
+            "No Regelleistung data retrieved for %s; "
+            "upload a manual DE_%s CSV as fallback",
+            product, product,
+        )
+        return None
+
+    result = pd.concat(all_frames, ignore_index=True)
+    logger.info(
+        "Fetched %d Regelleistung %s records (%s to %s)",
+        len(result), product, date_range[0].date(), date_range[-1].date(),
+    )
+    return result
 
 
 # ── Elexon System Prices (GB Balancing) ───────────────────────────────────────

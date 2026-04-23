@@ -15,10 +15,15 @@ MANUAL_DIR = PROJECT_ROOT / "data" / "manual"
 
 # --- API Config ---
 ENTSOE_API_KEY = os.getenv("ENTSOE_API_KEY", "")
+ENTSOE_ENDPOINT_URL = os.getenv("ENTSOE_ENDPOINT_URL", "")
 
 ELEXON_BASE_URL = "https://data.elexon.co.uk/bmrs/api/v1"
 ELEXON_MARKET_INDEX_ENDPOINT = f"{ELEXON_BASE_URL}/balancing/pricing/market-index"
 FINGRID_BASE_URL = "https://data.fingrid.fi/api"
+REGELLEISTUNG_API_URL = (
+    "https://www.regelleistung.net/apps/cpp-publisher/api/v1"
+    "/download/tenders/resultsoverview"
+)
 
 # --- FX Rates (approximate annual averages, update as needed) ---
 GBP_EUR_YEARLY: dict[int, float] = {

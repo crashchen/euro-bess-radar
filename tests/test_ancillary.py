@@ -468,16 +468,20 @@ class TestRunAutoFetch:
         assert results == {}
 
     @patch("src.data_ingestion.fetch_regelleistung_results")
-    def test_de_lu_skips_disabled_regelleistung(
-        self, mock_regelleistung: MagicMock, caplog: pytest.LogCaptureFixture,
+    def test_de_lu_calls_regelleistung(
+        self, mock_regelleistung: MagicMock,
     ) -> None:
-        with caplog.at_level(logging.INFO):
-            results = run_auto_fetch(
-                "DE_LU",
-                pd.Timestamp("2025-01-01", tz="UTC"),
-                pd.Timestamp("2025-01-02", tz="UTC"),
-            )
-
-        assert results == {}
-        mock_regelleistung.assert_not_called()
-        assert "Regelleistung auto-fetch disabled" in caplog.text
+        mock_regelleistung.return_value = pd.DataFrame({
+            "date": ["2025-01-01"],
+            "product": ["FCR"],
+            "time_block": ["00:00"],
+            "capacity_price_eur_mw": [5.50],
+            "direction": ["Symmetric"],
+        })
+        results = run_auto_fetch(
+            "DE_LU",
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+        )
+        assert mock_regelleistung.call_count == 2  # FCR + aFRR
+        assert len(results) >= 1
