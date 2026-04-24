@@ -88,7 +88,22 @@ def _build_summary_sheet(
 
     row = _write_kv_pair(ws, row, "Est. Annual Revenue (EUR/MW)", revenue_estimate["annual_revenue_eur_per_mw"], _PRICE_FMT)
     if "total_eur" in revenue_estimate:
-        row = _write_kv_pair(ws, row, "Total Annual Revenue (EUR)", revenue_estimate["total_eur"], _PRICE_FMT)
+        row = _write_kv_pair(ws, row, "Headline Annual Revenue (EUR)", revenue_estimate["total_eur"], _PRICE_FMT)
+    if "headline_total_mode" in revenue_estimate:
+        row = _write_kv_pair(ws, row, "Headline Total Mode", revenue_estimate["headline_total_mode"])
+    if "gross_additive_total_eur" in revenue_estimate:
+        row = _write_kv_pair(
+            ws, row,
+            "Gross Additive Total (Reference, EUR)",
+            revenue_estimate["gross_additive_total_eur"],
+            _PRICE_FMT,
+        )
+    if revenue_estimate.get("capacity_stack_warning"):
+        row = _write_kv_pair(
+            ws, row,
+            "Capacity Stack Warning",
+            revenue_estimate["capacity_stack_warning"],
+        )
     if "source_revenues" in revenue_estimate:
         for source, value in revenue_estimate["source_revenues"].items():
             row = _write_kv_pair(ws, row, f"{source} Revenue (EUR)", value, _PRICE_FMT)

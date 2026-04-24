@@ -30,6 +30,7 @@ from src.data_ingestion import (
     fetch_elexon_system_prices,
     fetch_entsoe_imbalance_prices,
     fetch_entsoe_prices,
+    fetch_generation_data,
     fetch_fingrid_afrr_prices,
     fetch_fingrid_data,
     fetch_fingrid_fcr_prices,
@@ -114,10 +115,10 @@ class TestFetchElexonPrices:
         self, mock_api: MagicMock,
     ) -> None:
         mock_api.return_value = [
-            {"startTime": "2025-01-01T00:00:00Z", "price": -20.0},
-            {"startTime": "2025-01-01T00:00:00Z", "price": 0.0},
-            {"startTime": "2025-01-01T00:30:00Z", "price": 50.0},
-            {"startTime": "2025-01-01T00:30:00Z", "price": 0.0},
+            {"startTime": "2025-01-01T00:00:00Z", "price": -20.0, "volume": 2.0},
+            {"startTime": "2025-01-01T00:00:00Z", "price": 0.0, "volume": 0.0},
+            {"startTime": "2025-01-01T00:30:00Z", "price": 50.0, "volume": 3.0},
+            {"startTime": "2025-01-01T00:30:00Z", "price": 0.0, "volume": 0.0},
         ]
 
         df = fetch_elexon_prices(
@@ -128,6 +129,23 @@ class TestFetchElexonPrices:
         assert len(df) == 2
         assert df["price_eur_mwh"].iloc[0] == pytest.approx(-20.0 * GBP_EUR_YEARLY[2025])
         assert df["price_eur_mwh"].iloc[1] == pytest.approx(50.0 * GBP_EUR_YEARLY[2025])
+
+    @patch("src.data_ingestion._call_elexon_api")
+    def test_preserves_legitimate_zero_prices(self, mock_api: MagicMock) -> None:
+        """A real £0/MWh market price should not be filtered away."""
+        mock_api.return_value = [
+            {"startTime": "2025-01-01T00:00:00Z", "price": 0.0, "volume": 2.0},
+            {"startTime": "2025-01-01T00:30:00Z", "price": -5.0, "volume": 2.0},
+        ]
+
+        df = fetch_elexon_prices(
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-01", tz="UTC"),
+        )
+
+        assert len(df) == 2
+        assert df["price_eur_mwh"].iloc[0] == 0.0
+        assert df["price_eur_mwh"].iloc[1] == pytest.approx(-5.0 * GBP_EUR_YEARLY[2025])
 
     @patch("src.data_ingestion._call_elexon_api")
     def test_unknown_year_uses_nearest_fx_rate(
@@ -170,6 +188,20 @@ class TestFetchElexonPrices:
             "2025-01-01 00:30:00+00:00",
             "2025-01-02 00:00:00+00:00",
         ]
+
+    @patch("src.data_ingestion._call_elexon_api")
+    def test_chunks_long_date_ranges_by_month(self, mock_api: MagicMock) -> None:
+        """A 3-month request should hit the API at least 3 times (monthly chunks)."""
+        mock_api.return_value = [
+            {"startTime": "2025-01-15T00:00:00Z", "price": 40.0},
+        ]
+
+        fetch_elexon_prices(
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-04-01", tz="UTC"),
+        )
+
+        assert mock_api.call_count >= 3
 
     @patch("src.data_ingestion._call_elexon_api", side_effect=requests.RequestException("boom"))
     def test_request_failure_raises_network_error(self, _mock_api: MagicMock) -> None:
@@ -296,6 +328,35 @@ class TestCleanPrices:
         assert result["price_eur_mwh"].isna().sum() == 0
         assert set(idx).issubset(set(result.index))
 
+    def test_requested_boundaries_reveal_head_and_tail_gaps(self) -> None:
+        """Cleaning should not hide missing first/last intervals of a request."""
+        expected_start = pd.Timestamp("2025-01-01T00:00:00Z")
+        expected_end = pd.Timestamp("2025-01-01T04:00:00Z")
+        observed_idx = pd.date_range(
+            "2025-01-01T01:00:00Z",
+            "2025-01-01T03:00:00Z",
+            freq="h",
+            inclusive="left",
+        )
+        df = pd.DataFrame({"price_eur_mwh": [51.0, 52.0]}, index=observed_idx)
+        df.index.name = "timestamp"
+
+        result = clean_prices(
+            df,
+            zone="DE_LU",
+            expected_start=expected_start,
+            expected_end=expected_end,
+        )
+
+        assert list(result.index.astype(str)) == [
+            "2025-01-01 00:00:00+00:00",
+            "2025-01-01 01:00:00+00:00",
+            "2025-01-01 02:00:00+00:00",
+            "2025-01-01 03:00:00+00:00",
+        ]
+        assert bool(result.loc[expected_start, "filled"]) is True
+        assert bool(result.loc[pd.Timestamp("2025-01-01T03:00:00Z"), "filled"]) is True
+
     def test_empty_df_passthrough(self) -> None:
         """Empty DataFrame should pass through without error."""
         df = pd.DataFrame(columns=["price_eur_mwh"])
@@ -411,8 +472,57 @@ class TestCacheRoundtrip:
             write_cache(mock_price_df, zone)
             with sqlite3.connect(tmp_path / "test.db") as conn:
                 conn.execute(
-                    "UPDATE cache_metadata SET updated_at = ? WHERE zone = ?",
-                    (stale_at, zone),
+                    'UPDATE "da_prices_de_lu" SET fetched_at = ?',
+                    (stale_at,),
+                )
+            result = read_cache(zone, start, end)
+
+        assert result is None
+
+    def test_rejects_stale_rows_within_requested_slice(
+        self, tmp_path: Path, mock_price_df: pd.DataFrame,
+    ) -> None:
+        """Refreshing a different slice should not make old rows fresh."""
+        zone = "DE_LU"
+        start = pd.Timestamp("2025-01-01", tz="UTC")
+        end = pd.Timestamp("2025-01-02", tz="UTC")
+        stale_at = (
+            pd.Timestamp.now(tz="UTC") - pd.Timedelta(hours=PRICE_CACHE_TTL_HOURS + 1)
+        ).isoformat()
+        fresh_at = pd.Timestamp.now(tz="UTC").isoformat()
+
+        with patch("src.data_ingestion.DB_PATH", tmp_path / "test.db"), \
+             patch("src.data_ingestion.CACHE_DIR", tmp_path):
+            write_cache(mock_price_df, zone)
+            with sqlite3.connect(tmp_path / "test.db") as conn:
+                conn.execute(
+                    'UPDATE "da_prices_de_lu" SET fetched_at = ? WHERE timestamp < ?',
+                    (stale_at, "2025-01-01T12:00:00+00:00"),
+                )
+                conn.execute(
+                    'UPDATE "da_prices_de_lu" SET fetched_at = ? WHERE timestamp >= ?',
+                    (fresh_at, "2025-01-01T12:00:00+00:00"),
+                )
+            result = read_cache(zone, start, end)
+
+        assert result is None
+
+    def test_old_schema_cache_misses(self, tmp_path: Path) -> None:
+        """Caches written before fetched_at existed should be refetched."""
+        zone = "DE_LU"
+        start = pd.Timestamp("2025-01-01", tz="UTC")
+        end = pd.Timestamp("2025-01-02", tz="UTC")
+
+        with patch("src.data_ingestion.DB_PATH", tmp_path / "old.db"):
+            with sqlite3.connect(tmp_path / "old.db") as conn:
+                conn.execute(
+                    'CREATE TABLE "da_prices_de_lu" ('
+                    "timestamp TEXT PRIMARY KEY, price_eur_mwh REAL NOT NULL, "
+                    "zone TEXT NOT NULL)"
+                )
+                conn.execute(
+                    'INSERT INTO "da_prices_de_lu" VALUES (?, ?, ?)',
+                    ("2025-01-01T00:00:00+00:00", 50.0, zone),
                 )
             result = read_cache(zone, start, end)
 
@@ -590,6 +700,32 @@ class TestFetchFingridData:
         assert df.empty
 
     @patch("src.data_ingestion.requests.get")
+    def test_deduplicates_page_boundary_timestamps(self, mock_get: MagicMock) -> None:
+        """Duplicate timestamps from pagination boundaries should not inflate joins."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "data": [
+                {"startTime": "2025-01-01T00:00:00Z", "value": 10.0},
+                {"startTime": "2025-01-01T00:00:00Z", "value": 14.0},
+                {"startTime": "2025-01-01T01:00:00Z", "value": 20.0},
+            ]
+        }
+        mock_get.return_value = mock_resp
+
+        df = fetch_fingrid_data(
+            318,
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+        )
+
+        assert list(df["timestamp"]) == [
+            pd.Timestamp("2025-01-01T00:00:00Z"),
+            pd.Timestamp("2025-01-01T01:00:00Z"),
+        ]
+        assert df["value"].iloc[0] == 12.0
+
+    @patch("src.data_ingestion.requests.get")
     def test_logs_missing_api_key_for_v2_endpoint(
         self, mock_get: MagicMock, caplog: pytest.LogCaptureFixture,
     ) -> None:
@@ -687,6 +823,25 @@ class TestFetchFingridAfrrPrices:
         assert list(df.columns) == ["timestamp", "afrr_up_price", "afrr_down_price"]
         assert [call.args[0] for call in mock_fetch.call_args_list] == [52, 51]
 
+    @patch("src.data_ingestion.fetch_fingrid_data")
+    def test_join_does_not_expand_duplicate_timestamps(self, mock_fetch: MagicMock) -> None:
+        duplicate_idx = [
+            pd.Timestamp("2025-01-01T00:00:00Z"),
+            pd.Timestamp("2025-01-01T00:00:00Z"),
+        ]
+        mock_fetch.return_value = pd.DataFrame(
+            {"timestamp": duplicate_idx, "value": [5.0, 7.0]}
+        )
+
+        df = fetch_fingrid_afrr_prices(
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+        )
+
+        assert len(df) == 1
+        assert df["afrr_up_price"].iloc[0] == 6.0
+        assert df["afrr_down_price"].iloc[0] == 6.0
+
 
 class TestFetchElexonGeneration:
     @patch("src.data_ingestion.requests.get")
@@ -719,6 +874,36 @@ class TestFetchElexonGeneration:
         assert "publishDateTimeTo" not in params
 
 
+class TestFetchGenerationData:
+    @patch("src.data_ingestion._call_entsoe_generation")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    def test_excludes_consumption_and_load_columns(
+        self, _mock_key: MagicMock, mock_generation: MagicMock,
+    ) -> None:
+        idx = pd.date_range("2025-01-01", periods=2, freq="h", tz="Europe/Brussels")
+        mock_generation.return_value = pd.DataFrame(
+            {
+                "Solar": [10.0, 20.0],
+                "Solar consumption": [1000.0, 1000.0],
+                "Wind Onshore": [30.0, 40.0],
+                "Load": [500.0, 500.0],
+                "Gas": [60.0, 40.0],
+            },
+            index=idx,
+        )
+
+        df = fetch_generation_data(
+            "DE_LU",
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-01T02:00:00Z"),
+        )
+
+        assert list(df["solar_mw"]) == [10.0, 20.0]
+        assert list(df["wind_onshore_mw"]) == [30.0, 40.0]
+        assert list(df["total_generation_mw"]) == [100.0, 100.0]
+        assert list(df["renewable_pct"]) == [40.0, 60.0]
+
+
 class TestFetchRegelleistungResults:
     def _make_xlsx_bytes(self) -> bytes:
         """Create a minimal xlsx that mimics Regelleistung tender export."""
@@ -741,13 +926,39 @@ class TestFetchRegelleistungResults:
         mock_api.return_value = self._make_xlsx_bytes()
         result = fetch_regelleistung_results(
             "FCR",
-            pd.Timestamp("2025-01-01", tz="UTC"),
-            pd.Timestamp("2025-01-02", tz="UTC"),
+            pd.Timestamp("2024-12-31T23:00:00Z"),
+            pd.Timestamp("2025-01-01T23:00:00Z"),
         )
         assert result is not None
         assert len(result) == 2
+        assert str(result["timestamp"].iloc[0]) == "2024-12-31 23:00:00+00:00"
+        assert str(result["timestamp"].iloc[1]) == "2025-01-01 03:00:00+00:00"
         assert "capacity_price_eur_mw" in result.columns
         assert result["capacity_price_eur_mw"].iloc[0] == 5.50
+
+    @patch("src.data_ingestion._call_regelleistung_api")
+    def test_parses_range_style_time_block(self, mock_api: MagicMock) -> None:
+        import openpyxl
+        from io import BytesIO
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append(["PRODUCT_NAME", "CAPACITY PRICE [EUR/MW]", "FROM", "DIRECTION"])
+        ws.append(["aFRR", 7.0, "00:00-04:00", "NEG"])
+        buf = BytesIO()
+        wb.save(buf)
+        mock_api.return_value = buf.getvalue()
+
+        result = fetch_regelleistung_results(
+            "aFRR",
+            pd.Timestamp("2024-12-31T23:00:00Z"),
+            pd.Timestamp("2025-01-01T23:00:00Z"),
+        )
+
+        assert result is not None
+        assert len(result) == 1
+        assert str(result["timestamp"].iloc[0]) == "2024-12-31 23:00:00+00:00"
+        assert result["direction"].iloc[0] == "Down"
 
     @patch("src.data_ingestion._call_regelleistung_api")
     def test_returns_none_on_network_error(
@@ -866,6 +1077,71 @@ class TestFetchElexonSystemPrices:
         assert list(df.index.astype(str)) == [
             "2025-01-01 00:30:00+00:00",
             "2025-01-02 00:00:00+00:00",
+        ]
+
+    @patch("src.data_ingestion.requests.get")
+    def test_bst_settlement_period_maps_from_london_local_time(
+        self, mock_get: MagicMock,
+    ) -> None:
+        """GB period 1 during BST is 23:00 UTC on the previous calendar day."""
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = [
+            {
+                "settlementDate": "2025-07-01",
+                "settlementPeriod": 1,
+                "systemBuyPrice": 55.0,
+                "systemSellPrice": 45.0,
+            },
+            {
+                "settlementDate": "2025-07-01",
+                "settlementPeriod": 3,
+                "systemBuyPrice": 56.0,
+                "systemSellPrice": 46.0,
+            },
+        ]
+        mock_get.return_value = mock_resp
+
+        df = fetch_elexon_system_prices(
+            start=pd.Timestamp("2025-06-30T23:00:00Z"),
+            end=pd.Timestamp("2025-07-01T01:00:00Z"),
+        )
+
+        assert list(df.index.astype(str)) == [
+            "2025-06-30 23:00:00+00:00",
+            "2025-07-01 00:00:00+00:00",
+        ]
+
+    @patch("src.data_ingestion.requests.get")
+    def test_fall_back_day_keeps_repeated_local_hour_distinct(
+        self, mock_get: MagicMock,
+    ) -> None:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = [
+            {
+                "settlementDate": "2025-10-26",
+                "settlementPeriod": 3,
+                "systemBuyPrice": 55.0,
+                "systemSellPrice": 45.0,
+            },
+            {
+                "settlementDate": "2025-10-26",
+                "settlementPeriod": 5,
+                "systemBuyPrice": 56.0,
+                "systemSellPrice": 46.0,
+            },
+        ]
+        mock_get.return_value = mock_resp
+
+        df = fetch_elexon_system_prices(
+            start=pd.Timestamp("2025-10-25T23:00:00Z"),
+            end=pd.Timestamp("2025-10-26T02:00:00Z"),
+        )
+
+        assert list(df.index.astype(str)) == [
+            "2025-10-26 00:00:00+00:00",
+            "2025-10-26 01:00:00+00:00",
         ]
 
     @patch("src.data_ingestion.requests.get")

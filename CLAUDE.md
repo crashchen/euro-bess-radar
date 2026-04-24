@@ -11,10 +11,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `src/config.py` is the single source of truth for zones, timezones, cache paths, and revenue-math constants (`HOURS_PER_YEAR`, `ANCILLARY_CAPACITY_AVAILABILITY=0.95`, `ANCILLARY_ENERGY_ACTIVATION_SHARE=0.10`, `GBP_EUR_YEARLY`). Nothing else should hard-code zones or FX rates.
 
 Data flow inside one dashboard run (`app.py`):
-1. `data_ingestion.fetch_da_prices()` dispatches to the right backend (entsoe-py for ENTSO-E zones, Elexon REST for GB), runs `build_zone_query_window()` to convert local calendar dates to a UTC `[start, end)` window, and caches into `da_prices_{zone}` SQLite tables. Cache validity is checked against `_expected_cache_interval()` + `reindex` so gaps are detected as missing points, not accepted as sparse data.
-2. `analytics.py` consumes the UTC price frame but groups by the zone's local calendar day via the `tz` parameter. `_find_daily_ordered_trade()` (called from `calculate_ordered_spreads()`) finds the best chronology-aware charge→discharge pair with rolling windows sized by `duration_hours`. Heatmaps, P50/P90, RE correlation, and revenue all share this ordered-spread basis.
+1. `data_ingestion.fetch_prices()` dispatches to the right backend (entsoe-py for ENTSO-E zones, Elexon REST for GB), runs `build_zone_query_window()` to convert local calendar dates to a UTC `[start, end)` window, and caches into `da_prices_{zone}` SQLite tables. Cache validity is checked per requested slice using row-level `fetched_at`, `_expected_cache_interval()` + `reindex`, so stale rows and gaps are detected as missing points instead of accepted as sparse data.
+2. `analytics.py` consumes the UTC price frame but groups by the zone's local calendar day via the `tz` parameter. `_find_daily_ordered_trade()` (called from `calculate_daily_spreads()`) finds the best chronology-aware charge→discharge pair with rolling windows sized by `duration_hours`. Heatmaps, P50/P90, RE correlation, and revenue all share this ordered-spread basis.
 3. `ancillary_fetchers.py` exposes a lazy `getattr()` registry (`fetch_{zone}_ancillary`) used by `run_auto_fetch()`. Results flow into `ancillary.normalize_auto_fetch_dataset()` and then `build_ancillary_dataset()`, which merges with any user-uploaded manual CSVs — manual uploads override auto-fetch *only for the same product type*, preserving other auto-fetched products.
-4. `merge_revenue_stack()` combines DA arbitrage with per-product ancillary revenue and returns a `source_revenues` dict (e.g. `DA Arbitrage`, `FCR-N`, `aFRR Up`) that both the Revenue tab and `export.py` read from.
+4. `merge_revenue_stack()` combines DA arbitrage with per-product ancillary revenue and returns a `source_revenues` dict (e.g. `DA Arbitrage`, `FCR-N`, `aFRR Up`) that both the Revenue tab and `export.py` read from. Capacity-reserve ancillary is not treated as fully additive with DA in the headline total; `gross_additive_total_eur` remains available as a non-co-optimized reference.
 5. `export.py` writes Excel reports that must respect the same `tz` parameter and stacked-revenue breakdown as the dashboard.
 
 Tests in `tests/` are heavily mocked (no live API calls) and mirror the module layout 1:1. `conftest.py` holds shared price/ancillary fixtures.
@@ -37,7 +37,7 @@ Tests in `tests/` are heavily mocked (no live API calls) and mirror the module l
   - GET /balancing/settlement/system-prices — system buy/sell prices (30-min)
   - GET /datasets/FUELINST — generation mix by fuel type
 - GBP→EUR conversion uses year-specific rates via `GBP_EUR_YEARLY` dict in config.py
-- Elexon returns 2 data providers per settlement period — zeros are filtered, non-zero prices averaged
+- Elexon returns multiple data providers per settlement period. Legitimate £0/MWh and negative prices must be retained; only recognizable duplicate zero placeholders are dropped before averaging remaining provider rows.
 
 ### Fingrid Open Data (Finland)
 - API key recommended/required for v2 (`x-api-key` header via `FINGRID_API_KEY`)
@@ -53,6 +53,12 @@ Tests in `tests/` are heavily mocked (no live API calls) and mirror the module l
 - Auto-fetch enabled: downloads daily tender results as xlsx, parsed into standard ancillary format
 - Manual CSV upload (`DE_FCR`, `DE_aFRR`) still supported as fallback and overrides auto-fetch for same product type
 - Returns: capacity prices in EUR/MW
+
+### Netztransparenz.de (Germany, Phase 3 reference)
+- Public German TSO transparency portal for balancing capacity/energy publications.
+- Base URL reserved in config as `NETZTRANSPARENZ_BASE_URL`; no fetcher is implemented yet.
+- Relevant future datasets: activated aFRR/mFRR, GCC/LFC area balance, reBAP imbalance prices, and reBAP components.
+- Not a replacement for the implemented Regelleistung.net tender-result fetcher in this repo. Treat it as a future activation/reBAP diagnostics source until an explicit fetcher is added.
 
 ### ENTSO-E Imbalance Prices
 - Uses same ENTSO-E API key as DA prices
@@ -116,12 +122,12 @@ Upload via sidebar. Template CSVs downloadable from the UI.
 - DA prices across ENTSO-E are in EUR/MWh; GB is in GBP/MWh
 - Generation data: not all zones have solar/wind/offshore split — handle missing columns gracefully
 - Negative wind/solar-price correlation = BESS-friendly market (high RE → low prices = charging, low RE → high prices = discharging)
-- **Revenue stacking**: `merge_revenue_stack()` combines DA arbitrage + ancillary revenues with `source_revenues` dict for per-product breakdown (e.g. DA Arbitrage, FCR-N, aFRR Up)
+- **Revenue stacking**: `merge_revenue_stack()` exposes DA arbitrage + ancillary `source_revenues` for per-product breakdown, but capacity-reserve ancillary is not assumed to be fully additive with DA in the headline total without co-optimization.
 - **Annualisation caveat**: DA arbitrage revenue is extrapolated from the user-selected sample window, so short windows (for example winter-only periods) can materially overstate or understate full-year merchant potential
 
 ## Commands
 - `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
-- `python -m pytest tests/ -v` — run all tests (138 tests, fully mocked, no network).
+- `python -m pytest tests/ -v` — run all tests (152 tests, fully mocked, no network).
 - `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
 - `streamlit run app.py` — launch the dashboard.
 - `python -c "from src.data_ingestion import test_elexon_connection; test_elexon_connection()"` — smoke-test Elexon (no API key needed).

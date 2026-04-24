@@ -267,6 +267,9 @@ class TestExportToBytes:
             "annual_revenue_eur_per_mw": 120000.0,
             "total_eur": 120000.0,
             "total_per_mw": 120000.0,
+            "gross_additive_total_eur": 145000.0,
+            "headline_total_mode": "conservative_da_primary",
+            "capacity_stack_warning": "Capacity reserve is not co-optimized.",
             "source_revenues": {
                 "DA Arbitrage": 80000.0,
                 "FCR-N": 25000.0,
@@ -292,6 +295,9 @@ class TestExportToBytes:
         }
 
         assert summary["Est. Annual Revenue (EUR/MW)"] == 120000
-        assert summary["Total Annual Revenue (EUR)"] == 120000
+        assert summary["Headline Annual Revenue (EUR)"] == 120000
+        assert summary["Gross Additive Total (Reference, EUR)"] == 145000
+        assert summary["Headline Total Mode"] == "conservative_da_primary"
+        assert summary["Capacity Stack Warning"] == "Capacity reserve is not co-optimized."
         assert summary["DA Arbitrage Revenue (EUR)"] == 80000
         assert summary["FCR-N Revenue (EUR)"] == 25000

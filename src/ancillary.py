@@ -14,6 +14,10 @@ from src.config import (
     ANCILLARY_ENERGY_ACTIVATION_SHARE,
     HOURS_PER_YEAR,
 )
+from src.time_utils import (
+    gb_settlement_period_to_utc,
+    parse_regelleistung_time_block_start,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -165,6 +169,14 @@ def _parse_date_hour_index(
     )
 
 
+def _parse_regelleistung_block_index(dates, time_blocks) -> pd.DatetimeIndex:
+    """Convert German reserve date/time-block columns to UTC timestamps."""
+    timestamps = []
+    for target_date, time_block in zip(pd.Series(dates), pd.Series(time_blocks)):
+        timestamps.append(parse_regelleistung_time_block_start(target_date, time_block))
+    return pd.DatetimeIndex(timestamps, name="timestamp")
+
+
 def _initialise_output(index: pd.DatetimeIndex) -> pd.DataFrame:
     """Create a standardised ancillary frame for the provided index."""
     out = pd.DataFrame(index=index)
@@ -273,17 +285,16 @@ def _timestamp_index_from_frame(df: pd.DataFrame) -> pd.DatetimeIndex:
         return pd.to_datetime(df["timestamp"], utc=True)
 
     if "date" in df.columns:
+        if "time_block" in df.columns:
+            return _parse_regelleistung_block_index(df["date"], df["time_block"])
         if "hour" in df.columns:
             return _parse_date_hour_index(df["date"], df["hour"])
         return pd.to_datetime(df["date"], utc=True)
 
     if "settlement_date" in df.columns and "settlement_period" in df.columns:
-        hour_min = ((df["settlement_period"].astype(int) - 1) * 30).apply(
-            lambda m: f"{m // 60:02d}:{m % 60:02d}"
-        )
-        return pd.to_datetime(
-            df["settlement_date"].astype(str) + " " + hour_min,
-            utc=True,
+        return gb_settlement_period_to_utc(
+            df["settlement_date"],
+            df["settlement_period"],
         )
 
     return pd.DatetimeIndex([], tz="UTC", name="timestamp")
@@ -479,17 +490,16 @@ def parse_ancillary_csv(
     # Parse timestamp
     idx = pd.DatetimeIndex([], tz="UTC", name="timestamp")
     if "date" in df.columns:
-        if "hour" in df.columns:
+        if "time_block" in df.columns:
+            idx = _parse_regelleistung_block_index(df["date"], df["time_block"])
+        elif "hour" in df.columns:
             idx = _parse_date_hour_index(df["date"], df["hour"], template_key=template_key)
         else:
             idx = pd.to_datetime(df["date"], utc=True)
     elif "settlement_date" in df.columns:
-        # GB: 30-min periods, period 1 = 00:00
-        df["hour_min"] = ((df["settlement_period"].astype(int) - 1) * 30).apply(
-            lambda m: f"{m // 60:02d}:{m % 60:02d}"
-        )
-        idx = pd.to_datetime(
-            df["settlement_date"].astype(str) + " " + df["hour_min"], utc=True,
+        idx = gb_settlement_period_to_utc(
+            df["settlement_date"],
+            df["settlement_period"],
         )
 
     zone = template_key.split("_")[0]
@@ -639,23 +649,30 @@ def calculate_ancillary_revenue(
         "mfrr_annual_eur": 0.0,
         "total_ancillary_eur": 0.0,
         "total_ancillary_per_mw": 0.0,
+        "capacity_ancillary_eur": 0.0,
+        "energy_ancillary_eur": 0.0,
         "product_revenues": {},
+        "product_revenue_types": {},
     }
 
     if ancillary_df.empty:
         return result
 
     product_revenues: dict[str, float] = {}
+    product_revenue_types: dict[str, str] = {}
     grouped = ancillary_df.groupby(
         ancillary_df["product_type"].fillna("UNKNOWN").astype(str).str.strip()
     )
     for product, group in grouped:
         annual_revenue = 0.0
+        capacity_revenue = 0.0
+        energy_revenue = 0.0
 
         cap_prices = group["capacity_price_eur_mw"].dropna()
         if not cap_prices.empty:
             avg_cap = _capacity_price_mean(cap_prices, product)
-            annual_revenue += avg_cap * power_mw * HOURS_PER_YEAR * availability
+            capacity_revenue = avg_cap * power_mw * HOURS_PER_YEAR * availability
+            annual_revenue += capacity_revenue
 
         energy_prices = group["energy_price_eur_mwh"].dropna()
         if not energy_prices.empty:
@@ -664,13 +681,22 @@ def calculate_ancillary_revenue(
             # screening assumption for activated hours. Two-sided balancing
             # signals are preserved separately and are not auto-monetised here.
             activation_hours = HOURS_PER_YEAR * ANCILLARY_ENERGY_ACTIVATION_SHARE
-            annual_revenue += avg_energy * power_mw * activation_hours
+            energy_revenue = avg_energy * power_mw * activation_hours
+            annual_revenue += energy_revenue
 
         if annual_revenue <= 0:
             continue
 
         annual_revenue = round(annual_revenue, 2)
         product_revenues[product] = annual_revenue
+        if capacity_revenue > 0 and energy_revenue > 0:
+            product_revenue_types[product] = "mixed"
+        elif capacity_revenue > 0:
+            product_revenue_types[product] = "capacity"
+        else:
+            product_revenue_types[product] = "energy"
+        result["capacity_ancillary_eur"] += capacity_revenue
+        result["energy_ancillary_eur"] += energy_revenue
         bucket = _service_bucket(product)
         result[bucket] += annual_revenue
 
@@ -678,7 +704,10 @@ def calculate_ancillary_revenue(
         result["fcr_annual_eur"] + result["afrr_annual_eur"] + result["mfrr_annual_eur"], 2
     )
     result["total_ancillary_per_mw"] = round(result["total_ancillary_eur"] / power_mw, 2)
+    result["capacity_ancillary_eur"] = round(result["capacity_ancillary_eur"], 2)
+    result["energy_ancillary_eur"] = round(result["energy_ancillary_eur"], 2)
     result["product_revenues"] = dict(sorted(product_revenues.items()))
+    result["product_revenue_types"] = dict(sorted(product_revenue_types.items()))
     return result
 
 
@@ -703,21 +732,55 @@ def merge_revenue_stack(
     afrr = ancillary_revenue.get("afrr_annual_eur", 0.0)
     mfrr = ancillary_revenue.get("mfrr_annual_eur", 0.0)
     product_revenues = ancillary_revenue.get("product_revenues", {})
-    total = da_eur + fcr + afrr + mfrr
+    standalone_ancillary = fcr + afrr + mfrr
+    gross_additive_total = da_eur + standalone_ancillary
+    capacity_ancillary = ancillary_revenue.get("capacity_ancillary_eur", 0.0)
+    product_revenue_types = ancillary_revenue.get("product_revenue_types", {})
+    has_capacity_ancillary = (
+        capacity_ancillary > 0
+        or any(kind in {"capacity", "mixed"} for kind in product_revenue_types.values())
+    )
+
+    if has_capacity_ancillary and standalone_ancillary > 0:
+        # DA arbitrage is the primary dispatch signal; capacity reserves
+        # cannot be simultaneously committed at full power.  Use DA as the
+        # headline and expose the gross additive figure as a reference only.
+        total = da_eur
+        headline_total_mode = "conservative_da_primary"
+        capacity_stack_warning = (
+            "Capacity reserve revenue is not added to the headline total because "
+            "it cannot be fully co-dispatched with day-ahead arbitrage. "
+            "Gross additive total is shown as a non-co-optimized reference."
+        )
+    else:
+        total = gross_additive_total
+        headline_total_mode = "additive_energy_only" if standalone_ancillary > 0 else "da_only"
+        capacity_stack_warning = ""
 
     source_revenues = {"DA Arbitrage": round(da_eur, 2)}
     for product, value in product_revenues.items():
         source_revenues[product] = round(float(value), 2)
+    component_total = gross_additive_total
 
     return {
         "da_arbitrage_eur": round(da_eur, 2),
         "fcr_eur": round(fcr, 2),
         "afrr_eur": round(afrr, 2),
         "mfrr_eur": round(mfrr, 2),
+        "standalone_ancillary_eur": round(standalone_ancillary, 2),
+        "capacity_ancillary_eur": round(capacity_ancillary, 2),
+        "energy_ancillary_eur": round(ancillary_revenue.get("energy_ancillary_eur", 0.0), 2),
         "product_revenues": product_revenues,
+        "product_revenue_types": product_revenue_types,
         "source_revenues": source_revenues,
         "total_eur": round(total, 2),
         "total_per_mw": round(total / power_mw, 2) if power_mw > 0 else 0.0,
-        "da_pct": round(100.0 * da_eur / total, 1) if total > 0 else 0.0,
-        "ancillary_pct": round(100.0 * (total - da_eur) / total, 1) if total > 0 else 0.0,
+        "gross_additive_total_eur": round(gross_additive_total, 2),
+        "headline_total_mode": headline_total_mode,
+        "capacity_stack_warning": capacity_stack_warning,
+        "da_pct": round(100.0 * da_eur / component_total, 1) if component_total > 0 else 0.0,
+        "ancillary_pct": (
+            round(100.0 * standalone_ancillary / component_total, 1)
+            if component_total > 0 else 0.0
+        ),
     }

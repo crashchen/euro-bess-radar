@@ -24,6 +24,7 @@ REGELLEISTUNG_API_URL = (
     "https://www.regelleistung.net/apps/cpp-publisher/api/v1"
     "/download/tenders/resultsoverview"
 )
+NETZTRANSPARENZ_BASE_URL = "https://www.netztransparenz.de"
 
 # --- FX Rates (approximate annual averages, update as needed) ---
 GBP_EUR_YEARLY: dict[int, float] = {

@@ -16,7 +16,7 @@ from src.analytics import (
     build_renewable_price_scatter,
     build_spread_heatmap,
     calculate_daily_spreads,
-    calculate_monthly_spreads,
+    calculate_monthly_spreads_from_daily,
     calculate_negative_price_hours,
     calculate_spread_percentiles,
     compare_zones,
@@ -74,6 +74,47 @@ def _store_ancillary_scope(zone: str, start: object, end: object) -> None:
     st.session_state["ancillary_zone"] = zone
     st.session_state["ancillary_dates"] = (str(start), str(end))
 
+
+def _clear_stale_price_state() -> None:
+    """Remove fetched price data when the sidebar scope changes."""
+    for key in ("zone_data", "selected_zones", "fetched_zone_date_scope", "refresh_token"):
+        st.session_state.pop(key, None)
+
+
+def _parse_and_store_ancillary_upload(
+    uploaded_file,
+    template_key: str,
+    zone: str,
+    start: object,
+    end: object,
+) -> None:
+    """Parse one uploaded ancillary CSV and store it under the active scope."""
+    try:
+        content = uploaded_file.getvalue().decode("utf-8-sig")
+        parsed = parse_ancillary_csv(content, template_key)
+        st.session_state["ancillary_df"] = parsed
+        st.session_state["ancillary_template"] = template_key
+        _store_ancillary_scope(zone, start, end)
+        st.success(f"{template_key} loaded: {len(parsed)} rows")
+    except UnicodeDecodeError:
+        st.error("Parse error: the uploaded file is not valid UTF-8/CSV text.")
+    except (ValueError, pd.errors.ParserError) as exc:
+        st.error(f"Parse error: {exc}")
+
+
+def _run_and_store_ancillary_fetch(zone: str, start: object, end: object) -> None:
+    """Run the configured ancillary auto-fetchers and store successful results."""
+    fetchers = get_available_fetchers(zone)
+    with st.spinner(f"Fetching from {', '.join(f['source'] for f in fetchers)}..."):
+        auto_start, auto_end = build_zone_query_window(zone, start, end)
+        results = run_auto_fetch(zone, auto_start, auto_end)
+        if results:
+            st.session_state["auto_fetch_results"] = results
+            _store_ancillary_scope(zone, start, end)
+            st.success(f"Fetched {len(results)} dataset(s): " + ", ".join(results.keys()))
+        else:
+            st.warning("No data returned. Try manual CSV upload instead.")
+
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 
 st.sidebar.title("BESS Pulse")
@@ -100,19 +141,23 @@ current_zone_date_scope = (tuple(selected_zones), str(start_date), str(end_date)
 previous_zone_date_scope = st.session_state.get("zone_date_scope")
 if previous_zone_date_scope is not None and previous_zone_date_scope != current_zone_date_scope:
     _clear_stale_ancillary_state()
+    _clear_stale_price_state()
 st.session_state["zone_date_scope"] = current_zone_date_scope
 
-# BESS parameters
+# BESS parameters — wrapped in a form so slider/input changes don't trigger
+# a full Streamlit re-run until the user clicks "Apply".
 st.sidebar.subheader("BESS Parameters")
-power_mw = st.sidebar.number_input("Power (MW)", min_value=0.1, value=10.0, step=1.0)
-duration_hours = st.sidebar.selectbox("Duration (h)", [1, 2, 4], index=0)
-efficiency = st.sidebar.slider("Efficiency (%)", 85, 95, 88) / 100.0
-capture_rate = st.sidebar.slider("Capture (%)", 30, 100, 70) / 100.0
-capex_eur_kwh = st.sidebar.number_input(
-    "CapEx (EUR/kWh)",
-    min_value=0.0, value=0.0, step=50.0,
-    help="Enter installed CapEx to calculate payback period. Leave 0 to skip.",
-)
+with st.sidebar.form("bess_params"):
+    power_mw = st.number_input("Power (MW)", min_value=0.1, value=10.0, step=1.0)
+    duration_hours = st.selectbox("Duration (h)", [1, 2, 4], index=0)
+    efficiency = st.slider("Efficiency (%)", 85, 95, 88) / 100.0
+    capture_rate = st.slider("Capture (%)", 30, 100, 70) / 100.0
+    capex_eur_kwh = st.number_input(
+        "CapEx (EUR/kWh)",
+        min_value=0.0, value=0.0, step=50.0,
+        help="Enter installed CapEx to calculate payback period. Leave 0 to skip.",
+    )
+    st.form_submit_button("Apply", type="primary")
 force_refresh = st.sidebar.checkbox(
     "Force Refresh",
     value=False,
@@ -135,17 +180,13 @@ with st.sidebar.expander("Ancillary Services Data"):
 
     if anc_file is not None:
         if st.button("Parse & Import"):
-            try:
-                content = anc_file.getvalue().decode("utf-8-sig")
-                anc_df = parse_ancillary_csv(content, anc_template)
-                st.session_state["ancillary_df"] = anc_df
-                st.session_state["ancillary_template"] = anc_template
-                _store_ancillary_scope(primary_zone_for_fetch, start_date, end_date)
-                st.success(f"{anc_template} loaded: {len(anc_df)} rows")
-            except UnicodeDecodeError:
-                st.error("Parse error: the uploaded file is not valid UTF-8/CSV text.")
-            except (ValueError, pd.errors.ParserError) as exc:
-                st.error(f"Parse error: {exc}")
+            _parse_and_store_ancillary_upload(
+                anc_file,
+                anc_template,
+                primary_zone_for_fetch,
+                start_date,
+                end_date,
+            )
 
     if "ancillary_df" in st.session_state:
         st.caption(f"Loaded: {st.session_state['ancillary_template']} "
@@ -179,26 +220,7 @@ with st.sidebar.expander("Auto-Fetch Ancillary Data"):
             f"\u26a1 Fetch ancillary data for {primary_zone_for_fetch}",
             key="auto_fetch_ancillary",
         ):
-            with st.spinner(
-                f"Fetching from {', '.join(f['source'] for f in fetchers)}..."
-            ):
-                auto_start, auto_end = build_zone_query_window(
-                    primary_zone_for_fetch,
-                    start_date,
-                    end_date,
-                )
-                results = run_auto_fetch(primary_zone_for_fetch, auto_start, auto_end)
-                if results:
-                    st.session_state["auto_fetch_results"] = results
-                    _store_ancillary_scope(primary_zone_for_fetch, start_date, end_date)
-                    st.success(
-                        f"Fetched {len(results)} dataset(s): "
-                        + ", ".join(results.keys())
-                    )
-                else:
-                    st.warning(
-                        "No data returned. Try manual CSV upload instead."
-                    )
+            _run_and_store_ancillary_fetch(primary_zone_for_fetch, start_date, end_date)
     else:
         st.info("No auto-fetch available for this zone. Use CSV upload.")
 
@@ -256,8 +278,6 @@ if fetch_btn or "zone_data" in st.session_state:
     refresh_token = st.session_state.get("refresh_token", 0)
     if fetch_btn:
         if force_refresh:
-            load_zone_data.clear()
-            load_generation.clear()
             refresh_token = time.time_ns()
         else:
             refresh_token = 0
@@ -287,10 +307,13 @@ if fetch_btn or "zone_data" in st.session_state:
         progress.empty()
         st.session_state["zone_data"] = zone_data
         st.session_state["selected_zones"] = selected_zones
+        st.session_state["fetched_zone_date_scope"] = current_zone_date_scope
         st.session_state["refresh_token"] = refresh_token
     else:
         zone_data = st.session_state.get("zone_data", {})
         selected_zones = st.session_state.get("selected_zones", selected_zones)
+        if st.session_state.get("fetched_zone_date_scope") != current_zone_date_scope:
+            zone_data = {}
 
     if not zone_data:
         st.warning("No data available. Check zone selection and date range.")
@@ -324,9 +347,7 @@ if fetch_btn or "zone_data" in st.session_state:
     daily_spreads = calculate_daily_spreads(
         primary_df, tz=zone_tz, duration_hours=duration_hours,
     )
-    monthly_spreads = calculate_monthly_spreads(
-        primary_df, tz=zone_tz, duration_hours=duration_hours,
-    )
+    monthly_spreads = calculate_monthly_spreads_from_daily(daily_spreads)
     percentiles = calculate_spread_percentiles(daily_spreads)
     neg_stats = calculate_negative_price_hours(primary_df)
     revenue = estimate_annual_arbitrage_revenue(
@@ -546,14 +567,33 @@ if fetch_btn or "zone_data" in st.session_state:
 
         r1, r2, r3 = st.columns(3)
         if stack:
-            r1.metric("Total Annual Revenue", f"\u20ac{stack['total_eur']:,.0f}")
+            r1.metric(
+                "Headline Annual Revenue",
+                f"\u20ac{stack['total_eur']:,.0f}",
+                help=stack.get("headline_total_mode", "combined screening total"),
+            )
             r2.metric("DA Arbitrage", f"\u20ac{stack['da_arbitrage_eur']:,.0f}",
-                       delta=f"{stack['da_pct']:.0f}% of total")
-            r3.metric("Ancillary Services", f"\u20ac{stack['total_eur'] - stack['da_arbitrage_eur']:,.0f}",
-                       delta=f"{stack['ancillary_pct']:.0f}% of total")
+                       delta=f"{stack['da_pct']:.0f}% of gross reference")
+            r3.metric(
+                "Ancillary Standalone",
+                f"\u20ac{stack['standalone_ancillary_eur']:,.0f}",
+                delta=f"{stack['ancillary_pct']:.0f}% of gross reference",
+            )
+
+            if stack.get("capacity_stack_warning"):
+                st.warning(stack["capacity_stack_warning"])
+                st.caption(
+                    f"Gross additive reference, not co-optimized: "
+                    f"\u20ac{stack['gross_additive_total_eur']:,.0f}/yr."
+                )
 
             component_rows = [
-                {"Source": source, "Annual Revenue (EUR)": value}
+                {
+                    "Source": source,
+                    "Standalone Annual Revenue (EUR)": value,
+                    "Revenue Type": stack.get("product_revenue_types", {}).get(source, "energy")
+                    if source != "DA Arbitrage" else "DA",
+                }
                 for source, value in stack["source_revenues"].items()
                 if value > 0
             ]
@@ -566,7 +606,7 @@ if fetch_btn or "zone_data" in st.session_state:
                 fig_stack.add_trace(go.Bar(
                     name=row["Source"],
                     y=["Annual Revenue"],
-                    x=[row["Annual Revenue (EUR)"]],
+                    x=[row["Standalone Annual Revenue (EUR)"]],
                     orientation="h",
                     marker_color=palette[idx % len(palette)],
                 ))
@@ -1007,17 +1047,7 @@ if fetch_btn or "zone_data" in st.session_state:
                     f"\u26a1 Fetch ancillary for {primary_zone}",
                     key="tab_auto_fetch",
                 ):
-                    with st.spinner("Fetching..."):
-                        af_start, af_end = build_zone_query_window(
-                            primary_zone, start_date, end_date,
-                        )
-                        af_results = run_auto_fetch(primary_zone, af_start, af_end)
-                        if af_results:
-                            st.session_state["auto_fetch_results"] = af_results
-                            _store_ancillary_scope(primary_zone, start_date, end_date)
-                            st.success(f"Fetched: {', '.join(af_results.keys())}")
-                        else:
-                            st.warning("No data returned.")
+                    _run_and_store_ancillary_fetch(primary_zone, start_date, end_date)
             else:
                 st.info("No auto-fetch available for this zone.")
 
@@ -1031,15 +1061,13 @@ if fetch_btn or "zone_data" in st.session_state:
             tab_file = st.file_uploader("Upload CSV", type=["csv"], key="tab_anc_upload")
             if tab_file is not None:
                 if st.button("Parse & Import", key="tab_anc_parse"):
-                    try:
-                        content = tab_file.getvalue().decode("utf-8-sig")
-                        parsed = parse_ancillary_csv(content, tab_template)
-                        st.session_state["ancillary_df"] = parsed
-                        st.session_state["ancillary_template"] = tab_template
-                        _store_ancillary_scope(primary_zone, start_date, end_date)
-                        st.success(f"{tab_template} loaded: {len(parsed)} rows")
-                    except (ValueError, pd.errors.ParserError, UnicodeDecodeError) as exc:
-                        st.error(f"Parse error: {exc}")
+                    _parse_and_store_ancillary_upload(
+                        tab_file,
+                        tab_template,
+                        primary_zone,
+                        start_date,
+                        end_date,
+                    )
 
         # Show loaded ancillary data summary
         st.divider()

@@ -94,6 +94,30 @@ class TestParsing:
         )
         assert df["energy_price_eur_mwh"].isna().all()
 
+    def test_gb_balancing_uses_london_settlement_timezone(self) -> None:
+        csv = (
+            "settlement_date,settlement_period,system_buy_price,system_sell_price\n"
+            "2025-07-01,1,55.00,45.00\n"
+            "2025-07-01,3,60.00,50.00\n"
+        )
+        df = parse_ancillary_csv(csv, "GB_BALANCING")
+        assert list(df.index.astype(str)) == [
+            "2025-06-30 23:00:00+00:00",
+            "2025-07-01 00:00:00+00:00",
+        ]
+
+    def test_de_time_block_parsing_uses_berlin_local_time(self) -> None:
+        csv = (
+            "date,time_block,product,capacity_price_eur_mw\n"
+            "2025-01-01,00:00-04:00,FCR,15.50\n"
+            "2025-01-01,04:00,FCR,16.20\n"
+        )
+        df = parse_ancillary_csv(csv, "DE_FCR")
+        assert list(df.index.astype(str)) == [
+            "2024-12-31 23:00:00+00:00",
+            "2025-01-01 03:00:00+00:00",
+        ]
+
     def test_gb_balancing_parsing_ignores_template_comment_line(self) -> None:
         csv = generate_template_csv("GB_BALANCING")
         df = parse_ancillary_csv(csv, "GB_BALANCING")
@@ -320,7 +344,9 @@ class TestAncillaryRevenue:
         df = parse_ancillary_csv(de_fcr_csv, "DE_FCR")
         result = calculate_ancillary_revenue(df)
         expected = {"fcr_annual_eur", "afrr_annual_eur", "mfrr_annual_eur",
-                    "total_ancillary_eur", "total_ancillary_per_mw", "product_revenues"}
+                    "total_ancillary_eur", "total_ancillary_per_mw",
+                    "capacity_ancillary_eur", "energy_ancillary_eur",
+                    "product_revenues", "product_revenue_types"}
         assert set(result.keys()) == expected
 
 
@@ -338,6 +364,7 @@ class TestMergeRevenueStack:
         }
         result = merge_revenue_stack(da, anc, power_mw=1.0)
         assert result["total_eur"] == 85000.0
+        assert result["headline_total_mode"] == "additive_energy_only"
         assert result["da_arbitrage_eur"] == 50000.0
         assert abs(result["da_pct"] - 58.8) < 0.1
         assert abs(result["ancillary_pct"] - 41.2) < 0.1
@@ -354,6 +381,8 @@ class TestMergeRevenueStack:
         }
         result = merge_revenue_stack(da, anc, power_mw=1.0)
         assert result["total_eur"] == 50000.0
+        assert result["gross_additive_total_eur"] == 50000.0
+        assert result["headline_total_mode"] == "da_only"
         assert result["da_pct"] == 100.0
 
     def test_total_per_mw_uses_power_when_da_is_zero(self) -> None:
@@ -383,6 +412,27 @@ class TestMergeRevenueStack:
         result = merge_revenue_stack(da, anc, power_mw=2.0)
         assert result["total_eur"] == 60000.0
         assert result["total_per_mw"] == 30000.0
+
+    def test_capacity_ancillary_is_not_default_additive_headline(self) -> None:
+        da = {"annual_revenue_eur": 50000.0, "annual_revenue_eur_per_mw": 50000.0}
+        anc = {
+            "fcr_annual_eur": 10000.0,
+            "afrr_annual_eur": 0.0,
+            "mfrr_annual_eur": 0.0,
+            "total_ancillary_eur": 10000.0,
+            "capacity_ancillary_eur": 10000.0,
+            "energy_ancillary_eur": 0.0,
+            "product_revenues": {"FCR-N": 10000.0},
+            "product_revenue_types": {"FCR-N": "capacity"},
+        }
+
+        result = merge_revenue_stack(da, anc, power_mw=1.0)
+
+        assert result["total_eur"] == 50000.0
+        assert result["gross_additive_total_eur"] == 60000.0
+        assert result["standalone_ancillary_eur"] == 10000.0
+        assert result["headline_total_mode"] == "conservative_da_primary"
+        assert "not added to the headline total" in result["capacity_stack_warning"]
 
 
 # ── Auto-fetcher registry ──────────────────────────────────────────────────

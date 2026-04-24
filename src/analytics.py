@@ -192,6 +192,24 @@ def calculate_monthly_spreads(
          avg_daily_max, avg_daily_min].
     """
     daily = calculate_daily_spreads(df, tz=tz, duration_hours=duration_hours)
+    return calculate_monthly_spreads_from_daily(daily)
+
+
+def calculate_monthly_spreads_from_daily(daily_spreads: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate already-computed daily spreads to monthly averages.
+
+    This avoids recomputing ordered daily trades when the dashboard already has
+    a duration-aware `daily_spreads` frame for the active zone.
+    """
+    if daily_spreads.empty:
+        return pd.DataFrame(
+            columns=[
+                "year_month", "avg_spread", "median_spread", "max_spread",
+                "min_spread", "avg_daily_max", "avg_daily_min",
+            ]
+        )
+
+    daily = daily_spreads.copy()
     daily["year_month"] = pd.to_datetime(daily["date"]).dt.to_period("M").astype(str)
 
     monthly = daily.groupby("year_month").agg(

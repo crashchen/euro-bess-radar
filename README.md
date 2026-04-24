@@ -22,6 +22,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 | Elexon Insights API | Great Britain | None |
 | Fingrid Open Data v2 | Finland | API key recommended (`FINGRID_API_KEY`) |
 | Regelleistung.net | Germany | REST API (FCR/aFRR tender results) + manual CSV fallback |
+| Netztransparenz.de | Germany | Future/reference source for balancing transparency, activated balancing, and reBAP |
 
 ## Quick Start
 
@@ -57,7 +58,7 @@ euro-bess-radar/
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   └── export.py             # Excel report generation
-├── tests/                    # 130 unit tests, heavily mocked
+├── tests/                    # 151 unit tests, heavily mocked
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads
@@ -74,6 +75,10 @@ Optimized for BESS investment screening in:
 - Italy South (IT_SUD) — DA prices + ENTSO-E imbalance
 - Sweden (SE_1-4) — Nordic market dynamics
 - Norway (NO_1-5) — Hydro-driven price patterns
+
+## Germany Balancing Data Roadmap
+
+Regelleistung.net remains the implemented German auto-fetch source for FCR/aFRR tender-result capacity prices. Netztransparenz.de is tracked as a Phase 3 reference source for German balancing transparency datasets, especially activated aFRR/mFRR, GCC/LFC area balance, and quarter-hourly reBAP imbalance prices. These datasets are useful for future activation/reBAP diagnostics, but they are not yet wired into the automated revenue model.
 
 ## License
 

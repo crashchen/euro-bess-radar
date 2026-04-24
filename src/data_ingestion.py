@@ -29,6 +29,10 @@ from src.config import (
     get_zone_timezone,
     is_elexon_zone,
 )
+from src.time_utils import (
+    gb_settlement_period_to_utc,
+    parse_regelleistung_time_block_start,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +204,22 @@ def _cache_updated_at(
     return ts.tz_localize("UTC") if ts.tzinfo is None else ts.tz_convert("UTC")
 
 
+def _gb_settlement_period_to_utc(
+    settlement_dates,
+    settlement_periods,
+) -> pd.DatetimeIndex:
+    """Internal wrapper for GB settlement-date/period UTC conversion."""
+    return gb_settlement_period_to_utc(settlement_dates, settlement_periods)
+
+
+def _parse_regelleistung_time_block_start(
+    target_date: str | date | pd.Timestamp,
+    time_block,
+) -> pd.Timestamp:
+    """Internal wrapper for German reserve block start parsing."""
+    return parse_regelleistung_time_block_start(target_date, time_block)
+
+
 def _convert_gbp_series_to_eur(
     gbp_values: pd.Series,
     timestamps,
@@ -261,13 +281,57 @@ def _infer_segment_freq(
 def _segment_and_reindex_prices(
     df: pd.DataFrame,
     zone: str | None = None,
+    expected_start: pd.Timestamp | None = None,
+    expected_end: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     """Reindex one or more contiguous resolution segments without crashing."""
-    if len(df) < 2:
+    if df.empty:
         df.index.name = "timestamp"
         return df
 
     index = pd.DatetimeIndex(df.index)
+    if expected_start is not None and expected_end is not None:
+        start = _to_utc_timestamp(expected_start)
+        end = _to_utc_timestamp(expected_end)
+        if end <= start:
+            df.index.name = "timestamp"
+            return df
+
+        inferred = _infer_segment_freq(index, zone=zone)
+        fallback = _expected_cache_interval(zone or "", index)
+
+        if zone and _ZONE_RESOLUTION_TRANSITIONS.get(zone):
+            reindexed_segments: list[pd.DataFrame] = []
+            split_points = [start, *_zone_resolution_boundaries(zone, start, end), end]
+            for segment_start, segment_end in zip(split_points, split_points[1:]):
+                interval = _expected_interval_for_segment(
+                    zone,
+                    segment_start,
+                    inferred or fallback,
+                )
+                expected_points = max(int(round((segment_end - segment_start) / interval)), 1)
+                expected_idx = pd.date_range(
+                    start=segment_start,
+                    periods=expected_points,
+                    freq=interval,
+                )
+                segment = df[(df.index >= segment_start) & (df.index < segment_end)]
+                reindexed_segments.append(segment.reindex(expected_idx))
+            out = pd.concat(reindexed_segments).sort_index()
+            out.index.name = "timestamp"
+            return out
+
+        interval = min(inferred, fallback) if inferred is not None else fallback
+        expected_points = max(int(round((end - start) / interval)), 1)
+        full_idx = pd.date_range(start=start, periods=expected_points, freq=interval)
+        out = df.reindex(full_idx)
+        out.index.name = "timestamp"
+        return out
+
+    if len(df) < 2:
+        df.index.name = "timestamp"
+        return df
+
     deltas = pd.Series(index).diff()
     positive = deltas.dropna()[deltas.dropna() > pd.Timedelta(0)]
 
@@ -394,12 +458,16 @@ def _cache_segment_has_gaps(
 def clean_prices(
     df: pd.DataFrame,
     zone: str | None = None,
+    expected_start: pd.Timestamp | None = None,
+    expected_end: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
     """Clean raw price data: handle gaps, outliers, timezone normalisation.
 
     Args:
         df: DataFrame with DatetimeIndex named 'timestamp' and column 'price_eur_mwh'.
         zone: Optional zone code for more actionable logging.
+        expected_start: Optional requested UTC start boundary for gap detection.
+        expected_end: Optional requested UTC exclusive end boundary for gap detection.
 
     Returns:
         Cleaned DataFrame with gaps forward-filled, no NaN remaining, plus a
@@ -410,7 +478,12 @@ def clean_prices(
 
     df = df.sort_index()
     df = df[~df.index.duplicated(keep="last")]
-    df = _segment_and_reindex_prices(df, zone=zone)
+    df = _segment_and_reindex_prices(
+        df,
+        zone=zone,
+        expected_start=expected_start,
+        expected_end=expected_end,
+    )
     df["filled"] = df["price_eur_mwh"].isna()
     df["price_eur_mwh"] = df["price_eur_mwh"].ffill().bfill()
     df["filled"] = df["filled"].astype(bool)
@@ -536,6 +609,57 @@ def _call_elexon_system_prices_api(
     return resp.json()
 
 
+def _drop_elexon_zero_placeholders(df: pd.DataFrame) -> pd.DataFrame:
+    """Drop duplicate zero placeholder rows without removing legitimate £0 prices."""
+    if df.empty or "timestamp" not in df.columns or "price_gbp" not in df.columns:
+        return df
+
+    duplicate_period = df.groupby("timestamp")["price_gbp"].transform("size") > 1
+    has_nonzero_price = df.groupby("timestamp")["price_gbp"].transform(
+        lambda values: values.ne(0).any()
+    )
+    zero_candidate = df["price_gbp"].eq(0) & duplicate_period & has_nonzero_price
+
+    volume_col = next((c for c in df.columns if "volume" in c.lower()), None)
+    if volume_col is not None:
+        zero_candidate &= pd.to_numeric(df[volume_col], errors="coerce").fillna(0).eq(0)
+    else:
+        provider_col = next((c for c in df.columns if "provider" in c.lower()), None)
+        if provider_col is None:
+            # A real MID trade can clear at £0/MWh. Without a provider/volume
+            # hint, keep it and average duplicates rather than silently deleting it.
+            return df
+        provider = df[provider_col].fillna("").astype(str).str.lower()
+        zero_candidate &= provider.str.contains("placeholder|zero|fallback|dummy")
+
+    dropped = int(zero_candidate.sum())
+    if dropped:
+        logger.info("Dropped %d duplicate Elexon zero placeholder rows", dropped)
+    return df.loc[~zero_candidate].copy()
+
+
+def _elexon_monthly_chunks(
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> list[tuple[str, str]]:
+    """Split a [start, end) window into per-month Elexon date-bound pairs.
+
+    Each chunk covers at most one calendar month to avoid Elexon API timeouts
+    or 400 Payload Too Large errors on multi-year requests.
+    """
+    from_date, _ = _elexon_date_bounds(start, end)
+    _, to_date = _elexon_date_bounds(start, end)
+    cursor = pd.Timestamp(from_date)
+    final = pd.Timestamp(to_date)
+    chunks: list[tuple[str, str]] = []
+    while cursor < final:
+        month_end = (cursor + pd.offsets.MonthBegin(1)).normalize()
+        chunk_end = min(month_end, final)
+        chunks.append((cursor.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d")))
+        cursor = chunk_end
+    return chunks
+
+
 def fetch_elexon_prices(
     start: pd.Timestamp,
     end: pd.Timestamp,
@@ -553,27 +677,28 @@ def fetch_elexon_prices(
     """
     all_records: list[dict[str, Any]] = []
     request_errors: list[DataSourceError] = []
-    from_date_str, to_date_str = _elexon_date_bounds(start, end)
-    range_label = f"[{from_date_str}, {to_date_str})"
+    chunks = _elexon_monthly_chunks(start, end)
 
-    logger.info("Fetching Elexon data for %s", range_label)
-    try:
-        data = _call_elexon_api(from_date_str, to_date_str)
-        all_records.extend(_extract_elexon_records(data, range_label))
-    except requests.RequestException as exc:
-        logger.warning("Failed to fetch Elexon data for %s: %s", range_label, exc)
-        request_errors.append(
-            DataSourceNetworkError(
-                f"Elexon request failed for {range_label}. Please retry."
+    for from_date_str, to_date_str in chunks:
+        range_label = f"[{from_date_str}, {to_date_str})"
+        logger.info("Fetching Elexon data for %s", range_label)
+        try:
+            data = _call_elexon_api(from_date_str, to_date_str)
+            all_records.extend(_extract_elexon_records(data, range_label))
+        except requests.RequestException as exc:
+            logger.warning("Failed to fetch Elexon data for %s: %s", range_label, exc)
+            request_errors.append(
+                DataSourceNetworkError(
+                    f"Elexon request failed for {range_label}. Please retry."
+                )
             )
-        )
-    except (TypeError, ValueError, KeyError, DataSourceParseError) as exc:
-        logger.warning("Failed to parse Elexon data for %s: %s", range_label, exc)
-        request_errors.append(
-            DataSourceParseError(
-                f"Elexon response for {range_label} could not be parsed."
+        except (TypeError, ValueError, KeyError, DataSourceParseError) as exc:
+            logger.warning("Failed to parse Elexon data for %s: %s", range_label, exc)
+            request_errors.append(
+                DataSourceParseError(
+                    f"Elexon response for {range_label} could not be parsed."
+                )
             )
-        )
 
     if not all_records:
         if request_errors:
@@ -596,10 +721,11 @@ def fetch_elexon_prices(
             "Elexon response could not be parsed into timestamps and prices."
         ) from exc
 
-    # Each settlement period has multiple data providers (e.g. one with a
-    # real price and one reporting 0). Drop zero-provider rows; keep
-    # negative prices, then average any remaining duplicates per timestamp.
-    df = df[df["price_gbp"] != 0]
+    # Some Elexon provider feeds contain duplicate £0 placeholders next to a
+    # real price. A legitimate market price can also be exactly £0/MWh, so only
+    # remove rows that carry a duplicate/provider hint instead of blanket
+    # filtering all zero prices.
+    df = _drop_elexon_zero_placeholders(df)
     df = df.groupby("timestamp", as_index=True)["price_gbp"].mean().to_frame()
     df["price_eur_mwh"] = _convert_gbp_series_to_eur(df["price_gbp"], df.index)
     df = df[["price_eur_mwh"]].sort_index()
@@ -611,6 +737,24 @@ def fetch_elexon_prices(
 
 
 # ── Cache (SQLite + CSV) ─────────────────────────────────────────────────────
+
+def _ensure_price_cache_schema(conn: sqlite3.Connection, table_name: str) -> None:
+    """Create or upgrade a price-cache table with row-level freshness metadata."""
+    conn.execute(f"""
+        CREATE TABLE IF NOT EXISTS "{table_name}" (
+            timestamp TEXT PRIMARY KEY,
+            price_eur_mwh REAL NOT NULL,
+            zone TEXT NOT NULL,
+            fetched_at TEXT
+        )
+    """)
+    columns = {
+        row[1]
+        for row in conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+    }
+    if "fetched_at" not in columns:
+        conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN fetched_at TEXT')
+
 
 def write_cache(df: pd.DataFrame, zone: str) -> None:
     """Write DataFrame to SQLite table and CSV file."""
@@ -629,23 +773,19 @@ def write_cache(df: pd.DataFrame, zone: str) -> None:
 
     # CSV
     csv_path = CACHE_DIR / f"{table_name}.csv"
+    fetched_at = pd.Timestamp.now(tz="UTC").isoformat()
     export = persist_df.reset_index()
     export["timestamp"] = export["timestamp"].map(lambda t: t.isoformat())
     export["zone"] = zone
-    export = export[["timestamp", "price_eur_mwh", "zone"]]
+    export["fetched_at"] = fetched_at
+    export = export[["timestamp", "price_eur_mwh", "zone", "fetched_at"]]
     export.to_csv(csv_path, index=False)
     logger.info("Wrote CSV cache: %s", csv_path)
 
     # SQLite
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(f"""
-            CREATE TABLE IF NOT EXISTS "{table_name}" (
-                timestamp TEXT PRIMARY KEY,
-                price_eur_mwh REAL NOT NULL,
-                zone TEXT NOT NULL
-            )
-        """)
+        _ensure_price_cache_schema(conn, table_name)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS cache_metadata (
                 zone TEXT PRIMARY KEY,
@@ -654,11 +794,12 @@ def write_cache(df: pd.DataFrame, zone: str) -> None:
         """)
         rows = [
             (row.timestamp.isoformat() if hasattr(row.timestamp, "isoformat") else str(row.timestamp),
-             float(row.price_eur_mwh), zone)
+             float(row.price_eur_mwh), zone, fetched_at)
             for row in persist_df.reset_index().itertuples(index=False)
         ]
         conn.executemany(
-            f'INSERT OR REPLACE INTO "{table_name}" (timestamp, price_eur_mwh, zone) VALUES (?, ?, ?)',
+            f'INSERT OR REPLACE INTO "{table_name}" '
+            "(timestamp, price_eur_mwh, zone, fetched_at) VALUES (?, ?, ?, ?)",
             rows,
         )
         conn.execute(
@@ -679,24 +820,8 @@ def read_cache(
     table_name = f"da_prices_{zone.lower()}"
     try:
         with sqlite3.connect(DB_PATH) as conn:
-            updated_at = _cache_updated_at(conn, zone)
-            if updated_at is None:
-                logger.info("Cache metadata missing for %s; treating cache as stale", zone)
-                return None
-
-            ttl = pd.Timedelta(hours=PRICE_CACHE_TTL_HOURS)
-            age = pd.Timestamp.now(tz="UTC") - updated_at
-            if age > ttl:
-                logger.info(
-                    "Cache stale for %s: age=%s exceeds ttl=%s",
-                    zone,
-                    age,
-                    ttl,
-                )
-                return None
-
             query = (
-                f'SELECT timestamp, price_eur_mwh FROM "{table_name}" '
+                f'SELECT timestamp, price_eur_mwh, fetched_at FROM "{table_name}" '
                 "WHERE timestamp >= ? AND timestamp < ?"
             )
             df = pd.read_sql_query(
@@ -704,16 +829,37 @@ def read_cache(
                 params=(start.isoformat(), end.isoformat()),
                 parse_dates=["timestamp"],
             )
-    except (sqlite3.DatabaseError, pd.errors.ParserError, ValueError):
+    except (sqlite3.DatabaseError, pd.errors.DatabaseError, pd.errors.ParserError, ValueError):
         return None
 
     if df.empty:
+        return None
+
+    if "fetched_at" not in df.columns or df["fetched_at"].isna().any():
+        logger.info("Cache for %s uses old schema; treating requested slice as stale", zone)
+        return None
+
+    fetched_at = pd.to_datetime(df["fetched_at"], utc=True, errors="coerce")
+    if fetched_at.isna().any():
+        logger.info("Cache for %s has invalid fetched_at values; treating as stale", zone)
+        return None
+
+    ttl = pd.Timedelta(hours=PRICE_CACHE_TTL_HOURS)
+    stale_rows = fetched_at < (pd.Timestamp.now(tz="UTC") - ttl)
+    if stale_rows.any():
+        logger.info(
+            "Cache stale for %s: %d rows in requested slice exceed ttl=%s",
+            zone,
+            int(stale_rows.sum()),
+            ttl,
+        )
         return None
 
     df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
     df = df.set_index("timestamp")
     df.index.name = "timestamp"
     df["zone"] = zone
+    df = df.drop(columns=["fetched_at"])
 
     interval = _expected_cache_interval(zone, df.index)
     if _index_spans_known_resolution_boundary(zone, df.index):
@@ -773,7 +919,7 @@ def fetch_prices(
         return df
 
     # Clean and enrich
-    df = clean_prices(df, zone=zone)
+    df = clean_prices(df, zone=zone, expected_start=start_utc, expected_end=end_utc)
     df["zone"] = zone
 
     # Cache write
@@ -789,6 +935,7 @@ _RENEWABLE_COLS = [
     "solar_mw", "wind_onshore_mw", "wind_offshore_mw",
     "total_renewable_mw", "total_generation_mw", "renewable_pct",
 ]
+_NON_GENERATION_COLUMN_TERMS = ("consumption", "load", "demand")
 
 
 @retry(max_retries=3, backoff=2.0)
@@ -861,15 +1008,25 @@ def fetch_generation_data(
     df.index.name = "timestamp"
 
     # Map common ENTSO-E generation types
-    solar_cols = [c for c in raw.columns if "solar" in c.lower()]
-    wind_on_cols = [c for c in raw.columns if "wind" in c.lower() and "offshore" not in c.lower()]
-    wind_off_cols = [c for c in raw.columns if "wind" in c.lower() and "offshore" in c.lower()]
+    generation_cols = [
+        c for c in raw.columns
+        if not any(term in c.lower() for term in _NON_GENERATION_COLUMN_TERMS)
+    ]
+    solar_cols = [c for c in generation_cols if "solar" in c.lower()]
+    wind_on_cols = [
+        c for c in generation_cols
+        if "wind" in c.lower() and "offshore" not in c.lower()
+    ]
+    wind_off_cols = [
+        c for c in generation_cols
+        if "wind" in c.lower() and "offshore" in c.lower()
+    ]
 
     df["solar_mw"] = raw[solar_cols].sum(axis=1) if solar_cols else 0.0
     df["wind_onshore_mw"] = raw[wind_on_cols].sum(axis=1) if wind_on_cols else 0.0
     df["wind_offshore_mw"] = raw[wind_off_cols].sum(axis=1) if wind_off_cols else 0.0
     df["total_renewable_mw"] = df["solar_mw"] + df["wind_onshore_mw"] + df["wind_offshore_mw"]
-    df["total_generation_mw"] = raw.sum(axis=1)
+    df["total_generation_mw"] = raw[generation_cols].sum(axis=1) if generation_cols else 0.0
     df["renewable_pct"] = (
         df["total_renewable_mw"] / df["total_generation_mw"].replace(0, float("nan")) * 100
     ).fillna(0)
@@ -1039,6 +1196,7 @@ def fetch_fingrid_data(
     df["timestamp"] = pd.to_datetime(df[time_col], utc=True)
     df["value"] = pd.to_numeric(df["value"], errors="coerce")
     df = df[["timestamp", "value"]].dropna().sort_values("timestamp")
+    df = df.groupby("timestamp", as_index=False)["value"].mean()
     return df.reset_index(drop=True)
 
 
@@ -1067,7 +1225,7 @@ def fetch_fingrid_fcr_prices(
         df = fetch_fingrid_data(ds_id, start, end)
         if df.empty:
             continue
-        series = df.set_index("timestamp")["value"].rename(col_name)
+        series = df.groupby("timestamp")["value"].mean().rename(col_name)
         if merged is None:
             merged = series.to_frame()
         else:
@@ -1106,7 +1264,7 @@ def fetch_fingrid_afrr_prices(
         df = fetch_fingrid_data(ds_id, start, end)
         if df.empty:
             continue
-        series = df.set_index("timestamp")["value"].rename(col_name)
+        series = df.groupby("timestamp")["value"].mean().rename(col_name)
         if merged is None:
             merged = series.to_frame()
         else:
@@ -1160,7 +1318,10 @@ def _parse_regelleistung_xlsx(
 
     if len(rows) < 2:
         return pd.DataFrame(
-            columns=["date", "product", "time_block", "capacity_price_eur_mw", "direction"],
+            columns=[
+                "timestamp", "date", "product", "time_block",
+                "capacity_price_eur_mw", "direction",
+            ],
         )
 
     headers = [str(h).strip().lower() if h else "" for h in rows[0]]
@@ -1191,13 +1352,28 @@ def _parse_regelleistung_xlsx(
         time_block = ""
         for key in ("time_block", "von", "from", "delivery_date"):
             if key in row_dict and row_dict[key]:
-                time_block = str(row_dict[key])
+                time_block = row_dict[key]
                 break
 
+        try:
+            timestamp = _parse_regelleistung_time_block_start(target_date, time_block)
+        except ValueError as exc:
+            if str(time_block).strip():
+                logger.warning(
+                    "Skipping Regelleistung row with unparseable time_block=%r "
+                    "for %s on %s: %s",
+                    time_block,
+                    product,
+                    target_date,
+                    exc,
+                )
+            continue
+
         records.append({
+            "timestamp": timestamp,
             "date": target_date,
             "product": product,
-            "time_block": time_block,
+            "time_block": "" if time_block is None else str(time_block),
             "capacity_price_eur_mw": price,
             "direction": direction,
         })
@@ -1219,13 +1395,13 @@ def fetch_regelleistung_results(
 
     Returns:
         DataFrame with columns:
-        [date, product, time_block, capacity_price_eur_mw, direction]
+        [timestamp, date, product, time_block, capacity_price_eur_mw, direction]
         or None if fetching fails.
     """
     market = "CAPACITY"
-    date_range = pd.date_range(
-        start.normalize(), (end - pd.Timedelta(seconds=1)).normalize(), freq="D",
-    )
+    start_local = start.tz_convert("Europe/Berlin").normalize()
+    end_local = (end - pd.Timedelta(seconds=1)).tz_convert("Europe/Berlin").normalize()
+    date_range = pd.date_range(start_local, end_local, freq="D")
 
     all_frames: list[pd.DataFrame] = []
     for day in date_range:
@@ -1305,11 +1481,10 @@ def fetch_elexon_system_prices(
 
     # Build timestamp from settlement date + period
     if "settlementDate" in df.columns and "settlementPeriod" in df.columns:
-        df["minutes"] = (df["settlementPeriod"].astype(int) - 1) * 30
-        df["timestamp"] = pd.to_datetime(df["settlementDate"]) + pd.to_timedelta(
-            df["minutes"], unit="m",
+        df["timestamp"] = _gb_settlement_period_to_utc(
+            df["settlementDate"],
+            df["settlementPeriod"],
         )
-        df["timestamp"] = df["timestamp"].dt.tz_localize("UTC")
     elif "startTime" in df.columns:
         df["timestamp"] = pd.to_datetime(df["startTime"], utc=True)
     else:
