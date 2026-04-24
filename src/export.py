@@ -1,9 +1,12 @@
-"""Excel report export for eu-bess-pulse."""
+"""Excel and PDF report export for eu-bess-pulse."""
 
 from __future__ import annotations
 
+import logging
+import tempfile
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
@@ -11,6 +14,8 @@ from openpyxl.utils import get_column_letter
 
 from src.analytics import build_price_heatmap
 from src.config import CACHE_DIR
+
+logger = logging.getLogger(__name__)
 
 
 # ── Styling helpers ──────────────────────────────────────────────────────────
@@ -287,3 +292,185 @@ def export_to_bytes(
             tz=tz,
         )
     return buf.getvalue()
+
+
+# ── PDF export ──────────────────────────────────────────────────────────────
+
+
+def _render_figure_to_image(
+    fig: Any,
+    width: int = 1200,
+    height: int = 500,
+) -> bytes:
+    """Convert a Plotly figure to PNG bytes via kaleido."""
+    return fig.to_image(format="png", width=width, height=height)
+
+
+def _build_pdf_report(
+    zone: str,
+    price_df: pd.DataFrame,
+    percentiles: dict[str, float],
+    revenue_estimate: dict[str, float],
+    negative_stats: dict[str, float],
+    tz: str | None = None,
+    figures: dict[str, Any] | None = None,
+) -> bytes:
+    """Lay out a multi-page PDF report using fpdf2."""
+    from fpdf import FPDF
+
+    pdf = FPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=15)
+
+    # ── Page 1: Summary ─────────────────────────────────────────────────
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 20)
+    pdf.cell(0, 14, "BESS Pulse - Market Report", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+
+    pdf.set_font("Helvetica", "", 11)
+    dates = price_df.index.tz_convert(tz) if tz else price_df.index
+    start_str = str(dates.min().date())
+    end_str = str(dates.max().date())
+    total_days = (dates.max().date() - dates.min().date()).days + 1
+
+    rows: list[tuple[str, str]] = [
+        ("Zone", zone),
+        ("Timezone", tz or "UTC"),
+        ("Date Range", f"{start_str}  to  {end_str}"),
+        ("Total Days", str(total_days)),
+        ("", ""),
+        ("Avg Price (EUR/MWh)", f"{price_df['price_eur_mwh'].mean():.2f}"),
+        ("Median Price (EUR/MWh)", f"{price_df['price_eur_mwh'].median():.2f}"),
+        ("", ""),
+        ("P50 Spread", f"{percentiles['p50']:.2f}"),
+        ("P75 Spread", f"{percentiles['p75']:.2f}"),
+        ("P90 Spread", f"{percentiles['p90']:.2f}"),
+        ("Mean Spread", f"{percentiles['mean']:.2f}"),
+        ("", ""),
+        ("Est. Annual Revenue (EUR/MW)",
+         f"{revenue_estimate['annual_revenue_eur_per_mw']:,.0f}"),
+    ]
+
+    if "total_eur" in revenue_estimate:
+        rows.append(("Headline Annual Revenue (EUR)",
+                      f"{revenue_estimate['total_eur']:,.0f}"))
+    if "headline_total_mode" in revenue_estimate:
+        rows.append(("Headline Total Mode",
+                      str(revenue_estimate["headline_total_mode"])))
+    if "gross_additive_total_eur" in revenue_estimate:
+        rows.append(("Gross Additive Total (Reference, EUR)",
+                      f"{revenue_estimate['gross_additive_total_eur']:,.0f}"))
+    if revenue_estimate.get("capacity_stack_warning"):
+        rows.append(("Note", str(revenue_estimate["capacity_stack_warning"])))
+    if "source_revenues" in revenue_estimate:
+        rows.append(("", ""))
+        for source, value in revenue_estimate["source_revenues"].items():
+            rows.append((f"{source} Revenue (EUR)", f"{value:,.0f}"))
+
+    rows.append(("", ""))
+    rows.append(("Modeled Cycles per Day",
+                  str(revenue_estimate.get("cycles_per_day_assumption", ""))))
+    rows.append(("Capture Rate Assumption",
+                  str(revenue_estimate.get("capture_rate_assumption", ""))))
+    if "roundtrip_efficiency" in revenue_estimate:
+        rows.append(("Round-Trip Efficiency",
+                      f"{revenue_estimate['roundtrip_efficiency']:.0%}"))
+    rows.append(("", ""))
+    rows.append(("Negative Price Hours",
+                  str(negative_stats.get("negative_hours", 0))))
+    rows.append(("Negative Price Intervals",
+                  str(negative_stats.get("negative_intervals", 0))))
+    rows.append(("Negative Price % of Intervals",
+                  f"{negative_stats.get('pct_negative', 0):.1f}%"))
+
+    col_w = 100
+    for label, value in rows:
+        if not label and not value:
+            pdf.ln(3)
+            continue
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(col_w, 7, label)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(0, 7, value, new_x="LMARGIN", new_y="NEXT")
+
+    # ── Chart pages ─────────────────────────────────────────────────────
+    if figures:
+        chart_order = [
+            ("Price Time Series", "price_ts"),
+            ("Price Heatmap", "price_heatmap"),
+            ("Daily Spread", "spread_ts"),
+            ("Revenue Breakdown", "revenue_bar"),
+            ("Revenue Waterfall", "revenue_waterfall"),
+            ("Spread Heatmap", "spread_heatmap"),
+            ("Monthly Seasonality", "monthly_seasonality"),
+        ]
+        for title, key in chart_order:
+            fig = figures.get(key)
+            if fig is None:
+                continue
+            try:
+                img_bytes = _render_figure_to_image(fig)
+            except Exception:
+                logger.warning("Failed to render chart '%s' for PDF", key)
+                continue
+
+            pdf.add_page()
+            pdf.set_font("Helvetica", "B", 14)
+            pdf.cell(0, 10, title, new_x="LMARGIN", new_y="NEXT")
+            pdf.ln(2)
+
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+                tmp.write(img_bytes)
+                tmp.flush()
+                page_w = pdf.w - pdf.l_margin - pdf.r_margin
+                page_h = pdf.h - pdf.get_y() - 15
+                img_w = page_w
+                img_h = img_w * 500 / 1200
+                if img_h > page_h:
+                    img_h = page_h
+                    img_w = img_h * 1200 / 500
+                pdf.image(tmp.name, w=img_w, h=img_h)
+                Path(tmp.name).unlink(missing_ok=True)
+
+    return bytes(pdf.output())
+
+
+def export_to_pdf_bytes(
+    zone: str,
+    price_df: pd.DataFrame,
+    daily_spreads: pd.DataFrame,
+    monthly_spreads: pd.DataFrame,
+    percentiles: dict[str, float],
+    revenue_estimate: dict[str, float],
+    negative_stats: dict[str, float],
+    tz: str | None = None,
+    figures: dict[str, Any] | None = None,
+) -> bytes:
+    """Export analytics to a PDF report as in-memory bytes.
+
+    Args:
+        zone: Bidding zone code.
+        price_df: Cleaned price DataFrame.
+        daily_spreads: Daily spread DataFrame.
+        monthly_spreads: Monthly aggregated spreads.
+        percentiles: Spread percentile dict.
+        revenue_estimate: Revenue estimate dict.
+        negative_stats: Negative price stats dict.
+        tz: IANA timezone for local-time date display.
+        figures: Optional dict mapping chart keys to Plotly figures.
+            Recognized keys: price_ts, price_heatmap, spread_ts,
+            revenue_bar, revenue_waterfall, spread_heatmap,
+            monthly_seasonality.
+
+    Returns:
+        Bytes content of the PDF file.
+    """
+    return _build_pdf_report(
+        zone=zone,
+        price_df=price_df,
+        percentiles=percentiles,
+        revenue_estimate=revenue_estimate,
+        negative_stats=negative_stats,
+        tz=tz,
+        figures=figures,
+    )

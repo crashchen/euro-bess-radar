@@ -47,7 +47,7 @@ from src.data_ingestion import (
     fetch_generation_data,
     fetch_prices,
 )
-from src.export import export_to_bytes
+from src.export import export_to_bytes, export_to_pdf_bytes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -358,6 +358,9 @@ if fetch_btn or "zone_data" in st.session_state:
         capture_rate=capture_rate,
     )
 
+    # Collect Plotly figures for PDF export
+    report_figures: dict[str, object] = {}
+
     # ── Tabs ─────────────────────────────────────────────────────────────────
     tab_names = [
         "Market Overview", "Heatmaps", "Revenue Estimation",
@@ -403,6 +406,7 @@ if fetch_btn or "zone_data" in st.session_state:
             line=dict(color="#E74C3C", width=2),
         )
         fig_price.update_xaxes(rangeslider_visible=True)
+        report_figures["price_ts"] = fig_price
         st.plotly_chart(fig_price, width="stretch")
 
         spread_plot_df = daily_spreads.copy()
@@ -418,6 +422,7 @@ if fetch_btn or "zone_data" in st.session_state:
             template=chart_template,
         )
         fig_spread.update_xaxes(rangeslider_visible=True, type="date")
+        report_figures["spread_ts"] = fig_spread
         st.plotly_chart(fig_spread, width="stretch")
 
     # ── Tab 2: Heatmaps ─────────────────────────────────────────────────────
@@ -434,6 +439,7 @@ if fetch_btn or "zone_data" in st.session_state:
             template=chart_template,
         )
         fig_phm.update_yaxes(dtick=1)
+        report_figures["price_heatmap"] = fig_phm
         st.plotly_chart(fig_phm, width="stretch")
 
         spread_hm = build_spread_heatmap(
@@ -449,6 +455,7 @@ if fetch_btn or "zone_data" in st.session_state:
             template=chart_template,
         )
         fig_shm.update_yaxes(dtick=1)
+        report_figures["spread_heatmap"] = fig_shm
         st.plotly_chart(fig_shm, width="stretch")
         st.caption(
             "Negative hours mark windows selected for charging; positive hours mark "
@@ -618,6 +625,7 @@ if fetch_btn or "zone_data" in st.session_state:
                 yaxis_title="",
                 legend_title_text="Source",
             )
+            report_figures["revenue_bar"] = fig_stack
             st.plotly_chart(fig_stack, width="stretch")
             if anc_source:
                 st.caption(f"Ancillary valuation source: {anc_source}")
@@ -697,6 +705,7 @@ if fetch_btn or "zone_data" in st.session_state:
             yaxis_title="EUR/MWh",
             showlegend=False,
         )
+        report_figures["revenue_waterfall"] = fig_wf
         st.plotly_chart(fig_wf, width="stretch")
 
         # Sensitivity table
@@ -784,6 +793,7 @@ if fetch_btn or "zone_data" in st.session_state:
                 yaxis_title="EUR/MWh",
                 legend=dict(orientation="h", y=-0.15),
             )
+            report_figures["monthly_seasonality"] = fig_monthly
             st.plotly_chart(fig_monthly, width="stretch")
 
     # ── Tab 4: Renewable Correlation ─────────────────────────────────────────
@@ -1095,12 +1105,30 @@ if fetch_btn or "zone_data" in st.session_state:
         negative_stats=neg_stats,
         tz=zone_tz,
     )
-    exp_col1, exp_col2 = st.columns([3, 1])
+    pdf_bytes = export_to_pdf_bytes(
+        zone=primary_zone,
+        price_df=primary_df,
+        daily_spreads=daily_spreads,
+        monthly_spreads=monthly_spreads,
+        percentiles=percentiles,
+        revenue_estimate=export_revenue,
+        negative_stats=neg_stats,
+        tz=zone_tz,
+        figures=report_figures,
+    )
+    exp_col1, exp_col2 = st.columns(2)
     exp_col1.download_button(
         label="\U0001f4e5 Export to Excel",
         data=xlsx_bytes,
         file_name=f"{primary_zone}_report.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        width="stretch",
+    )
+    exp_col2.download_button(
+        label="\U0001f4c4 Export to PDF",
+        data=pdf_bytes,
+        file_name=f"{primary_zone}_report.pdf",
+        mime="application/pdf",
         width="stretch",
     )
 

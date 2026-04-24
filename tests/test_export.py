@@ -16,7 +16,7 @@ from src.analytics import (
     calculate_spread_percentiles,
     estimate_annual_arbitrage_revenue,
 )
-from src.export import export_to_bytes, export_to_excel
+from src.export import export_to_bytes, export_to_excel, export_to_pdf_bytes, _render_figure_to_image
 
 
 @pytest.fixture
@@ -301,3 +301,85 @@ class TestExportToBytes:
         assert summary["Capacity Stack Warning"] == "Capacity reserve is not co-optimized."
         assert summary["DA Arbitrage Revenue (EUR)"] == 80000
         assert summary["FCR-N Revenue (EUR)"] == 25000
+
+
+# ── PDF export tests ──────────────────────────────────────────────────────────
+
+class TestPdfExport:
+    @pytest.fixture()
+    def sample_data(self):
+        idx = pd.date_range("2025-01-01", periods=72, freq="h", tz="UTC")
+        price_df = pd.DataFrame({"price_eur_mwh": range(72)}, index=idx)
+        price_df.index.name = "timestamp"
+
+        daily = calculate_daily_spreads(price_df)
+        monthly = calculate_monthly_spreads(price_df)
+        pctls = calculate_spread_percentiles(daily)
+        rev = estimate_annual_arbitrage_revenue(daily)
+        neg = calculate_negative_price_hours(price_df)
+        return price_df, daily, monthly, pctls, rev, neg
+
+    def test_pdf_export_returns_bytes(self, sample_data) -> None:
+        price_df, daily, monthly, pctls, rev, neg = sample_data
+        result = export_to_pdf_bytes(
+            zone="DE_LU",
+            price_df=price_df,
+            daily_spreads=daily,
+            monthly_spreads=monthly,
+            percentiles=pctls,
+            revenue_estimate=rev,
+            negative_stats=neg,
+        )
+        assert isinstance(result, bytes)
+        assert len(result) > 100
+        assert result[:5] == b"%PDF-"
+
+    def test_pdf_export_with_timezone(self, sample_data) -> None:
+        price_df, daily, monthly, pctls, rev, neg = sample_data
+        result = export_to_pdf_bytes(
+            zone="DE_LU",
+            price_df=price_df,
+            daily_spreads=daily,
+            monthly_spreads=monthly,
+            percentiles=pctls,
+            revenue_estimate=rev,
+            negative_stats=neg,
+            tz="Europe/Berlin",
+        )
+        assert result[:5] == b"%PDF-"
+
+    def test_pdf_export_with_figures(self, sample_data) -> None:
+        import plotly.graph_objects as go
+
+        price_df, daily, monthly, pctls, rev, neg = sample_data
+        fig = go.Figure(go.Scatter(x=[1, 2, 3], y=[4, 5, 6]))
+        result = export_to_pdf_bytes(
+            zone="DE_LU",
+            price_df=price_df,
+            daily_spreads=daily,
+            monthly_spreads=monthly,
+            percentiles=pctls,
+            revenue_estimate=rev,
+            negative_stats=neg,
+            figures={"price_ts": fig},
+        )
+        assert result[:5] == b"%PDF-"
+        # PDF with chart should be larger than text-only
+        text_only = export_to_pdf_bytes(
+            zone="DE_LU",
+            price_df=price_df,
+            daily_spreads=daily,
+            monthly_spreads=monthly,
+            percentiles=pctls,
+            revenue_estimate=rev,
+            negative_stats=neg,
+        )
+        assert len(result) > len(text_only)
+
+    def test_render_figure_to_image(self) -> None:
+        import plotly.graph_objects as go
+
+        fig = go.Figure(go.Bar(x=["A", "B"], y=[1, 2]))
+        img = _render_figure_to_image(fig)
+        assert isinstance(img, bytes)
+        assert img[:8] == b"\x89PNG\r\n\x1a\n"
