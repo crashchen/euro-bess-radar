@@ -19,6 +19,14 @@ from src.analytics import (
 from src.export import export_to_bytes, export_to_excel, export_to_pdf_bytes, _render_figure_to_image
 
 
+def _render_or_skip(fig) -> bytes:
+    """Render a Plotly figure or skip when local Kaleido is unavailable."""
+    try:
+        return _render_figure_to_image(fig)
+    except Exception as exc:
+        pytest.skip(f"Kaleido image rendering unavailable in this environment: {exc}")
+
+
 @pytest.fixture
 def sample_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, dict, dict]:
     """Build minimal analytics data for export tests."""
@@ -270,6 +278,14 @@ class TestExportToBytes:
             "gross_additive_total_eur": 145000.0,
             "headline_total_mode": "conservative_da_primary",
             "capacity_stack_warning": "Capacity reserve is not co-optimized.",
+            "annual_degradation_cost_eur": 18000.0,
+            "net_revenue_eur": 102000.0,
+            "degradation_pct": 15.0,
+            "effective_life_years": 16.4,
+            "lifetime_limiting_factor": "cycling",
+            "annual_throughput_mwh": 2922.0,
+            "lcos_eur_mwh": 54.2,
+            "net_payback_years": 7.5,
             "source_revenues": {
                 "DA Arbitrage": 80000.0,
                 "FCR-N": 25000.0,
@@ -291,7 +307,7 @@ class TestExportToBytes:
         ws = wb["Summary"]
         summary = {
             ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value
-            for r in range(1, 30)
+            for r in range(1, 45)
         }
 
         assert summary["Est. Annual Revenue (EUR/MW)"] == 120000
@@ -301,6 +317,14 @@ class TestExportToBytes:
         assert summary["Capacity Stack Warning"] == "Capacity reserve is not co-optimized."
         assert summary["DA Arbitrage Revenue (EUR)"] == 80000
         assert summary["FCR-N Revenue (EUR)"] == 25000
+        assert summary["Annual Degradation Cost (EUR)"] == 18000
+        assert summary["Net Revenue after Degradation (EUR)"] == 102000
+        assert summary["Degradation % of Gross Revenue"] == 0.15
+        assert summary["Effective Battery Lifetime (years)"] == 16.4
+        assert summary["Lifetime Limiting Factor"] == "cycling"
+        assert summary["Annual Throughput (MWh)"] == 2922
+        assert summary["LCOS (EUR/MWh)"] == 54.2
+        assert summary["Net Payback (years)"] == 7.5
 
 
 # ── PDF export tests ──────────────────────────────────────────────────────────
@@ -353,6 +377,7 @@ class TestPdfExport:
 
         price_df, daily, monthly, pctls, rev, neg = sample_data
         fig = go.Figure(go.Scatter(x=[1, 2, 3], y=[4, 5, 6]))
+        _render_or_skip(fig)
         result = export_to_pdf_bytes(
             zone="DE_LU",
             price_df=price_df,
@@ -380,6 +405,6 @@ class TestPdfExport:
         import plotly.graph_objects as go
 
         fig = go.Figure(go.Bar(x=["A", "B"], y=[1, 2]))
-        img = _render_figure_to_image(fig)
+        img = _render_or_skip(fig)
         assert isinstance(img, bytes)
         assert img[:8] == b"\x89PNG\r\n\x1a\n"

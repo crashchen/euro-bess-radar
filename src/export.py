@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import tempfile
 from io import BytesIO
 from pathlib import Path
@@ -120,6 +121,60 @@ def _build_summary_sheet(
         row = _write_kv_pair(ws, row, "Round-Trip Efficiency", revenue_estimate["roundtrip_efficiency"], _PCT_FMT)
     row = _write_kv_pair(ws, row, "Modeled Cycles per Day", revenue_estimate["cycles_per_day_assumption"])
     row = _write_kv_pair(ws, row, "Capture Rate Assumption", revenue_estimate["capture_rate_assumption"])
+    if "annual_degradation_cost_eur" in revenue_estimate:
+        row = _write_kv_pair(
+            ws, row,
+            "Annual Degradation Cost (EUR)",
+            revenue_estimate["annual_degradation_cost_eur"],
+            _PRICE_FMT,
+        )
+    if "net_revenue_eur" in revenue_estimate:
+        row = _write_kv_pair(
+            ws, row,
+            "Net Revenue after Degradation (EUR)",
+            revenue_estimate["net_revenue_eur"],
+            _PRICE_FMT,
+        )
+    if "degradation_pct" in revenue_estimate:
+        row = _write_kv_pair(
+            ws, row,
+            "Degradation % of Gross Revenue",
+            revenue_estimate["degradation_pct"] / 100,
+            _PCT_FMT,
+        )
+    if "effective_life_years" in revenue_estimate:
+        row = _write_kv_pair(
+            ws, row,
+            "Effective Battery Lifetime (years)",
+            revenue_estimate["effective_life_years"],
+        )
+    if "lifetime_limiting_factor" in revenue_estimate:
+        row = _write_kv_pair(
+            ws, row,
+            "Lifetime Limiting Factor",
+            revenue_estimate["lifetime_limiting_factor"],
+        )
+    if "annual_throughput_mwh" in revenue_estimate:
+        row = _write_kv_pair(
+            ws, row,
+            "Annual Throughput (MWh)",
+            revenue_estimate["annual_throughput_mwh"],
+            _PRICE_FMT,
+        )
+    if "lcos_eur_mwh" in revenue_estimate:
+        row = _write_kv_pair(
+            ws, row,
+            "LCOS (EUR/MWh)",
+            revenue_estimate["lcos_eur_mwh"],
+            _PRICE_FMT,
+        )
+    if "net_payback_years" in revenue_estimate:
+        net_payback = revenue_estimate["net_payback_years"]
+        row = _write_kv_pair(
+            ws, row,
+            "Net Payback (years)",
+            net_payback if math.isfinite(net_payback) else "N/A",
+        )
     row += 1
 
     row = _write_kv_pair(ws, row, "Negative Price Hours", negative_stats["negative_hours"])
@@ -375,6 +430,31 @@ def _build_pdf_report(
     if "roundtrip_efficiency" in revenue_estimate:
         rows.append(("Round-Trip Efficiency",
                       f"{revenue_estimate['roundtrip_efficiency']:.0%}"))
+    if "annual_degradation_cost_eur" in revenue_estimate:
+        rows.append(("Annual Degradation Cost (EUR)",
+                     f"{revenue_estimate['annual_degradation_cost_eur']:,.0f}"))
+    if "net_revenue_eur" in revenue_estimate:
+        rows.append(("Net Revenue after Degradation (EUR)",
+                     f"{revenue_estimate['net_revenue_eur']:,.0f}"))
+    if "degradation_pct" in revenue_estimate:
+        rows.append(("Degradation % of Gross Revenue",
+                     f"{revenue_estimate['degradation_pct']:.1f}%"))
+    if "effective_life_years" in revenue_estimate:
+        rows.append(("Effective Battery Lifetime (years)",
+                     f"{revenue_estimate['effective_life_years']:.1f}"))
+    if "lifetime_limiting_factor" in revenue_estimate:
+        rows.append(("Lifetime Limiting Factor",
+                     str(revenue_estimate["lifetime_limiting_factor"])))
+    if "annual_throughput_mwh" in revenue_estimate:
+        rows.append(("Annual Throughput (MWh)",
+                     f"{revenue_estimate['annual_throughput_mwh']:,.0f}"))
+    if "lcos_eur_mwh" in revenue_estimate:
+        rows.append(("LCOS (EUR/MWh)",
+                     f"{revenue_estimate['lcos_eur_mwh']:,.0f}"))
+    if "net_payback_years" in revenue_estimate:
+        net_payback = revenue_estimate["net_payback_years"]
+        rows.append(("Net Payback (years)",
+                     f"{net_payback:.1f}" if math.isfinite(net_payback) else "N/A"))
     rows.append(("", ""))
     rows.append(("Negative Price Hours",
                   str(negative_stats.get("negative_hours", 0))))

@@ -48,6 +48,13 @@ from src.data_ingestion import (
     fetch_generation_data,
     fetch_prices,
 )
+from src.degradation import (
+    calculate_annual_throughput_mwh,
+    calculate_degradation_cost,
+    calculate_levelized_cost_of_storage,
+    calculate_net_revenue,
+    estimate_battery_lifetime,
+)
 from src.export import export_to_bytes, export_to_pdf_bytes
 
 logging.basicConfig(level=logging.INFO)
@@ -677,6 +684,97 @@ if fetch_btn or "zone_data" in st.session_state:
             p3.metric(
                 "Simple Payback",
                 f"{payback_years:.1f} years" if payback_years < 100 else "N/A",
+            )
+
+            # Battery degradation & lifetime
+            if "n_cycles" in daily_spreads.columns:
+                avg_cycles_day = float(daily_spreads["n_cycles"].mean())
+            else:
+                avg_cycles_day = float(revenue.get("cycles_per_day_assumption", 1.0))
+            annual_cycles = avg_cycles_day * 365.25
+            capacity_kwh = power_mw * duration_hours * 1000
+            deg_cost = calculate_degradation_cost(
+                n_cycles=annual_cycles,
+                capex_eur_kwh=capex_eur_kwh,
+                capacity_kwh=capacity_kwh,
+            )
+            lifetime = estimate_battery_lifetime(avg_cycles_per_day=avg_cycles_day)
+            net_rev = calculate_net_revenue(
+                annual_rev,
+                deg_cost["total_degradation_eur"],
+            )
+            annual_throughput_mwh = calculate_annual_throughput_mwh(
+                avg_cycles_day,
+                capacity_kwh,
+            )
+            lcos_eur_mwh = (
+                calculate_levelized_cost_of_storage(
+                    capex_eur_kwh,
+                    capacity_kwh,
+                    float(lifetime["effective_life_years"]),
+                    annual_throughput_mwh,
+                )
+                if annual_throughput_mwh > 0 else None
+            )
+            net_payback = (
+                total_capex / net_rev["net_revenue_eur"]
+                if net_rev["net_revenue_eur"] > 0 else float("inf")
+            )
+
+            export_revenue.update({
+                "annual_degradation_cost_eur": deg_cost["total_degradation_eur"],
+                "degradation_cost_per_cycle_eur": deg_cost["cost_per_cycle_eur"],
+                "degradation_cycle_life": deg_cost["cycle_life"],
+                "net_revenue_eur": net_rev["net_revenue_eur"],
+                "degradation_pct": net_rev["degradation_pct"],
+                "effective_life_years": lifetime["effective_life_years"],
+                "cycle_limited_years": lifetime["cycle_limited_years"],
+                "calendar_life_years": lifetime["calendar_life_years"],
+                "lifetime_limiting_factor": lifetime["limiting_factor"],
+                "annual_throughput_mwh": annual_throughput_mwh,
+                "net_payback_years": net_payback,
+            })
+            if lcos_eur_mwh is not None:
+                export_revenue["lcos_eur_mwh"] = lcos_eur_mwh
+
+            st.divider()
+            st.markdown("**Battery Degradation & Lifetime**")
+            d1, d2, d3 = st.columns(3)
+            d1.metric(
+                "Degradation Cost/Year",
+                f"\u20ac{deg_cost['total_degradation_eur']:,.0f}",
+            )
+            d2.metric(
+                "Net Revenue/Year",
+                f"\u20ac{net_rev['net_revenue_eur']:,.0f}",
+                delta=f"-{net_rev['degradation_pct']:.1f}% degradation",
+            )
+            d3.metric(
+                "Effective Lifetime",
+                f"{float(lifetime['effective_life_years']):.1f} years",
+                help=(
+                    f"Limited by {lifetime['limiting_factor']} "
+                    f"({float(lifetime['cycle_limited_years']):.1f}y cycling, "
+                    f"{float(lifetime['calendar_life_years']):.0f}y calendar)"
+                ),
+            )
+
+            d4, d5, d6, d7 = st.columns(4)
+            d4.metric("Cost per Cycle", f"\u20ac{deg_cost['cost_per_cycle_eur']:,.0f}")
+            d5.metric(
+                "Net Payback",
+                f"{net_payback:.1f} years" if net_payback < 100 else "N/A",
+            )
+            d6.metric(
+                "LCOS",
+                f"\u20ac{lcos_eur_mwh:,.1f}/MWh"
+                if lcos_eur_mwh is not None else "N/A",
+            )
+            d7.metric("Avg Cycles/Day", f"{avg_cycles_day:.2f}")
+            st.caption(
+                f"Degradation uses {avg_cycles_day:.2f} modeled DA full-equivalent "
+                "cycles/day. Ancillary activation wear is not modeled in this "
+                "screening estimate."
             )
 
         # Revenue waterfall
