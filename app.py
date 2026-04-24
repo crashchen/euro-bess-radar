@@ -340,7 +340,7 @@ if fetch_btn or "zone_data" in st.session_state:
     # ── Tabs ─────────────────────────────────────────────────────────────────
     tab_names = [
         "Market Overview", "Heatmaps", "Revenue Estimation",
-        "Renewable Correlation", "Zone Comparison",
+        "Renewable Correlation", "Zone Comparison", "Ancillary Services",
     ]
     tabs = st.tabs(tab_names)
 
@@ -434,6 +434,33 @@ if fetch_btn or "zone_data" in st.session_state:
             "windows selected for discharging. Color intensity shows the average signed "
             "ordered-spread signal assigned to those selected windows, not per-hour revenue attribution."
         )
+
+        # Charge/Discharge hour frequency
+        charge_freq = (spread_hm < 0).sum(axis=1)
+        discharge_freq = (spread_hm > 0).sum(axis=1)
+        total_months = spread_hm.shape[1]
+        freq_df = pd.DataFrame({
+            "Hour": range(24),
+            "Charge %": (charge_freq.values / total_months * 100).round(1),
+            "Discharge %": (discharge_freq.values / total_months * 100).round(1),
+        })
+        fig_freq = go.Figure()
+        fig_freq.add_trace(go.Bar(
+            x=freq_df["Hour"], y=freq_df["Charge %"],
+            name="Charge", marker_color="#3498DB",
+        ))
+        fig_freq.add_trace(go.Bar(
+            x=freq_df["Hour"], y=freq_df["Discharge %"],
+            name="Discharge", marker_color="#E74C3C",
+        ))
+        fig_freq.update_layout(
+            title=f"Charge/Discharge Hour Selection Frequency ({duration_hours}h windows)",
+            xaxis_title="Hour (local)",
+            yaxis_title="% of months selected",
+            barmode="group",
+            template=chart_template,
+        )
+        st.plotly_chart(fig_freq, width="stretch")
 
     # ── Tab 3: Revenue Estimation ────────────────────────────────────────────
     with tabs[2]:
@@ -663,6 +690,61 @@ if fetch_btn or "zone_data" in st.session_state:
         fig_hist.add_vline(x=percentiles["p90"], line_dash="dash", line_color="red",
                            annotation_text=f"P90: {percentiles['p90']:.1f}")
         st.plotly_chart(fig_hist, width="stretch")
+
+        # Monthly revenue seasonality & volatility
+        if not monthly_spreads.empty and len(monthly_spreads) >= 2:
+            st.divider()
+            st.markdown("**Monthly Revenue Seasonality & Risk**")
+
+            monthly_rev = monthly_spreads["avg_spread"].values
+            spread_cv = float(monthly_rev.std() / monthly_rev.mean()) if monthly_rev.mean() > 0 else 0
+            best_month = monthly_spreads.loc[monthly_spreads["avg_spread"].idxmax()]
+            worst_month = monthly_spreads.loc[monthly_spreads["avg_spread"].idxmin()]
+            zero_spread_days = int((daily_spreads["spread"] <= 0).sum())
+
+            v1, v2, v3, v4 = st.columns(4)
+            v1.metric("Spread CV", f"{spread_cv:.2f}",
+                       help="Coefficient of variation — lower = more stable revenue")
+            v2.metric("Best Month", f"{best_month['year_month']}",
+                       delta=f"\u20ac{best_month['avg_spread']:.1f}/MWh")
+            v3.metric("Worst Month", f"{worst_month['year_month']}",
+                       delta=f"\u20ac{worst_month['avg_spread']:.1f}/MWh",
+                       delta_color="inverse")
+            v4.metric("Zero-Spread Days", f"{zero_spread_days}",
+                       delta=f"{zero_spread_days / len(daily_spreads) * 100:.0f}% of total",
+                       delta_color="inverse")
+
+            fig_monthly = go.Figure()
+            fig_monthly.add_trace(go.Bar(
+                x=monthly_spreads["year_month"],
+                y=monthly_spreads["avg_spread"],
+                name="Avg Spread",
+                marker_color="#2E86C1",
+            ))
+            fig_monthly.add_trace(go.Scatter(
+                x=monthly_spreads["year_month"],
+                y=monthly_spreads["max_spread"],
+                mode="markers+lines",
+                name="Max Spread",
+                marker=dict(color="#2ECC71", size=6),
+                line=dict(dash="dot"),
+            ))
+            fig_monthly.add_trace(go.Scatter(
+                x=monthly_spreads["year_month"],
+                y=monthly_spreads["min_spread"],
+                mode="markers+lines",
+                name="Min Spread",
+                marker=dict(color="#E74C3C", size=6),
+                line=dict(dash="dot"),
+            ))
+            fig_monthly.update_layout(
+                title=f"Monthly Spread Breakdown ({duration_hours}h windows)",
+                template=chart_template,
+                xaxis_title="Month",
+                yaxis_title="EUR/MWh",
+                legend=dict(orientation="h", y=-0.15),
+            )
+            st.plotly_chart(fig_monthly, width="stretch")
 
     # ── Tab 4: Renewable Correlation ─────────────────────────────────────────
     with tabs[3]:
@@ -910,6 +992,69 @@ if fetch_btn or "zone_data" in st.session_state:
                     )
                     st.plotly_chart(fig_comp, width="stretch")
 
+    # ── Tab 6: Ancillary Services ─────────────────────────────────────────────
+    with tabs[5]:
+        st.subheader(f"Ancillary Services — {primary_zone}")
+
+        anc_col1, anc_col2 = st.columns(2)
+        with anc_col1:
+            st.markdown("**Auto-Fetch**")
+            tab_fetchers = get_available_fetchers(primary_zone)
+            if tab_fetchers:
+                for f in tab_fetchers:
+                    st.caption(f"\U0001f4e1 {f['name']} ({f['source']})")
+                if st.button(
+                    f"\u26a1 Fetch ancillary for {primary_zone}",
+                    key="tab_auto_fetch",
+                ):
+                    with st.spinner("Fetching..."):
+                        af_start, af_end = build_zone_query_window(
+                            primary_zone, start_date, end_date,
+                        )
+                        af_results = run_auto_fetch(primary_zone, af_start, af_end)
+                        if af_results:
+                            st.session_state["auto_fetch_results"] = af_results
+                            _store_ancillary_scope(primary_zone, start_date, end_date)
+                            st.success(f"Fetched: {', '.join(af_results.keys())}")
+                        else:
+                            st.warning("No data returned.")
+            else:
+                st.info("No auto-fetch available for this zone.")
+
+        with anc_col2:
+            st.markdown("**Manual CSV Upload**")
+            tab_template = st.selectbox(
+                "Template", list(ANCILLARY_TEMPLATES.keys()),
+                format_func=lambda k: f"{k} — {ANCILLARY_TEMPLATES[k]['description'][:40]}",
+                key="tab_anc_template",
+            )
+            tab_file = st.file_uploader("Upload CSV", type=["csv"], key="tab_anc_upload")
+            if tab_file is not None:
+                if st.button("Parse & Import", key="tab_anc_parse"):
+                    try:
+                        content = tab_file.getvalue().decode("utf-8-sig")
+                        parsed = parse_ancillary_csv(content, tab_template)
+                        st.session_state["ancillary_df"] = parsed
+                        st.session_state["ancillary_template"] = tab_template
+                        _store_ancillary_scope(primary_zone, start_date, end_date)
+                        st.success(f"{tab_template} loaded: {len(parsed)} rows")
+                    except (ValueError, pd.errors.ParserError, UnicodeDecodeError) as exc:
+                        st.error(f"Parse error: {exc}")
+
+        # Show loaded ancillary data summary
+        st.divider()
+        if anc_df is not None and not anc_df.empty:
+            st.markdown(f"**Loaded ancillary data:** {len(anc_df)} rows")
+            if "product_type" in anc_df.columns:
+                products = anc_df["product_type"].unique()
+                st.caption(f"Products: {', '.join(str(p) for p in products)}")
+            with st.expander("Preview ancillary data"):
+                st.dataframe(anc_df.head(50), hide_index=True)
+        else:
+            st.info(
+                "No ancillary data loaded. Use auto-fetch or manual CSV upload above."
+            )
+
     # ── Export button ────────────────────────────────────────────────────────
     st.divider()
     xlsx_bytes = export_to_bytes(
@@ -922,8 +1067,9 @@ if fetch_btn or "zone_data" in st.session_state:
         negative_stats=neg_stats,
         tz=zone_tz,
     )
-    st.download_button(
-        label="Export to Excel",
+    exp_col1, exp_col2 = st.columns([3, 1])
+    exp_col1.download_button(
+        label="\U0001f4e5 Export to Excel",
         data=xlsx_bytes,
         file_name=f"{primary_zone}_report.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
