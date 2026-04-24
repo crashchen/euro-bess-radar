@@ -621,6 +621,7 @@ def compare_zones(
     zone_timezones: dict[str, str] | None = None,
     duration_hours: float = 1.0,
     capture_rate: float = 0.70,
+    roundtrip_efficiency: float = 0.88,
 ) -> pd.DataFrame:
     """Compare key metrics across multiple zones.
 
@@ -629,6 +630,7 @@ def compare_zones(
         zone_timezones: Optional dict mapping zone_code -> IANA timezone.
         duration_hours: Charge/discharge window length for spread calculation.
         capture_rate: Share of theoretical spread assumed to be captured (0-1).
+        roundtrip_efficiency: Round-trip efficiency of the BESS (0-1).
 
     Returns:
         Summary DataFrame with one row per zone.
@@ -646,6 +648,7 @@ def compare_zones(
             daily,
             duration_hours=duration_hours,
             capture_rate=capture_rate,
+            roundtrip_efficiency=roundtrip_efficiency,
         )
 
         rows.append({

@@ -108,6 +108,11 @@ power_mw = st.sidebar.number_input("Power (MW)", min_value=0.1, value=10.0, step
 duration_hours = st.sidebar.selectbox("Duration (h)", [1, 2, 4], index=0)
 efficiency = st.sidebar.slider("Efficiency (%)", 85, 95, 88) / 100.0
 capture_rate = st.sidebar.slider("Capture (%)", 30, 100, 70) / 100.0
+capex_eur_kwh = st.sidebar.number_input(
+    "CapEx (EUR/kWh)",
+    min_value=0.0, value=0.0, step=50.0,
+    help="Enter installed CapEx to calculate payback period. Leave 0 to skip.",
+)
 force_refresh = st.sidebar.checkbox(
     "Force Refresh",
     value=False,
@@ -359,12 +364,22 @@ if fetch_btn or "zone_data" in st.session_state:
             f"in {zone_tz}."
         )
 
+        price_plot_df = primary_df.reset_index()
         fig_price = px.line(
-            primary_df.reset_index(),
+            price_plot_df,
             x="timestamp", y="price_eur_mwh",
             title="Day-Ahead Prices",
             labels={"price_eur_mwh": "EUR/MWh", "timestamp": ""},
             template=chart_template,
+        )
+        fig_price.update_traces(opacity=0.4, name="Hourly", showlegend=True)
+        ma_series = primary_df["price_eur_mwh"].rolling(
+            window=24 * 30, min_periods=24,
+        ).mean()
+        fig_price.add_scatter(
+            x=primary_df.index, y=ma_series,
+            mode="lines", name="30-Day MA",
+            line=dict(color="#E74C3C", width=2),
         )
         fig_price.update_xaxes(rangeslider_visible=True)
         st.plotly_chart(fig_price, width="stretch")
@@ -477,6 +492,9 @@ if fetch_btn or "zone_data" in st.session_state:
         stack = None
         anc_source = None
         export_revenue = revenue.copy()
+        export_revenue["power_mw"] = power_mw
+        export_revenue["duration_hours"] = duration_hours
+        export_revenue["roundtrip_efficiency"] = efficiency
 
         if ancillary_scope_mismatch:
             st.info(
@@ -554,6 +572,65 @@ if fetch_btn or "zone_data" in st.session_state:
             r2.metric("Revenue per MW", f"\u20ac{revenue['annual_revenue_eur_per_mw']:,.0f}/MW/yr")
             r3.metric("Avg Daily Revenue", f"\u20ac{revenue['avg_daily_revenue']:,.0f}")
             st.info("Upload or auto-fetch ancillary services data to see the full revenue stack.")
+
+        # CapEx / Payback
+        if capex_eur_kwh > 0:
+            total_capex = capex_eur_kwh * power_mw * duration_hours * 1000
+            annual_rev = (
+                stack["total_eur"] if stack
+                else revenue["annual_revenue_eur"]
+            )
+            payback_years = total_capex / annual_rev if annual_rev > 0 else float("inf")
+            st.divider()
+            p1, p2, p3 = st.columns(3)
+            p1.metric("Total CapEx", f"\u20ac{total_capex:,.0f}")
+            p2.metric("Annual Revenue", f"\u20ac{annual_rev:,.0f}")
+            p3.metric(
+                "Simple Payback",
+                f"{payback_years:.1f} years" if payback_years < 100 else "N/A",
+            )
+
+        # Revenue waterfall
+        st.divider()
+        theoretical_spread = percentiles["mean"]
+        eff_loss = theoretical_spread * (1 - efficiency)
+        post_eff = theoretical_spread - eff_loss
+        capture_loss = post_eff * (1 - capture_rate)
+        realized_spread = post_eff - capture_loss
+        wf_measures = ["relative", "relative", "total", "relative", "total"]
+        wf_labels = [
+            "Avg Ordered Spread",
+            "Efficiency Loss",
+            "Post-Efficiency",
+            "Capture Discount",
+            "Realized Spread",
+        ]
+        wf_values = [
+            theoretical_spread,
+            -eff_loss,
+            post_eff,
+            -capture_loss,
+            realized_spread,
+        ]
+        fig_wf = go.Figure(go.Waterfall(
+            x=wf_labels,
+            y=wf_values,
+            measure=wf_measures,
+            connector={"line": {"color": "rgba(150,150,150,0.4)"}},
+            decreasing={"marker": {"color": "#E74C3C"}},
+            increasing={"marker": {"color": "#2ECC71"}},
+            totals={"marker": {"color": "#2E86C1"}},
+            textposition="outside",
+            text=[f"\u20ac{v:+.1f}" if m == "relative" else f"\u20ac{v:.1f}"
+                  for v, m in zip(wf_values, wf_measures)],
+        ))
+        fig_wf.update_layout(
+            title="Revenue Attribution Waterfall (EUR/MWh per cycle)",
+            template=chart_template,
+            yaxis_title="EUR/MWh",
+            showlegend=False,
+        )
+        st.plotly_chart(fig_wf, width="stretch")
 
         # Sensitivity table
         st.markdown("**Duration Sensitivity (per MW)**")
@@ -750,6 +827,7 @@ if fetch_btn or "zone_data" in st.session_state:
                 zone_timezones=ZONE_TIMEZONES,
                 duration_hours=duration_hours,
                 capture_rate=capture_rate,
+                roundtrip_efficiency=efficiency,
             )
             if comp.empty:
                 st.warning(
@@ -759,31 +837,56 @@ if fetch_btn or "zone_data" in st.session_state:
                 comp = comp.sort_values(
                     "estimated_annual_revenue_per_mw", ascending=False,
                 ).reset_index(drop=True)
-                comp_display = comp.copy()
-                comp_display["avg_price"] = comp_display["avg_price"].map(
-                    lambda x: f"\u20ac{x:.2f}"
+
+                # Risk/Reward scatter
+                fig_rr = px.scatter(
+                    comp,
+                    x="p90_spread",
+                    y="estimated_annual_revenue_per_mw",
+                    size="negative_pct",
+                    text="zone",
+                    title="Zone Screening: Risk/Reward Frontier",
+                    labels={
+                        "p90_spread": "P90 Spread (EUR/MWh)",
+                        "estimated_annual_revenue_per_mw": "Est. Annual Revenue (EUR/MW/yr)",
+                        "negative_pct": "Negative Price %",
+                    },
+                    template=chart_template,
+                    size_max=40,
                 )
-                comp_display["std_price"] = comp_display["std_price"].map(
-                    lambda x: f"{x:.2f}"
+                fig_rr.update_traces(textposition="top center")
+                st.plotly_chart(fig_rr, width="stretch")
+
+                # Numeric table (keep sortable)
+                st.dataframe(
+                    comp,
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "zone": "Zone",
+                        "avg_price": st.column_config.NumberColumn(
+                            "Avg Price", format="\u20ac%.2f",
+                        ),
+                        "std_price": st.column_config.NumberColumn(
+                            "Std Dev", format="%.2f",
+                        ),
+                        "avg_spread": st.column_config.NumberColumn(
+                            "Avg Spread", format="\u20ac%.2f",
+                        ),
+                        "p50_spread": st.column_config.NumberColumn(
+                            "P50 Spread", format="\u20ac%.2f",
+                        ),
+                        "p90_spread": st.column_config.NumberColumn(
+                            "P90 Spread", format="\u20ac%.2f",
+                        ),
+                        "negative_pct": st.column_config.NumberColumn(
+                            "Neg Price %", format="%.1f%%",
+                        ),
+                        "estimated_annual_revenue_per_mw": st.column_config.NumberColumn(
+                            "Revenue (EUR/MW/yr)", format="\u20ac%,.0f",
+                        ),
+                    },
                 )
-                comp_display["avg_spread"] = comp_display["avg_spread"].map(
-                    lambda x: f"\u20ac{x:.2f}"
-                )
-                comp_display["p50_spread"] = comp_display["p50_spread"].map(
-                    lambda x: f"\u20ac{x:.2f}"
-                )
-                comp_display["p90_spread"] = comp_display["p90_spread"].map(
-                    lambda x: f"\u20ac{x:.2f}"
-                )
-                comp_display["negative_pct"] = comp_display["negative_pct"].map(
-                    lambda x: f"{x:.1f}%"
-                )
-                comp_display["estimated_annual_revenue_per_mw"] = (
-                    comp_display["estimated_annual_revenue_per_mw"].map(
-                        lambda x: f"\u20ac{x:,.0f}"
-                    )
-                )
-                st.dataframe(comp_display, width="stretch", hide_index=True)
 
                 all_daily = []
                 for zone, df in zone_data.items():

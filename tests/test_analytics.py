@@ -283,6 +283,22 @@ class TestCompareZones:
             > low_capture["estimated_annual_revenue_per_mw"].iloc[0]
         )
 
+    def test_efficiency_flows_into_revenue(
+        self, seven_day_prices: pd.DataFrame,
+    ) -> None:
+        low_eff = compare_zones(
+            {"DE_LU": seven_day_prices},
+            roundtrip_efficiency=0.85,
+        )
+        high_eff = compare_zones(
+            {"DE_LU": seven_day_prices},
+            roundtrip_efficiency=0.95,
+        )
+        assert (
+            high_eff["estimated_annual_revenue_per_mw"].iloc[0]
+            > low_eff["estimated_annual_revenue_per_mw"].iloc[0]
+        )
+
 
 # ── Renewable correlation ────────────────────────────────────────────────────
 
