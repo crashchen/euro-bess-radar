@@ -265,7 +265,8 @@ class TestCompareZones:
     def test_columns(self, seven_day_prices: pd.DataFrame) -> None:
         result = compare_zones({"DE_LU": seven_day_prices})
         expected = {"zone", "avg_price", "std_price", "avg_spread", "p50_spread",
-                    "p90_spread", "negative_pct", "estimated_annual_revenue_per_mw"}
+                    "p90_spread", "negative_pct", "estimated_annual_revenue_per_mw",
+                    "dispatch_method"}
         assert set(result.columns) == expected
 
     def test_capture_rate_flows_into_revenue(
@@ -299,6 +300,41 @@ class TestCompareZones:
             high_eff["estimated_annual_revenue_per_mw"].iloc[0]
             > low_eff["estimated_annual_revenue_per_mw"].iloc[0]
         )
+
+    def test_lp_dispatch_columns(self, seven_day_prices: pd.DataFrame) -> None:
+        result = compare_zones(
+            {"DE_LU": seven_day_prices},
+            use_lp_dispatch=True,
+            power_mw=1.0,
+        )
+        assert result["dispatch_method"].iloc[0] == "lp"
+
+    def test_degradation_columns(self, seven_day_prices: pd.DataFrame) -> None:
+        result = compare_zones(
+            {"DE_LU": seven_day_prices},
+            capex_eur_kwh=300.0,
+        )
+        for col in ["avg_cycles_per_day", "net_revenue_per_mw", "lcos_eur_mwh",
+                     "payback_years", "effective_life_years", "limiting_factor"]:
+            assert col in result.columns, f"Missing column: {col}"
+        assert result["effective_life_years"].iloc[0] > 0
+        assert result["limiting_factor"].iloc[0] in ("cycling", "calendar")
+
+    def test_lp_with_degradation(self, seven_day_prices: pd.DataFrame) -> None:
+        result = compare_zones(
+            {"DE_LU": seven_day_prices},
+            use_lp_dispatch=True,
+            power_mw=1.0,
+            capex_eur_kwh=300.0,
+        )
+        assert result["dispatch_method"].iloc[0] == "lp"
+        assert "lcos_eur_mwh" in result.columns
+        assert result["avg_cycles_per_day"].iloc[0] > 0
+
+    def test_backward_compat_no_degradation(self, seven_day_prices: pd.DataFrame) -> None:
+        result = compare_zones({"DE_LU": seven_day_prices})
+        assert "lcos_eur_mwh" not in result.columns
+        assert "payback_years" not in result.columns
 
 
 # ── Renewable correlation ────────────────────────────────────────────────────

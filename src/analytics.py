@@ -706,6 +706,9 @@ def compare_zones(
     duration_hours: float = 1.0,
     capture_rate: float = 0.70,
     roundtrip_efficiency: float = 0.88,
+    power_mw: float = 1.0,
+    use_lp_dispatch: bool = False,
+    capex_eur_kwh: float = 0.0,
 ) -> pd.DataFrame:
     """Compare key metrics across multiple zones.
 
@@ -715,6 +718,9 @@ def compare_zones(
         duration_hours: Charge/discharge window length for spread calculation.
         capture_rate: Share of theoretical spread assumed to be captured (0-1).
         roundtrip_efficiency: Round-trip efficiency of the BESS (0-1).
+        power_mw: BESS power rating in MW.
+        use_lp_dispatch: If True, use LP dispatch instead of greedy heuristic.
+        capex_eur_kwh: CapEx in EUR/kWh; if >0, degradation metrics are added.
 
     Returns:
         Summary DataFrame with one row per zone.
@@ -725,17 +731,26 @@ def compare_zones(
             continue
 
         tz = zone_timezones.get(zone) if zone_timezones else None
-        daily = calculate_daily_spreads(df, tz=tz, duration_hours=duration_hours)
+
+        if use_lp_dispatch:
+            daily = calculate_daily_dispatch(
+                df, tz=tz, duration_hours=duration_hours,
+                power_mw=power_mw, efficiency=roundtrip_efficiency,
+            )
+        else:
+            daily = calculate_daily_spreads(df, tz=tz, duration_hours=duration_hours)
+
         pctls = calculate_spread_percentiles(daily)
         neg = calculate_negative_price_hours(df)
         rev = estimate_annual_arbitrage_revenue(
             daily,
+            power_mw=power_mw,
             duration_hours=duration_hours,
             capture_rate=capture_rate,
             roundtrip_efficiency=roundtrip_efficiency,
         )
 
-        rows.append({
+        row: dict[str, object] = {
             "zone": zone,
             "avg_price": round(float(df["price_eur_mwh"].mean()), 2),
             "std_price": round(float(df["price_eur_mwh"].std()), 2),
@@ -744,6 +759,53 @@ def compare_zones(
             "p90_spread": round(pctls["p90"], 2),
             "negative_pct": neg["pct_negative"],
             "estimated_annual_revenue_per_mw": rev["annual_revenue_eur_per_mw"],
-        })
+            "dispatch_method": rev.get("dispatch_method", "greedy"),
+        }
+
+        # Degradation & lifetime metrics when CapEx is provided
+        if capex_eur_kwh > 0:
+            from src.degradation import (
+                calculate_annual_throughput_mwh,
+                calculate_degradation_cost,
+                calculate_levelized_cost_of_storage,
+                estimate_battery_lifetime,
+            )
+
+            capacity_kwh = power_mw * duration_hours * 1000
+            if "n_cycles" in daily.columns:
+                avg_cycles_day = float(daily["n_cycles"].mean())
+            else:
+                avg_cycles_day = float(rev.get("cycles_per_day_assumption", 1.0))
+
+            annual_cycles = avg_cycles_day * 365.25
+            deg = calculate_degradation_cost(
+                n_cycles=annual_cycles,
+                capex_eur_kwh=capex_eur_kwh,
+                capacity_kwh=capacity_kwh,
+            )
+            lifetime = estimate_battery_lifetime(avg_cycles_per_day=avg_cycles_day)
+            annual_rev = rev["annual_revenue_eur"]
+            net_rev = annual_rev - deg["total_degradation_eur"]
+            throughput = calculate_annual_throughput_mwh(avg_cycles_day, capacity_kwh)
+            lcos = (
+                calculate_levelized_cost_of_storage(
+                    capex_eur_kwh, capacity_kwh,
+                    float(lifetime["effective_life_years"]), throughput,
+                )
+                if throughput > 0 else None
+            )
+            total_capex = capex_eur_kwh * capacity_kwh
+            payback = total_capex / net_rev if net_rev > 0 else float("inf")
+
+            row.update({
+                "avg_cycles_per_day": round(avg_cycles_day, 2),
+                "net_revenue_per_mw": round(net_rev / power_mw, 0),
+                "lcos_eur_mwh": round(lcos, 1) if lcos is not None else None,
+                "payback_years": round(payback, 1) if payback < 1000 else None,
+                "effective_life_years": round(float(lifetime["effective_life_years"]), 1),
+                "limiting_factor": lifetime["limiting_factor"],
+            })
+
+        rows.append(row)
 
     return pd.DataFrame(rows)

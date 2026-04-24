@@ -554,3 +554,54 @@ def export_to_pdf_bytes(
         tz=tz,
         figures=figures,
     )
+
+
+# ── Comparison export ─────────────────────────────────────────────────────────
+
+_COMPARISON_COLUMNS = {
+    "zone": ("Zone", None),
+    "avg_price": ("Avg Price (EUR/MWh)", _PRICE_FMT),
+    "std_price": ("Std Dev", _PRICE_FMT),
+    "avg_spread": ("Avg Spread (EUR/MWh)", _PRICE_FMT),
+    "p50_spread": ("P50 Spread", _PRICE_FMT),
+    "p90_spread": ("P90 Spread", _PRICE_FMT),
+    "negative_pct": ("Neg Price %", _PCT_FMT),
+    "estimated_annual_revenue_per_mw": ("Revenue (EUR/MW/yr)", "#,##0"),
+    "dispatch_method": ("Dispatch Method", None),
+    "avg_cycles_per_day": ("Avg Cycles/Day", "0.00"),
+    "net_revenue_per_mw": ("Net Revenue (EUR/MW/yr)", "#,##0"),
+    "lcos_eur_mwh": ("LCOS (EUR/MWh)", "#,##0.0"),
+    "payback_years": ("Payback (years)", "0.0"),
+    "effective_life_years": ("Effective Life (years)", "0.0"),
+    "limiting_factor": ("Limiting Factor", None),
+}
+
+
+def export_comparison_to_bytes(comparison_df: pd.DataFrame) -> bytes:
+    """Export zone comparison DataFrame to an Excel workbook.
+
+    Args:
+        comparison_df: Output of ``compare_zones()``.
+
+    Returns:
+        Excel file as bytes.
+    """
+    buf = BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        comparison_df.to_excel(writer, sheet_name="Zone Comparison", index=False)
+        ws = writer.sheets["Zone Comparison"]
+
+        # Apply styled headers and number formats
+        for col_idx, col_name in enumerate(comparison_df.columns, 1):
+            label, fmt = _COMPARISON_COLUMNS.get(col_name, (col_name, None))
+            cell = ws.cell(row=1, column=col_idx, value=label)
+            cell.font = _HEADER_FONT
+            cell.fill = _HEADER_FILL
+            cell.alignment = Alignment(horizontal="center")
+            if fmt:
+                for row_idx in range(2, len(comparison_df) + 2):
+                    ws.cell(row=row_idx, column=col_idx).number_format = fmt
+
+        _auto_column_width(ws)
+
+    return buf.getvalue()

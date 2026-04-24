@@ -55,7 +55,7 @@ from src.degradation import (
     calculate_net_revenue,
     estimate_battery_lifetime,
 )
-from src.export import export_to_bytes, export_to_pdf_bytes
+from src.export import export_comparison_to_bytes, export_to_bytes, export_to_pdf_bytes
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -1092,66 +1092,117 @@ if fetch_btn or "zone_data" in st.session_state:
                 duration_hours=duration_hours,
                 capture_rate=capture_rate,
                 roundtrip_efficiency=efficiency,
+                power_mw=power_mw,
+                use_lp_dispatch=use_lp_dispatch,
+                capex_eur_kwh=capex_eur_kwh,
             )
             if comp.empty:
                 st.warning(
                     "No comparison rows could be built from the fetched zone data."
                 )
             else:
+                has_degradation = "net_revenue_per_mw" in comp.columns
+                sort_col = (
+                    "net_revenue_per_mw" if has_degradation
+                    else "estimated_annual_revenue_per_mw"
+                )
                 comp = comp.sort_values(
-                    "estimated_annual_revenue_per_mw", ascending=False,
+                    sort_col, ascending=False,
                 ).reset_index(drop=True)
 
                 # Risk/Reward scatter
-                fig_rr = px.scatter(
-                    comp,
-                    x="p90_spread",
-                    y="estimated_annual_revenue_per_mw",
-                    size="negative_pct",
-                    text="zone",
-                    title="Zone Screening: Risk/Reward Frontier",
-                    labels={
-                        "p90_spread": "P90 Spread (EUR/MWh)",
-                        "estimated_annual_revenue_per_mw": "Est. Annual Revenue (EUR/MW/yr)",
-                        "negative_pct": "Negative Price %",
-                    },
-                    template=chart_template,
-                    size_max=40,
+                y_col = sort_col
+                y_label = (
+                    "Net Revenue (EUR/MW/yr)" if has_degradation
+                    else "Est. Annual Revenue (EUR/MW/yr)"
                 )
+                scatter_kwargs: dict = {
+                    "x": "p90_spread",
+                    "y": y_col,
+                    "text": "zone",
+                    "title": "Zone Screening: Risk/Reward Frontier",
+                    "labels": {
+                        "p90_spread": "P90 Spread (EUR/MWh)",
+                        y_col: y_label,
+                    },
+                    "template": chart_template,
+                }
+                if has_degradation and comp["lcos_eur_mwh"].notna().any():
+                    scatter_kwargs["size"] = "lcos_eur_mwh"
+                    scatter_kwargs["size_max"] = 40
+                    scatter_kwargs["labels"]["lcos_eur_mwh"] = "LCOS (EUR/MWh)"
+                else:
+                    scatter_kwargs["size"] = "negative_pct"
+                    scatter_kwargs["size_max"] = 40
+                    scatter_kwargs["labels"]["negative_pct"] = "Negative Price %"
+
+                fig_rr = px.scatter(comp, **scatter_kwargs)
                 fig_rr.update_traces(textposition="top center")
                 st.plotly_chart(fig_rr, width="stretch")
 
-                # Numeric table (keep sortable)
+                # Numeric table
+                col_config: dict = {
+                    "zone": "Zone",
+                    "avg_price": st.column_config.NumberColumn(
+                        "Avg Price", format="\u20ac%.2f",
+                    ),
+                    "std_price": st.column_config.NumberColumn(
+                        "Std Dev", format="%.2f",
+                    ),
+                    "avg_spread": st.column_config.NumberColumn(
+                        "Avg Spread", format="\u20ac%.2f",
+                    ),
+                    "p50_spread": st.column_config.NumberColumn(
+                        "P50 Spread", format="\u20ac%.2f",
+                    ),
+                    "p90_spread": st.column_config.NumberColumn(
+                        "P90 Spread", format="\u20ac%.2f",
+                    ),
+                    "negative_pct": st.column_config.NumberColumn(
+                        "Neg Price %", format="%.1f%%",
+                    ),
+                    "estimated_annual_revenue_per_mw": st.column_config.NumberColumn(
+                        "Revenue (EUR/MW/yr)", format="\u20ac%,.0f",
+                    ),
+                    "dispatch_method": "Dispatch",
+                }
+                if has_degradation:
+                    col_config.update({
+                        "avg_cycles_per_day": st.column_config.NumberColumn(
+                            "Cycles/Day", format="%.2f",
+                        ),
+                        "net_revenue_per_mw": st.column_config.NumberColumn(
+                            "Net Rev (EUR/MW/yr)", format="\u20ac%,.0f",
+                        ),
+                        "lcos_eur_mwh": st.column_config.NumberColumn(
+                            "LCOS", format="\u20ac%.1f/MWh",
+                        ),
+                        "payback_years": st.column_config.NumberColumn(
+                            "Payback", format="%.1f yr",
+                        ),
+                        "effective_life_years": st.column_config.NumberColumn(
+                            "Lifetime", format="%.1f yr",
+                        ),
+                        "limiting_factor": "Limit",
+                    })
+
                 st.dataframe(
                     comp,
                     width="stretch",
                     hide_index=True,
-                    column_config={
-                        "zone": "Zone",
-                        "avg_price": st.column_config.NumberColumn(
-                            "Avg Price", format="\u20ac%.2f",
-                        ),
-                        "std_price": st.column_config.NumberColumn(
-                            "Std Dev", format="%.2f",
-                        ),
-                        "avg_spread": st.column_config.NumberColumn(
-                            "Avg Spread", format="\u20ac%.2f",
-                        ),
-                        "p50_spread": st.column_config.NumberColumn(
-                            "P50 Spread", format="\u20ac%.2f",
-                        ),
-                        "p90_spread": st.column_config.NumberColumn(
-                            "P90 Spread", format="\u20ac%.2f",
-                        ),
-                        "negative_pct": st.column_config.NumberColumn(
-                            "Neg Price %", format="%.1f%%",
-                        ),
-                        "estimated_annual_revenue_per_mw": st.column_config.NumberColumn(
-                            "Revenue (EUR/MW/yr)", format="\u20ac%,.0f",
-                        ),
-                    },
+                    column_config=col_config,
                 )
 
+                # Download comparison
+                comp_xlsx = export_comparison_to_bytes(comp)
+                st.download_button(
+                    label="Download comparison (Excel)",
+                    data=comp_xlsx,
+                    file_name="zone_comparison.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
+                # Daily spread comparison chart
                 all_daily = []
                 for zone, df in zone_data.items():
                     ds = calculate_daily_spreads(
