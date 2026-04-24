@@ -211,9 +211,10 @@ class TestRevenue:
         expected_keys = {
             "annual_revenue_eur", "annual_revenue_eur_per_mw",
             "avg_daily_revenue", "capture_rate_assumption",
-            "cycles_per_day_assumption",
+            "cycles_per_day_assumption", "dispatch_method",
         }
         assert set(result.keys()) == expected_keys
+        assert result["dispatch_method"] == "greedy"
 
 
 # ── Negative price hours ─────────────────────────────────────────────────────
@@ -538,3 +539,71 @@ class TestLocalTimezoneAnalytics:
             zone_timezones={"DE_LU": "Europe/Berlin"},
         )
         assert len(result) == 1
+
+
+# ── LP dispatch integration ────────────────────────────────────────────────────
+
+class TestDailyDispatch:
+    @pytest.fixture()
+    def spread_prices(self) -> pd.DataFrame:
+        idx = pd.date_range("2025-01-01", periods=72, freq="h", tz="UTC")
+        prices = ([20.0] * 12 + [80.0] * 12) * 3
+        df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+        df.index.name = "timestamp"
+        return df
+
+    def test_returns_superset_of_greedy(self, spread_prices) -> None:
+        from src.analytics import calculate_daily_dispatch
+        result = calculate_daily_dispatch(spread_prices, duration_hours=2.0)
+        greedy_cols = {"date", "daily_min", "daily_max", "spread", "max_hour", "min_hour"}
+        lp_cols = {"lp_revenue", "n_cycles", "lp_spread_eur_mwh"}
+        assert greedy_cols.issubset(set(result.columns))
+        assert lp_cols.issubset(set(result.columns))
+
+    def test_lp_revenue_positive_for_spread(self, spread_prices) -> None:
+        from src.analytics import calculate_daily_dispatch
+        result = calculate_daily_dispatch(spread_prices, duration_hours=2.0, efficiency=0.88)
+        assert (result["lp_revenue"] > 0).all()
+        assert (result["n_cycles"] > 0).all()
+
+    def test_one_row_per_day(self, spread_prices) -> None:
+        from src.analytics import calculate_daily_dispatch
+        result = calculate_daily_dispatch(spread_prices, duration_hours=2.0)
+        assert len(result) == 3
+
+    def test_revenue_uses_lp_when_present(self, spread_prices) -> None:
+        from src.analytics import calculate_daily_dispatch
+        result = calculate_daily_dispatch(spread_prices, duration_hours=2.0, efficiency=0.88)
+        rev = estimate_annual_arbitrage_revenue(result, power_mw=1.0, duration_hours=2.0)
+        assert rev["dispatch_method"] == "lp"
+        assert rev["annual_revenue_eur"] > 0
+
+    def test_greedy_backward_compat(self, seven_day_prices) -> None:
+        """estimate_annual_arbitrage_revenue with greedy-only data uses greedy path."""
+        daily = calculate_daily_spreads(seven_day_prices)
+        rev = estimate_annual_arbitrage_revenue(daily)
+        assert rev["dispatch_method"] == "greedy"
+        assert "annual_revenue_eur" in rev
+
+    def test_lp_revenue_comparable_to_greedy(self, spread_prices) -> None:
+        """LP revenue should be within a few percent of greedy for a clean spread.
+
+        LP includes a small VOM cost (~1 EUR/MWh total per cycle) that greedy
+        doesn't model, so LP can be slightly lower for simple patterns. But for
+        multi-cycle patterns LP should exceed greedy.
+        """
+        from src.analytics import calculate_daily_dispatch
+        result = calculate_daily_dispatch(
+            spread_prices, duration_hours=2.0, power_mw=1.0, efficiency=0.88,
+        )
+        rev_lp = estimate_annual_arbitrage_revenue(
+            result, power_mw=1.0, duration_hours=2.0, capture_rate=1.0,
+        )
+
+        greedy = calculate_daily_spreads(spread_prices, duration_hours=2.0)
+        rev_greedy = estimate_annual_arbitrage_revenue(
+            greedy, power_mw=1.0, duration_hours=2.0,
+            roundtrip_efficiency=0.88, capture_rate=1.0,
+        )
+        # Within 2% — VOM cost accounts for the small difference
+        assert rev_lp["annual_revenue_eur"] >= rev_greedy["annual_revenue_eur"] * 0.98

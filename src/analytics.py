@@ -174,6 +174,52 @@ def calculate_daily_spreads(
     return result
 
 
+def calculate_daily_dispatch(
+    df: pd.DataFrame,
+    tz: str | None = None,
+    duration_hours: float = 1.0,
+    power_mw: float = 1.0,
+    efficiency: float = 0.88,
+) -> pd.DataFrame:
+    """Compute daily spreads with both greedy and LP dispatch results.
+
+    Returns a superset of :func:`calculate_daily_spreads` with additional
+    LP columns (``lp_revenue``, ``n_cycles``, ``lp_spread_eur_mwh``).
+
+    Args:
+        df: Price DataFrame with DatetimeIndex and 'price_eur_mwh'.
+        tz: IANA timezone for local-day grouping.
+        duration_hours: BESS duration in hours.
+        power_mw: BESS power rating in MW.
+        efficiency: Round-trip efficiency (0–1).
+    """
+    from src.dispatch import solve_dispatch_batch
+
+    greedy = calculate_daily_spreads(df, tz=tz, duration_hours=duration_hours)
+    lp = solve_dispatch_batch(
+        df,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        tz=tz,
+        soc_init_frac=0.0,
+    )
+
+    if greedy.empty or lp.empty:
+        for col in ("lp_revenue", "n_cycles", "lp_spread_eur_mwh"):
+            greedy[col] = pd.Series(dtype=float)
+        return greedy
+
+    # greedy has 'date' as both a column and index.name — drop the index name
+    # to avoid pandas ambiguity, then join LP results via the 'date' column.
+    greedy = greedy.copy()
+    greedy.index.name = None
+    lp_indexed = lp.set_index("date")
+    merged = greedy.join(lp_indexed, on="date", how="left")
+    merged.index.name = "date"
+    return merged
+
+
 def calculate_monthly_spreads(
     df: pd.DataFrame,
     tz: str | None = None,
@@ -330,26 +376,45 @@ def estimate_annual_arbitrage_revenue(
 ) -> dict[str, float]:
     """Estimate annualised BESS arbitrage revenue from daily spreads.
 
+    Auto-detects LP dispatch columns (``lp_revenue``) when present and uses
+    the LP-optimal daily revenue directly.  Falls back to greedy heuristic
+    otherwise, preserving full backward compatibility.
+
     Args:
-        daily_spreads: DataFrame with 'spread' column for the relevant
-            charge/discharge duration.
+        daily_spreads: DataFrame with 'spread' column (greedy) and optionally
+            'lp_revenue'/'n_cycles' columns from LP dispatch.
         power_mw: BESS power rating in MW.
         duration_hours: BESS duration in hours.
         roundtrip_efficiency: Round-trip efficiency (0-1).
         capture_rate: Share of theoretical spread assumed to be captured (0-1).
-        cycles_per_day: Average cycles per day.
+        cycles_per_day: Average cycles per day (greedy path only).
 
     Returns:
         Dict with annual_revenue_eur, annual_revenue_eur_per_mw,
-        avg_daily_revenue, capture_rate_assumption, cycles_per_day_assumption.
+        avg_daily_revenue, capture_rate_assumption, cycles_per_day_assumption,
+        dispatch_method.
     """
+    days_in_year = 365.25
+
+    if "lp_revenue" in daily_spreads.columns:
+        avg_daily_revenue = float(daily_spreads["lp_revenue"].mean()) * capture_rate
+        annual_revenue = avg_daily_revenue * days_in_year
+        avg_cycles = float(daily_spreads["n_cycles"].mean()) if "n_cycles" in daily_spreads.columns else 1.0
+        return {
+            "annual_revenue_eur": round(annual_revenue, 2),
+            "annual_revenue_eur_per_mw": round(annual_revenue / power_mw, 2),
+            "avg_daily_revenue": round(avg_daily_revenue, 2),
+            "capture_rate_assumption": capture_rate,
+            "cycles_per_day_assumption": round(avg_cycles, 2),
+            "dispatch_method": "lp",
+        }
+
     avg_spread = float(daily_spreads["spread"].mean())
     energy_mwh = power_mw * duration_hours
 
     daily_revenue = (
         avg_spread * energy_mwh * roundtrip_efficiency * capture_rate * cycles_per_day
     )
-    days_in_year = 365.25
     annual_revenue = daily_revenue * days_in_year
 
     return {
@@ -358,6 +423,7 @@ def estimate_annual_arbitrage_revenue(
         "avg_daily_revenue": round(daily_revenue, 2),
         "capture_rate_assumption": capture_rate,
         "cycles_per_day_assumption": cycles_per_day,
+        "dispatch_method": "greedy",
     }
 
 

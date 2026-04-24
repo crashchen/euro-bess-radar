@@ -8,6 +8,7 @@ plotly>=6.0,<7.0
 openpyxl>=3.1,<4.0
 kaleido>=0.2,<1.0
 fpdf2>=2.8,<3.0
+scipy>=1.12,<2.0
 
 # Dev dependencies
 pytest>=8.0,<9.0

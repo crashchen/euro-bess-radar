@@ -15,6 +15,7 @@ from src.analytics import (
     build_price_heatmap,
     build_renewable_price_scatter,
     build_spread_heatmap,
+    calculate_daily_dispatch,
     calculate_daily_spreads,
     calculate_monthly_spreads_from_daily,
     calculate_negative_price_hours,
@@ -156,6 +157,11 @@ with st.sidebar.form("bess_params"):
         "CapEx (EUR/kWh)",
         min_value=0.0, value=0.0, step=50.0,
         help="Enter installed CapEx to calculate payback period. Leave 0 to skip.",
+    )
+    use_lp_dispatch = st.checkbox(
+        "Multi-cycle LP dispatch",
+        value=False,
+        help="Use LP optimizer for multi-cycle dispatch instead of greedy single-cycle heuristic.",
     )
     st.form_submit_button("Apply", type="primary")
 force_refresh = st.sidebar.checkbox(
@@ -344,9 +350,15 @@ if fetch_btn or "zone_data" in st.session_state:
     primary_df = zone_data[primary_zone]
     zone_tz = get_zone_timezone(primary_zone)
 
-    daily_spreads = calculate_daily_spreads(
-        primary_df, tz=zone_tz, duration_hours=duration_hours,
-    )
+    if use_lp_dispatch:
+        daily_spreads = calculate_daily_dispatch(
+            primary_df, tz=zone_tz, duration_hours=duration_hours,
+            power_mw=power_mw, efficiency=efficiency,
+        )
+    else:
+        daily_spreads = calculate_daily_spreads(
+            primary_df, tz=zone_tz, duration_hours=duration_hours,
+        )
     monthly_spreads = calculate_monthly_spreads_from_daily(daily_spreads)
     percentiles = calculate_spread_percentiles(daily_spreads)
     neg_stats = calculate_negative_price_hours(primary_df)
@@ -635,13 +647,15 @@ if fetch_btn or "zone_data" in st.session_state:
                     "model only monetises explicit capacity prices and single-sided energy prices."
                 )
         else:
+            dispatch_label = revenue.get("dispatch_method", "greedy")
             r1.metric(
                 "Est. Annual Revenue",
                 f"\u20ac{revenue['annual_revenue_eur']:,.0f}",
                 help=(
                     f"At {power_mw} MW, {duration_hours}h, {efficiency*100:.0f}% eff, "
-                    f"{revenue['cycles_per_day_assumption']:.1f} modeled cycle/day, "
-                    f"{revenue['capture_rate_assumption']:.0%} capture"
+                    f"{revenue['cycles_per_day_assumption']:.1f} avg cycle/day, "
+                    f"{revenue['capture_rate_assumption']:.0%} capture, "
+                    f"dispatch: {dispatch_label}"
                 ),
             )
             r2.metric("Revenue per MW", f"\u20ac{revenue['annual_revenue_eur_per_mw']:,.0f}/MW/yr")
@@ -707,6 +721,26 @@ if fetch_btn or "zone_data" in st.session_state:
         )
         report_figures["revenue_waterfall"] = fig_wf
         st.plotly_chart(fig_wf, width="stretch")
+
+        # LP dispatch details
+        if use_lp_dispatch and "lp_revenue" in daily_spreads.columns:
+            st.divider()
+            st.markdown("**LP Dispatch Details**")
+            lp1, lp2, lp3 = st.columns(3)
+            avg_cycles = float(daily_spreads["n_cycles"].mean())
+            avg_lp_spread = float(daily_spreads["lp_spread_eur_mwh"].mean())
+            greedy_spread = float(daily_spreads["spread"].mean())
+            uplift_pct = (
+                (avg_lp_spread - greedy_spread * efficiency) / (greedy_spread * efficiency) * 100
+                if greedy_spread * efficiency > 0 else 0.0
+            )
+            lp1.metric("Avg Cycles/Day", f"{avg_cycles:.2f}")
+            lp2.metric("LP Spread (EUR/MWh)", f"\u20ac{avg_lp_spread:.1f}")
+            lp3.metric(
+                "LP vs Greedy Uplift",
+                f"{uplift_pct:+.0f}%",
+                help="Percentage improvement of LP-optimal over greedy single-cycle (adjusted for efficiency)",
+            )
 
         # Sensitivity table
         st.markdown("**Duration Sensitivity (per MW)**")
