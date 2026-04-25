@@ -216,7 +216,7 @@ def _build_heatmap_sheet(ws, title: str, heatmap: pd.DataFrame) -> None:
     """Write a heatmap matrix to a sheet."""
     ws.title = title
     # Header row: "Hour" + month columns
-    headers = ["Hour"] + list(heatmap.columns)
+    headers = ["Hour", *list(heatmap.columns)]
     _write_header_row(ws, 1, headers)
 
     for r_idx, (hour, row_data) in enumerate(heatmap.iterrows(), 2):

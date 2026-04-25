@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -20,7 +19,6 @@ from src.ancillary import (
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
 from src.config import ANCILLARY_ENERGY_ACTIVATION_SHARE, GBP_EUR_YEARLY, HOURS_PER_YEAR
-
 
 # ── Template CSV generation ──────────────────────────────────────────────────
 

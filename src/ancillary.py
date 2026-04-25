@@ -172,7 +172,7 @@ def _parse_date_hour_index(
 def _parse_regelleistung_block_index(dates, time_blocks) -> pd.DatetimeIndex:
     """Convert German reserve date/time-block columns to UTC timestamps."""
     timestamps = []
-    for target_date, time_block in zip(pd.Series(dates), pd.Series(time_blocks)):
+    for target_date, time_block in zip(pd.Series(dates), pd.Series(time_blocks), strict=True):
         timestamps.append(parse_regelleistung_time_block_start(target_date, time_block))
     return pd.DatetimeIndex(timestamps, name="timestamp")
 
@@ -363,7 +363,7 @@ def normalize_auto_fetch_dataset(
         )
         canonical = [
             _canonical_product_label(label, direction, dataset_name)
-            for label, direction in zip(labels, directions)
+            for label, direction in zip(labels, directions, strict=True)
         ]
         frames.append(_build_standard_frame(
             idx,
@@ -518,7 +518,7 @@ def parse_ancillary_csv(
         )
         canonical = [
             _canonical_product_label(product, direction, template_key)
-            for product, direction in zip(product_series, direction_series)
+            for product, direction in zip(product_series, direction_series, strict=True)
         ]
         frames.append(_build_standard_frame(
             idx,

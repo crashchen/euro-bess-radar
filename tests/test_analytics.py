@@ -9,8 +9,8 @@ import pytest
 from src.analytics import (
     _find_daily_ordered_trade,
     analyze_renewable_bess_signal,
-    build_price_heatmap,
     build_daily_renewable_spread_view,
+    build_price_heatmap,
     build_renewable_price_scatter,
     build_spread_heatmap,
     calculate_daily_spreads,
@@ -24,7 +24,6 @@ from src.analytics import (
     estimate_annual_arbitrage_revenue,
 )
 from src.config import get_zone_timezone
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 

@@ -29,8 +29,8 @@ def solve_daily_lp(
         dt: Interval duration in hours (e.g. 1.0, 0.5, 0.25).
         power_mw: BESS power rating in MW.
         duration_hours: BESS energy duration in hours.
-        efficiency: Round-trip efficiency (0–1).
-        soc_init_frac: Initial SoC as fraction of capacity (0–1).
+        efficiency: Round-trip efficiency (0-1).
+        soc_init_frac: Initial SoC as fraction of capacity (0-1).
 
     Returns:
         Dict with keys: revenue_eur, p_charge, p_discharge, soc, n_cycles.
@@ -153,9 +153,9 @@ def solve_dispatch_batch(
         price_df: DataFrame with DatetimeIndex and 'price_eur_mwh' column.
         power_mw: BESS power rating in MW.
         duration_hours: BESS energy duration in hours.
-        efficiency: Round-trip efficiency (0–1).
+        efficiency: Round-trip efficiency (0-1).
         tz: IANA timezone for local-day grouping. None = use index as-is.
-        soc_init_frac: Initial SoC fraction for each day (0–1).
+        soc_init_frac: Initial SoC fraction for each day (0-1).
 
     Returns:
         DataFrame with columns: [date, lp_revenue, n_cycles, lp_spread_eur_mwh].

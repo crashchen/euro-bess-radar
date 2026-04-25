@@ -119,8 +119,6 @@ def sensitivity_table(
         }
 
     rows = []
-    labels = {"revenue": "Low/Base/High", "capex": "Low/Base/High",
-              "discount_rate": "6%/8%/10%", "lifetime": "15yr/20yr/25yr"}
 
     for param, values in vary.items():
         for val in values:

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import sqlite3
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -30,16 +30,15 @@ from src.data_ingestion import (
     fetch_elexon_system_prices,
     fetch_entsoe_imbalance_prices,
     fetch_entsoe_prices,
-    fetch_generation_data,
     fetch_fingrid_afrr_prices,
     fetch_fingrid_data,
     fetch_fingrid_fcr_prices,
+    fetch_generation_data,
     fetch_prices,
     fetch_regelleistung_results,
     read_cache,
     write_cache,
 )
-
 
 # ── Test 1: ENTSO-E schema ──────────────────────────────────────────────────
 
@@ -753,13 +752,12 @@ class TestFetchFingridData:
         mock_resp.json.return_value = {"data": []}
         mock_get.return_value = mock_resp
 
-        with patch.dict("os.environ", {}, clear=True):
-            with caplog.at_level(logging.WARNING):
-                fetch_fingrid_data(
-                    317,
-                    pd.Timestamp("2025-01-01", tz="UTC"),
-                    pd.Timestamp("2025-01-02", tz="UTC"),
-                )
+        with patch.dict("os.environ", {}, clear=True), caplog.at_level(logging.WARNING):
+            fetch_fingrid_data(
+                317,
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
 
         assert "without FINGRID_API_KEY" in caplog.text
         assert mock_get.call_args.kwargs["headers"] == {}
@@ -926,8 +924,9 @@ class TestFetchGenerationData:
 class TestFetchRegelleistungResults:
     def _make_xlsx_bytes(self) -> bytes:
         """Create a minimal xlsx that mimics Regelleistung tender export."""
-        import openpyxl
         from io import BytesIO
+
+        import openpyxl
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -957,8 +956,9 @@ class TestFetchRegelleistungResults:
 
     @patch("src.data_ingestion._call_regelleistung_api")
     def test_parses_range_style_time_block(self, mock_api: MagicMock) -> None:
-        import openpyxl
         from io import BytesIO
+
+        import openpyxl
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -998,8 +998,9 @@ class TestFetchRegelleistungResults:
         self, mock_api: MagicMock, caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Empty xlsx (headers only) returns None with fallback warning."""
-        import openpyxl
         from io import BytesIO
+
+        import openpyxl
 
         wb = openpyxl.Workbook()
         ws = wb.active

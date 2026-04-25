@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date as date_type
-from datetime import datetime, time as time_type
 import re
-from typing import Iterable
+from collections.abc import Iterable
+from datetime import date as date_type
+from datetime import datetime
+from datetime import time as time_type
 
 import pandas as pd
 
@@ -34,7 +35,7 @@ def gb_settlement_period_to_utc(
         raise ValueError("settlement_dates and settlement_periods must have equal length")
 
     timestamps = []
-    for raw_date, raw_period in zip(dates, periods):
+    for raw_date, raw_period in zip(dates, periods, strict=True):
         period = int(raw_period)
         if period < 1:
             raise ValueError("GB settlement periods are 1-indexed")
@@ -50,7 +51,7 @@ def _time_from_numeric(value: int | float) -> tuple[int, int] | None:
     if pd.isna(numeric):
         return None
     if 0 <= numeric < 1:
-        minutes = int(round(numeric * 24 * 60))
+        minutes = round(numeric * 24 * 60)
     elif numeric >= 1:
         ts = pd.Timestamp("1899-12-30") + pd.Timedelta(days=numeric)
         minutes = ts.hour * 60 + ts.minute
@@ -65,9 +66,9 @@ def _time_from_text(value: str) -> tuple[int, int] | None:
     if not text or text.lower() in {"nan", "none", "nat"}:
         return None
 
-    # A block like "00:00-04:00" or "00:00 – 04:00" starts at the first time.
+    # A block like "00:00-04:00" or "00:00 - 04:00" starts at the first time.
     text = text.replace("Uhr", "").replace("uhr", "").strip()
-    text = re.split(r"\s*[-–—]\s*", text, maxsplit=1)[0].strip()
+    text = re.split(r"\s*[-\u2013\u2014]\s*", text, maxsplit=1)[0].strip()
 
     match = re.search(r"(?P<hour>\d{1,2})[:.](?P<minute>\d{2})", text)
     if match:
@@ -100,9 +101,7 @@ def parse_regelleistung_time_block_start(
     parsed_time: tuple[int, int] | None
     if isinstance(time_block, pd.Timestamp):
         parsed_time = (int(time_block.hour), int(time_block.minute))
-    elif isinstance(time_block, datetime):
-        parsed_time = (time_block.hour, time_block.minute)
-    elif isinstance(time_block, time_type):
+    elif isinstance(time_block, (datetime, time_type)):
         parsed_time = (time_block.hour, time_block.minute)
     elif isinstance(time_block, (int, float)):
         parsed_time = _time_from_numeric(time_block)

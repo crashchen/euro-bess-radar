@@ -34,7 +34,7 @@ def _infer_interval_hours(index: pd.DatetimeIndex) -> float:
 def _window_length(index: pd.DatetimeIndex, duration_hours: float) -> int:
     """Convert BESS duration in hours to an integer number of intervals."""
     interval_hours = _infer_interval_hours(index)
-    return max(int(round(duration_hours / interval_hours)), 1)
+    return max(round(duration_hours / interval_hours), 1)
 
 
 def _find_daily_ordered_trade(
@@ -191,7 +191,7 @@ def calculate_daily_dispatch(
         tz: IANA timezone for local-day grouping.
         duration_hours: BESS duration in hours.
         power_mw: BESS power rating in MW.
-        efficiency: Round-trip efficiency (0–1).
+        efficiency: Round-trip efficiency (0-1).
     """
     from src.dispatch import solve_dispatch_batch
 
@@ -742,8 +742,8 @@ def analyze_renewable_bess_signal(
         "spread_uplift_high_vs_low_renewable": None,
         "price_by_renewable_quartile": {},
         "spread_by_renewable_quartile": {},
-        "hourly_points": int(len(hourly)),
-        "daily_points": int(len(daily)),
+        "hourly_points": len(hourly),
+        "daily_points": len(daily),
     }
 
     if len(hourly) >= 10 and hourly["renewable_pct"].nunique() > 1:

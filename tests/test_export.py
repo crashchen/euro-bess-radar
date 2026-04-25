@@ -16,7 +16,12 @@ from src.analytics import (
     calculate_spread_percentiles,
     estimate_annual_arbitrage_revenue,
 )
-from src.export import export_to_bytes, export_to_excel, export_to_pdf_bytes, _render_figure_to_image
+from src.export import (
+    _render_figure_to_image,
+    export_to_bytes,
+    export_to_excel,
+    export_to_pdf_bytes,
+)
 
 
 def _render_or_skip(fig) -> bytes:

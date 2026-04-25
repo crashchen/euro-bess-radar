@@ -93,7 +93,7 @@ class TestSensitivityTable:
         result = sensitivity_table(
             base_revenue=100000.0, total_capex=500000.0,
         )
-        # 4 params × 3 values each = 12 rows
+        # 4 params x 3 values each = 12 rows
         assert len(result) == 12
         assert set(result.columns) == {"param", "value", "npv"}
 

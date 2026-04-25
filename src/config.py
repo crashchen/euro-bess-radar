@@ -1,9 +1,9 @@
 """Project configuration: bidding zones, API endpoints, paths."""
 
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-import os
 
 load_dotenv()
 
@@ -155,7 +155,7 @@ def get_api_key() -> str:
     """Load and validate ENTSO-E API key from environment."""
     key = ENTSOE_API_KEY
     if not key:
-        raise EnvironmentError(
+        raise OSError(
             "ENTSOE_API_KEY not found. Add it to .env file in project root."
         )
     return key

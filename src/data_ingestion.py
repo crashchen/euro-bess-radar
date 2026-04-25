@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import date
 import functools
+import itertools
 import logging
 import sqlite3
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from datetime import date
+from typing import Any
 
 import pandas as pd
 import requests
@@ -304,13 +306,13 @@ def _segment_and_reindex_prices(
         if zone and _ZONE_RESOLUTION_TRANSITIONS.get(zone):
             reindexed_segments: list[pd.DataFrame] = []
             split_points = [start, *_zone_resolution_boundaries(zone, start, end), end]
-            for segment_start, segment_end in zip(split_points, split_points[1:]):
+            for segment_start, segment_end in itertools.pairwise(split_points):
                 interval = _expected_interval_for_segment(
                     zone,
                     segment_start,
                     inferred or fallback,
                 )
-                expected_points = max(int(round((segment_end - segment_start) / interval)), 1)
+                expected_points = max(round((segment_end - segment_start) / interval), 1)
                 expected_idx = pd.date_range(
                     start=segment_start,
                     periods=expected_points,
@@ -323,7 +325,7 @@ def _segment_and_reindex_prices(
             return out
 
         interval = min(inferred, fallback) if inferred is not None else fallback
-        expected_points = max(int(round((end - start) / interval)), 1)
+        expected_points = max(round((end - start) / interval), 1)
         full_idx = pd.date_range(start=start, periods=expected_points, freq=interval)
         out = df.reindex(full_idx)
         out.index.name = "timestamp"
@@ -438,7 +440,7 @@ def _cache_segment_has_gaps(
     inferred = _infer_segment_freq(pd.DatetimeIndex(segment.index), zone=zone)
     expected_interval = _expected_interval_for_segment(zone, segment_start, fallback_interval)
     interval = min(inferred, expected_interval) if inferred is not None else expected_interval
-    expected_points = max(int(round((segment_end - segment_start) / interval)), 1)
+    expected_points = max(round((segment_end - segment_start) / interval), 1)
     expected_index = pd.date_range(start=segment_start, periods=expected_points, freq=interval)
     missing_points = int(segment.reindex(expected_index)["price_eur_mwh"].isna().sum())
 
@@ -868,7 +870,7 @@ def read_cache(
     interval = _expected_cache_interval(zone, df.index)
     if _index_spans_known_resolution_boundary(zone, df.index):
         split_points = [start, *_zone_resolution_boundaries(zone, start, end), end]
-        for segment_start, segment_end in zip(split_points, split_points[1:]):
+        for segment_start, segment_end in itertools.pairwise(split_points):
             if _cache_segment_has_gaps(df, zone, segment_start, segment_end, interval):
                 return None
     else:
@@ -1312,8 +1314,9 @@ def _parse_regelleistung_xlsx(
     content: bytes, product: str, target_date: str,
 ) -> pd.DataFrame:
     """Parse Regelleistung xlsx export into standard ancillary format."""
-    import openpyxl
     from io import BytesIO
+
+    import openpyxl
 
     wb = openpyxl.load_workbook(BytesIO(content), read_only=True, data_only=True)
     ws = wb.active
@@ -1331,7 +1334,7 @@ def _parse_regelleistung_xlsx(
     headers = [str(h).strip().lower() if h else "" for h in rows[0]]
     records = []
     for row in rows[1:]:
-        row_dict = dict(zip(headers, row))
+        row_dict = dict(zip(headers, row, strict=False))
         price = None
         for key in ("capacity price [eur/mw]", "capacity_price", "price", "ergebnispreis"):
             if key in row_dict and row_dict[key] is not None:
@@ -1345,7 +1348,7 @@ def _parse_regelleistung_xlsx(
 
         direction = "Symmetric"
         for key in ("direction", "richtung", "product_name"):
-            if key in row_dict and row_dict[key]:
+            if row_dict.get(key):
                 val = str(row_dict[key]).strip().upper()
                 if "UP" in val or "POS" in val:
                     direction = "Up"
@@ -1355,7 +1358,7 @@ def _parse_regelleistung_xlsx(
 
         time_block = ""
         for key in ("time_block", "von", "from", "delivery_date"):
-            if key in row_dict and row_dict[key]:
+            if row_dict.get(key):
                 time_block = row_dict[key]
                 break
 
