@@ -427,6 +427,105 @@ def estimate_annual_arbitrage_revenue(
     }
 
 
+def calculate_yearly_revenue_breakdown(
+    daily_spreads: pd.DataFrame,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    roundtrip_efficiency: float = 0.88,
+    capture_rate: float = 0.70,
+) -> pd.DataFrame:
+    """Break down revenue by calendar year for multi-year backtest.
+
+    Args:
+        daily_spreads: DataFrame with 'date' index/column and 'spread'
+            (and optionally 'lp_revenue'/'n_cycles' from LP dispatch).
+        power_mw: BESS power rating in MW.
+        duration_hours: BESS duration in hours.
+        roundtrip_efficiency: Round-trip efficiency (0-1).
+        capture_rate: Share of theoretical spread assumed captured (0-1).
+
+    Returns:
+        DataFrame with one row per calendar year: year, n_days, avg_spread,
+        avg_cycles_per_day, annual_revenue, revenue_per_mw.
+    """
+    df = daily_spreads.copy()
+    if "date" in df.columns:
+        df["year"] = pd.to_datetime(df["date"]).dt.year
+    else:
+        df["year"] = pd.to_datetime(df.index).year
+
+    use_lp = "lp_revenue" in df.columns
+    energy_mwh = power_mw * duration_hours
+    rows = []
+
+    for year, group in df.groupby("year"):
+        n_days = len(group)
+        avg_spread = float(group["spread"].mean())
+
+        if use_lp:
+            avg_daily_rev = float(group["lp_revenue"].mean()) * capture_rate
+            avg_cycles = float(group["n_cycles"].mean()) if "n_cycles" in group.columns else 1.0
+        else:
+            avg_daily_rev = avg_spread * energy_mwh * roundtrip_efficiency * capture_rate
+            avg_cycles = 1.0
+
+        annual_rev = avg_daily_rev * 365.25
+        rows.append({
+            "year": int(year),
+            "n_days": n_days,
+            "avg_spread": round(avg_spread, 2),
+            "avg_cycles_per_day": round(avg_cycles, 2),
+            "annual_revenue": round(annual_rev, 2),
+            "revenue_per_mw": round(annual_rev / power_mw, 2),
+        })
+
+    return pd.DataFrame(rows)
+
+
+def calculate_monthly_revenue(
+    daily_spreads: pd.DataFrame,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    roundtrip_efficiency: float = 0.88,
+    capture_rate: float = 0.70,
+) -> pd.DataFrame:
+    """Monthly revenue aggregation for seasonal heatmap.
+
+    Args:
+        daily_spreads: DataFrame with 'date' index/column and revenue columns.
+        power_mw: BESS power rating in MW.
+        duration_hours: BESS duration in hours.
+        roundtrip_efficiency: Round-trip efficiency (0-1).
+        capture_rate: Share of theoretical spread assumed captured (0-1).
+
+    Returns:
+        DataFrame with year, month, monthly_revenue columns.
+    """
+    df = daily_spreads.copy()
+    dates = pd.to_datetime(df["date"] if "date" in df.columns else df.index)
+    df["year"] = dates.dt.year
+    df["month"] = dates.dt.month
+
+    use_lp = "lp_revenue" in df.columns
+    energy_mwh = power_mw * duration_hours
+    rows = []
+
+    for (year, month), group in df.groupby(["year", "month"]):
+        if use_lp:
+            monthly_rev = float(group["lp_revenue"].sum()) * capture_rate
+        else:
+            monthly_rev = float(
+                (group["spread"] * energy_mwh * roundtrip_efficiency * capture_rate).sum()
+            )
+        rows.append({
+            "year": int(year),
+            "month": int(month),
+            "monthly_revenue": round(monthly_rev, 2),
+        })
+
+    return pd.DataFrame(rows)
+
+
 def calculate_negative_price_hours(df: pd.DataFrame) -> dict[str, float]:
     """Count and analyse negative price occurrences.
 
@@ -696,6 +795,63 @@ def analyze_renewable_bess_signal(
         result["spread_by_renewable_quartile"] = _quartile_averages(daily_re, spread)
 
     return result
+
+
+# ── Imbalance spread ─────────────────────────────────────────────────────────
+
+
+def calculate_imbalance_spread(
+    da_prices: pd.DataFrame,
+    imbalance_prices: pd.DataFrame,
+    tz: str | None = None,
+) -> dict[str, float]:
+    """Estimate additional BESS revenue from DA-vs-imbalance spread.
+
+    Merges day-ahead and imbalance prices on timestamp, calculates the
+    absolute spread, and estimates annualised value per MW.
+
+    Args:
+        da_prices: DataFrame with 'price_eur_mwh' column and DatetimeIndex.
+        imbalance_prices: DataFrame with 'imbalance_price_long' (and optionally
+            'imbalance_price_short') columns and DatetimeIndex.
+        tz: IANA timezone for local-time grouping.
+
+    Returns:
+        Dict with avg_spread, p50, p90, negative_pct, estimated_annual_value_per_mw.
+    """
+    da = _to_local(da_prices, tz)
+    imb = _to_local(imbalance_prices, tz)
+
+    # Pick the best imbalance price column
+    if "imbalance_price_long" in imb.columns:
+        imb_col = "imbalance_price_long"
+    elif "imbalance_price_eur_mwh" in imb.columns:
+        imb_col = "imbalance_price_eur_mwh"
+    else:
+        return {"avg_spread": 0.0, "p50": 0.0, "p90": 0.0,
+                "negative_pct": 0.0, "estimated_annual_value_per_mw": 0.0}
+
+    merged = da[["price_eur_mwh"]].join(imb[[imb_col]], how="inner")
+    if merged.empty:
+        return {"avg_spread": 0.0, "p50": 0.0, "p90": 0.0,
+                "negative_pct": 0.0, "estimated_annual_value_per_mw": 0.0}
+
+    spread = (merged[imb_col] - merged["price_eur_mwh"]).abs()
+    avg_spread = float(spread.mean())
+    interval_hours = _infer_interval_hours(merged.index)
+
+    # Annualize: assume BESS captures spread on each interval
+    hours_per_year = 8766.0
+    intervals_per_year = hours_per_year / interval_hours
+    annual_value = avg_spread * interval_hours * intervals_per_year
+
+    return {
+        "avg_spread": round(avg_spread, 2),
+        "p50": round(float(spread.quantile(0.5)), 2),
+        "p90": round(float(spread.quantile(0.9)), 2),
+        "negative_pct": round(float((spread <= 0).mean() * 100), 1),
+        "estimated_annual_value_per_mw": round(annual_value, 2),
+    }
 
 
 # ── Zone comparison ──────────────────────────────────────────────────────────

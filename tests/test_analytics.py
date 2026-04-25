@@ -14,9 +14,12 @@ from src.analytics import (
     build_renewable_price_scatter,
     build_spread_heatmap,
     calculate_daily_spreads,
+    calculate_imbalance_spread,
+    calculate_monthly_revenue,
     calculate_monthly_spreads,
     calculate_negative_price_hours,
     calculate_spread_percentiles,
+    calculate_yearly_revenue_breakdown,
     compare_zones,
     estimate_annual_arbitrage_revenue,
 )
@@ -335,6 +338,95 @@ class TestCompareZones:
         result = compare_zones({"DE_LU": seven_day_prices})
         assert "lcos_eur_mwh" not in result.columns
         assert "payback_years" not in result.columns
+
+
+# ── Yearly / monthly revenue breakdown ───────────────────────────────────────
+
+@pytest.fixture
+def two_year_prices() -> pd.DataFrame:
+    """Two years of hourly prices with different spreads per year."""
+    idx = pd.date_range("2024-01-01", periods=365 * 2 * 24, freq="h", tz="UTC")
+    hours = np.arange(len(idx)) % 24
+    day_number = np.arange(len(idx)) // 24
+    # Year 1: amplitude 30, Year 2: amplitude 50 → year 2 higher revenue
+    amplitude = np.where(day_number < 365, 30.0, 50.0)
+    prices = 60.0 + amplitude * np.sin(2 * np.pi * hours / 24)
+    df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+    df.index.name = "timestamp"
+    return df
+
+
+class TestYearlyRevenueBreakdown:
+    def test_two_year_data_produces_two_rows(self, two_year_prices: pd.DataFrame) -> None:
+        daily = calculate_daily_spreads(two_year_prices, duration_hours=1.0)
+        result = calculate_yearly_revenue_breakdown(daily)
+        assert len(result) == 2
+        assert list(result["year"]) == [2024, 2025]
+
+    def test_year2_higher_revenue(self, two_year_prices: pd.DataFrame) -> None:
+        daily = calculate_daily_spreads(two_year_prices, duration_hours=1.0)
+        result = calculate_yearly_revenue_breakdown(daily)
+        assert result.loc[result["year"] == 2025, "annual_revenue"].iloc[0] > \
+               result.loc[result["year"] == 2024, "annual_revenue"].iloc[0]
+
+    def test_single_year_returns_one_row(self, seven_day_prices: pd.DataFrame) -> None:
+        daily = calculate_daily_spreads(seven_day_prices, duration_hours=1.0)
+        result = calculate_yearly_revenue_breakdown(daily)
+        assert len(result) == 1
+
+    def test_expected_columns(self, seven_day_prices: pd.DataFrame) -> None:
+        daily = calculate_daily_spreads(seven_day_prices, duration_hours=1.0)
+        result = calculate_yearly_revenue_breakdown(daily)
+        expected = {"year", "n_days", "avg_spread", "avg_cycles_per_day",
+                    "annual_revenue", "revenue_per_mw"}
+        assert set(result.columns) == expected
+
+
+class TestMonthlyRevenue:
+    def test_months_present(self, seven_day_prices: pd.DataFrame) -> None:
+        daily = calculate_daily_spreads(seven_day_prices, duration_hours=1.0)
+        result = calculate_monthly_revenue(daily)
+        assert len(result) == 1  # all 7 days in January
+        assert result["month"].iloc[0] == 1
+
+    def test_multi_month(self, two_year_prices: pd.DataFrame) -> None:
+        daily = calculate_daily_spreads(two_year_prices, duration_hours=1.0)
+        result = calculate_monthly_revenue(daily)
+        assert len(result) >= 12  # at least 12 months across 2 years
+        assert set(result["month"].unique()) == set(range(1, 13))
+
+
+# ── Imbalance spread ─────────────────────────────────────────────────────────
+
+class TestImbalanceSpread:
+    def test_basic_spread(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+        da = pd.DataFrame({"price_eur_mwh": [50.0] * 48}, index=idx)
+        da.index.name = "timestamp"
+        imb = pd.DataFrame({"imbalance_price_long": [70.0] * 48}, index=idx)
+        imb.index.name = "timestamp"
+        result = calculate_imbalance_spread(da, imb)
+        assert result["avg_spread"] == pytest.approx(20.0)
+        assert result["estimated_annual_value_per_mw"] > 0
+
+    def test_no_overlap_returns_zero(self) -> None:
+        idx1 = pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC")
+        idx2 = pd.date_range("2025-06-01", periods=24, freq="h", tz="UTC")
+        da = pd.DataFrame({"price_eur_mwh": [50.0] * 24}, index=idx1)
+        da.index.name = "timestamp"
+        imb = pd.DataFrame({"imbalance_price_long": [70.0] * 24}, index=idx2)
+        imb.index.name = "timestamp"
+        result = calculate_imbalance_spread(da, imb)
+        assert result["avg_spread"] == 0.0
+
+    def test_missing_column_returns_zero(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC")
+        da = pd.DataFrame({"price_eur_mwh": [50.0] * 24}, index=idx)
+        da.index.name = "timestamp"
+        imb = pd.DataFrame({"other_col": [70.0] * 24}, index=idx)
+        imb.index.name = "timestamp"
+        result = calculate_imbalance_spread(da, imb)
+        assert result["avg_spread"] == 0.0
 
 
 # ── Renewable correlation ────────────────────────────────────────────────────

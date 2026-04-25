@@ -12,6 +12,7 @@ from src.ancillary import (
     ANCILLARY_TEMPLATES,
     build_ancillary_dataset,
     calculate_ancillary_revenue,
+    co_optimize_revenue_split,
     generate_template_csv,
     merge_revenue_stack,
     normalize_auto_fetch_dataset,
@@ -535,3 +536,48 @@ class TestRunAutoFetch:
         )
         assert mock_regelleistung.call_count == 2  # FCR + aFRR
         assert len(results) >= 1
+
+
+# ── Co-optimization ──────────────────────────────────────────────────────────
+
+class TestCoOptimizeRevenueSplit:
+    def test_pure_da_when_capacity_zero(self) -> None:
+        result = co_optimize_revenue_split(
+            da_annual_revenue=100000.0,
+            capacity_price_eur_mw_h=0.0,
+            power_mw=1.0,
+        )
+        assert result["optimal_fraction"] == 0.0
+        assert result["total_revenue"] == pytest.approx(100000.0)
+
+    def test_some_capacity_when_price_positive(self) -> None:
+        result = co_optimize_revenue_split(
+            da_annual_revenue=100000.0,
+            capacity_price_eur_mw_h=5.0,  # reasonable FCR price
+            power_mw=1.0,
+        )
+        assert result["total_revenue"] >= 100000.0
+        assert result["optimal_fraction"] >= 0.0
+
+    def test_full_capacity_when_much_higher(self) -> None:
+        result = co_optimize_revenue_split(
+            da_annual_revenue=10000.0,
+            capacity_price_eur_mw_h=50.0,  # very high capacity price
+            power_mw=1.0,
+        )
+        assert result["optimal_fraction"] == 1.0
+        assert result["capacity_revenue"] > result["da_revenue"]
+
+    def test_sweep_has_21_rows(self) -> None:
+        result = co_optimize_revenue_split(
+            da_annual_revenue=100000.0,
+            capacity_price_eur_mw_h=5.0,
+            power_mw=1.0,
+        )
+        assert len(result["sweep"]) == 21
+
+    def test_power_scales_capacity_revenue(self) -> None:
+        r1 = co_optimize_revenue_split(100000, 5.0, power_mw=1.0)
+        r10 = co_optimize_revenue_split(1000000, 5.0, power_mw=10.0)
+        # Same capacity price → same optimal fraction
+        assert r1["optimal_fraction"] == r10["optimal_fraction"]

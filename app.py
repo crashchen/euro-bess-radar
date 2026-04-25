@@ -17,9 +17,11 @@ from src.analytics import (
     build_spread_heatmap,
     calculate_daily_dispatch,
     calculate_daily_spreads,
+    calculate_monthly_revenue,
     calculate_monthly_spreads_from_daily,
     calculate_negative_price_hours,
     calculate_spread_percentiles,
+    calculate_yearly_revenue_breakdown,
     compare_zones,
     estimate_annual_arbitrage_revenue,
 )
@@ -27,6 +29,7 @@ from src.ancillary import (
     ANCILLARY_TEMPLATES,
     build_ancillary_dataset,
     calculate_ancillary_revenue,
+    co_optimize_revenue_split,
     generate_template_csv,
     merge_revenue_stack,
     parse_ancillary_csv,
@@ -56,6 +59,7 @@ from src.degradation import (
     estimate_battery_lifetime,
 )
 from src.export import export_comparison_to_bytes, export_to_bytes, export_to_pdf_bytes
+from src.scenario import bootstrap_annual_revenue, calculate_npv_distribution, sensitivity_table
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -618,6 +622,38 @@ if fetch_btn or "zone_data" in st.session_state:
                     f"Gross additive reference, not co-optimized: "
                     f"\u20ac{stack['gross_additive_total_eur']:,.0f}/yr."
                 )
+                # Co-optimization estimate
+                cap_eur = stack.get("capacity_ancillary_eur", 0.0)
+                if cap_eur > 0:
+                    hours_per_year = 8766.0
+                    avg_cap_price = cap_eur / (power_mw * hours_per_year * 0.95)
+                    co_opt = co_optimize_revenue_split(
+                        da_annual_revenue=stack["da_arbitrage_eur"],
+                        capacity_price_eur_mw_h=avg_cap_price,
+                        power_mw=power_mw,
+                    )
+                    with st.expander("Co-optimization estimate", expanded=False):
+                        co1, co2, co3 = st.columns(3)
+                        co1.metric(
+                            "Optimal DA/Capacity Split",
+                            f"{(1 - co_opt['optimal_fraction']):.0%} DA / "
+                            f"{co_opt['optimal_fraction']:.0%} Capacity",
+                        )
+                        co2.metric(
+                            "Co-optimized Total",
+                            f"\u20ac{co_opt['total_revenue']:,.0f}/yr",
+                        )
+                        uplift = co_opt["total_revenue"] - stack["da_arbitrage_eur"]
+                        co3.metric(
+                            "Uplift vs DA-only",
+                            f"\u20ac{uplift:,.0f}/yr",
+                            delta=f"+{uplift / stack['da_arbitrage_eur'] * 100:.0f}%"
+                            if stack["da_arbitrage_eur"] > 0 else "",
+                        )
+                        st.caption(
+                            "Heuristic time-partition: committed hours earn capacity price, "
+                            "uncommitted hours earn DA arbitrage pro-rata. Not a joint LP."
+                        )
 
             component_rows = [
                 {
@@ -659,6 +695,30 @@ if fetch_btn or "zone_data" in st.session_state:
                     "Auto-fetched balancing/system-price datasets are loaded, but the current "
                     "model only monetises explicit capacity prices and single-sided energy prices."
                 )
+
+            # Imbalance spread opportunity
+            imb_data = auto_fetch_results.get("Imbalance prices")
+            if imb_data is not None and not imb_data.empty:
+                from src.analytics import calculate_imbalance_spread
+                imb_spread = calculate_imbalance_spread(
+                    primary_df, imb_data, tz=zone_tz,
+                )
+                if imb_spread["avg_spread"] > 0:
+                    with st.expander("Imbalance Spread Opportunity", expanded=False):
+                        im1, im2, im3 = st.columns(3)
+                        im1.metric("Avg DA-Imbalance Spread",
+                                   f"\u20ac{imb_spread['avg_spread']:.1f}/MWh")
+                        im2.metric("P90 Spread",
+                                   f"\u20ac{imb_spread['p90']:.1f}/MWh")
+                        im3.metric(
+                            "Est. Annual Value/MW",
+                            f"\u20ac{imb_spread['estimated_annual_value_per_mw']:,.0f}",
+                            help="Theoretical maximum — actual capture depends on forecast accuracy and position limits.",
+                        )
+                        st.caption(
+                            "Supplementary revenue opportunity from DA-vs-imbalance price spread. "
+                            "Not added to headline total without co-optimization."
+                        )
         else:
             dispatch_label = revenue.get("dispatch_method", "greedy")
             r1.metric(
@@ -933,6 +993,179 @@ if fetch_btn or "zone_data" in st.session_state:
             )
             report_figures["monthly_seasonality"] = fig_monthly
             st.plotly_chart(fig_monthly, width="stretch")
+
+        # ── Year-over-year backtest ────────────────────────────────────────
+        yearly = calculate_yearly_revenue_breakdown(
+            daily_spreads,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            roundtrip_efficiency=efficiency,
+            capture_rate=capture_rate,
+        )
+        if len(yearly) >= 2:
+            st.divider()
+            st.markdown("**Year-over-Year Revenue Backtest**")
+            rev_cov = (
+                float(yearly["annual_revenue"].std() / yearly["annual_revenue"].mean())
+                if yearly["annual_revenue"].mean() > 0 else 0.0
+            )
+            y1, y2 = st.columns(2)
+            y1.metric("Revenue CoV", f"{rev_cov:.2f}",
+                       help="Coefficient of variation across years — lower = more stable")
+            y2.metric("Years in Sample", str(len(yearly)))
+            fig_yoy = px.bar(
+                yearly, x="year", y="revenue_per_mw",
+                title="Annual Revenue per MW by Year",
+                labels={"year": "Year", "revenue_per_mw": "EUR/MW/yr"},
+                template=chart_template,
+                text_auto=True,
+            )
+            fig_yoy.update_traces(texttemplate="\u20ac%{y:,.0f}", textposition="outside")
+            st.plotly_chart(fig_yoy, width="stretch")
+
+            # Monthly revenue heatmap (year × month)
+            monthly_rev = calculate_monthly_revenue(
+                daily_spreads,
+                power_mw=power_mw,
+                duration_hours=duration_hours,
+                roundtrip_efficiency=efficiency,
+                capture_rate=capture_rate,
+            )
+            if len(monthly_rev) > 3:
+                pivot = monthly_rev.pivot_table(
+                    index="year", columns="month", values="monthly_revenue", aggfunc="sum",
+                )
+                pivot.columns = [f"{m:02d}" for m in pivot.columns]
+                fig_seasonal = px.imshow(
+                    pivot.values,
+                    x=list(pivot.columns),
+                    y=[str(y) for y in pivot.index],
+                    labels={"x": "Month", "y": "Year", "color": "EUR"},
+                    title="Monthly Revenue Heatmap (EUR)",
+                    color_continuous_scale="YlOrRd",
+                    template=chart_template,
+                    aspect="auto",
+                )
+                st.plotly_chart(fig_seasonal, width="stretch")
+
+        # ── Risk analysis (Monte Carlo) ───────────────────────────────────
+        with st.expander("Risk Analysis (Monte Carlo)", expanded=False):
+            if use_lp_dispatch and "lp_revenue" in daily_spreads.columns:
+                daily_rev_series = daily_spreads["lp_revenue"] * capture_rate
+            else:
+                energy_mwh = power_mw * duration_hours
+                daily_rev_series = (
+                    daily_spreads["spread"] * energy_mwh * efficiency * capture_rate
+                )
+
+            mc = bootstrap_annual_revenue(daily_rev_series, n_simulations=5000)
+
+            mc1, mc2, mc3 = st.columns(3)
+            mc1.metric("P10 Revenue", f"\u20ac{mc['p10']:,.0f}")
+            mc2.metric("P50 Revenue", f"\u20ac{mc['p50']:,.0f}")
+            mc3.metric("P90 Revenue", f"\u20ac{mc['p90']:,.0f}")
+
+            fig_mc = px.histogram(
+                x=mc["simulations"], nbins=50,
+                title="Bootstrapped Annual Revenue Distribution",
+                labels={"x": "Annual Revenue (EUR)", "count": "Simulations"},
+                template=chart_template,
+            )
+            fig_mc.add_vline(x=mc["p10"], line_dash="dash",
+                             annotation_text=f"P10: \u20ac{mc['p10']:,.0f}")
+            fig_mc.add_vline(x=mc["p50"], line_dash="solid", line_color="green",
+                             annotation_text=f"P50: \u20ac{mc['p50']:,.0f}")
+            fig_mc.add_vline(x=mc["p90"], line_dash="dash", line_color="red",
+                             annotation_text=f"P90: \u20ac{mc['p90']:,.0f}")
+            st.plotly_chart(fig_mc, width="stretch")
+
+            # NPV distribution (if CapEx provided)
+            if capex_eur_kwh > 0:
+                capacity_kwh = power_mw * duration_hours * 1000
+                total_capex = capex_eur_kwh * capacity_kwh
+                if "n_cycles" in daily_spreads.columns:
+                    mc_avg_cycles = float(daily_spreads["n_cycles"].mean())
+                else:
+                    mc_avg_cycles = float(revenue.get("cycles_per_day_assumption", 1.0))
+                annual_cycles = mc_avg_cycles * 365.25
+                mc_deg = calculate_degradation_cost(
+                    n_cycles=annual_cycles,
+                    capex_eur_kwh=capex_eur_kwh,
+                    capacity_kwh=capacity_kwh,
+                )
+                mc_lifetime = estimate_battery_lifetime(avg_cycles_per_day=mc_avg_cycles)
+
+                npv_dist = calculate_npv_distribution(
+                    mc["simulations"],
+                    total_capex=total_capex,
+                    annual_degradation_cost=mc_deg["total_degradation_eur"],
+                    effective_life_years=float(mc_lifetime["effective_life_years"]),
+                )
+
+                n1, n2, n3, n4 = st.columns(4)
+                n1.metric("NPV P10", f"\u20ac{npv_dist['npv_p10']:,.0f}")
+                n2.metric("NPV P50", f"\u20ac{npv_dist['npv_p50']:,.0f}")
+                n3.metric("NPV P90", f"\u20ac{npv_dist['npv_p90']:,.0f}")
+                prob_color = "normal" if npv_dist["prob_positive_npv"] >= 0.5 else "inverse"
+                n4.metric("P(NPV>0)", f"{npv_dist['prob_positive_npv']:.0%}",
+                          delta_color=prob_color)
+
+                fig_npv = px.histogram(
+                    x=npv_dist["npv_array"], nbins=50,
+                    title="NPV Distribution",
+                    labels={"x": "NPV (EUR)", "count": "Simulations"},
+                    template=chart_template,
+                )
+                fig_npv.add_vline(x=0, line_dash="solid", line_color="gray",
+                                  annotation_text="Break-even")
+                st.plotly_chart(fig_npv, width="stretch")
+
+                # Sensitivity tornado
+                sens = sensitivity_table(
+                    base_revenue=mc["p50"],
+                    total_capex=total_capex,
+                    effective_life_years=float(mc_lifetime["effective_life_years"]),
+                    annual_degradation_cost=mc_deg["total_degradation_eur"],
+                )
+                base_npv = sens.loc[
+                    (sens["param"] == "revenue") & (sens["value"] == 1.0), "npv"
+                ].iloc[0]
+                tornado_rows = []
+                for param in sens["param"].unique():
+                    param_data = sens[sens["param"] == param].sort_values("value")
+                    low_npv = param_data["npv"].iloc[0]
+                    high_npv = param_data["npv"].iloc[-1]
+                    tornado_rows.append({
+                        "param": param,
+                        "low_delta": low_npv - base_npv,
+                        "high_delta": high_npv - base_npv,
+                    })
+                tornado_df = pd.DataFrame(tornado_rows)
+                tornado_df["swing"] = tornado_df["high_delta"] - tornado_df["low_delta"]
+                tornado_df = tornado_df.sort_values("swing", ascending=True)
+
+                fig_tornado = go.Figure()
+                fig_tornado.add_trace(go.Bar(
+                    y=tornado_df["param"],
+                    x=tornado_df["low_delta"],
+                    orientation="h",
+                    name="Downside",
+                    marker_color="#E74C3C",
+                ))
+                fig_tornado.add_trace(go.Bar(
+                    y=tornado_df["param"],
+                    x=tornado_df["high_delta"],
+                    orientation="h",
+                    name="Upside",
+                    marker_color="#2ECC71",
+                ))
+                fig_tornado.update_layout(
+                    title="NPV Sensitivity (vs base case)",
+                    template=chart_template,
+                    barmode="overlay",
+                    xaxis_title="NPV Delta (EUR)",
+                )
+                st.plotly_chart(fig_tornado, width="stretch")
 
     # ── Tab 4: Renewable Correlation ─────────────────────────────────────────
     with tabs[3]:

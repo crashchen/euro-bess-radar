@@ -784,3 +784,55 @@ def merge_revenue_stack(
             if component_total > 0 else 0.0
         ),
     }
+
+
+def co_optimize_revenue_split(
+    da_annual_revenue: float,
+    capacity_price_eur_mw_h: float,
+    power_mw: float,
+    availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
+) -> dict:
+    """Find optimal time split between DA arbitrage and capacity ancillary.
+
+    Tests commitment fractions from 0% to 100% (in 5% steps) and picks
+    the split that maximizes total revenue.  During committed hours the
+    BESS earns capacity price; during uncommitted hours it earns DA
+    arbitrage pro-rata.
+
+    Args:
+        da_annual_revenue: Full-year DA arbitrage revenue at 100% DA (EUR).
+        capacity_price_eur_mw_h: Average hourly capacity price (EUR/MW/h).
+        power_mw: BESS power rating in MW.
+        availability: Availability factor for capacity commitment.
+
+    Returns:
+        Dict with optimal_fraction, da_revenue, capacity_revenue,
+        total_revenue, and the full sweep DataFrame.
+    """
+    hours_per_year = 8766.0  # 365.25 * 24
+
+    fractions = [i / 20 for i in range(21)]  # 0.00, 0.05, ..., 1.00
+    rows = []
+    for frac in fractions:
+        cap_rev = frac * hours_per_year * capacity_price_eur_mw_h * power_mw * availability
+        da_rev = (1 - frac) * da_annual_revenue
+        total = da_rev + cap_rev
+        rows.append({
+            "commitment_fraction": frac,
+            "da_revenue": round(da_rev, 2),
+            "capacity_revenue": round(cap_rev, 2),
+            "total_revenue": round(total, 2),
+        })
+
+    import pandas as pd
+    sweep = pd.DataFrame(rows)
+    best_idx = int(sweep["total_revenue"].idxmax())
+    best = sweep.iloc[best_idx]
+
+    return {
+        "optimal_fraction": best["commitment_fraction"],
+        "da_revenue": best["da_revenue"],
+        "capacity_revenue": best["capacity_revenue"],
+        "total_revenue": best["total_revenue"],
+        "sweep": sweep,
+    }

@@ -127,7 +127,7 @@ Upload via sidebar. Template CSVs downloadable from the UI.
 
 ## Commands
 - `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
-- `python -m pytest tests/ -v` — run all tests (206 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
+- `python -m pytest tests/ -v` — run all tests (236 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
 - `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
 - `streamlit run app.py` — launch the dashboard.
 - `python -c "from src.data_ingestion import test_elexon_connection; test_elexon_connection()"` — smoke-test Elexon (no API key needed).
