@@ -190,8 +190,8 @@ class TestFetchElexonPrices:
         ]
 
     @patch("src.data_ingestion._call_elexon_api")
-    def test_chunks_long_date_ranges_by_month(self, mock_api: MagicMock) -> None:
-        """A 3-month request should hit the API at least 3 times (monthly chunks)."""
+    def test_chunks_long_date_ranges_to_seven_day_windows(self, mock_api: MagicMock) -> None:
+        """Long GB requests should use short chunks that Elexon accepts."""
         mock_api.return_value = [
             {"startTime": "2025-01-15T00:00:00Z", "price": 40.0},
         ]
@@ -201,7 +201,26 @@ class TestFetchElexonPrices:
             pd.Timestamp("2025-04-01", tz="UTC"),
         )
 
-        assert mock_api.call_count >= 3
+        assert mock_api.call_count >= 13
+        for call in mock_api.call_args_list:
+            from_date, to_date = call.args
+            assert pd.Timestamp(to_date) - pd.Timestamp(from_date) <= pd.Timedelta(days=7)
+
+    @patch("src.data_ingestion._call_elexon_api")
+    def test_partial_chunk_failure_raises_instead_of_returning_partial_data(
+        self, mock_api: MagicMock,
+    ) -> None:
+        """A failed later chunk must not be forward-filled into fake flat prices."""
+        mock_api.side_effect = [
+            [{"startTime": "2025-01-01T00:00:00Z", "price": 40.0}],
+            requests.RequestException("boom"),
+        ]
+
+        with pytest.raises(DataSourceNetworkError, match="Elexon request failed"):
+            fetch_elexon_prices(
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-10", tz="UTC"),
+            )
 
     @patch("src.data_ingestion._call_elexon_api", side_effect=requests.RequestException("boom"))
     def test_request_failure_raises_network_error(self, _mock_api: MagicMock) -> None:

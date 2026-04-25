@@ -76,6 +76,16 @@ class TestComparisonExport:
         assert ws.cell(row=2, column=1).value == "DE_LU"
         assert ws.cell(row=3, column=1).value == "FR"
 
+    def test_negative_percentage_is_excel_ratio(self, comparison_df: pd.DataFrame) -> None:
+        data = export_comparison_to_bytes(comparison_df)
+        wb = load_workbook(BytesIO(data))
+        ws = wb["Zone Comparison"]
+        headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
+        neg_col = headers.index("Neg Price %") + 1
+
+        assert ws.cell(row=2, column=neg_col).value == pytest.approx(0.052)
+        assert ws.cell(row=2, column=neg_col).number_format == "0.0%"
+
     def test_empty_dataframe(self) -> None:
         empty = pd.DataFrame(columns=["zone", "avg_price", "estimated_annual_revenue_per_mw"])
         data = export_comparison_to_bytes(empty)

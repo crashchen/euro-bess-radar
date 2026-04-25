@@ -55,10 +55,12 @@ euro-bess-radar/
 │   ├── config.py             # Zones, API endpoints, constants
 │   ├── data_ingestion.py     # ENTSO-E, Elexon, Fingrid fetchers
 │   ├── analytics.py          # Spread, P50/P90, heatmaps, renewables/BESS signals
+│   ├── dispatch.py           # LP dispatch for multi-cycle daily arbitrage
+│   ├── degradation.py        # Throughput-based degradation and lifetime metrics
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   └── export.py             # Excel report generation
-├── tests/                    # 151 unit tests, heavily mocked
+├── tests/                    # 206 passing tests, heavily mocked; 2 PDF tests may skip
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads

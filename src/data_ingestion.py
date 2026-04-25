@@ -37,6 +37,7 @@ from src.time_utils import (
 logger = logging.getLogger(__name__)
 
 _warned_fx_years: set[int] = set()
+ELEXON_MAX_DAYS_PER_REQUEST = 7
 _ZONE_RESOLUTION_TRANSITIONS: dict[str, tuple[tuple[pd.Timestamp, pd.Timedelta, pd.Timedelta], ...]] = {
     "DE_LU": (
         (
@@ -638,14 +639,14 @@ def _drop_elexon_zero_placeholders(df: pd.DataFrame) -> pd.DataFrame:
     return df.loc[~zero_candidate].copy()
 
 
-def _elexon_monthly_chunks(
+def _elexon_date_chunks(
     start: pd.Timestamp,
     end: pd.Timestamp,
 ) -> list[tuple[str, str]]:
-    """Split a [start, end) window into per-month Elexon date-bound pairs.
+    """Split a [start, end) window into small Elexon date-bound pairs.
 
-    Each chunk covers at most one calendar month to avoid Elexon API timeouts
-    or 400 Payload Too Large errors on multi-year requests.
+    Elexon Market Index rejects longer windows with 400 responses, so keep
+    chunks short even for one-month dashboard requests.
     """
     from_date, _ = _elexon_date_bounds(start, end)
     _, to_date = _elexon_date_bounds(start, end)
@@ -653,8 +654,10 @@ def _elexon_monthly_chunks(
     final = pd.Timestamp(to_date)
     chunks: list[tuple[str, str]] = []
     while cursor < final:
-        month_end = (cursor + pd.offsets.MonthBegin(1)).normalize()
-        chunk_end = min(month_end, final)
+        chunk_end = min(
+            cursor + pd.Timedelta(days=ELEXON_MAX_DAYS_PER_REQUEST),
+            final,
+        )
         chunks.append((cursor.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d")))
         cursor = chunk_end
     return chunks
@@ -677,7 +680,7 @@ def fetch_elexon_prices(
     """
     all_records: list[dict[str, Any]] = []
     request_errors: list[DataSourceError] = []
-    chunks = _elexon_monthly_chunks(start, end)
+    chunks = _elexon_date_chunks(start, end)
 
     for from_date_str, to_date_str in chunks:
         range_label = f"[{from_date_str}, {to_date_str})"
@@ -700,9 +703,10 @@ def fetch_elexon_prices(
                 )
             )
 
+    if request_errors:
+        raise request_errors[0]
+
     if not all_records:
-        if request_errors:
-            raise request_errors[0]
         logger.warning("Elexon returned no data for [%s, %s)", start, end)
         return pd.DataFrame(columns=["price_eur_mwh"])
 

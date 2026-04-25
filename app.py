@@ -156,6 +156,7 @@ st.session_state["zone_date_scope"] = current_zone_date_scope
 # a full Streamlit re-run until the user clicks "Apply".
 st.sidebar.subheader("BESS Parameters")
 with st.sidebar.form("bess_params"):
+    st.caption("Changes here update the dashboard only after you click Apply.")
     power_mw = st.number_input("Power (MW)", min_value=0.1, value=10.0, step=1.0)
     duration_hours = st.selectbox("Duration (h)", [1, 2, 4], index=0)
     efficiency = st.slider("Efficiency (%)", 85, 95, 88) / 100.0
@@ -170,7 +171,7 @@ with st.sidebar.form("bess_params"):
         value=False,
         help="Use LP optimizer for multi-cycle dispatch instead of greedy single-cycle heuristic.",
     )
-    st.form_submit_button("Apply", type="primary")
+    st.form_submit_button("Apply BESS parameters", type="primary")
 force_refresh = st.sidebar.checkbox(
     "Force Refresh",
     value=False,
@@ -512,6 +513,11 @@ if fetch_btn or "zone_data" in st.session_state:
     # ── Tab 3: Revenue Estimation ────────────────────────────────────────────
     with tabs[2]:
         st.subheader(f"Revenue Estimation — {primary_zone}")
+        st.caption(
+            f"Applied BESS case: {power_mw:.1f} MW / {duration_hours}h, "
+            f"{efficiency:.0%} efficiency, {capture_rate:.0%} capture, "
+            f"{'LP dispatch' if use_lp_dispatch else 'greedy dispatch'}."
+        )
         sample_days = (pd.Timestamp(end_date) - pd.Timestamp(start_date)).days + 1
         if sample_days < 365:
             st.warning(

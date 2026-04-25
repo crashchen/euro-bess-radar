@@ -591,7 +591,8 @@ def export_comparison_to_bytes(comparison_df: pd.DataFrame) -> bytes:
         comparison_df.to_excel(writer, sheet_name="Zone Comparison", index=False)
         ws = writer.sheets["Zone Comparison"]
 
-        # Apply styled headers and number formats
+        # Apply styled headers and number formats. Analytics stores negative_pct
+        # as percentage points for UI readability; Excel percent cells need ratios.
         for col_idx, col_name in enumerate(comparison_df.columns, 1):
             label, fmt = _COMPARISON_COLUMNS.get(col_name, (col_name, None))
             cell = ws.cell(row=1, column=col_idx, value=label)
@@ -600,7 +601,10 @@ def export_comparison_to_bytes(comparison_df: pd.DataFrame) -> bytes:
             cell.alignment = Alignment(horizontal="center")
             if fmt:
                 for row_idx in range(2, len(comparison_df) + 2):
-                    ws.cell(row=row_idx, column=col_idx).number_format = fmt
+                    data_cell = ws.cell(row=row_idx, column=col_idx)
+                    if col_name == "negative_pct" and data_cell.value is not None:
+                        data_cell.value = data_cell.value / 100
+                    data_cell.number_format = fmt
 
         _auto_column_width(ws)
 
