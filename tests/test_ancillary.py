@@ -18,7 +18,12 @@ from src.ancillary import (
     parse_ancillary_csv,
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
-from src.config import ANCILLARY_ENERGY_ACTIVATION_SHARE, GBP_EUR_YEARLY, HOURS_PER_YEAR
+from src.config import (
+    ANCILLARY_CAPACITY_AVAILABILITY,
+    ANCILLARY_ENERGY_ACTIVATION_SHARE,
+    GBP_EUR_YEARLY,
+    HOURS_PER_YEAR,
+)
 
 # ── Template CSV generation ──────────────────────────────────────────────────
 
@@ -579,3 +584,14 @@ class TestCoOptimizeRevenueSplit:
         r10 = co_optimize_revenue_split(1000000, 5.0, power_mw=10.0)
         # Same capacity price → same optimal fraction
         assert r1["optimal_fraction"] == r10["optimal_fraction"]
+
+    def test_capacity_revenue_uses_configured_hours_and_availability(self) -> None:
+        result = co_optimize_revenue_split(
+            da_annual_revenue=0.0,
+            capacity_price_eur_mw_h=2.0,
+            power_mw=3.0,
+        )
+        assert result["optimal_fraction"] == 1.0
+        assert result["capacity_revenue"] == pytest.approx(
+            HOURS_PER_YEAR * ANCILLARY_CAPACITY_AVAILABILITY * 2.0 * 3.0,
+        )

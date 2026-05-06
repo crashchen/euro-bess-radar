@@ -809,12 +809,10 @@ def co_optimize_revenue_split(
         Dict with optimal_fraction, da_revenue, capacity_revenue,
         total_revenue, and the full sweep DataFrame.
     """
-    hours_per_year = 8766.0  # 365.25 * 24
-
     fractions = [i / 20 for i in range(21)]  # 0.00, 0.05, ..., 1.00
     rows = []
     for frac in fractions:
-        cap_rev = frac * hours_per_year * capacity_price_eur_mw_h * power_mw * availability
+        cap_rev = frac * HOURS_PER_YEAR * capacity_price_eur_mw_h * power_mw * availability
         da_rev = (1 - frac) * da_annual_revenue
         total = da_rev + cap_rev
         rows.append({

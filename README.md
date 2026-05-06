@@ -4,7 +4,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 
 ## Features
 
-- **Day-ahead price analysis** across 35+ European bidding zones (ENTSO-E + Elexon)
+- **Day-ahead price analysis** across 37+ European bidding zones (ENTSO-E + Elexon)
 - **Revenue estimation** for 1h, 2h, and 4h BESS using chronology-aware charge/discharge windows
 - **Inline revenue guidance** with sample-window annualisation notes and ancillary methodology help in the dashboard
 - **Renewables and BESS signal analysis** — quantify how renewable share affects prices and ordered spreads
@@ -60,7 +60,7 @@ euro-bess-radar/
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   └── export.py             # Excel report generation
-├── tests/                    # 206 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 238 passing tests, heavily mocked; 2 PDF tests may skip
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads
@@ -74,7 +74,7 @@ Optimized for BESS investment screening in:
 - Finland (FI) — FCR-N/D + aFRR auto-fetch via Fingrid
 - Great Britain (GB) — Elexon MID + system prices
 - Romania (RO) — DA prices + ENTSO-E imbalance data
-- Italy South (IT_SUD) — DA prices + ENTSO-E imbalance
+- Italy (IT_NORD, IT_CNOR, IT_CSUD, IT_SUD, IT_CALA, IT_SICI, IT_SARD) — DA prices and selected ENTSO-E imbalance coverage
 - Sweden (SE_1-4) — Nordic market dynamics
 - Norway (NO_1-5) — Hydro-driven price patterns
 

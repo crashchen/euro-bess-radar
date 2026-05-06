@@ -23,7 +23,7 @@ from src.analytics import (
     compare_zones,
     estimate_annual_arbitrage_revenue,
 )
-from src.config import get_zone_timezone
+from src.config import ALL_ZONES, get_zone_timezone
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -376,9 +376,27 @@ class TestYearlyRevenueBreakdown:
     def test_expected_columns(self, seven_day_prices: pd.DataFrame) -> None:
         daily = calculate_daily_spreads(seven_day_prices, duration_hours=1.0)
         result = calculate_yearly_revenue_breakdown(daily)
-        expected = {"year", "n_days", "avg_spread", "avg_cycles_per_day",
-                    "annual_revenue", "revenue_per_mw"}
+        expected = {
+            "year", "n_days", "year_days", "coverage_pct", "is_partial_year",
+            "avg_spread", "avg_cycles_per_day", "annual_revenue", "revenue_per_mw",
+        }
         assert set(result.columns) == expected
+
+    def test_partial_years_are_flagged(self, seven_day_prices: pd.DataFrame) -> None:
+        daily = calculate_daily_spreads(seven_day_prices, duration_hours=1.0)
+        result = calculate_yearly_revenue_breakdown(daily)
+        assert bool(result["is_partial_year"].iloc[0]) is True
+        assert result["n_days"].iloc[0] == 7
+        assert result["coverage_pct"].iloc[0] < 5.0
+
+    def test_full_leap_year_is_not_flagged(self, two_year_prices: pd.DataFrame) -> None:
+        daily = calculate_daily_spreads(two_year_prices, duration_hours=1.0)
+        result = calculate_yearly_revenue_breakdown(daily)
+        year_2024 = result[result["year"] == 2024].iloc[0]
+        assert year_2024["n_days"] == 366
+        assert year_2024["year_days"] == 366
+        assert year_2024["coverage_pct"] == 100.0
+        assert bool(year_2024["is_partial_year"]) is False
 
 
 class TestMonthlyRevenue:
@@ -653,6 +671,12 @@ class TestLocalTimezoneAnalytics:
         assert get_zone_timezone("DE_LU") == "Europe/Berlin"
         assert get_zone_timezone("GB") == "Europe/London"
         assert get_zone_timezone("FI") == "Europe/Helsinki"
+
+    def test_new_italy_zones_are_available(self) -> None:
+        assert "IT_CNOR" in ALL_ZONES.values()
+        assert "IT_CALA" in ALL_ZONES.values()
+        assert get_zone_timezone("IT_CNOR") == "Europe/Rome"
+        assert get_zone_timezone("IT_CALA") == "Europe/Rome"
 
     def test_get_zone_timezone_unknown_falls_back(self) -> None:
         assert get_zone_timezone("UNKNOWN") == "UTC"

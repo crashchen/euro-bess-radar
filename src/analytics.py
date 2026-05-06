@@ -445,8 +445,10 @@ def calculate_yearly_revenue_breakdown(
         capture_rate: Share of theoretical spread assumed captured (0-1).
 
     Returns:
-        DataFrame with one row per calendar year: year, n_days, avg_spread,
-        avg_cycles_per_day, annual_revenue, revenue_per_mw.
+        DataFrame with one row per calendar year: year, n_days, year_days,
+        coverage_pct, is_partial_year, avg_spread, avg_cycles_per_day,
+        annual_revenue, revenue_per_mw. Annual revenue is normalized from
+        the observed days in each calendar year.
     """
     df = daily_spreads.copy()
     if "date" in df.columns:
@@ -460,6 +462,7 @@ def calculate_yearly_revenue_breakdown(
 
     for year, group in df.groupby("year"):
         n_days = len(group)
+        year_days = 366 if pd.Timestamp(year=int(year), month=12, day=31).is_leap_year else 365
         avg_spread = float(group["spread"].mean())
 
         if use_lp:
@@ -473,6 +476,9 @@ def calculate_yearly_revenue_breakdown(
         rows.append({
             "year": int(year),
             "n_days": n_days,
+            "year_days": year_days,
+            "coverage_pct": round(100.0 * n_days / year_days, 1),
+            "is_partial_year": n_days < year_days,
             "avg_spread": round(avg_spread, 2),
             "avg_cycles_per_day": round(avg_cycles, 2),
             "annual_revenue": round(annual_rev, 2),

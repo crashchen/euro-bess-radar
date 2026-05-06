@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.analytics import (
+    calculate_daily_dispatch,
     calculate_daily_spreads,
     calculate_imbalance_spread,
     calculate_monthly_revenue,
@@ -23,6 +24,7 @@ from src.ancillary import (
 from src.config import (
     ANCILLARY_CAPACITY_AVAILABILITY,
     ANCILLARY_ENERGY_ACTIVATION_SHARE,
+    HOURS_PER_YEAR,
 )
 from src.degradation import (
     calculate_annual_throughput_mwh,
@@ -165,12 +167,14 @@ def render(
             # Co-optimization estimate
             cap_eur = stack.get("capacity_ancillary_eur", 0.0)
             if cap_eur > 0:
-                hours_per_year = 8766.0
-                avg_cap_price = cap_eur / (power_mw * hours_per_year * 0.95)
+                avg_cap_price = cap_eur / (
+                    power_mw * HOURS_PER_YEAR * ANCILLARY_CAPACITY_AVAILABILITY
+                )
                 co_opt = co_optimize_revenue_split(
                     da_annual_revenue=stack["da_arbitrage_eur"],
                     capacity_price_eur_mw_h=avg_cap_price,
                     power_mw=power_mw,
+                    availability=ANCILLARY_CAPACITY_AVAILABILITY,
                 )
                 with st.expander("Co-optimization estimate", expanded=False):
                     co1, co2, co3 = st.columns(3)
@@ -447,7 +451,14 @@ def render(
         )
 
     # Sensitivity table (cached)
-    _render_sensitivity_table(primary_df, zone_tz, efficiency, capture_rate, chart_template)
+    _render_sensitivity_table(
+        primary_df,
+        zone_tz,
+        efficiency,
+        capture_rate,
+        use_lp_dispatch,
+        chart_template,
+    )
 
     # Spread distribution
     fig_hist = px.histogram(
@@ -479,6 +490,17 @@ def render(
     if len(yearly) >= 2:
         st.divider()
         st.markdown("**Year-over-Year Revenue Backtest**")
+        partial_years = yearly[yearly["is_partial_year"]]
+        if not partial_years.empty:
+            partial_labels = ", ".join(
+                f"{int(row.year)} ({int(row.n_days)}/{int(row.year_days)} days)"
+                for row in partial_years.itertuples(index=False)
+            )
+            st.warning(
+                "Some calendar-year bars are annualized from partial-year samples: "
+                f"{partial_labels}. Treat those bars as normalized screening signals, "
+                "not full observed annual performance."
+            )
         rev_cov = (
             float(yearly["annual_revenue"].std() / yearly["annual_revenue"].mean())
             if yearly["annual_revenue"].mean() > 0 else 0.0
@@ -489,10 +511,21 @@ def render(
         y2.metric("Years in Sample", str(len(yearly)))
         fig_yoy = px.bar(
             yearly, x="year", y="revenue_per_mw",
-            title="Annual Revenue per MW by Year",
-            labels={"year": "Year", "revenue_per_mw": "EUR/MW/yr"},
+            title="Annualized Revenue per MW by Calendar Year",
+            labels={
+                "year": "Year",
+                "revenue_per_mw": "EUR/MW/yr",
+                "n_days": "Observed Days",
+                "coverage_pct": "Year Coverage %",
+            },
             template=chart_template,
             text_auto=True,
+            hover_data={
+                "n_days": True,
+                "year_days": True,
+                "coverage_pct": ":.1f",
+                "is_partial_year": True,
+            },
         )
         fig_yoy.update_traces(texttemplate="\u20ac%{y:,.0f}", textposition="outside")
         st.plotly_chart(fig_yoy, width="stretch")
@@ -649,15 +682,27 @@ def _render_sensitivity_table(
     zone_tz: str,
     efficiency: float,
     capture_rate: float,
+    use_lp_dispatch: bool,
     chart_template: str,
 ) -> None:
     """Render the duration sensitivity table."""
-    st.markdown("**Duration Sensitivity (per MW)**")
+    del chart_template
+    dispatch_label = "LP dispatch" if use_lp_dispatch else "greedy dispatch"
+    st.markdown(f"**Duration Sensitivity (per MW, {dispatch_label})**")
     sens_rows = []
     for dur in [1, 2, 4]:
-        spreads_d = calculate_daily_spreads(
-            primary_df, tz=zone_tz, duration_hours=dur,
-        )
+        if use_lp_dispatch:
+            spreads_d = calculate_daily_dispatch(
+                primary_df,
+                tz=zone_tz,
+                duration_hours=dur,
+                power_mw=1.0,
+                efficiency=efficiency,
+            )
+        else:
+            spreads_d = calculate_daily_spreads(
+                primary_df, tz=zone_tz, duration_hours=dur,
+            )
         rev_d = estimate_annual_arbitrage_revenue(
             spreads_d, power_mw=1.0, duration_hours=dur,
             roundtrip_efficiency=efficiency,
@@ -665,8 +710,9 @@ def _render_sensitivity_table(
         )
         sens_rows.append({
             "Duration (h)": dur,
-            "Annual Revenue (EUR/MW)": f"\u20ac{rev_d['annual_revenue_eur_per_mw']:,.0f}",
-            "Avg Daily (EUR/MW)": f"\u20ac{rev_d['avg_daily_revenue']:,.0f}",
+            "Dispatch": rev_d.get("dispatch_method", "greedy"),
+            "Annual Revenue (EUR/MW/yr)": f"\u20ac{rev_d['annual_revenue_eur_per_mw']:,.0f}",
+            "Avg Daily Revenue (EUR/MW)": f"\u20ac{rev_d['avg_daily_revenue']:,.0f}",
         })
     st.table(pd.DataFrame(sens_rows))
 
