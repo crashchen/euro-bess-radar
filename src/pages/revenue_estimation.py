@@ -18,7 +18,6 @@ from src.analytics import (
 from src.ancillary import (
     build_ancillary_dataset,
     calculate_ancillary_revenue,
-    co_optimize_revenue_split,
     merge_revenue_stack,
 )
 from src.config import (
@@ -33,6 +32,7 @@ from src.degradation import (
     calculate_net_revenue,
     estimate_battery_lifetime,
 )
+from src.dispatch import solve_joint_capacity_batch
 from src.scenario import (
     bootstrap_annual_revenue,
     calculate_npv_distribution,
@@ -170,33 +170,59 @@ def render(
                 avg_cap_price = cap_eur / (
                     power_mw * HOURS_PER_YEAR * ANCILLARY_CAPACITY_AVAILABILITY
                 )
-                co_opt = co_optimize_revenue_split(
-                    da_annual_revenue=stack["da_arbitrage_eur"],
+                joint = solve_joint_capacity_batch(
+                    primary_df,
                     capacity_price_eur_mw_h=avg_cap_price,
                     power_mw=power_mw,
+                    duration_hours=duration_hours,
+                    efficiency=efficiency,
+                    tz=zone_tz,
+                    soc_init_frac=0.0,
                     availability=ANCILLARY_CAPACITY_AVAILABILITY,
                 )
-                with st.expander("Co-optimization estimate", expanded=False):
+                if joint.empty:
+                    co_total = 0.0
+                    co_da = 0.0
+                    co_capacity = 0.0
+                    avg_reserve_fraction = 0.0
+                else:
+                    co_da = float(joint["joint_da_revenue"].mean()) * capture_rate * 365.25
+                    co_capacity = float(joint["joint_capacity_revenue"].mean()) * 365.25
+                    co_total = co_da + co_capacity
+                    avg_reserve_fraction = float(joint["reserve_fraction"].mean())
+
+                export_revenue.update({
+                    "joint_cooptimized_total_eur": round(co_total, 2),
+                    "joint_cooptimized_da_eur": round(co_da, 2),
+                    "joint_cooptimized_capacity_eur": round(co_capacity, 2),
+                    "joint_cooptimized_avg_reserve_fraction": round(avg_reserve_fraction, 4),
+                })
+
+                with st.expander("Joint LP co-optimization estimate", expanded=False):
                     co1, co2, co3 = st.columns(3)
                     co1.metric(
-                        "Optimal DA/Capacity Split",
-                        f"{(1 - co_opt['optimal_fraction']):.0%} DA / "
-                        f"{co_opt['optimal_fraction']:.0%} Capacity",
+                        "Avg Reserve Commitment",
+                        f"{avg_reserve_fraction:.0%} of power",
                     )
                     co2.metric(
-                        "Co-optimized Total",
-                        f"\u20ac{co_opt['total_revenue']:,.0f}/yr",
+                        "Joint LP Total",
+                        f"\u20ac{co_total:,.0f}/yr",
                     )
-                    uplift = co_opt["total_revenue"] - stack["da_arbitrage_eur"]
+                    uplift = co_total - stack["da_arbitrage_eur"]
                     co3.metric(
                         "Uplift vs DA-only",
                         f"\u20ac{uplift:,.0f}/yr",
                         delta=f"+{uplift / stack['da_arbitrage_eur'] * 100:.0f}%"
                         if stack["da_arbitrage_eur"] > 0 else "",
                     )
+                    co4, co5 = st.columns(2)
+                    co4.metric("LP DA Component", f"\u20ac{co_da:,.0f}/yr")
+                    co5.metric("LP Capacity Component", f"\u20ac{co_capacity:,.0f}/yr")
                     st.caption(
-                        "Heuristic time-partition: committed hours earn capacity price, "
-                        "uncommitted hours earn DA arbitrage pro-rata. Not a joint LP."
+                        "Joint LP lets reserve capacity consume power headroom alongside "
+                        "DA charge/discharge decisions. It still excludes activation "
+                        "energy, bid acceptance, reserve-specific SoC duration, and "
+                        "product qualification constraints."
                     )
 
         component_rows = [

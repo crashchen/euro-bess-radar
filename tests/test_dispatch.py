@@ -6,7 +6,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.dispatch import solve_daily_lp, solve_dispatch_batch
+from src.dispatch import (
+    solve_daily_joint_capacity_lp,
+    solve_daily_lp,
+    solve_dispatch_batch,
+    solve_joint_capacity_batch,
+)
 
 
 class TestSolveDailyLp:
@@ -181,3 +186,76 @@ class TestSolveDispatchBatch:
             expected_spread.round(6),
             check_names=False,
         )
+
+
+class TestSolveDailyJointCapacityLp:
+    def test_flat_prices_commit_capacity_when_capacity_price_positive(self) -> None:
+        prices = np.array([50.0] * 24)
+        result = solve_daily_joint_capacity_lp(
+            prices,
+            dt=1.0,
+            capacity_price_eur_mw_h=10.0,
+            power_mw=2.0,
+            duration_hours=2.0,
+            availability=0.95,
+        )
+        assert result["da_revenue_eur"] == pytest.approx(0.0, abs=1e-6)
+        assert result["capacity_revenue_eur"] == pytest.approx(10.0 * 2.0 * 24 * 0.95)
+        assert result["avg_reserve_mw"] == pytest.approx(2.0)
+
+    def test_capacity_competes_with_dispatch_power_headroom(self) -> None:
+        prices = np.array([20.0] * 12 + [120.0] * 12)
+        da_only = solve_daily_lp(
+            prices,
+            dt=1.0,
+            power_mw=1.0,
+            duration_hours=2.0,
+            efficiency=0.88,
+            soc_init_frac=0.0,
+        )
+        joint = solve_daily_joint_capacity_lp(
+            prices,
+            dt=1.0,
+            capacity_price_eur_mw_h=1.0,
+            power_mw=1.0,
+            duration_hours=2.0,
+            efficiency=0.88,
+            soc_init_frac=0.0,
+        )
+        assert joint["total_revenue_eur"] >= da_only["revenue_eur"]
+        assert joint["avg_reserve_mw"] < 1.0
+
+    def test_high_capacity_price_suppresses_cycling(self) -> None:
+        prices = np.array([20.0] * 12 + [120.0] * 12)
+        result = solve_daily_joint_capacity_lp(
+            prices,
+            dt=1.0,
+            capacity_price_eur_mw_h=200.0,
+            power_mw=1.0,
+            duration_hours=2.0,
+            efficiency=0.88,
+            soc_init_frac=0.0,
+        )
+        assert result["avg_reserve_mw"] == pytest.approx(1.0)
+        assert result["n_cycles"] == pytest.approx(0.0)
+
+
+class TestSolveJointCapacityBatch:
+    def test_batch_returns_expected_columns(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+        df = pd.DataFrame({"price_eur_mwh": [50.0] * 48}, index=idx)
+        df.index.name = "timestamp"
+        result = solve_joint_capacity_batch(
+            df,
+            capacity_price_eur_mw_h=5.0,
+            power_mw=1.0,
+            duration_hours=2.0,
+        )
+        assert len(result) == 2
+        expected = {
+            "date", "joint_total_revenue", "joint_da_revenue",
+            "joint_capacity_revenue", "avg_reserve_mw", "reserve_fraction",
+            "n_cycles",
+        }
+        assert set(result.columns) == expected
+        assert (result["joint_capacity_revenue"] > 0).all()

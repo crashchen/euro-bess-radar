@@ -110,6 +110,19 @@ def _build_summary_sheet(
             "Capacity Stack Warning",
             revenue_estimate["capacity_stack_warning"],
         )
+    if "joint_cooptimized_total_eur" in revenue_estimate:
+        row = _write_kv_pair(
+            ws, row,
+            "Joint LP Co-optimized Total (EUR)",
+            revenue_estimate["joint_cooptimized_total_eur"],
+            _PRICE_FMT,
+        )
+        row = _write_kv_pair(
+            ws, row,
+            "Joint LP Avg Reserve Commitment",
+            revenue_estimate.get("joint_cooptimized_avg_reserve_fraction", 0.0),
+            _PCT_FMT,
+        )
     if "source_revenues" in revenue_estimate:
         for source, value in revenue_estimate["source_revenues"].items():
             row = _write_kv_pair(ws, row, f"{source} Revenue (EUR)", value, _PRICE_FMT)
@@ -417,6 +430,11 @@ def _build_pdf_report(
                       f"{revenue_estimate['gross_additive_total_eur']:,.0f}"))
     if revenue_estimate.get("capacity_stack_warning"):
         rows.append(("Note", str(revenue_estimate["capacity_stack_warning"])))
+    if "joint_cooptimized_total_eur" in revenue_estimate:
+        rows.append(("Joint LP Co-optimized Total (EUR)",
+                     f"{revenue_estimate['joint_cooptimized_total_eur']:,.0f}"))
+        rows.append(("Joint LP Avg Reserve Commitment",
+                     f"{revenue_estimate.get('joint_cooptimized_avg_reserve_fraction', 0.0):.0%}"))
     if "source_revenues" in revenue_estimate:
         rows.append(("", ""))
         for source, value in revenue_estimate["source_revenues"].items():

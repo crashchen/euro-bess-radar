@@ -54,7 +54,49 @@ AUTO_FETCHERS: dict[str, list[dict[str, Any]]] = {
             "source": "ENTSO-E",
         },
     ],
+    "IT_NORD": [
+        {
+            "name": "Imbalance prices",
+            "fetcher": "fetch_entsoe_imbalance_prices",
+            "source": "ENTSO-E",
+        },
+    ],
+    "IT_CNOR": [
+        {
+            "name": "Imbalance prices",
+            "fetcher": "fetch_entsoe_imbalance_prices",
+            "source": "ENTSO-E",
+        },
+    ],
+    "IT_CSUD": [
+        {
+            "name": "Imbalance prices",
+            "fetcher": "fetch_entsoe_imbalance_prices",
+            "source": "ENTSO-E",
+        },
+    ],
     "IT_SUD": [
+        {
+            "name": "Imbalance prices",
+            "fetcher": "fetch_entsoe_imbalance_prices",
+            "source": "ENTSO-E",
+        },
+    ],
+    "IT_CALA": [
+        {
+            "name": "Imbalance prices",
+            "fetcher": "fetch_entsoe_imbalance_prices",
+            "source": "ENTSO-E",
+        },
+    ],
+    "IT_SICI": [
+        {
+            "name": "Imbalance prices",
+            "fetcher": "fetch_entsoe_imbalance_prices",
+            "source": "ENTSO-E",
+        },
+    ],
+    "IT_SARD": [
         {
             "name": "Imbalance prices",
             "fetcher": "fetch_entsoe_imbalance_prices",

@@ -8,7 +8,8 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 - **Revenue estimation** for 1h, 2h, and 4h BESS using chronology-aware charge/discharge windows
 - **Inline revenue guidance** with sample-window annualisation notes and ancillary methodology help in the dashboard
 - **Renewables and BESS signal analysis** — quantify how renewable share affects prices and ordered spreads
-- **Ancillary services integration** — manual CSV upload + auto-fetch for DE, FI, GB with per-product reserve lines, manual-over-auto product overrides, and preserved directional/system price fields
+- **Ancillary services integration** — manual CSV upload + auto-fetch for DE, FI, GB, RO, SE_3, and Italian zones with per-product reserve lines, manual-over-auto product overrides, and preserved directional/system price fields
+- **Joint LP co-optimization estimate** for DA arbitrage vs reserve-capacity power headroom
 - **Multi-zone comparison** for market screening
 - **Excel export** with full analytics and sub-hourly negative-price normalization
 - **GBP to EUR normalization** for GB history using yearly FX mappings
@@ -60,7 +61,7 @@ euro-bess-radar/
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   └── export.py             # Excel report generation
-├── tests/                    # 238 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 242 passing tests, heavily mocked; 2 PDF tests may skip
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads
@@ -74,7 +75,7 @@ Optimized for BESS investment screening in:
 - Finland (FI) — FCR-N/D + aFRR auto-fetch via Fingrid
 - Great Britain (GB) — Elexon MID + system prices
 - Romania (RO) — DA prices + ENTSO-E imbalance data
-- Italy (IT_NORD, IT_CNOR, IT_CSUD, IT_SUD, IT_CALA, IT_SICI, IT_SARD) — DA prices and selected ENTSO-E imbalance coverage
+- Italy (IT_NORD, IT_CNOR, IT_CSUD, IT_SUD, IT_CALA, IT_SICI, IT_SARD) — DA prices + ENTSO-E imbalance auto-fetch where available
 - Sweden (SE_1-4) — Nordic market dynamics
 - Norway (NO_1-5) — Hydro-driven price patterns
 

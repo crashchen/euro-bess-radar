@@ -463,7 +463,11 @@ class TestGetAvailableFetchers:
         assert get_available_fetchers("XX_UNKNOWN") == []
 
     def test_entsoe_zones_have_imbalance(self) -> None:
-        for zone in ["RO", "SE_3", "IT_SUD"]:
+        italy_zones = [
+            "IT_NORD", "IT_CNOR", "IT_CSUD", "IT_SUD",
+            "IT_CALA", "IT_SICI", "IT_SARD",
+        ]
+        for zone in ["RO", "SE_3", *italy_zones]:
             fetchers = get_available_fetchers(zone)
             assert len(fetchers) >= 1
             assert fetchers[0]["source"] == "ENTSO-E"

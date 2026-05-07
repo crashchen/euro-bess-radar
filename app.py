@@ -273,6 +273,18 @@ if fetch_btn or "zone_data" in st.session_state:
         negative_stats=neg_stats,
         tz=zone_tz,
     )
+    include_pdf_charts = st.checkbox(
+        "Include charts in PDF",
+        value=False,
+        help=(
+            "Chart pages require Kaleido/Chrome static rendering and can be slower "
+            "or unavailable on some local machines. Leave off for a stable text-only PDF."
+        ),
+    )
+    pdf_figures = report_figures if include_pdf_charts else None
+    if not include_pdf_charts:
+        st.caption("PDF export will include the summary tables only. Enable chart export to add Plotly chart pages.")
+
     pdf_bytes = export_to_pdf_bytes(
         zone=primary_zone,
         price_df=primary_df,
@@ -282,7 +294,7 @@ if fetch_btn or "zone_data" in st.session_state:
         revenue_estimate=export_revenue,
         negative_stats=neg_stats,
         tz=zone_tz,
-        figures=report_figures,
+        figures=pdf_figures,
     )
     exp_col1, exp_col2 = st.columns(2)
     exp_col1.download_button(

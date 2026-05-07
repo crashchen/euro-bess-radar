@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from io import BytesIO
 from pathlib import Path
 
@@ -25,7 +26,14 @@ from src.export import (
 
 
 def _render_or_skip(fig) -> bytes:
-    """Render a Plotly figure or skip when local Kaleido is unavailable."""
+    """Render a Plotly figure only in explicit Kaleido integration runs.
+
+    Kaleido 1.x launches a local Chrome process for static image rendering. On
+    some macOS desktop sessions that can produce OS-level Chrome crash dialogs,
+    so the default unit suite keeps these checks opt-in.
+    """
+    if os.environ.get("BESS_PULSE_RUN_KALEIDO_TESTS") != "1":
+        pytest.skip("Set BESS_PULSE_RUN_KALEIDO_TESTS=1 to run Kaleido/Chrome rendering tests.")
     try:
         return _render_figure_to_image(fig)
     except Exception as exc:
@@ -283,6 +291,8 @@ class TestExportToBytes:
             "gross_additive_total_eur": 145000.0,
             "headline_total_mode": "conservative_da_primary",
             "capacity_stack_warning": "Capacity reserve is not co-optimized.",
+            "joint_cooptimized_total_eur": 132000.0,
+            "joint_cooptimized_avg_reserve_fraction": 0.42,
             "annual_degradation_cost_eur": 18000.0,
             "net_revenue_eur": 102000.0,
             "degradation_pct": 15.0,
@@ -320,6 +330,8 @@ class TestExportToBytes:
         assert summary["Gross Additive Total (Reference, EUR)"] == 145000
         assert summary["Headline Total Mode"] == "conservative_da_primary"
         assert summary["Capacity Stack Warning"] == "Capacity reserve is not co-optimized."
+        assert summary["Joint LP Co-optimized Total (EUR)"] == 132000
+        assert summary["Joint LP Avg Reserve Commitment"] == 0.42
         assert summary["DA Arbitrage Revenue (EUR)"] == 80000
         assert summary["FCR-N Revenue (EUR)"] == 25000
         assert summary["Annual Degradation Cost (EUR)"] == 18000

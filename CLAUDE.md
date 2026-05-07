@@ -14,7 +14,7 @@ Data flow inside one dashboard run (`app.py`):
 1. `data_ingestion.fetch_prices()` dispatches to the right backend (entsoe-py for ENTSO-E zones, Elexon REST for GB), runs `build_zone_query_window()` to convert local calendar dates to a UTC `[start, end)` window, and caches into `da_prices_{zone}` SQLite tables. Cache validity is checked per requested slice using row-level `fetched_at`, `_expected_cache_interval()` + `reindex`, so stale rows and gaps are detected as missing points instead of accepted as sparse data.
 2. `analytics.py` consumes the UTC price frame but groups by the zone's local calendar day via the `tz` parameter. `_find_daily_ordered_trade()` (called from `calculate_daily_spreads()`) finds the best chronology-aware charge→discharge pair with rolling windows sized by `duration_hours`. Heatmaps, P50/P90, RE correlation, and revenue all share this ordered-spread basis.
 3. `ancillary_fetchers.py` exposes a lazy `getattr()` registry (`fetch_{zone}_ancillary`) used by `run_auto_fetch()`. Results flow into `ancillary.normalize_auto_fetch_dataset()` and then `build_ancillary_dataset()`, which merges with any user-uploaded manual CSVs — manual uploads override auto-fetch *only for the same product type*, preserving other auto-fetched products.
-4. `merge_revenue_stack()` combines DA arbitrage with per-product ancillary revenue and returns a `source_revenues` dict (e.g. `DA Arbitrage`, `FCR-N`, `aFRR Up`) that both the Revenue tab and `export.py` read from. Capacity-reserve ancillary is not treated as fully additive with DA in the headline total; `gross_additive_total_eur` remains available as a non-co-optimized reference.
+4. `merge_revenue_stack()` combines DA arbitrage with per-product ancillary revenue and returns a `source_revenues` dict (e.g. `DA Arbitrage`, `FCR-N`, `aFRR Up`) that both the Revenue tab and `export.py` read from. Capacity-reserve ancillary is not treated as fully additive with DA in the headline total; `gross_additive_total_eur` remains available as a non-co-optimized reference, and `dispatch.solve_joint_capacity_batch()` can provide a screening-grade joint LP power-headroom estimate.
 5. `export.py` writes Excel reports that must respect the same `tz` parameter and stacked-revenue breakdown as the dashboard.
 
 Tests in `tests/` are heavily mocked (no live API calls) and mirror the module layout 1:1. `conftest.py` holds shared price/ancillary fixtures.
@@ -62,7 +62,7 @@ Tests in `tests/` are heavily mocked (no live API calls) and mirror the module l
 
 ### ENTSO-E Imbalance Prices
 - Uses same ENTSO-E API key as DA prices
-- Covers: RO, SE_3, IT_SUD (and other ENTSO-E zones)
+- Covers: RO, SE_3, Italian bidding zones, and other ENTSO-E zones where imbalance data is available
 - Returns: imbalance/balancing prices in EUR/MWh
 
 ## Geographic Scope
@@ -80,7 +80,7 @@ Zone-specific fetchers run automatically when the zone is selected:
 - **FI** — FCR-N/D + aFRR prices via Fingrid
 - **DE_LU** — FCR/aFRR auction results via Regelleistung.net REST API (downloads daily xlsx)
 - **GB** — System buy/sell prices via Elexon
-- **RO, SE_3, IT_SUD** — Imbalance prices via ENTSO-E
+- **RO, SE_3, IT_NORD, IT_CNOR, IT_CSUD, IT_SUD, IT_CALA, IT_SICI, IT_SARD** — Imbalance prices via ENTSO-E
 
 Registry uses lazy `getattr()` lookup for testability. `run_auto_fetch()` handles per-fetcher errors gracefully.
 
@@ -123,11 +123,12 @@ Upload via sidebar. Template CSVs downloadable from the UI.
 - Generation data: not all zones have solar/wind/offshore split — handle missing columns gracefully
 - Negative wind/solar-price correlation = BESS-friendly market (high RE → low prices = charging, low RE → high prices = discharging)
 - **Revenue stacking**: `merge_revenue_stack()` exposes DA arbitrage + ancillary `source_revenues` for per-product breakdown, but capacity-reserve ancillary is not assumed to be fully additive with DA in the headline total without co-optimization.
+- **Joint co-optimization**: `solve_joint_capacity_batch()` models reserve capacity as power headroom competing with DA charge/discharge in the LP. It does not model activation energy, bid acceptance, reserve-specific SoC duration, or qualification constraints.
 - **Annualisation caveat**: DA arbitrage revenue is extrapolated from the user-selected sample window, so short windows (for example winter-only periods) can materially overstate or understate full-year merchant potential
 
 ## Commands
 - `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
-- `python -m pytest tests/ -v` — run all tests (238 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
+- `python -m pytest tests/ -v` — run all tests (242 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
 - `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
 - `streamlit run app.py` — launch the dashboard.
 - `python -c "from src.data_ingestion import test_elexon_connection; test_elexon_connection()"` — smoke-test Elexon (no API key needed).
