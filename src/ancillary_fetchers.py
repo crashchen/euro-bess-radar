@@ -7,8 +7,13 @@ from collections.abc import Callable
 from typing import Any
 
 import pandas as pd
+import requests
 
 import src.data_ingestion as _ingestion
+from src.data_ingestion import (
+    DataSourceNetworkError,
+    DataSourceParseError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -165,8 +170,18 @@ def run_auto_fetch(
                 result = func(start, end)
                 if result is not None and not result.empty:
                     results[name] = result
-        except Exception as exc:
+        except (
+            requests.RequestException,
+            DataSourceNetworkError,
+            DataSourceParseError,
+            ValueError,
+            KeyError,
+            TypeError,
+        ) as exc:
             logger.warning("Auto-fetch '%s' for %s failed: %s", name, zone, exc)
+        # DataSourceAuthError intentionally not caught here so the sidebar
+        # can show a clear "set FINGRID_API_KEY" / similar message instead
+        # of swallowing it as "no data returned".
 
     logger.info(
         "Auto-fetch for %s complete: %d/%d succeeded",

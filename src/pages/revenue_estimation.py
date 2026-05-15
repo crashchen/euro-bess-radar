@@ -66,7 +66,7 @@ def render(
     st.caption(
         f"Applied BESS case: {power_mw:.1f} MW / {duration_hours}h, "
         f"{efficiency:.0%} efficiency, {capture_rate:.0%} capture, "
-        f"{'LP dispatch' if use_lp_dispatch else 'greedy dispatch'}."
+        f"{'MILP dispatch' if use_lp_dispatch else 'greedy dispatch'}."
     )
     sample_days = (pd.Timestamp(end_date) - pd.Timestamp(start_date)).days + 1
     if sample_days < 365:
@@ -80,6 +80,12 @@ def render(
         st.caption(
             f"Annualisation note: this revenue is extrapolated from the selected "
             f"sample window ({sample_days} days)."
+        )
+    excluded_days = int(daily_spreads.attrs.get("excluded_days_due_to_missing", 0))
+    if excluded_days > 0:
+        st.warning(
+            f"Data quality note: {excluded_days} local day(s) contain unresolved "
+            "price gaps and are excluded from spread, dispatch, and revenue annualisation."
         )
 
     with st.expander("How ancillary works"):
@@ -198,14 +204,14 @@ def render(
                     "joint_cooptimized_avg_reserve_fraction": round(avg_reserve_fraction, 4),
                 })
 
-                with st.expander("Joint LP co-optimization estimate", expanded=False):
+                with st.expander("Joint MILP co-optimization estimate", expanded=False):
                     co1, co2, co3 = st.columns(3)
                     co1.metric(
                         "Avg Reserve Commitment",
                         f"{avg_reserve_fraction:.0%} of power",
                     )
                     co2.metric(
-                        "Joint LP Total",
+                        "Joint MILP Total",
                         f"\u20ac{co_total:,.0f}/yr",
                     )
                     uplift = co_total - stack["da_arbitrage_eur"]
@@ -216,10 +222,10 @@ def render(
                         if stack["da_arbitrage_eur"] > 0 else "",
                     )
                     co4, co5 = st.columns(2)
-                    co4.metric("LP DA Component", f"\u20ac{co_da:,.0f}/yr")
-                    co5.metric("LP Capacity Component", f"\u20ac{co_capacity:,.0f}/yr")
+                    co4.metric("MILP DA Component", f"\u20ac{co_da:,.0f}/yr")
+                    co5.metric("MILP Capacity Component", f"\u20ac{co_capacity:,.0f}/yr")
                     st.caption(
-                        "Joint LP lets reserve capacity consume power headroom alongside "
+                        "Joint MILP lets reserve capacity consume power headroom alongside "
                         "DA charge/discharge decisions. It still excludes activation "
                         "energy, bid acceptance, reserve-specific SoC duration, and "
                         "product qualification constraints."
@@ -456,10 +462,10 @@ def render(
     report_figures["revenue_waterfall"] = fig_wf
     st.plotly_chart(fig_wf, width="stretch")
 
-    # LP dispatch details
+    # MILP dispatch details
     if use_lp_dispatch and "lp_revenue" in daily_spreads.columns:
         st.divider()
-        st.markdown("**LP Dispatch Details**")
+        st.markdown("**MILP Dispatch Details**")
         lp1, lp2, lp3 = st.columns(3)
         avg_cycles = float(daily_spreads["n_cycles"].mean())
         avg_lp_spread = float(daily_spreads["lp_spread_eur_mwh"].mean())
@@ -469,11 +475,11 @@ def render(
             if greedy_spread * efficiency > 0 else 0.0
         )
         lp1.metric("Avg Cycles/Day", f"{avg_cycles:.2f}")
-        lp2.metric("LP Spread (EUR/MWh)", f"\u20ac{avg_lp_spread:.1f}")
+        lp2.metric("MILP Spread (EUR/MWh)", f"\u20ac{avg_lp_spread:.1f}")
         lp3.metric(
-            "LP vs Greedy Uplift",
+            "MILP vs Greedy Uplift",
             f"{uplift_pct:+.0f}%",
-            help="Percentage improvement of LP-optimal over greedy single-cycle (adjusted for efficiency)",
+            help="Percentage improvement of MILP-optimal over greedy single-cycle (adjusted for efficiency)",
         )
 
     # Sensitivity table (cached)
@@ -713,7 +719,7 @@ def _render_sensitivity_table(
 ) -> None:
     """Render the duration sensitivity table."""
     del chart_template
-    dispatch_label = "LP dispatch" if use_lp_dispatch else "greedy dispatch"
+    dispatch_label = "MILP dispatch" if use_lp_dispatch else "greedy dispatch"
     st.markdown(f"**Duration Sensitivity (per MW, {dispatch_label})**")
     sens_rows = []
     for dur in [1, 2, 4]:

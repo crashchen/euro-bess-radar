@@ -87,6 +87,22 @@ class TestNpvDistribution:
         assert result["npv_p50"] > 0
         assert result["prob_positive_npv"] == 1.0
 
+    def test_fractional_lifetime_smoothly_varies_npv(self) -> None:
+        """Fractional life (e.g. 14.9 from degradation model) must not be
+        floored to 14 — that drops nearly a full year of discounted revenue.
+        """
+        annual_rev = np.full(100, 100000.0)
+        kwargs = dict(total_capex=500000.0, discount_rate=0.08)
+        r_14 = calculate_npv_distribution(annual_rev, effective_life_years=14.0, **kwargs)
+        r_14_9 = calculate_npv_distribution(annual_rev, effective_life_years=14.9, **kwargs)
+        r_15 = calculate_npv_distribution(annual_rev, effective_life_years=15.0, **kwargs)
+        # 14.9 must be strictly between 14 and 15, not equal to 14
+        assert r_14["npv_p50"] < r_14_9["npv_p50"] < r_15["npv_p50"]
+        # And much closer to 15 than to 14
+        gap_to_14 = r_14_9["npv_p50"] - r_14["npv_p50"]
+        gap_to_15 = r_15["npv_p50"] - r_14_9["npv_p50"]
+        assert gap_to_14 > gap_to_15
+
 
 class TestSensitivityTable:
     def test_expected_shape(self) -> None:

@@ -117,6 +117,34 @@ class TestDailySpreads:
         expected_cols = {"date", "daily_min", "daily_max", "spread", "max_hour", "min_hour"}
         assert set(result.columns) == expected_cols
 
+    def test_days_with_unresolved_missing_prices_are_excluded(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+        prices = list(range(24)) + list(range(24))
+        df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+        df.index.name = "timestamp"
+        df.loc[idx[30:34], "price_eur_mwh"] = np.nan
+
+        result = calculate_daily_spreads(df)
+
+        assert len(result) == 1
+        assert result["date"].iloc[0] == pd.Timestamp("2025-01-01").date()
+        assert result.attrs["excluded_days_due_to_missing"] == 1
+
+    def test_empty_spread_percentiles_are_safe_defaults(self) -> None:
+        empty = calculate_daily_spreads(
+            pd.DataFrame(
+                {"price_eur_mwh": [np.nan] * 24},
+                index=pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC"),
+            )
+        )
+
+        pctls = calculate_spread_percentiles(empty)
+        revenue = estimate_annual_arbitrage_revenue(empty)
+
+        assert pctls == {"p50": 0.0, "p75": 0.0, "p90": 0.0, "mean": 0.0, "std": 0.0}
+        assert revenue["annual_revenue_eur"] == 0.0
+        assert revenue["valid_sample_days"] == 0
+
 
 # ── Monthly spreads ──────────────────────────────────────────────────────────
 
@@ -214,6 +242,7 @@ class TestRevenue:
             "annual_revenue_eur", "annual_revenue_eur_per_mw",
             "avg_daily_revenue", "capture_rate_assumption",
             "cycles_per_day_assumption", "dispatch_method",
+            "valid_sample_days", "excluded_days_due_to_missing",
         }
         assert set(result.keys()) == expected_keys
         assert result["dispatch_method"] == "greedy"
@@ -692,7 +721,7 @@ class TestLocalTimezoneAnalytics:
         assert len(result) == 1
 
 
-# ── LP dispatch integration ────────────────────────────────────────────────────
+# ── MILP dispatch integration ──────────────────────────────────────────────────
 
 class TestDailyDispatch:
     @pytest.fixture()

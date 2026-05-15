@@ -11,6 +11,7 @@ from collections.abc import Callable
 from datetime import date
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import requests
 from entsoe import EntsoePandasClient
@@ -239,6 +240,8 @@ def _convert_gbp_series_to_eur(
 
 # ── Cleaning ──────────────────────────────────────────────────────────────────
 
+MAX_SHORT_GAP_HOURS = 2.0
+
 def _format_distinct_deltas(positive: pd.Series) -> str:
     """Render distinct positive deltas for logging."""
     return ", ".join(
@@ -387,6 +390,96 @@ def _segment_and_reindex_prices(
     return out
 
 
+def _dominant_interval_hours(index: pd.DatetimeIndex) -> float:
+    """Return the dominant interval length in hours for data-quality metrics."""
+    freq = _infer_segment_freq(index)
+    if freq is None:
+        return 1.0
+    return max(freq.total_seconds() / 3600.0, 1.0 / 60.0)
+
+
+def _max_consecutive_true(mask: pd.Series) -> int:
+    """Return the longest consecutive True run in a boolean Series."""
+    max_run = 0
+    current = 0
+    for value in mask.astype(bool).to_numpy():
+        if value:
+            current += 1
+            max_run = max(max_run, current)
+        else:
+            current = 0
+    return max_run
+
+
+def _short_internal_gap_mask(
+    missing: pd.Series,
+    max_gap_intervals: int,
+) -> pd.Series:
+    """Mark internal missing runs short enough for safe interpolation."""
+    values = missing.astype(bool).to_numpy()
+    impute = np.zeros(len(values), dtype=bool)
+    pos = 0
+    while pos < len(values):
+        if not values[pos]:
+            pos += 1
+            continue
+        start = pos
+        while pos < len(values) and values[pos]:
+            pos += 1
+        end = pos
+        is_internal = start > 0 and end < len(values)
+        if is_internal and end - start <= max_gap_intervals:
+            impute[start:end] = True
+    return pd.Series(impute, index=missing.index)
+
+
+def summarize_price_data_quality(df: pd.DataFrame) -> dict[str, float | int]:
+    """Summarise source-backed, imputed, and unresolved price intervals."""
+    total = len(df)
+    if total == 0 or "price_eur_mwh" not in df.columns:
+        return {
+            "total_intervals": total,
+            "source_gap_intervals": 0,
+            "imputed_intervals": 0,
+            "missing_intervals": 0,
+            "valid_intervals": 0,
+            "source_gap_ratio": 0.0,
+            "imputed_ratio": 0.0,
+            "missing_ratio": 0.0,
+            "max_source_gap_hours": 0.0,
+        }
+
+    missing = df["price_eur_mwh"].isna()
+    filled = (
+        df["filled"].astype(bool)
+        if "filled" in df.columns
+        else missing
+    )
+    imputed = (
+        df["imputed"].astype(bool)
+        if "imputed" in df.columns
+        else pd.Series(False, index=df.index)
+    )
+    interval_hours = _dominant_interval_hours(pd.DatetimeIndex(df.index))
+    source_gap_intervals = int(filled.sum())
+    imputed_intervals = int(imputed.sum())
+    missing_intervals = int(missing.sum())
+    valid_intervals = int(df["price_eur_mwh"].notna().sum())
+    max_gap_hours = _max_consecutive_true(filled) * interval_hours
+
+    return {
+        "total_intervals": total,
+        "source_gap_intervals": source_gap_intervals,
+        "imputed_intervals": imputed_intervals,
+        "missing_intervals": missing_intervals,
+        "valid_intervals": valid_intervals,
+        "source_gap_ratio": source_gap_intervals / total if total else 0.0,
+        "imputed_ratio": imputed_intervals / total if total else 0.0,
+        "missing_ratio": missing_intervals / total if total else 0.0,
+        "max_source_gap_hours": round(max_gap_hours, 2),
+    }
+
+
 def _zone_resolution_boundaries(
     zone: str,
     start: pd.Timestamp,
@@ -473,8 +566,9 @@ def clean_prices(
         expected_end: Optional requested UTC exclusive end boundary for gap detection.
 
     Returns:
-        Cleaned DataFrame with gaps forward-filled, no NaN remaining, plus a
-        `filled` flag marking rows that were synthetic or missing in source data.
+        Cleaned DataFrame with short internal gaps interpolated, long or edge
+        gaps left as NaN, plus flags marking rows that were missing in source
+        data (`filled`) and actually imputed (`imputed`).
     """
     if df.empty:
         return df
@@ -487,9 +581,18 @@ def clean_prices(
         expected_start=expected_start,
         expected_end=expected_end,
     )
-    df["filled"] = df["price_eur_mwh"].isna()
-    df["price_eur_mwh"] = df["price_eur_mwh"].ffill().bfill()
+    missing = df["price_eur_mwh"].isna()
+    interval_hours = _dominant_interval_hours(pd.DatetimeIndex(df.index))
+    max_gap_intervals = max(round(MAX_SHORT_GAP_HOURS / interval_hours), 1)
+    impute_mask = _short_internal_gap_mask(missing, max_gap_intervals)
+
+    interpolated = df["price_eur_mwh"].interpolate(method="time", limit_area="inside")
+    df["filled"] = missing
+    df["imputed"] = impute_mask
+    df.loc[impute_mask, "price_eur_mwh"] = interpolated.loc[impute_mask]
     df["filled"] = df["filled"].astype(bool)
+    df["imputed"] = df["imputed"].astype(bool)
+    df.attrs["data_quality"] = summarize_price_data_quality(df)
     return df
 
 
@@ -1118,13 +1221,22 @@ def _call_fingrid_api(
     params: dict[str, Any],
     headers: dict[str, str],
 ) -> Any:
-    """Fetch one Fingrid API page with retries."""
+    """Fetch one Fingrid API page with retries.
+
+    Auth failures (401/403) raise DataSourceAuthError and bypass the retry
+    loop — retrying a missing/invalid API key cannot succeed.
+    """
     resp = requests.get(
         f"{FINGRID_BASE_URL}/datasets/{dataset_id}/data",
         params=params,
         headers=headers,
         timeout=30,
     )
+    if resp.status_code in (401, 403):
+        raise DataSourceAuthError(
+            f"Fingrid auth failed (HTTP {resp.status_code}). "
+            "Set FINGRID_API_KEY in .env."
+        )
     resp.raise_for_status()
     return resp.json()
 
@@ -1168,15 +1280,16 @@ def fetch_fingrid_data(
         try:
             payload = _call_fingrid_api(dataset_id, params, headers)
         except (requests.RequestException, ValueError) as exc:
+            # Keep already-collected pages: a transient failure on a later page
+            # shouldn't drop earlier successful pages on the floor. Surface as
+            # a warning so the user knows the slice is partial.
             logger.warning(
                 "Fingrid fetch failed for dataset %d on page %d after retries; "
-                "discarding %d collected rows and returning empty data: %s",
-                dataset_id,
-                page,
-                len(all_rows),
-                exc,
+                "returning %d rows collected from earlier pages (data may be "
+                "incomplete): %s",
+                dataset_id, page, len(all_rows), exc,
             )
-            return pd.DataFrame(columns=["timestamp", "value"])
+            break
 
         records = payload.get("data", payload) if isinstance(payload, dict) else payload
         if not isinstance(records, list) or not records:
@@ -1422,10 +1535,12 @@ def fetch_regelleistung_results(
             logger.warning(
                 "Regelleistung fetch failed for %s on %s: %s", product, date_str, exc,
             )
-        except Exception as exc:
+        except (ValueError, KeyError, TypeError, DataSourceParseError) as exc:
             logger.warning(
                 "Regelleistung parse failed for %s on %s: %s", product, date_str, exc,
             )
+        # DataSourceAuthError (and any other unexpected error) propagates so
+        # the UI can surface a root-cause message instead of "no data".
 
     if not all_frames:
         logger.warning(

@@ -7,6 +7,7 @@ import plotly.express as px
 import streamlit as st
 
 from src.config import is_elexon_zone
+from src.data_ingestion import summarize_price_data_quality
 
 
 def render(
@@ -38,6 +39,21 @@ def render(
         f"Spreads use chronology-aware {duration_hours}h charge/discharge windows "
         f"in {zone_tz}."
     )
+    quality = summarize_price_data_quality(primary_df)
+    excluded_days = int(daily_spreads.attrs.get("excluded_days_due_to_missing", 0))
+    if quality["missing_intervals"] > 0:
+        st.warning(
+            "Data quality: "
+            f"{quality['imputed_ratio']:.1%} of intervals were short-gap imputed; "
+            f"{quality['missing_ratio']:.1%} remain missing and are excluded from "
+            f"spread/dispatch analytics across {excluded_days} local day(s)."
+        )
+    elif quality["imputed_intervals"] > 0:
+        st.caption(
+            "Data quality: "
+            f"{quality['imputed_ratio']:.1%} of intervals were short-gap imputed; "
+            "no unresolved price gaps remain."
+        )
 
     price_plot_df = primary_df.reset_index()
     fig_price = px.line(

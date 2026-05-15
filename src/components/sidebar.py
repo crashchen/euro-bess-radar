@@ -73,7 +73,11 @@ def _run_and_store_ancillary_fetch(zone: str, start: object, end: object) -> Non
     fetchers = get_available_fetchers(zone)
     with st.spinner(f"Fetching from {', '.join(f['source'] for f in fetchers)}..."):
         auto_start, auto_end = build_zone_query_window(zone, start, end)
-        results = run_auto_fetch(zone, auto_start, auto_end)
+        try:
+            results = run_auto_fetch(zone, auto_start, auto_end)
+        except DataSourceAuthError as exc:
+            st.error(f"Auto-fetch auth error: {exc}")
+            return
         if results:
             st.session_state["auto_fetch_results"] = results
             _store_ancillary_scope(zone, start, end)
@@ -180,9 +184,9 @@ def render_sidebar() -> dict:
             help="Enter installed CapEx to calculate payback period. Leave 0 to skip.",
         )
         use_lp_dispatch = st.checkbox(
-            "Multi-cycle LP dispatch",
+            "Multi-cycle MILP dispatch",
             value=False,
-            help="Use LP optimizer for multi-cycle dispatch instead of greedy single-cycle heuristic.",
+            help="Use MILP optimizer for multi-cycle dispatch instead of greedy single-cycle heuristic.",
         )
         st.form_submit_button("Apply BESS parameters", type="primary")
     force_refresh = st.sidebar.checkbox(

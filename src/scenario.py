@@ -2,8 +2,32 @@
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
+
+
+def _annuity_pv_factor(life_years: float, discount_rate: float) -> float:
+    """Present-value factor for an annuity of 1 per year over a fractional life.
+
+    The integer years use the closed-form annuity formula; any fractional
+    residual is treated as a pro-rata cashflow at the end of the next year.
+    Avoids the bug where ``int(life)`` floored 14.9 to 14, dropping ~one full
+    year of discounted revenue from NPV.
+    """
+    if life_years <= 0:
+        return 0.0
+    if discount_rate == 0:
+        return float(life_years)
+    n_full = math.floor(life_years)
+    frac = life_years - n_full
+    pv = 0.0
+    if n_full > 0:
+        pv += (1 - (1 + discount_rate) ** (-n_full)) / discount_rate
+    if frac > 0:
+        pv += frac / (1 + discount_rate) ** (n_full + 1)
+    return pv
 
 
 def bootstrap_annual_revenue(
@@ -72,9 +96,7 @@ def calculate_npv_distribution(
     Returns:
         Dict with npv_p10, npv_p50, npv_p90, prob_positive_npv, npv_array.
     """
-    n_years = int(effective_life_years)
-    discount_factors = np.array([1 / (1 + discount_rate) ** t for t in range(1, n_years + 1)])
-    pv_factor = discount_factors.sum()
+    pv_factor = _annuity_pv_factor(float(effective_life_years), discount_rate)
 
     net_annual = annual_revenue_dist - annual_degradation_cost
     npv_array = net_annual * pv_factor - total_capex
@@ -128,8 +150,7 @@ def sensitivity_table(
             life = val if param == "lifetime" else effective_life_years
             deg = annual_degradation_cost
 
-            n_years = int(life)
-            pv_factor = sum(1 / (1 + dr) ** t for t in range(1, n_years + 1))
+            pv_factor = _annuity_pv_factor(float(life), dr)
             npv = (rev - deg) * pv_factor - capex
 
             rows.append({

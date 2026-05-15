@@ -135,6 +135,20 @@ def _calculate_daily_ordered_spread(
     }
 
 
+def _empty_daily_spreads(
+    excluded_days_due_to_missing: int = 0,
+    observed_days: int = 0,
+) -> pd.DataFrame:
+    """Return an empty daily-spread frame with data-quality attrs."""
+    result = pd.DataFrame(
+        columns=["date", "daily_min", "daily_max", "spread", "max_hour", "min_hour"],
+    )
+    result.attrs["excluded_days_due_to_missing"] = excluded_days_due_to_missing
+    result.attrs["observed_days"] = observed_days
+    result.attrs["valid_days"] = 0
+    return result
+
+
 def calculate_daily_spreads(
     df: pd.DataFrame,
     tz: str | None = None,
@@ -158,19 +172,27 @@ def calculate_daily_spreads(
     daily = prices.groupby(prices.index.date)
 
     records = []
+    observed_days = 0
+    excluded_days = 0
     for date, group in daily:
-        metrics = _calculate_daily_ordered_spread(group.sort_index(), duration_hours)
+        observed_days += 1
+        group = group.sort_index()
+        if group.isna().any():
+            excluded_days += 1
+            continue
+        metrics = _calculate_daily_ordered_spread(group, duration_hours)
         metrics["date"] = date
         records.append(metrics)
 
     result = pd.DataFrame.from_records(records)
     if result.empty:
-        return pd.DataFrame(
-            columns=["date", "daily_min", "daily_max", "spread", "max_hour", "min_hour"],
-        )
+        return _empty_daily_spreads(excluded_days, observed_days)
 
     result = result[["date", "daily_min", "daily_max", "spread", "max_hour", "min_hour"]]
     result.index.name = "date"
+    result.attrs["excluded_days_due_to_missing"] = excluded_days
+    result.attrs["observed_days"] = observed_days
+    result.attrs["valid_days"] = len(result)
     return result
 
 
@@ -181,10 +203,10 @@ def calculate_daily_dispatch(
     power_mw: float = 1.0,
     efficiency: float = 0.88,
 ) -> pd.DataFrame:
-    """Compute daily spreads with both greedy and LP dispatch results.
+    """Compute daily spreads with both greedy and MILP dispatch results.
 
     Returns a superset of :func:`calculate_daily_spreads` with additional
-    LP columns (``lp_revenue``, ``n_cycles``, ``lp_spread_eur_mwh``).
+    MILP columns (``lp_revenue``, ``n_cycles``, ``lp_spread_eur_mwh``).
 
     Args:
         df: Price DataFrame with DatetimeIndex and 'price_eur_mwh'.
@@ -208,6 +230,10 @@ def calculate_daily_dispatch(
     if greedy.empty or lp.empty:
         for col in ("lp_revenue", "n_cycles", "lp_spread_eur_mwh"):
             greedy[col] = pd.Series(dtype=float)
+        greedy.attrs["excluded_days_due_to_missing"] = max(
+            int(greedy.attrs.get("excluded_days_due_to_missing", 0)),
+            int(lp.attrs.get("excluded_days_due_to_missing", 0)),
+        )
         return greedy
 
     # greedy has 'date' as both a column and index.name — drop the index name
@@ -217,6 +243,12 @@ def calculate_daily_dispatch(
     lp_indexed = lp.set_index("date")
     merged = greedy.join(lp_indexed, on="date", how="left")
     merged.index.name = "date"
+    merged.attrs["excluded_days_due_to_missing"] = max(
+        int(greedy.attrs.get("excluded_days_due_to_missing", 0)),
+        int(lp.attrs.get("excluded_days_due_to_missing", 0)),
+    )
+    merged.attrs["observed_days"] = greedy.attrs.get("observed_days", len(merged))
+    merged.attrs["valid_days"] = len(merged)
     return merged
 
 
@@ -280,7 +312,12 @@ def calculate_spread_percentiles(
     Returns:
         Dict with keys: p50, p75, p90, mean, std.
     """
-    s = daily_spreads["spread"]
+    if daily_spreads.empty or "spread" not in daily_spreads.columns:
+        return {"p50": 0.0, "p75": 0.0, "p90": 0.0, "mean": 0.0, "std": 0.0}
+
+    s = daily_spreads["spread"].dropna()
+    if s.empty:
+        return {"p50": 0.0, "p75": 0.0, "p90": 0.0, "mean": 0.0, "std": 0.0}
     return {
         "p50": float(s.quantile(0.50)),
         "p75": float(s.quantile(0.75)),
@@ -342,6 +379,8 @@ def build_spread_heatmap(
 
     for _, group in prices.groupby(prices.index.date):
         group = group.sort_index()
+        if group.isna().any():
+            continue
         signal = pd.Series(0.0, index=group.index, name="signal")
         trade = _find_daily_ordered_trade(group, duration_hours)
         spread = float(trade["spread"])
@@ -376,13 +415,13 @@ def estimate_annual_arbitrage_revenue(
 ) -> dict[str, float]:
     """Estimate annualised BESS arbitrage revenue from daily spreads.
 
-    Auto-detects LP dispatch columns (``lp_revenue``) when present and uses
-    the LP-optimal daily revenue directly.  Falls back to greedy heuristic
+    Auto-detects MILP dispatch columns (``lp_revenue``) when present and uses
+    the optimized daily revenue directly.  Falls back to greedy heuristic
     otherwise, preserving full backward compatibility.
 
     Args:
         daily_spreads: DataFrame with 'spread' column (greedy) and optionally
-            'lp_revenue'/'n_cycles' columns from LP dispatch.
+            'lp_revenue'/'n_cycles' columns from MILP dispatch.
         power_mw: BESS power rating in MW.
         duration_hours: BESS duration in hours.
         roundtrip_efficiency: Round-trip efficiency (0-1).
@@ -395,9 +434,28 @@ def estimate_annual_arbitrage_revenue(
         dispatch_method.
     """
     days_in_year = 365.25
+    if daily_spreads.empty:
+        dispatch_method = "lp" if "lp_revenue" in daily_spreads.columns else "greedy"
+        return {
+            "annual_revenue_eur": 0.0,
+            "annual_revenue_eur_per_mw": 0.0,
+            "avg_daily_revenue": 0.0,
+            "capture_rate_assumption": capture_rate,
+            "cycles_per_day_assumption": 0.0,
+            "dispatch_method": dispatch_method,
+            "valid_sample_days": 0,
+            "excluded_days_due_to_missing": int(
+                daily_spreads.attrs.get("excluded_days_due_to_missing", 0)
+            ),
+        }
 
     if "lp_revenue" in daily_spreads.columns:
-        avg_daily_revenue = float(daily_spreads["lp_revenue"].mean()) * capture_rate
+        lp_revenue = daily_spreads["lp_revenue"].dropna()
+        avg_daily_revenue = (
+            float(lp_revenue.mean()) * capture_rate
+            if not lp_revenue.empty
+            else 0.0
+        )
         annual_revenue = avg_daily_revenue * days_in_year
         avg_cycles = float(daily_spreads["n_cycles"].mean()) if "n_cycles" in daily_spreads.columns else 1.0
         return {
@@ -407,9 +465,14 @@ def estimate_annual_arbitrage_revenue(
             "capture_rate_assumption": capture_rate,
             "cycles_per_day_assumption": round(avg_cycles, 2),
             "dispatch_method": "lp",
+            "valid_sample_days": len(daily_spreads),
+            "excluded_days_due_to_missing": int(
+                daily_spreads.attrs.get("excluded_days_due_to_missing", 0)
+            ),
         }
 
-    avg_spread = float(daily_spreads["spread"].mean())
+    spread_series = daily_spreads["spread"].dropna()
+    avg_spread = float(spread_series.mean()) if not spread_series.empty else 0.0
     energy_mwh = power_mw * duration_hours
 
     daily_revenue = (
@@ -424,6 +487,10 @@ def estimate_annual_arbitrage_revenue(
         "capture_rate_assumption": capture_rate,
         "cycles_per_day_assumption": cycles_per_day,
         "dispatch_method": "greedy",
+        "valid_sample_days": len(daily_spreads),
+        "excluded_days_due_to_missing": int(
+            daily_spreads.attrs.get("excluded_days_due_to_missing", 0)
+        ),
     }
 
 
@@ -438,7 +505,7 @@ def calculate_yearly_revenue_breakdown(
 
     Args:
         daily_spreads: DataFrame with 'date' index/column and 'spread'
-            (and optionally 'lp_revenue'/'n_cycles' from LP dispatch).
+            (and optionally 'lp_revenue'/'n_cycles' from MILP dispatch).
         power_mw: BESS power rating in MW.
         duration_hours: BESS duration in hours.
         roundtrip_efficiency: Round-trip efficiency (0-1).
@@ -881,7 +948,7 @@ def compare_zones(
         capture_rate: Share of theoretical spread assumed to be captured (0-1).
         roundtrip_efficiency: Round-trip efficiency of the BESS (0-1).
         power_mw: BESS power rating in MW.
-        use_lp_dispatch: If True, use LP dispatch instead of greedy heuristic.
+        use_lp_dispatch: If True, use MILP dispatch instead of greedy heuristic.
         capex_eur_kwh: CapEx in EUR/kWh; if >0, degradation metrics are added.
 
     Returns:

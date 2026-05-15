@@ -36,6 +36,17 @@ PRODUCT_ALIASES: dict[str, set[str]] = {
     "FCR-D": {"FCR-D Up", "FCR-D Down"},
 }
 
+
+def _normalize_product_key(value: object) -> str:
+    """Lowercase + collapse separators so 'aFRR Up', 'afrr_up', 'AFRR-UP'
+    all match. Used by the manual-vs-auto override logic to avoid silent
+    double-counting if an upstream label format flips.
+    """
+    text = str(value).strip().lower()
+    for sep in ("_", "-", "/"):
+        text = text.replace(sep, " ")
+    return " ".join(text.split())
+
 # ── Templates ────────────────────────────────────────────────────────────────
 
 ANCILLARY_TEMPLATES: dict[str, dict] = {
@@ -441,16 +452,20 @@ def build_ancillary_dataset(
     combined = pd.concat(frames).sort_index() if frames else _empty_ancillary_frame()
     if manual_df is not None and not manual_df.empty:
         manual = manual_df.sort_index()
-        manual_products = set(
-            manual["product_type"].dropna().astype(str).str.strip()
-        )
-        expanded_manual_products = manual_products | set().union(
-            *(PRODUCT_ALIASES.get(product, set()) for product in manual_products)
-        )
+        # Normalize product_type for matching: lowercase, collapse any
+        # separator (space/dash/underscore) to a single space. Without this,
+        # an upstream label flip from "aFRR Up" to "afrr_up" silently lets
+        # both manual and auto data through, double-counting revenue.
+        raw_products = manual["product_type"].dropna().astype(str)
+        manual_products = set(raw_products.map(_normalize_product_key))
+        expanded_manual_products = manual_products | {
+            _normalize_product_key(alias)
+            for product in raw_products
+            for alias in PRODUCT_ALIASES.get(product.strip(), set())
+        }
         if not combined.empty and expanded_manual_products:
-            combined = combined[
-                ~combined["product_type"].astype(str).str.strip().isin(expanded_manual_products)
-            ]
+            combined_keys = combined["product_type"].astype(str).map(_normalize_product_key)
+            combined = combined[~combined_keys.isin(expanded_manual_products)]
         combined = pd.concat([combined, manual]).sort_index()
 
     combined.index.name = "timestamp"

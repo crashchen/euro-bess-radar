@@ -1,4 +1,4 @@
-"""LP-based multi-cycle BESS dispatch optimizer."""
+"""MILP-based multi-cycle BESS dispatch optimizer."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def solve_daily_lp(
     efficiency: float = 0.88,
     soc_init_frac: float = 0.5,
 ) -> dict:
-    """Solve optimal charge/discharge schedule for one day via LP.
+    """Solve optimal charge/discharge schedule for one day via MILP.
 
     Args:
         prices: 1-D array of prices (EUR/MWh) for each interval.
@@ -50,64 +50,66 @@ def solve_daily_lp(
     soc_init = soc_init_frac * capacity_mwh
     sqrt_eff = math.sqrt(efficiency)
 
-    # Decision variables: x = [p_charge_0..N-1, p_discharge_0..N-1]  (2N)
-    # Objective: minimize c^T x  where charging costs money, discharging earns.
-    # A small cycling cost (VOM, EUR/MWh) suppresses unrealistic micro-cycling.
-    c = np.zeros(2 * n)
+    # Decision variables: x = [p_charge_0..N-1, p_discharge_0..N-1, b_0..N-1] (3N)
+    # b[t] is binary: 1 = charging mode, 0 = discharging mode. The LP relaxation
+    # of pure mutual exclusion (sum constraint) lets the solver split power
+    # between charging and discharging in the same interval, which is physically
+    # impossible and lets it "burn" grid energy through round-trip losses to
+    # earn revenue at negative prices. The binary b enforces strict exclusion.
+    c = np.zeros(3 * n)
     c[:n] = (prices + DISPATCH_VOM_COST_EUR_MWH) * dt
-    c[n:] = -(prices - DISPATCH_VOM_COST_EUR_MWH) * dt
+    c[n:2 * n] = -(prices - DISPATCH_VOM_COST_EUR_MWH) * dt
 
-    # Variable bounds: 0 <= p_charge, p_discharge <= power_mw
-    bounds = [(0.0, power_mw)] * (2 * n)
-
-    # SoC constraints via cumulative sums:
-    # soc(t) = soc_init + sum_{k=0}^{t-1} (p_charge[k]*sqrt_eff - p_discharge[k]/sqrt_eff) * dt
-    # We need: 0 <= soc(t) <= capacity_mwh  for t = 1..N
+    bounds = [(0.0, power_mw)] * (2 * n) + [(0.0, 1.0)] * n
+    integrality = np.zeros(3 * n)
+    integrality[2 * n:] = 1  # binary b[t]
 
     a_ub_rows = []
     b_ub_rows = []
 
-    # Mutual exclusion: p_charge[t] + p_discharge[t] <= power_mw for each t.
-    # This prevents physically impossible simultaneous charge+discharge.
+    # Strict mutual exclusion via binary mode variable:
+    #   p_charge[t]    - power_mw * b[t] <= 0       (charge only when b=1)
+    #   p_discharge[t] + power_mw * b[t] <= power_mw (discharge only when b=0)
     for t in range(n):
-        row_excl = np.zeros(2 * n)
-        row_excl[t] = 1.0
-        row_excl[n + t] = 1.0
-        a_ub_rows.append(row_excl)
+        row_ch = np.zeros(3 * n)
+        row_ch[t] = 1.0
+        row_ch[2 * n + t] = -power_mw
+        a_ub_rows.append(row_ch)
+        b_ub_rows.append(0.0)
+
+        row_dis = np.zeros(3 * n)
+        row_dis[n + t] = 1.0
+        row_dis[2 * n + t] = power_mw
+        a_ub_rows.append(row_dis)
         b_ub_rows.append(power_mw)
 
     for t in range(1, n + 1):
-        # Upper SoC bound: cumulative charge effect <= capacity - soc_init
-        row_upper = np.zeros(2 * n)
+        row_upper = np.zeros(3 * n)
         row_upper[:t] = sqrt_eff * dt
         row_upper[n:n + t] = -dt / sqrt_eff
         a_ub_rows.append(row_upper)
         b_ub_rows.append(capacity_mwh - soc_init)
 
-        # Lower SoC bound: -(cumulative) <= soc_init
-        row_lower = np.zeros(2 * n)
+        row_lower = np.zeros(3 * n)
         row_lower[:t] = -sqrt_eff * dt
         row_lower[n:n + t] = dt / sqrt_eff
         a_ub_rows.append(row_lower)
         b_ub_rows.append(soc_init)
 
-    # Terminal SoC equality: soc(N) = soc_init (energy-neutral over the day).
-    # Equality prevents the LP from exploiting negative prices by ending with
-    # surplus SoC that vanishes between daily solves.
-    row_terminal = np.zeros(2 * n)
-    row_terminal[:n] = sqrt_eff * dt    # charge adds to SoC
-    row_terminal[n:] = -dt / sqrt_eff   # discharge removes from SoC
+    row_terminal = np.zeros(3 * n)
+    row_terminal[:n] = sqrt_eff * dt
+    row_terminal[n:2 * n] = -dt / sqrt_eff
     a_eq = row_terminal.reshape(1, -1)
-    b_eq = np.array([0.0])  # net SoC change = 0
+    b_eq = np.array([0.0])
 
     a_ub = np.array(a_ub_rows)
     b_ub = np.array(b_ub_rows)
 
     result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
-                     bounds=bounds, method="highs")
+                     bounds=bounds, integrality=integrality, method="highs")
 
     if not result.success:
-        logger.warning("LP dispatch failed: %s", result.message)
+        logger.warning("MILP dispatch failed: %s", result.message)
         return {
             "revenue_eur": 0.0,
             "p_charge": np.zeros(n),
@@ -117,7 +119,7 @@ def solve_daily_lp(
         }
 
     p_charge = result.x[:n]
-    p_discharge = result.x[n:]
+    p_discharge = result.x[n:2 * n]
     revenue = -result.fun  # negate because linprog minimizes
 
     # Reconstruct SoC trajectory
@@ -149,7 +151,7 @@ def solve_daily_joint_capacity_lp(
     soc_init_frac: float = 0.5,
     availability: float = 0.95,
 ) -> dict:
-    """Jointly optimize DA dispatch and reserve capacity headroom for one day.
+    """Jointly optimize DA dispatch and reserve capacity headroom via MILP.
 
     The reserve variable consumes power headroom in each interval but does not
     model activation energy, bid acceptance, or product-specific SoC duration.
@@ -176,38 +178,59 @@ def solve_daily_joint_capacity_lp(
     sqrt_eff = math.sqrt(efficiency)
     capacity_price = max(float(capacity_price_eur_mw_h), 0.0)
 
-    # Decision variables: [charge_0..N, discharge_0..N, reserve_0..N]
-    c = np.zeros(3 * n)
+    # Decision variables: [charge, discharge, reserve, b]  (4N total)
+    # b[t] is binary: 1 = charging mode, 0 = discharging mode. Same MILP-based
+    # mutual exclusion as solve_daily_lp; reserve is independent of b and only
+    # competes for power headroom via the existing power-balance constraint.
+    nv = 4 * n
+    c = np.zeros(nv)
     c[:n] = (prices + DISPATCH_VOM_COST_EUR_MWH) * dt
     c[n:2 * n] = -(prices - DISPATCH_VOM_COST_EUR_MWH) * dt
-    c[2 * n:] = -capacity_price * availability * dt
+    c[2 * n:3 * n] = -capacity_price * availability * dt
 
-    bounds = [(0.0, power_mw)] * (3 * n)
+    bounds = [(0.0, power_mw)] * (3 * n) + [(0.0, 1.0)] * n
+    integrality = np.zeros(nv)
+    integrality[3 * n:] = 1
+
     a_ub_rows = []
     b_ub_rows = []
 
     for t in range(n):
-        row_power = np.zeros(3 * n)
+        # Power-balance: charge + discharge + reserve <= power_mw
+        row_power = np.zeros(nv)
         row_power[t] = 1.0
         row_power[n + t] = 1.0
         row_power[2 * n + t] = 1.0
         a_ub_rows.append(row_power)
         b_ub_rows.append(power_mw)
 
+        # Strict mutual exclusion via binary mode b[t]
+        row_ch = np.zeros(nv)
+        row_ch[t] = 1.0
+        row_ch[3 * n + t] = -power_mw
+        a_ub_rows.append(row_ch)
+        b_ub_rows.append(0.0)
+
+        row_dis = np.zeros(nv)
+        row_dis[n + t] = 1.0
+        row_dis[3 * n + t] = power_mw
+        a_ub_rows.append(row_dis)
+        b_ub_rows.append(power_mw)
+
     for t in range(1, n + 1):
-        row_upper = np.zeros(3 * n)
+        row_upper = np.zeros(nv)
         row_upper[:t] = sqrt_eff * dt
         row_upper[n:n + t] = -dt / sqrt_eff
         a_ub_rows.append(row_upper)
         b_ub_rows.append(capacity_mwh - soc_init)
 
-        row_lower = np.zeros(3 * n)
+        row_lower = np.zeros(nv)
         row_lower[:t] = -sqrt_eff * dt
         row_lower[n:n + t] = dt / sqrt_eff
         a_ub_rows.append(row_lower)
         b_ub_rows.append(soc_init)
 
-    row_terminal = np.zeros(3 * n)
+    row_terminal = np.zeros(nv)
     row_terminal[:n] = sqrt_eff * dt
     row_terminal[n:2 * n] = -dt / sqrt_eff
 
@@ -218,11 +241,12 @@ def solve_daily_joint_capacity_lp(
         A_eq=row_terminal.reshape(1, -1),
         b_eq=np.array([0.0]),
         bounds=bounds,
+        integrality=integrality,
         method="highs",
     )
 
     if not result.success:
-        logger.warning("Joint capacity LP failed: %s", result.message)
+        logger.warning("Joint capacity MILP failed: %s", result.message)
         zeros = np.zeros(n)
         return {
             "total_revenue_eur": 0.0,
@@ -238,7 +262,7 @@ def solve_daily_joint_capacity_lp(
 
     p_charge = result.x[:n]
     p_discharge = result.x[n:2 * n]
-    reserve_mw = result.x[2 * n:]
+    reserve_mw = result.x[2 * n:3 * n]
     da_revenue = float(
         ((prices - DISPATCH_VOM_COST_EUR_MWH) * p_discharge * dt).sum()
         - ((prices + DISPATCH_VOM_COST_EUR_MWH) * p_charge * dt).sum()
@@ -276,15 +300,20 @@ def solve_joint_capacity_batch(
     soc_init_frac: float = 0.5,
     availability: float = 0.95,
 ) -> pd.DataFrame:
-    """Run joint DA + reserve-capacity LP for each local calendar day."""
+    """Run joint DA + reserve-capacity MILP for each local calendar day."""
     local = _to_local(price_df, tz)
     prices = local["price_eur_mwh"]
     dt = _infer_interval_hours(local.index)
 
     records = []
+    excluded_days = 0
     for date, group in prices.groupby(prices.index.date):
+        sorted_group = group.sort_index()
+        if sorted_group.isna().any():
+            excluded_days += 1
+            continue
         result = solve_daily_joint_capacity_lp(
-            group.sort_index().values,
+            sorted_group.values,
             dt=dt,
             capacity_price_eur_mw_h=capacity_price_eur_mw_h,
             power_mw=power_mw,
@@ -306,15 +335,19 @@ def solve_joint_capacity_batch(
         })
 
     if not records:
-        return pd.DataFrame(
+        result = pd.DataFrame(
             columns=[
                 "date", "joint_total_revenue", "joint_da_revenue",
                 "joint_capacity_revenue", "avg_reserve_mw", "reserve_fraction",
                 "n_cycles",
             ],
         )
+        result.attrs["excluded_days_due_to_missing"] = excluded_days
+        return result
 
-    return pd.DataFrame.from_records(records)
+    result = pd.DataFrame.from_records(records)
+    result.attrs["excluded_days_due_to_missing"] = excluded_days
+    return result
 
 
 def solve_dispatch_batch(
@@ -325,7 +358,7 @@ def solve_dispatch_batch(
     tz: str | None = None,
     soc_init_frac: float = 0.5,
 ) -> pd.DataFrame:
-    """Run LP dispatch for each calendar day in the price series.
+    """Run MILP dispatch for each calendar day in the price series.
 
     Args:
         price_df: DataFrame with DatetimeIndex and 'price_eur_mwh' column.
@@ -343,8 +376,12 @@ def solve_dispatch_batch(
     dt = _infer_interval_hours(local.index)
 
     records = []
+    excluded_days = 0
     for date, group in prices.groupby(prices.index.date):
         sorted_group = group.sort_index()
+        if sorted_group.isna().any():
+            excluded_days += 1
+            continue
         result = solve_daily_lp(
             sorted_group.values,
             dt=dt,
@@ -363,6 +400,12 @@ def solve_dispatch_batch(
         })
 
     if not records:
-        return pd.DataFrame(columns=["date", "lp_revenue", "n_cycles", "lp_spread_eur_mwh"])
+        result = pd.DataFrame(
+            columns=["date", "lp_revenue", "n_cycles", "lp_spread_eur_mwh"]
+        )
+        result.attrs["excluded_days_due_to_missing"] = excluded_days
+        return result
 
-    return pd.DataFrame.from_records(records)
+    result = pd.DataFrame.from_records(records)
+    result.attrs["excluded_days_due_to_missing"] = excluded_days
+    return result

@@ -308,6 +308,49 @@ class TestAncillaryRevenue:
         manual_fcr = anc_df[anc_df["product_type"] == "FCR"]
         assert manual_fcr["capacity_price_eur_mw"].iloc[0] == 15.50
 
+    def test_normalize_product_key_collapses_format_variants(self) -> None:
+        """Defense-in-depth: if upstream ever sends a label that bypasses
+        canonical-label mapping (e.g. a new product not in the keyword list),
+        normalize_product_key still maps case/separator variants to one key
+        so manual overrides don't double-count silently.
+        """
+        from src.ancillary import _normalize_product_key
+        base = _normalize_product_key("aFRR Up")
+        assert base == _normalize_product_key("AFRR UP")
+        assert base == _normalize_product_key("afrr_up")
+        assert base == _normalize_product_key("aFRR-Up")
+        assert base == _normalize_product_key("  aFRR   Up  ")
+
+    def test_manual_override_matches_across_label_format_variants(self) -> None:
+        """Manual override must still match auto data even if separators or
+        case differ ('aFRR Up' vs 'afrr_up' vs 'AFRR-UP') — otherwise both
+        rows pass through and revenue gets double-counted.
+        """
+        idx = pd.date_range("2025-01-01", periods=2, freq="h", tz="UTC")
+        manual_df = pd.DataFrame(
+            {
+                "capacity_price_eur_mw": [99.0, 99.0],
+                "energy_price_eur_mwh": [float("nan"), float("nan")],
+                "product_type": ["aFRR Up", "aFRR Up"],
+                "direction": ["Up", "Up"],
+                "zone": ["DE_LU", "DE_LU"],
+            },
+            index=idx,
+        )
+        # Auto-fetch labels arrive in alternative casings/separators
+        auto_results = {
+            "DE auctions": pd.DataFrame({
+                "timestamp": idx,
+                "product": ["AFRR-UP", "afrr_up"],
+                "direction": ["Up", "Up"],
+                "capacity_price_eur_mw": [50.0, 50.0],
+            }),
+        }
+        anc_df = build_ancillary_dataset(manual_df=manual_df, auto_fetch_results=auto_results)
+        # Auto rows should be removed by override; only manual price (99) remains.
+        assert (anc_df["capacity_price_eur_mw"] == 99.0).all()
+        assert len(anc_df) == 2
+
     def test_manual_fi_fcr_d_overrides_auto_fcr_d_aliases(self) -> None:
         idx = pd.date_range("2025-01-01", periods=1, freq="h", tz="UTC")
         manual_df = pd.DataFrame(
@@ -508,7 +551,8 @@ class TestRunAutoFetch:
             "timestamp": idx,
             "fcr_n_price": [10.0, 11.0, 12.0],
         })
-        mock_afrr.side_effect = Exception("API timeout")
+        import requests as _rq
+        mock_afrr.side_effect = _rq.Timeout("API timeout")
 
         results = run_auto_fetch(
             "FI",
@@ -524,6 +568,24 @@ class TestRunAutoFetch:
             pd.Timestamp("2025-01-02", tz="UTC"),
         )
         assert results == {}
+
+    @patch("src.data_ingestion.fetch_fingrid_fcr_prices")
+    def test_auth_error_propagates_from_run_auto_fetch(
+        self, mock_fcr: MagicMock,
+    ) -> None:
+        """DataSourceAuthError must propagate so the sidebar can prompt the
+        user to set the missing API key, instead of being swallowed as
+        'no data returned'.
+        """
+        from src.data_ingestion import DataSourceAuthError as _AuthErr
+        mock_fcr.side_effect = _AuthErr("Fingrid auth failed")
+
+        with pytest.raises(_AuthErr):
+            run_auto_fetch(
+                "FI",
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
 
     @patch("src.data_ingestion.fetch_regelleistung_results")
     def test_de_lu_calls_regelleistung(

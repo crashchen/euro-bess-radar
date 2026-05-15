@@ -37,6 +37,7 @@ from src.data_ingestion import (
     fetch_prices,
     fetch_regelleistung_results,
     read_cache,
+    summarize_price_data_quality,
     write_cache,
 )
 
@@ -309,18 +310,71 @@ class TestFetchPricesRouting:
 
 class TestCleanPrices:
     def test_fills_gaps(self) -> None:
-        """NaN gaps should be forward-filled, no NaN remaining."""
+        """Short internal NaN gaps should be interpolated and flagged."""
         idx = pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC")
         df = pd.DataFrame({"price_eur_mwh": [50.0 + i for i in range(24)]}, index=idx)
         df.index.name = "timestamp"
 
-        # Introduce NaN gaps
-        df.loc[df.index[5:8], "price_eur_mwh"] = None
+        df.loc[df.index[5:7], "price_eur_mwh"] = None
 
         result = clean_prices(df)
         assert result["price_eur_mwh"].isna().sum() == 0
         assert len(result) == 24
         assert result.loc[df.index[5], "filled"]
+        assert result.loc[df.index[5], "imputed"]
+        assert result.loc[df.index[5], "price_eur_mwh"] == pytest.approx(55.0)
+        assert result.loc[df.index[6], "price_eur_mwh"] == pytest.approx(56.0)
+
+    def test_long_gaps_remain_nan(self) -> None:
+        """Long gaps should remain visible instead of being flattened."""
+        idx = pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC")
+        df = pd.DataFrame({"price_eur_mwh": [50.0 + i for i in range(24)]}, index=idx)
+        df.index.name = "timestamp"
+        df.loc[df.index[5:9], "price_eur_mwh"] = None
+
+        result = clean_prices(df)
+
+        assert result.loc[df.index[5:8], "price_eur_mwh"].isna().all()
+        assert result.loc[df.index[5:8], "filled"].all()
+        assert not result.loc[df.index[5:8], "imputed"].any()
+
+    def test_edge_gaps_remain_nan(self) -> None:
+        """Head/tail gaps should not be back-filled into fake boundary prices."""
+        expected_start = pd.Timestamp("2025-01-01T00:00:00Z")
+        expected_end = pd.Timestamp("2025-01-01T04:00:00Z")
+        observed_idx = pd.date_range(
+            "2025-01-01T01:00:00Z",
+            "2025-01-01T03:00:00Z",
+            freq="h",
+            inclusive="left",
+        )
+        df = pd.DataFrame({"price_eur_mwh": [51.0, 52.0]}, index=observed_idx)
+        df.index.name = "timestamp"
+
+        result = clean_prices(
+            df,
+            zone="DE_LU",
+            expected_start=expected_start,
+            expected_end=expected_end,
+        )
+
+        assert pd.isna(result.loc[expected_start, "price_eur_mwh"])
+        assert pd.isna(result.loc[pd.Timestamp("2025-01-01T03:00:00Z"), "price_eur_mwh"])
+        assert bool(result.loc[expected_start, "filled"]) is True
+        assert bool(result.loc[expected_start, "imputed"]) is False
+
+    def test_data_quality_summary_tracks_imputed_and_missing(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=8, freq="h", tz="UTC")
+        df = pd.DataFrame({"price_eur_mwh": [1.0, None, 3.0, None, None, None, None, 8.0]}, index=idx)
+        df.index.name = "timestamp"
+
+        result = clean_prices(df)
+        quality = summarize_price_data_quality(result)
+
+        assert quality["source_gap_intervals"] == 5
+        assert quality["imputed_intervals"] == 1
+        assert quality["missing_intervals"] == 4
+        assert quality["max_source_gap_hours"] == 4.0
 
     def test_mixed_resolution_preserves_original_timestamps(self) -> None:
         """Mixed 60-min / 15-min histories should not crash cleaning."""
@@ -764,9 +818,12 @@ class TestFetchFingridData:
 
     @patch("src.data_ingestion.time.sleep")
     @patch("src.data_ingestion.requests.get")
-    def test_discards_partial_rows_when_later_page_fails(
+    def test_keeps_partial_rows_when_later_page_fails(
         self, mock_get: MagicMock, _mock_sleep: MagicMock,
     ) -> None:
+        """A transient failure on page N+1 must not discard pages 1..N.
+        Returning empty in that case used to silently swallow large slices.
+        """
         page_1 = MagicMock()
         page_1.raise_for_status = MagicMock()
         page_1.json.return_value = {
@@ -787,8 +844,34 @@ class TestFetchFingridData:
                 pd.Timestamp("2025-01-02", tz="UTC"),
             )
 
-        assert df.empty
+        assert not df.empty
+        assert df["value"].iloc[0] == pytest.approx(10.5)
         assert list(df.columns) == ["timestamp", "value"]
+
+    @patch("src.data_ingestion.time.sleep")
+    @patch("src.data_ingestion.requests.get")
+    def test_auth_error_propagates_as_data_source_auth_error(
+        self, mock_get: MagicMock, _mock_sleep: MagicMock,
+    ) -> None:
+        """401/403 must bypass the retry loop and surface as DataSourceAuthError
+        so the UI can prompt for FINGRID_API_KEY rather than swallow as 'no data'.
+        """
+        unauth = MagicMock()
+        unauth.status_code = 401
+        unauth.raise_for_status = MagicMock()
+        mock_get.return_value = unauth
+
+        with (
+            patch.dict("os.environ", {"FINGRID_API_KEY": "bad-key"}, clear=False),
+            pytest.raises(DataSourceAuthError),
+        ):
+            fetch_fingrid_data(
+                318,
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
+        # No retry: a single GET attempt
+        assert mock_get.call_count == 1
 
 
 # ── Test 11: Fingrid FCR prices ───────────────────────────────────────────────

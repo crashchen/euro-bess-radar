@@ -15,6 +15,7 @@ from openpyxl.utils import get_column_letter
 
 from src.analytics import build_price_heatmap
 from src.config import CACHE_DIR
+from src.data_ingestion import summarize_price_data_quality
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,23 @@ def _build_summary_sheet(
     row = _write_kv_pair(ws, row, "Date Range End", str(dates.max().date()))
     total_days = (dates.max().date() - dates.min().date()).days + 1
     row = _write_kv_pair(ws, row, "Total Days", total_days)
+    quality = summarize_price_data_quality(price_df)
+    if quality["source_gap_intervals"] > 0:
+        row = _write_kv_pair(
+            ws, row, "Source Gap Intervals", quality["source_gap_intervals"],
+        )
+        row = _write_kv_pair(
+            ws, row, "Short-Gap Imputed Intervals", quality["imputed_intervals"],
+        )
+        row = _write_kv_pair(
+            ws, row, "Unresolved Missing Intervals", quality["missing_intervals"],
+        )
+        row = _write_kv_pair(
+            ws, row, "Unresolved Missing %", quality["missing_ratio"], _PCT_FMT,
+        )
+        row = _write_kv_pair(
+            ws, row, "Max Source Gap (hours)", quality["max_source_gap_hours"],
+        )
     row += 1
 
     row = _write_kv_pair(ws, row, "Avg Price (EUR/MWh)", round(price_df["price_eur_mwh"].mean(), 2), _PRICE_FMT)
@@ -113,13 +131,13 @@ def _build_summary_sheet(
     if "joint_cooptimized_total_eur" in revenue_estimate:
         row = _write_kv_pair(
             ws, row,
-            "Joint LP Co-optimized Total (EUR)",
+            "Joint MILP Co-optimized Total (EUR)",
             revenue_estimate["joint_cooptimized_total_eur"],
             _PRICE_FMT,
         )
         row = _write_kv_pair(
             ws, row,
-            "Joint LP Avg Reserve Commitment",
+            "Joint MILP Avg Reserve Commitment",
             revenue_estimate.get("joint_cooptimized_avg_reserve_fraction", 0.0),
             _PCT_FMT,
         )
@@ -400,12 +418,23 @@ def _build_pdf_report(
     start_str = str(dates.min().date())
     end_str = str(dates.max().date())
     total_days = (dates.max().date() - dates.min().date()).days + 1
+    quality = summarize_price_data_quality(price_df)
 
     rows: list[tuple[str, str]] = [
         ("Zone", zone),
         ("Timezone", tz or "UTC"),
         ("Date Range", f"{start_str}  to  {end_str}"),
         ("Total Days", str(total_days)),
+    ]
+    if quality["source_gap_intervals"] > 0:
+        rows.extend([
+            ("Source Gap Intervals", str(quality["source_gap_intervals"])),
+            ("Short-Gap Imputed Intervals", str(quality["imputed_intervals"])),
+            ("Unresolved Missing Intervals", str(quality["missing_intervals"])),
+            ("Unresolved Missing %", f"{quality['missing_ratio']:.1%}"),
+            ("Max Source Gap (hours)", str(quality["max_source_gap_hours"])),
+        ])
+    rows.extend([
         ("", ""),
         ("Avg Price (EUR/MWh)", f"{price_df['price_eur_mwh'].mean():.2f}"),
         ("Median Price (EUR/MWh)", f"{price_df['price_eur_mwh'].median():.2f}"),
@@ -417,7 +446,7 @@ def _build_pdf_report(
         ("", ""),
         ("Est. Annual Revenue (EUR/MW)",
          f"{revenue_estimate['annual_revenue_eur_per_mw']:,.0f}"),
-    ]
+    ])
 
     if "total_eur" in revenue_estimate:
         rows.append(("Headline Annual Revenue (EUR)",
@@ -431,9 +460,9 @@ def _build_pdf_report(
     if revenue_estimate.get("capacity_stack_warning"):
         rows.append(("Note", str(revenue_estimate["capacity_stack_warning"])))
     if "joint_cooptimized_total_eur" in revenue_estimate:
-        rows.append(("Joint LP Co-optimized Total (EUR)",
+        rows.append(("Joint MILP Co-optimized Total (EUR)",
                      f"{revenue_estimate['joint_cooptimized_total_eur']:,.0f}"))
-        rows.append(("Joint LP Avg Reserve Commitment",
+        rows.append(("Joint MILP Avg Reserve Commitment",
                      f"{revenue_estimate.get('joint_cooptimized_avg_reserve_fraction', 0.0):.0%}"))
     if "source_revenues" in revenue_estimate:
         rows.append(("", ""))

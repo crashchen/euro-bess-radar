@@ -17,6 +17,7 @@ from src.analytics import (
     calculate_spread_percentiles,
     estimate_annual_arbitrage_revenue,
 )
+from src.data_ingestion import clean_prices
 from src.export import (
     _render_figure_to_image,
     export_to_bytes,
@@ -330,8 +331,8 @@ class TestExportToBytes:
         assert summary["Gross Additive Total (Reference, EUR)"] == 145000
         assert summary["Headline Total Mode"] == "conservative_da_primary"
         assert summary["Capacity Stack Warning"] == "Capacity reserve is not co-optimized."
-        assert summary["Joint LP Co-optimized Total (EUR)"] == 132000
-        assert summary["Joint LP Avg Reserve Commitment"] == 0.42
+        assert summary["Joint MILP Co-optimized Total (EUR)"] == 132000
+        assert summary["Joint MILP Avg Reserve Commitment"] == 0.42
         assert summary["DA Arbitrage Revenue (EUR)"] == 80000
         assert summary["FCR-N Revenue (EUR)"] == 25000
         assert summary["Annual Degradation Cost (EUR)"] == 18000
@@ -342,6 +343,41 @@ class TestExportToBytes:
         assert summary["Annual Throughput (MWh)"] == 2922
         assert summary["LCOS (EUR/MWh)"] == 54.2
         assert summary["Net Payback (years)"] == 7.5
+
+    def test_summary_includes_data_quality_when_gaps_exist(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=8, freq="h", tz="UTC")
+        raw = pd.DataFrame(
+            {"price_eur_mwh": [50.0, None, 52.0, None, None, None, None, 57.0]},
+            index=idx,
+        )
+        raw.index.name = "timestamp"
+        price_df = clean_prices(raw)
+        daily = calculate_daily_spreads(price_df)
+        monthly = calculate_monthly_spreads(price_df)
+        pctls = calculate_spread_percentiles(daily)
+        rev = estimate_annual_arbitrage_revenue(daily)
+        neg = calculate_negative_price_hours(price_df)
+
+        result = export_to_bytes(
+            zone="DE_LU",
+            price_df=price_df,
+            daily_spreads=daily,
+            monthly_spreads=monthly,
+            percentiles=pctls,
+            revenue_estimate=rev,
+            negative_stats=neg,
+        )
+
+        wb = load_workbook(BytesIO(result))
+        ws = wb["Summary"]
+        summary = {
+            ws.cell(row=r, column=1).value: ws.cell(row=r, column=2).value
+            for r in range(1, 25)
+        }
+
+        assert summary["Source Gap Intervals"] == 5
+        assert summary["Short-Gap Imputed Intervals"] == 1
+        assert summary["Unresolved Missing Intervals"] == 4
 
 
 # ── PDF export tests ──────────────────────────────────────────────────────────

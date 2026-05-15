@@ -1,4 +1,4 @@
-"""Tests for LP-based multi-cycle BESS dispatch optimizer."""
+"""Tests for MILP-based multi-cycle BESS dispatch optimizer."""
 
 from __future__ import annotations
 
@@ -81,12 +81,41 @@ class TestSolveDailyLp:
         prices = np.array([-50.0] * 24)
         r = solve_daily_lp(prices, dt=1.0, power_mw=1.0, duration_hours=2.0,
                            efficiency=0.88, soc_init_frac=0.0)
-        assert r["revenue_eur"] > 0  # BESS earns from negative-price absorption
+        assert r["revenue_eur"] >= 0
         # Total power per interval respects mutual exclusion
         total_power = r["p_charge"] + r["p_discharge"]
         assert total_power.max() <= 1.0 + 1e-6
         # Terminal SoC equals initial
         assert r["soc"][-1] == pytest.approx(r["soc"][0], abs=1e-4)
+        # Cycles are bounded by physical SoC capacity, not by within-interval wash energy.
+        # 1MW/2MWh battery, 24h, terminal-neutral → at most ~6 partial cycles even
+        # in pathological cases. With proper mutual exclusion it's usually 0.
+        assert r["n_cycles"] <= 6.0
+
+    def test_no_simultaneous_charge_and_discharge_negative_prices(self) -> None:
+        """Charging and discharging in the same interval is physically impossible
+        and energy-destructive. Under all-negative prices the LP relaxation can
+        exploit this to dump grid energy through the round-trip loss; enforce
+        strict mutual exclusion via MILP.
+        """
+        prices = np.array([-50.0] * 24)
+        r = solve_daily_lp(prices, dt=1.0, power_mw=1.0, duration_hours=2.0,
+                           efficiency=0.88, soc_init_frac=0.0)
+        both = (r["p_charge"] > 1e-6) & (r["p_discharge"] > 1e-6)
+        assert int(both.sum()) == 0, (
+            f"LP allowed {int(both.sum())} intervals with simultaneous "
+            f"charge+discharge — should be 0"
+        )
+
+    def test_no_simultaneous_charge_and_discharge_normal_prices(self) -> None:
+        """Even on normal arbitrage patterns LP degeneracy can pick simultaneous
+        flow as one of multiple optima. Mutual exclusion must hold strictly.
+        """
+        prices = np.array([20.0] * 6 + [80.0] * 6 + [20.0] * 6 + [80.0] * 6)
+        r = solve_daily_lp(prices, dt=1.0, power_mw=1.0, duration_hours=2.0,
+                           efficiency=0.88, soc_init_frac=0.5)
+        both = (r["p_charge"] > 1e-6) & (r["p_discharge"] > 1e-6)
+        assert int(both.sum()) == 0
 
     def test_negative_then_positive_prices(self) -> None:
         """Negative→positive spread should produce positive revenue."""
@@ -175,6 +204,16 @@ class TestSolveDispatchBatch:
         assert len(result) == 0
         assert list(result.columns) == ["date", "lp_revenue", "n_cycles", "lp_spread_eur_mwh"]
 
+    def test_nan_days_are_excluded_not_zeroed(self, multi_day_prices) -> None:
+        multi_day_prices = multi_day_prices.copy()
+        multi_day_prices.loc[multi_day_prices.index[30:34], "price_eur_mwh"] = np.nan
+
+        result = solve_dispatch_batch(multi_day_prices)
+
+        assert len(result) == 2
+        assert result.attrs["excluded_days_due_to_missing"] == 1
+        assert (result["lp_revenue"] > 0).all()
+
     def test_lp_spread_equals_revenue_over_capacity(self, multi_day_prices) -> None:
         """lp_spread_eur_mwh should equal lp_revenue / (power * duration)."""
         result = solve_dispatch_batch(
@@ -240,6 +279,17 @@ class TestSolveDailyJointCapacityLp:
         assert result["n_cycles"] == pytest.approx(0.0)
 
 
+    def test_no_simultaneous_charge_and_discharge_under_capacity(self) -> None:
+        """Joint MILP must also enforce strict charge/discharge mutual exclusion."""
+        prices = np.array([-30.0] * 12 + [40.0] * 12)
+        r = solve_daily_joint_capacity_lp(
+            prices, dt=1.0, capacity_price_eur_mw_h=5.0,
+            power_mw=1.0, duration_hours=2.0, efficiency=0.88, soc_init_frac=0.0,
+        )
+        both = (r["p_charge"] > 1e-6) & (r["p_discharge"] > 1e-6)
+        assert int(both.sum()) == 0
+
+
 class TestSolveJointCapacityBatch:
     def test_batch_returns_expected_columns(self) -> None:
         idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
@@ -259,3 +309,19 @@ class TestSolveJointCapacityBatch:
         }
         assert set(result.columns) == expected
         assert (result["joint_capacity_revenue"] > 0).all()
+
+    def test_nan_days_are_excluded(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+        df = pd.DataFrame({"price_eur_mwh": [50.0] * 48}, index=idx)
+        df.loc[idx[4:8], "price_eur_mwh"] = np.nan
+        df.index.name = "timestamp"
+
+        result = solve_joint_capacity_batch(
+            df,
+            capacity_price_eur_mw_h=5.0,
+            power_mw=1.0,
+            duration_hours=2.0,
+        )
+
+        assert len(result) == 1
+        assert result.attrs["excluded_days_due_to_missing"] == 1
