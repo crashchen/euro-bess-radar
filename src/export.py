@@ -13,7 +13,11 @@ import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from src.analytics import build_price_heatmap, filter_to_complete_local_days
+from src.analytics import (
+    build_price_heatmap,
+    calculate_negative_price_hours,
+    filter_to_complete_local_days,
+)
 from src.config import CACHE_DIR
 from src.data_ingestion import summarize_price_data_quality
 
@@ -278,13 +282,22 @@ def _write_excel_workbook(
     wb = writer.book
     summary_ws = wb.active if wb.active is not None else wb.create_sheet()
 
+    # Recompute negative-price stats and the heatmap from the same complete-
+    # local-day subset that calculate_daily_spreads uses, so a third-party
+    # caller passing raw price_df + raw negative_stats can't end up with an
+    # Excel where the summary counts hours from days the spread tables drop.
+    # An empty subset (every day was excluded) deliberately yields zero
+    # negatives — the fallback to caller stats would re-leak the inconsistency.
+    complete_df = filter_to_complete_local_days(price_df, tz=tz)
+    consistent_neg_stats = calculate_negative_price_hours(complete_df)
+
     _build_summary_sheet(
         summary_ws,
         zone,
         price_df,
         percentiles,
         revenue_estimate,
-        negative_stats,
+        consistent_neg_stats,
         tz=tz,
     )
     _build_table_sheet(wb.create_sheet(), "Daily Spreads", daily_spreads)
@@ -294,11 +307,7 @@ def _write_excel_workbook(
     hourly["timestamp"] = hourly["timestamp"].astype(str)
     _build_table_sheet(wb.create_sheet(), "Hourly Prices", hourly)
 
-    # Use complete-day filtered prices for the heatmap to keep it consistent
-    # with the daily-spread and dispatch tables above (which exclude any
-    # local day with missing intervals).
-    heatmap_df = filter_to_complete_local_days(price_df, tz=tz)
-    heatmap = build_price_heatmap(heatmap_df, tz=tz)
+    heatmap = build_price_heatmap(complete_df, tz=tz)
     _build_heatmap_sheet(wb.create_sheet(), "Price Heatmap", heatmap)
 
 def export_to_excel(
@@ -423,6 +432,13 @@ def _build_pdf_report(
     end_str = str(dates.max().date())
     total_days = (dates.max().date() - dates.min().date()).days + 1
     quality = summarize_price_data_quality(price_df)
+    # Recompute neg-stats from the same complete-local-day subset that the
+    # spread tables use so the PDF summary stays internally consistent even
+    # when the caller passed unfiltered stats. An empty subset deliberately
+    # zeros the stats — the previous fallback to caller-supplied numbers
+    # could re-leak the inconsistency it was meant to prevent.
+    complete_df = filter_to_complete_local_days(price_df, tz=tz)
+    negative_stats = calculate_negative_price_hours(complete_df)
 
     rows: list[tuple[str, str]] = [
         ("Zone", zone),

@@ -374,6 +374,48 @@ def _segment_and_reindex_prices(
     # one and dominates (>= 50% of deltas), treat it as the true cadence and
     # reindex the whole range — that lets sparse gaps surface as NaN rows
     # downstream instead of being silently swallowed by segment splitting.
+    # When the index crosses a known zone resolution boundary, run the same
+    # mode-delta heuristic on each side independently so a sparse gap inside
+    # the post-transition segment still surfaces, without upsampling the
+    # pre-transition rows to the post-transition cadence.
+    transition_pts = (
+        _zone_resolution_boundaries(zone, index.min(), index.max())
+        if zone else []
+    )
+    if transition_pts:
+        boundaries = [index.min(), *transition_pts, index.max()]
+        sub_outs: list[pd.DataFrame] = []
+        last_idx = len(boundaries) - 2
+        for i, (seg_start, seg_end) in enumerate(itertools.pairwise(boundaries)):
+            is_last = i == last_idx
+            inclusive = "both" if is_last else "left"
+            if is_last:
+                sub_df = df[(df.index >= seg_start) & (df.index <= seg_end)]
+            else:
+                sub_df = df[(df.index >= seg_start) & (df.index < seg_end)]
+            if sub_df.empty:
+                continue
+            # Use zone-aware expected interval per side so a 60-min pre-DE_LU
+            # segment isn't reindexed at 15-min, and so a row missing exactly
+            # at the boundary (or right before it) is still surfaced. The
+            # boundary itself anchors each side instead of the observed min/max.
+            sub_idx = pd.DatetimeIndex(sub_df.index)
+            inferred = _infer_segment_freq(sub_idx, zone=zone)
+            fallback = _expected_cache_interval(zone or "", sub_idx)
+            interval = _expected_interval_for_segment(
+                zone, seg_start, inferred or fallback,
+            )
+            full_idx = pd.date_range(
+                start=seg_start, end=seg_end,
+                freq=interval, inclusive=inclusive,
+            )
+            sub_outs.append(sub_df.reindex(full_idx))
+        if sub_outs:
+            out = pd.concat(sub_outs).sort_index()
+            out = out[~out.index.duplicated(keep="last")]
+            out.index.name = "timestamp"
+            return out
+
     mode_delta = positive.mode().iloc[0]
     if (
         mode_delta == min(distinct_deltas)

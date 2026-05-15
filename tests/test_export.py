@@ -140,6 +140,91 @@ class TestExportToBytes:
         # xlsx magic bytes: PK (zip)
         assert result[:2] == b"PK"
 
+    def test_negative_stats_zeroed_when_all_days_excluded(self) -> None:
+        """If every local day is incomplete (and therefore excluded from the
+        spread / heatmap), the export summary's neg-price stats must zero
+        out — not leak the caller's raw stats.
+        """
+        idx = pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC")
+        # Single day fully negative, but with a 5-hour NaN gap → long gap →
+        # day stays NaN → entire complete-day subset is empty.
+        prices = [-30.0] * 24
+        for h in range(3, 8):
+            prices[h] = float("nan")
+        price_df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+        price_df.index.name = "timestamp"
+        cleaned = clean_prices(price_df)
+        daily = calculate_daily_spreads(cleaned)
+        monthly = calculate_monthly_spreads(cleaned)
+        pctls = calculate_spread_percentiles(daily)
+        rev = estimate_annual_arbitrage_revenue(daily)
+        raw_neg = calculate_negative_price_hours(cleaned)
+        # Pre-condition: caller's raw stats DO show negatives.
+        assert raw_neg["negative_hours"] > 0
+
+        out = export_to_bytes(
+            zone="DE_LU",
+            price_df=cleaned,
+            daily_spreads=daily,
+            monthly_spreads=monthly,
+            percentiles=pctls,
+            revenue_estimate=rev,
+            negative_stats=raw_neg,
+        )
+        wb = load_workbook(BytesIO(out))
+        ws = wb["Summary"]
+        neg_in_sheet = None
+        for r in range(1, 50):
+            if ws.cell(row=r, column=1).value == "Negative Price Hours":
+                neg_in_sheet = ws.cell(row=r, column=2).value
+                break
+        assert neg_in_sheet == 0
+
+    def test_negative_stats_recomputed_for_consistency_with_heatmap(self) -> None:
+        """When the caller passes raw negative_stats from the unfiltered
+        price_df but the heatmap is filtered to complete days, the Excel
+        summary used to display incompatible numbers. Export now recomputes
+        neg-stats from the same filtered subset.
+        """
+        idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+        prices = [-30.0] * 24 + [40.0] * 24
+        # Corrupt 5 contiguous hours of day 1 — long enough to exceed
+        # MAX_SHORT_GAP_HOURS so the gap stays NaN and day 1 is excluded.
+        for h in range(3, 8):
+            prices[h] = float("nan")
+        price_df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+        price_df.index.name = "timestamp"
+        # daily / monthly / percentiles / revenue derived from valid window
+        cleaned = clean_prices(price_df)
+        daily = calculate_daily_spreads(cleaned)
+        monthly = calculate_monthly_spreads(cleaned)
+        pctls = calculate_spread_percentiles(daily)
+        rev = estimate_annual_arbitrage_revenue(daily)
+        # Caller passes RAW (unfiltered) neg-stats: includes day-1 negatives
+        raw_neg = calculate_negative_price_hours(cleaned)
+        assert raw_neg["negative_hours"] > 0  # day 1 has 24 negatives
+
+        out = export_to_bytes(
+            zone="DE_LU",
+            price_df=cleaned,
+            daily_spreads=daily,
+            monthly_spreads=monthly,
+            percentiles=pctls,
+            revenue_estimate=rev,
+            negative_stats=raw_neg,
+        )
+        wb = load_workbook(BytesIO(out))
+        ws = wb["Summary"]
+        # Find "Negative Price Hours" row
+        neg_hours_in_sheet = None
+        for r in range(1, 50):
+            if ws.cell(row=r, column=1).value == "Negative Price Hours":
+                neg_hours_in_sheet = ws.cell(row=r, column=2).value
+                break
+        # Day 1 was excluded (NaN→long gap→excluded), so summary should
+        # report 0 negatives, not the 24 hours from the unfiltered input.
+        assert neg_hours_in_sheet == 0
+
     def test_with_timezone(self, sample_data) -> None:
         """Export with tz parameter should produce valid xlsx with timezone in summary."""
         price_df, daily, monthly, pctls, rev, neg = sample_data

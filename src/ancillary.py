@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -258,6 +259,7 @@ def _canonical_product_label(
     tokens = " ".join(
         part for part in [template_hint or "", base or ""] if part
     ).upper()
+    word_tokens = {t for t in re.split(r"[\s_\-/]+", tokens) if t}
 
     if "FCR_N" in tokens or "FCR-N" in tokens:
         label = "FCR-N"
@@ -271,7 +273,10 @@ def _canonical_product_label(
         label = "Imbalance"
     elif "BALANCING" in tokens:
         label = "Balancing"
-    elif "FCR" in tokens or "POS" in tokens:
+    elif "FCR" in tokens or "POS" in word_tokens:
+        # POS-as-FCR-family is the German "POS" / "NEG" reserve-direction
+        # convention; it must be a complete word, not a substring of e.g.
+        # "Post Qualification" or "Position".
         label = "FCR"
     else:
         label = str(base or template_hint or "Unknown")
@@ -279,10 +284,24 @@ def _canonical_product_label(
     dir_upper = str(direction or "").strip().upper()
     if not dir_upper:
         # Recover direction from the base string when not provided explicitly.
-        base_upper = str(base or "").upper()
-        if any(tok in base_upper for tok in (" UP", "_UP", "-UP", " POS", " LONG")):
+        # Match only as a complete trailing token (so "Post Qualification"
+        # doesn't false-positive on "POS"); require exactly one direction
+        # token ("Up Down" stays unsuffixed); and require at least one
+        # non-direction token alongside it (a bare "POS" carries no product
+        # family information so we leave it for the bucket logic).
+        base_tokens = [
+            t for t in re.split(r"[\s_\-/]+", str(base or "").upper().strip()) if t
+        ]
+        up_tokens = {"UP", "POS", "LONG"}
+        down_tokens = {"DOWN", "NEG", "SHORT"}
+        has_up = any(tok in up_tokens for tok in base_tokens)
+        has_down = any(tok in down_tokens for tok in base_tokens)
+        has_non_direction = any(
+            tok not in up_tokens and tok not in down_tokens for tok in base_tokens
+        )
+        if has_non_direction and has_up and not has_down:
             dir_upper = "UP"
-        elif any(tok in base_upper for tok in (" DOWN", "_DOWN", "-DOWN", " NEG", " SHORT")):
+        elif has_non_direction and has_down and not has_up:
             dir_upper = "DOWN"
     if dir_upper in {"UP", "LONG", "POS"} and not label.upper().endswith(" UP"):
         return f"{label} Up"

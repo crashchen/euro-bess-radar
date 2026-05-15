@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Module Interaction (big picture)
 
-`src/config.py` is the single source of truth for zones, timezones, cache paths, and revenue-math constants (`HOURS_PER_YEAR`, `ANCILLARY_CAPACITY_AVAILABILITY=0.95`, `ANCILLARY_ENERGY_ACTIVATION_SHARE=0.10`, `GBP_EUR_YEARLY`). Nothing else should hard-code zones or FX rates.
+`src/config.py` is the single source of truth for zones, timezones, cache paths, and revenue-math constants (`HOURS_PER_YEAR`, `ANCILLARY_CAPACITY_AVAILABILITY=0.95`, `ANCILLARY_ENERGY_ACTIVATION_SHARE=0.10`, `GBP_EUR_YEARLY`, `MAX_SHORT_GAP_HOURS=2.0`). Nothing else should hard-code zones, FX rates, or data-quality thresholds.
 
 Data flow inside one dashboard run (`app.py`):
 1. `data_ingestion.fetch_prices()` dispatches to the right backend (entsoe-py for ENTSO-E zones, Elexon REST for GB), runs `build_zone_query_window()` to convert local calendar dates to a UTC `[start, end)` window, and caches into `da_prices_{zone}` SQLite tables. Cache validity is checked per requested slice using row-level `fetched_at`, `_expected_cache_interval()` + `reindex`, so stale rows and gaps are detected as missing points instead of accepted as sparse data.
@@ -95,11 +95,17 @@ Supported templates:
 Upload via sidebar. Template CSVs downloadable from the UI.
 
 ### Data Merging
-`build_ancillary_dataset()` merges manual + auto-fetch data. Manual uploads override auto-fetch for the same product type only — other auto-fetched products are preserved. `normalize_auto_fetch_dataset()` converts varied fetcher schemas into a standard ancillary format with per-product rows.
+`build_ancillary_dataset()` merges manual + auto-fetch data. Manual uploads override auto-fetch for the same product type only — other auto-fetched products are preserved. `normalize_auto_fetch_dataset()` converts varied fetcher schemas into a standard ancillary format with per-product rows. Override matching uses `_normalize_product_key()` (case- and separator-insensitive) so an upstream label flip from `aFRR Up` to `afrr_up` does not silently bypass the override.
 
 ### UI Guidance
 - Revenue Estimation tab shows an annualisation note based on the currently selected sample window length
 - Revenue Estimation tab includes a `How ancillary works` expander explaining product-level stacking, manual-vs-auto precedence, and which ancillary signals are not auto-monetised
+
+### Auth Errors
+Fingrid / Regelleistung / Elexon all detect HTTP 401/403 via the shared `_raise_if_auth_failed()` helper and raise `DataSourceAuthError` *before* the `@retry` decorator can swallow it. `run_auto_fetch()` deliberately does not catch `DataSourceAuthError`, so it propagates to `_run_and_store_ancillary_fetch()` in `src/components/sidebar.py` which surfaces it via `st.error` with a hint (e.g. "Set FINGRID_API_KEY in .env."). Other transient fetcher errors (network, parse) are still caught per-fetcher and logged.
+
+### Data Quality
+`clean_prices()` short-gap interpolates gaps up to `MAX_SHORT_GAP_HOURS` (config.py) and flags those rows with `imputed=True`. Longer gaps stay NaN with `filled=True / imputed=False`. `_segment_and_reindex_prices()` also detects sparse internal gaps when no `expected_window` is provided (mode-delta heuristic). For zones listed in `_ZONE_RESOLUTION_TRANSITIONS` (declare new ones there when a TSO changes its market time unit) the helper splits the index at each transition boundary and runs the mode-delta heuristic on each side independently — this surfaces sparse gaps inside both the pre- and post-transition segments without upsampling the lower-resolution side. `analytics.filter_to_complete_local_days(df, tz)` mirrors the day-level filter that `calculate_daily_spreads()` uses, and is applied in `app.py` and `src/export.py` so negative-price stats and heatmaps stay consistent with daily-spread / dispatch / revenue analytics across the dashboard, Excel, and PDF outputs. Excel/PDF exports always recompute the negative-price stats from the filtered subset internally; do not rely on the caller-supplied `negative_stats` to be already filtered.
 
 ## Coding Conventions
 - pandas timestamps are UTC internally; every analytics/export entry point takes a `tz` parameter for local-time grouping. Do not group by UTC day — daily spread and heatmap numbers will be wrong across DST boundaries.
@@ -124,11 +130,12 @@ Upload via sidebar. Template CSVs downloadable from the UI.
 - Negative wind/solar-price correlation = BESS-friendly market (high RE → low prices = charging, low RE → high prices = discharging)
 - **Revenue stacking**: `merge_revenue_stack()` exposes DA arbitrage + ancillary `source_revenues` for per-product breakdown, but capacity-reserve ancillary is not assumed to be fully additive with DA in the headline total without co-optimization.
 - **Joint co-optimization**: `solve_joint_capacity_batch()` models reserve capacity as power headroom competing with DA charge/discharge in a MILP with binary charge/discharge mutual exclusion. It does not model activation energy, bid acceptance, reserve-specific SoC duration, or qualification constraints.
+- **Mutual exclusion is binary, not relaxed**: `solve_daily_lp()` and `solve_daily_joint_capacity_lp()` both use a binary mode variable via scipy `integrality`. A pure LP relaxation of `p_charge + p_discharge <= power_mw` is degenerate at negative prices (the solver can earn revenue by simultaneously charging and discharging through round-trip losses). Do not weaken this back to an LP-only constraint.
 - **Annualisation caveat**: DA arbitrage revenue is extrapolated from the user-selected sample window, so short windows (for example winter-only periods) can materially overstate or understate full-year merchant potential
 
 ## Commands
 - `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
-- `python -m pytest tests/ -v` — run all tests (258 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
+- `python -m pytest tests/ -v` — run all tests (274 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
 - `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
 - `streamlit run app.py` — launch the dashboard.
 - `python -c "from src.data_ingestion import test_elexon_connection; test_elexon_connection()"` — smoke-test Elexon (no API key needed).

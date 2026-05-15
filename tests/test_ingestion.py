@@ -325,6 +325,91 @@ class TestCleanPrices:
         assert result.loc[df.index[5], "price_eur_mwh"] == pytest.approx(55.0)
         assert result.loc[df.index[6], "price_eur_mwh"] == pytest.approx(56.0)
 
+    def test_transition_boundary_row_detected_when_missing(self) -> None:
+        """A row missing exactly at the transition boundary itself
+        (e.g. the first 15-min sample at 2025-10-01 00:00) must surface as
+        filled/imputed instead of silently disappearing — and the same for
+        a row missing right before the boundary.
+        """
+        # Case A: missing 00:00 (first post-transition sample)
+        idx = pd.DatetimeIndex([
+            "2025-09-30T22:00:00Z", "2025-09-30T23:00:00Z",
+            "2025-10-01T00:15:00Z", "2025-10-01T00:30:00Z",
+            "2025-10-01T00:45:00Z",
+        ], name="timestamp")
+        df = pd.DataFrame({"price_eur_mwh": [10.0, 11.0, 13.0, 14.0, 15.0]}, index=idx)
+        result = clean_prices(df, zone="DE_LU")
+        boundary_ts = pd.Timestamp("2025-10-01T00:00:00Z")
+        assert boundary_ts in result.index
+        assert bool(result.loc[boundary_ts, "filled"]) is True
+
+        # Case B: missing 23:00 (last pre-transition sample)
+        idx_b = pd.DatetimeIndex([
+            "2025-09-30T22:00:00Z",
+            "2025-10-01T00:00:00Z", "2025-10-01T00:15:00Z", "2025-10-01T00:30:00Z",
+        ], name="timestamp")
+        df_b = pd.DataFrame({"price_eur_mwh": [10.0, 12.0, 13.0, 14.0]}, index=idx_b)
+        result_b = clean_prices(df_b, zone="DE_LU")
+        last_pre_ts = pd.Timestamp("2025-09-30T23:00:00Z")
+        assert last_pre_ts in result_b.index
+        assert bool(result_b.loc[last_pre_ts, "filled"]) is True
+
+    def test_post_transition_sparse_gap_still_detected(self) -> None:
+        """When the index crosses a known DE_LU 60->15min transition AND the
+        post-transition 15-min segment has its own sparse gap (e.g. missing
+        00:45), the per-side mode-delta heuristic must still surface that
+        gap. A blanket skip-at-transition would silently drop the 00:45 row.
+        """
+        idx = pd.DatetimeIndex([
+            "2025-09-30T22:00:00Z",
+            "2025-09-30T23:00:00Z",
+            "2025-10-01T00:00:00Z",
+            "2025-10-01T00:15:00Z",
+            "2025-10-01T00:30:00Z",
+            # 00:45 missing
+            "2025-10-01T01:00:00Z",
+            "2025-10-01T01:15:00Z",
+            "2025-10-01T01:30:00Z",
+        ], name="timestamp")
+        df = pd.DataFrame(
+            {"price_eur_mwh": [10.0, 11.0, 12.0, 13.0, 14.0, 16.0, 17.0, 18.0]},
+            index=idx,
+        )
+        result = clean_prices(df, zone="DE_LU")
+        gap_ts = pd.Timestamp("2025-10-01T00:45:00Z")
+        assert gap_ts in result.index
+        assert bool(result.loc[gap_ts, "filled"]) is True
+        # Pre-transition rows must remain untouched (no fabricated 22:15).
+        assert pd.Timestamp("2025-09-30T22:15:00Z") not in result.index
+
+    def test_mode_delta_skipped_at_zone_resolution_transition(self) -> None:
+        """When the index crosses a known DE_LU 60min->15min transition and
+        no expected_window is given, the modal-delta shortcut would otherwise
+        upsample the pre-transition hourly region to 15-min and fabricate
+        intra-hour prices. The transition guard must keep pre-transition
+        rows at hourly cadence.
+        """
+        idx = pd.DatetimeIndex([
+            "2025-09-30T22:00:00Z",
+            "2025-09-30T23:00:00Z",
+            "2025-10-01T00:00:00Z",
+            "2025-10-01T00:15:00Z",
+            "2025-10-01T00:30:00Z",
+            "2025-10-01T00:45:00Z",
+            "2025-10-01T01:00:00Z",
+        ], name="timestamp")
+        df = pd.DataFrame(
+            {"price_eur_mwh": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0]},
+            index=idx,
+        )
+        result = clean_prices(df, zone="DE_LU")
+        # No fabricated 22:15 / 22:30 / 22:45.
+        assert pd.Timestamp("2025-09-30T22:15:00Z") not in result.index
+        assert pd.Timestamp("2025-09-30T22:30:00Z") not in result.index
+        # Original 7 rows preserved untouched.
+        assert len(result) == 7
+        assert not result["filled"].any()
+
     def test_sparse_gap_detected_without_expected_window(self) -> None:
         """When the caller does not pass expected_start/end, a sparse internal
         gap (e.g. a missing 02:00 in hourly data) must still be detected and

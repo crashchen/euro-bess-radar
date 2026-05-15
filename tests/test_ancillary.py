@@ -308,6 +308,31 @@ class TestAncillaryRevenue:
         manual_fcr = anc_df[anc_df["product_type"] == "FCR"]
         assert manual_fcr["capacity_price_eur_mw"].iloc[0] == 15.50
 
+    def test_family_detection_does_not_false_positive_on_pos_substring(self) -> None:
+        """The family-detection branch maps bare 'POS' to FCR (legacy German
+        convention) but must not match it as a substring of unrelated words
+        like 'Post Qualification' or 'Position'.
+        """
+        from src.ancillary import _canonical_product_label
+        # Substrings must not trigger the FCR family.
+        assert _canonical_product_label("Post Qualification", "", "AUC") == "Post Qualification"
+        assert _canonical_product_label("Position", "", "AUC") == "Position"
+        # But the legitimate German bare 'POS' label still maps to FCR.
+        assert _canonical_product_label("POS", "", "DE_FCR") == "FCR"
+
+    def test_direction_extraction_does_not_false_positive_on_substrings(self) -> None:
+        """'Post Qualification' contains the substring 'POS' but is not a
+        direction; 'Up Down' is bidirectional and must not be classified
+        as Up. A bare 'POS' carries no product family info either.
+        """
+        from src.ancillary import _canonical_product_label
+        assert _canonical_product_label("aFRR Post Qualification", "", "AUC") == "aFRR"
+        assert _canonical_product_label("aFRR Up Down", "", "AUC") == "aFRR"
+        assert _canonical_product_label("POS", "", "DE_FCR") == "FCR"
+        # Genuine cases must still extract.
+        assert _canonical_product_label("FCR-D Up", "", "AUC") == "FCR-D Up"
+        assert _canonical_product_label("aFRR_UP", "", "AUC") == "aFRR Up"
+
     def test_direction_recovered_from_embedded_product_label(self) -> None:
         """When the auto-fetch source carries direction inside the product
         string (e.g. 'FCR-D Up') without a separate direction column, the
