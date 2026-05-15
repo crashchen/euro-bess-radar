@@ -25,6 +25,7 @@ from src.config import (
     ELEXON_MARKET_INDEX_ENDPOINT,
     FINGRID_BASE_URL,
     GBP_EUR_YEARLY,
+    MAX_SHORT_GAP_HOURS,
     PRICE_CACHE_TTL_HOURS,
     REGELLEISTUNG_API_URL,
     get_api_key,
@@ -68,6 +69,20 @@ class DataSourceNetworkError(DataSourceError):
 
 class DataSourceParseError(DataSourceError):
     """Raised when a remote data source response cannot be parsed safely."""
+
+
+def _raise_if_auth_failed(
+    resp: requests.Response, source: str, hint: str | None = None,
+) -> None:
+    """Convert HTTP 401/403 into DataSourceAuthError so callers and retry
+    decorators do not treat unfixable auth failures as transient network
+    errors.
+    """
+    if resp.status_code in (401, 403):
+        suffix = f" {hint}" if hint else ""
+        raise DataSourceAuthError(
+            f"{source} auth failed (HTTP {resp.status_code}).{suffix}"
+        )
 
 
 # ── Retry decorator ──────────────────────────────────────────────────────────
@@ -240,8 +255,6 @@ def _convert_gbp_series_to_eur(
 
 # ── Cleaning ──────────────────────────────────────────────────────────────────
 
-MAX_SHORT_GAP_HOURS = 2.0
-
 def _format_distinct_deltas(positive: pd.Series) -> str:
     """Render distinct positive deltas for logging."""
     return ", ".join(
@@ -352,6 +365,21 @@ def _segment_and_reindex_prices(
             df.index.name = "timestamp"
             return df
         full_idx = pd.date_range(start=index.min(), end=index.max(), freq=freq)
+        out = df.reindex(full_idx)
+        out.index.name = "timestamp"
+        return out
+
+    # Mixed deltas usually mean "regular cadence with a gap" rather than
+    # "actually varying resolution". If the modal delta is also the smallest
+    # one and dominates (>= 50% of deltas), treat it as the true cadence and
+    # reindex the whole range — that lets sparse gaps surface as NaN rows
+    # downstream instead of being silently swallowed by segment splitting.
+    mode_delta = positive.mode().iloc[0]
+    if (
+        mode_delta == min(distinct_deltas)
+        and (positive == mode_delta).mean() >= 0.5
+    ):
+        full_idx = pd.date_range(start=index.min(), end=index.max(), freq=mode_delta)
         out = df.reindex(full_idx)
         out.index.name = "timestamp"
         return out
@@ -696,6 +724,7 @@ def _call_elexon_api(from_date_str: str, to_date_str: str) -> list[dict[str, Any
         params={"from": from_date_str, "to": to_date_str, "format": "json"},
         timeout=30,
     )
+    _raise_if_auth_failed(resp, "Elexon market-index")
     resp.raise_for_status()
     return resp.json()
 
@@ -711,6 +740,7 @@ def _call_elexon_system_prices_api(
         params={"from": from_date_str, "to": to_date_str, "format": "json"},
         timeout=30,
     )
+    _raise_if_auth_failed(resp, "Elexon system-prices")
     resp.raise_for_status()
     return resp.json()
 
@@ -1232,11 +1262,7 @@ def _call_fingrid_api(
         headers=headers,
         timeout=30,
     )
-    if resp.status_code in (401, 403):
-        raise DataSourceAuthError(
-            f"Fingrid auth failed (HTTP {resp.status_code}). "
-            "Set FINGRID_API_KEY in .env."
-        )
+    _raise_if_auth_failed(resp, "Fingrid", "Set FINGRID_API_KEY in .env.")
     resp.raise_for_status()
     return resp.json()
 
@@ -1408,7 +1434,13 @@ REGELLEISTUNG_AUTO_FETCH_ENABLED = True
 def _call_regelleistung_api(
     product: str, market: str, date_str: str,
 ) -> bytes:
-    """Download one day of Regelleistung tender results as xlsx bytes."""
+    """Download one day of Regelleistung tender results as xlsx bytes.
+
+    Auth failures (401/403) bypass the retry loop and surface as
+    DataSourceAuthError so the UI can prompt the user instead of silently
+    looping. The endpoint is keyless today, so this guards against future
+    policy changes or rate-limit auth walls.
+    """
     resp = requests.get(
         REGELLEISTUNG_API_URL,
         params={
@@ -1418,6 +1450,10 @@ def _call_regelleistung_api(
             "date": date_str,
         },
         timeout=30,
+    )
+    _raise_if_auth_failed(
+        resp, "Regelleistung",
+        "Endpoint may have moved or now requires authentication.",
     )
     resp.raise_for_status()
     return resp.content

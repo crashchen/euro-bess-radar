@@ -246,7 +246,15 @@ def _canonical_product_label(
     direction: str | None = None,
     template_hint: str | None = None,
 ) -> str:
-    """Map source-specific product labels into stable dashboard product names."""
+    """Map source-specific product labels into stable dashboard product names.
+
+    If ``direction`` is empty, the base string is scanned for an embedded
+    direction token (``Up``/``Down``/``Long``/``Short`` / ``Pos``/``Neg``).
+    Without this fallback an auto-fetched row carrying its direction inside
+    ``product`` (e.g. ``"FCR-D Up"`` with no separate direction column) loses
+    the Up/Down split entirely and collapses with its opposite-direction
+    sibling, double-counting revenue.
+    """
     tokens = " ".join(
         part for part in [template_hint or "", base or ""] if part
     ).upper()
@@ -269,9 +277,16 @@ def _canonical_product_label(
         label = str(base or template_hint or "Unknown")
 
     dir_upper = str(direction or "").strip().upper()
-    if dir_upper in {"UP", "LONG"} and not label.upper().endswith(" UP"):
+    if not dir_upper:
+        # Recover direction from the base string when not provided explicitly.
+        base_upper = str(base or "").upper()
+        if any(tok in base_upper for tok in (" UP", "_UP", "-UP", " POS", " LONG")):
+            dir_upper = "UP"
+        elif any(tok in base_upper for tok in (" DOWN", "_DOWN", "-DOWN", " NEG", " SHORT")):
+            dir_upper = "DOWN"
+    if dir_upper in {"UP", "LONG", "POS"} and not label.upper().endswith(" UP"):
         return f"{label} Up"
-    if dir_upper in {"DOWN", "SHORT"} and not label.upper().endswith(" DOWN"):
+    if dir_upper in {"DOWN", "SHORT", "NEG"} and not label.upper().endswith(" DOWN"):
         return f"{label} Down"
     return label
 

@@ -325,6 +325,29 @@ class TestCleanPrices:
         assert result.loc[df.index[5], "price_eur_mwh"] == pytest.approx(55.0)
         assert result.loc[df.index[6], "price_eur_mwh"] == pytest.approx(56.0)
 
+    def test_sparse_gap_detected_without_expected_window(self) -> None:
+        """When the caller does not pass expected_start/end, a sparse internal
+        gap (e.g. a missing 02:00 in hourly data) must still be detected and
+        marked, not silently swallowed. Without this the data-quality flag
+        misses a whole hour of missing pricing.
+        """
+        idx = pd.DatetimeIndex([
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T01:00:00Z",
+            # 02:00 missing
+            "2025-01-01T03:00:00Z",
+            "2025-01-01T04:00:00Z",
+        ], name="timestamp")
+        df = pd.DataFrame({"price_eur_mwh": [10.0, 11.0, 13.0, 14.0]}, index=idx)
+
+        result = clean_prices(df)
+        assert len(result) == 5
+        gap_ts = pd.Timestamp("2025-01-01T02:00:00Z")
+        assert bool(result.loc[gap_ts, "filled"]) is True
+        assert bool(result.loc[gap_ts, "imputed"]) is True
+        # Short gap (1h) gets interpolated to the linear midpoint.
+        assert result.loc[gap_ts, "price_eur_mwh"] == pytest.approx(12.0)
+
     def test_long_gaps_remain_nan(self) -> None:
         """Long gaps should remain visible instead of being flattened."""
         idx = pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC")
@@ -1100,6 +1123,29 @@ class TestFetchRegelleistungResults:
             )
         assert result is None
         assert "manual DE_FCR" in caplog.text
+
+    @patch("src.data_ingestion.time.sleep")
+    @patch("src.data_ingestion.requests.get")
+    def test_auth_error_propagates_as_data_source_auth_error(
+        self, mock_get: MagicMock, _mock_sleep: MagicMock,
+    ) -> None:
+        """A 401/403 from Regelleistung must surface as DataSourceAuthError
+        instead of being swallowed as a generic RequestException by the
+        retry loop and outer except.
+        """
+        forbidden = MagicMock()
+        forbidden.status_code = 403
+        forbidden.raise_for_status = MagicMock()
+        mock_get.return_value = forbidden
+
+        with pytest.raises(DataSourceAuthError):
+            fetch_regelleistung_results(
+                "FCR",
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
+        # Bypassed retry: one GET, not three
+        assert mock_get.call_count == 1
 
 
 # ── Test 12: Elexon system prices ─────────────────────────────────────────────

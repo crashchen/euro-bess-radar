@@ -308,6 +308,30 @@ class TestAncillaryRevenue:
         manual_fcr = anc_df[anc_df["product_type"] == "FCR"]
         assert manual_fcr["capacity_price_eur_mw"].iloc[0] == 15.50
 
+    def test_direction_recovered_from_embedded_product_label(self) -> None:
+        """When the auto-fetch source carries direction inside the product
+        string (e.g. 'FCR-D Up') without a separate direction column, the
+        canonical label must still produce 'FCR-D Up' / 'FCR-D Down' — not
+        collapse them both to 'FCR-D' and double-count.
+        """
+        idx = pd.date_range("2025-01-01", periods=2, freq="h", tz="UTC")
+        df = pd.DataFrame({
+            "timestamp": idx,
+            "product": ["FCR-D Up", "FCR-D Down"],
+            "capacity_price_eur_mw": [10.0, 12.0],
+        })
+        out = normalize_auto_fetch_dataset(df, "AUC")
+        assert set(out["product_type"]) == {"FCR-D Up", "FCR-D Down"}
+
+        # Also covers separator/case variants in the embedded direction.
+        df2 = pd.DataFrame({
+            "timestamp": idx,
+            "product": ["aFRR_UP", "aFRR-DOWN"],
+            "capacity_price_eur_mw": [5.0, 6.0],
+        })
+        out2 = normalize_auto_fetch_dataset(df2, "AUC")
+        assert set(out2["product_type"]) == {"aFRR Up", "aFRR Down"}
+
     def test_normalize_product_key_collapses_format_variants(self) -> None:
         """Defense-in-depth: if upstream ever sends a label that bypasses
         canonical-label mapping (e.g. a new product not in the keyword list),

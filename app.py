@@ -15,6 +15,7 @@ from src.analytics import (
     calculate_negative_price_hours,
     calculate_spread_percentiles,
     estimate_annual_arbitrage_revenue,
+    filter_to_complete_local_days,
 )
 from src.ancillary import build_ancillary_dataset
 from src.components.sidebar import (
@@ -143,7 +144,10 @@ if fetch_btn or "zone_data" in st.session_state:
         )
     monthly_spreads = calculate_monthly_spreads_from_daily(daily_spreads)
     percentiles = calculate_spread_percentiles(daily_spreads)
-    neg_stats = calculate_negative_price_hours(primary_df)
+    # Keep negative-price stats and heatmaps consistent with daily-spread
+    # filtering: a day with any NaN price is excluded everywhere.
+    complete_df = filter_to_complete_local_days(primary_df, tz=zone_tz)
+    neg_stats = calculate_negative_price_hours(complete_df)
     revenue = estimate_annual_arbitrage_revenue(
         daily_spreads,
         power_mw=power_mw,
@@ -199,7 +203,7 @@ if fetch_btn or "zone_data" in st.session_state:
     with tabs[1]:
         heatmaps.render(
             primary_zone=primary_zone,
-            primary_df=primary_df,
+            primary_df=complete_df,
             duration_hours=duration_hours,
             zone_tz=zone_tz,
             chart_template=chart_template,

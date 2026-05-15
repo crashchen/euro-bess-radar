@@ -22,6 +22,7 @@ from src.analytics import (
     calculate_yearly_revenue_breakdown,
     compare_zones,
     estimate_annual_arbitrage_revenue,
+    filter_to_complete_local_days,
 )
 from src.config import ALL_ZONES, get_zone_timezone
 
@@ -277,6 +278,44 @@ class TestNegativePrices:
         df.index.name = "timestamp"
         result = calculate_negative_price_hours(df)
         assert result["negative_hours"] == 0
+
+
+class TestFilterToCompleteLocalDays:
+    def test_drops_entire_day_with_one_nan(self) -> None:
+        """A single missing hour on day 1 must drop all 24 hours of day 1
+        so downstream stats stay aligned with calculate_daily_spreads, which
+        excludes the day entirely.
+        """
+        idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+        prices = [10.0] * 48
+        prices[5] = float("nan")
+        df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+        df.index.name = "timestamp"
+        out = filter_to_complete_local_days(df, tz="UTC")
+        # Day 1 (2025-01-01) is gone; day 2 (2025-01-02) is intact
+        assert len(out) == 24
+        assert set(pd.DatetimeIndex(out.index).date) == {pd.Timestamp("2025-01-02").date()}
+
+    def test_passthrough_when_no_nan(self) -> None:
+        idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+        df = pd.DataFrame({"price_eur_mwh": [25.0] * 48}, index=idx)
+        df.index.name = "timestamp"
+        out = filter_to_complete_local_days(df, tz="Europe/Berlin")
+        assert len(out) == 48
+
+    def test_neg_hours_match_spreads_excluded_days(self) -> None:
+        """If spreads exclude day 1, the negative-price counter on the
+        filtered df must not see any hour from day 1.
+        """
+        idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+        prices = [-30.0] * 24 + [40.0] * 24
+        prices[3] = float("nan")  # break day 1
+        df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+        df.index.name = "timestamp"
+        complete = filter_to_complete_local_days(df, tz="UTC")
+        stats = calculate_negative_price_hours(complete)
+        # All 24 negative-price hours were on day 1, which is excluded.
+        assert stats["negative_hours"] == 0
 
 
 # ── Zone comparison ──────────────────────────────────────────────────────────
@@ -695,6 +734,62 @@ class TestLocalTimezoneAnalytics:
         result_none = calculate_daily_spreads(seven_day_prices, tz=None)
         result_default = calculate_daily_spreads(seven_day_prices)
         pd.testing.assert_frame_equal(result_none, result_default)
+
+    def test_daily_spreads_handles_dst_spring_forward(
+        self, dst_spring_forward_prices: pd.DataFrame,
+    ) -> None:
+        """Local time skips an hour on 2025-03-30; calculate_daily_spreads
+        must still group correctly and not blow up on the gap.
+        """
+        result = calculate_daily_spreads(
+            dst_spring_forward_prices, tz="Europe/Berlin",
+        )
+        dates = {str(d) for d in result["date"]}
+        # Three local days covered (2025-03-29, 2025-03-30, 2025-03-31 may be partial)
+        assert "2025-03-29" in dates
+        assert "2025-03-30" in dates
+        # No NaN spread for any included day.
+        assert not result["spread"].isna().any()
+
+    def test_daily_spreads_handles_dst_fall_back(
+        self, dst_fall_back_prices: pd.DataFrame,
+    ) -> None:
+        """Local time repeats an hour on 2025-10-26; analytics must handle
+        the 25-hour local day without ambiguous-timestamp errors.
+        """
+        result = calculate_daily_spreads(
+            dst_fall_back_prices, tz="Europe/Berlin",
+        )
+        dates = {str(d) for d in result["date"]}
+        assert "2025-10-26" in dates
+        assert not result["spread"].isna().any()
+
+    def test_15min_resolution_produces_spread(
+        self, de_lu_15min_prices: pd.DataFrame,
+    ) -> None:
+        """DE_LU 15-min data (96 intervals/day) must work end-to-end."""
+        result = calculate_daily_spreads(
+            de_lu_15min_prices, tz="Europe/Berlin", duration_hours=2.0,
+        )
+        # Should produce one full local day
+        assert len(result) >= 1
+        assert (result["spread"] >= 0).all()
+
+    def test_sparse_data_excludes_day_consistently(
+        self, sparse_hourly_prices: pd.DataFrame,
+    ) -> None:
+        """A sparse fixture (missing 02:00) flowing through clean_prices
+        then analytics must end up either fully imputed (short gap) or
+        excluded — never silently dropped with no signal.
+        """
+        from src.data_ingestion import clean_prices
+        cleaned = clean_prices(sparse_hourly_prices)
+        # Short-gap imputation should fill 02:00 since gap == 1h <= MAX
+        assert cleaned["price_eur_mwh"].isna().sum() == 0
+        # Now spreads work normally
+        result = calculate_daily_spreads(cleaned, tz="UTC")
+        assert len(result) == 1
+        assert result.attrs.get("excluded_days_due_to_missing", 0) == 0
 
     def test_get_zone_timezone_known(self) -> None:
         assert get_zone_timezone("DE_LU") == "Europe/Berlin"

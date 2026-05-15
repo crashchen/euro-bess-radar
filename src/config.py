@@ -42,6 +42,11 @@ HOURS_PER_YEAR = 8760
 ANCILLARY_CAPACITY_AVAILABILITY = 0.95
 ANCILLARY_ENERGY_ACTIVATION_SHARE = 0.10
 
+# Maximum gap length (hours) that clean_prices will short-gap interpolate.
+# Gaps longer than this remain NaN and the affected local day is excluded
+# from spread/dispatch/revenue analytics.
+MAX_SHORT_GAP_HOURS = 2.0
+
 # --- Bidding Zones ---
 # Tier 1: EU member states (ENTSO-E API)
 # Tier 2: Non-EU ENTSO-E members (same API, same treatment)

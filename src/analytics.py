@@ -135,6 +135,30 @@ def _calculate_daily_ordered_spread(
     }
 
 
+def filter_to_complete_local_days(
+    df: pd.DataFrame,
+    tz: str | None = None,
+) -> pd.DataFrame:
+    """Drop rows from any local-tz calendar day that contains a NaN price.
+
+    Mirrors the day-level filter used by ``calculate_daily_spreads`` so that
+    downstream stats (negative-price counts, heatmaps) stay consistent with
+    the daily-spread view. Without this, the dashboard can show e.g. a
+    'negative hours' count that includes hours from days the spread analysis
+    excluded — confusing and inconsistent.
+    """
+    if df.empty or "price_eur_mwh" not in df.columns:
+        return df
+    local = _to_local(df, tz)
+    local_dates = local.index.date
+    nan_by_day = local["price_eur_mwh"].isna().groupby(local_dates).any()
+    incomplete = set(nan_by_day[nan_by_day].index)
+    if not incomplete:
+        return df
+    mask = ~pd.Series(local_dates, index=df.index).isin(incomplete)
+    return df.loc[mask]
+
+
 def _empty_daily_spreads(
     excluded_days_due_to_missing: int = 0,
     observed_days: int = 0,

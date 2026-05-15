@@ -13,7 +13,7 @@ import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from src.analytics import build_price_heatmap
+from src.analytics import build_price_heatmap, filter_to_complete_local_days
 from src.config import CACHE_DIR
 from src.data_ingestion import summarize_price_data_quality
 
@@ -294,7 +294,11 @@ def _write_excel_workbook(
     hourly["timestamp"] = hourly["timestamp"].astype(str)
     _build_table_sheet(wb.create_sheet(), "Hourly Prices", hourly)
 
-    heatmap = build_price_heatmap(price_df, tz=tz)
+    # Use complete-day filtered prices for the heatmap to keep it consistent
+    # with the daily-spread and dispatch tables above (which exclude any
+    # local day with missing intervals).
+    heatmap_df = filter_to_complete_local_days(price_df, tz=tz)
+    heatmap = build_price_heatmap(heatmap_df, tz=tz)
     _build_heatmap_sheet(wb.create_sheet(), "Price Heatmap", heatmap)
 
 def export_to_excel(
