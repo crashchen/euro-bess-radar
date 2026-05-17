@@ -418,14 +418,27 @@ def solve_daily_da_id_dispatch(
     )
 
     da_net = stage_1["p_discharge"] - stage_1["p_charge"]
+    # da_gross is the pre-VOM DA settlement value. solve_daily_lp returns
+    # the post-VOM revenue; the original formula
+    #     total = stage_1["revenue_eur"] + (ida_lp_value - implicit_mtm)
+    # mixed a post-VOM term with a gross MtM term, double-counting VOM
+    # whenever Stage 2 cancelled DA physical flow (no DA delivery -> no
+    # real DA VOM cost). The correct accounting is:
+    #     total_cash = da_gross - implicit_mtm + ida_lp_value
+    # where implicit_mtm and ida_lp_value are both at IDA prices (gross
+    # MtM cancels out, leaving the Stage-2 physical VOM exactly once).
+    da_gross = float((da_net * da_prices * dt).sum())
     implicit_mtm = float((da_net * ida_prices * dt).sum())
-    ida_lp_value = stage_2["revenue_eur"]  # already net of VOM
-    rebid_uplift = ida_lp_value - implicit_mtm
-    # Numerical floor: with VOM the Stage-2 MILP can in theory return a
-    # value epsilon below the DA-as-Stage-2 baseline due to solver
-    # tolerance. Clamp at zero so the UI never shows a negative "uplift."
-    rebid_uplift = max(rebid_uplift, 0.0)
-    total_cash = stage_1["revenue_eur"] + rebid_uplift
+    ida_lp_value = stage_2["revenue_eur"]  # post-VOM at Stage-2 dispatch
+    total_cash = da_gross - implicit_mtm + ida_lp_value
+    rebid_uplift = total_cash - stage_1["revenue_eur"]
+    # Numerical floor: Stage-1 dispatch is always a feasible Stage-2
+    # solution, so the optimal uplift is non-negative in theory. Clamp
+    # any small solver-tolerance negative back to zero (and renormalise
+    # total_cash so the decomposition still holds).
+    if rebid_uplift < 0:
+        rebid_uplift = 0.0
+        total_cash = stage_1["revenue_eur"]
 
     return {
         "da_revenue_eur": round(stage_1["revenue_eur"], 6),

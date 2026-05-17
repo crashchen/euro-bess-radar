@@ -54,6 +54,34 @@ class TestTemplateGeneration:
         assert lines[1].split(",")[1] == "0"
         assert lines[2].split(",")[1] == "1"
 
+    def test_esios_bundle_flows_into_ancillary_stack(self) -> None:
+        """ESIOS auto-fetch returns wide columns like secondary_up_capacity_eur_mw;
+        normalize_auto_fetch_dataset must recognise them so revenue stack
+        downstream sees the data instead of silently dropping it.
+        """
+        from src.ancillary import build_ancillary_dataset
+
+        idx = pd.date_range("2025-01-01", periods=3, freq="h", tz="UTC")
+        esios = pd.DataFrame({
+            "timestamp": idx,
+            "secondary_up_capacity_eur_mw": [10.0, 12.0, 11.0],
+            "secondary_down_capacity_eur_mw": [8.0, 9.0, 8.5],
+            "tertiary_up_energy_eur_mwh": [50.0, 55.0, 52.0],
+            "tertiary_down_energy_eur_mwh": [20.0, 22.0, 21.0],
+        })
+        anc = build_ancillary_dataset(
+            auto_fetch_results={"Secondary/tertiary reserves": esios},
+        )
+        assert not anc.empty
+        assert set(anc["product_type"].unique()) == {
+            "aFRR Up", "aFRR Down", "mFRR Up", "mFRR Down",
+        }
+        # Capacity columns should be filled for aFRR rows, energy columns for mFRR rows
+        afrr_up = anc[anc["product_type"] == "aFRR Up"]
+        mfrr_up = anc[anc["product_type"] == "mFRR Up"]
+        assert (afrr_up["capacity_price_eur_mw"] == [10.0, 12.0, 11.0]).all()
+        assert (mfrr_up["energy_price_eur_mwh"] == [50.0, 55.0, 52.0]).all()
+
     def test_it_balancing_parses_marginal_prices(self) -> None:
         """IT_BALANCING uses the same marginal_price_up/down columns as
         RO_BALANCING — verify they flow into energy_price_up/down_eur_mwh

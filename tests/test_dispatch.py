@@ -384,6 +384,35 @@ class TestSolveDailyDaIdDispatch:
         r = solve_daily_da_id_dispatch(prices, prices.copy(), dt=1.0)
         assert r["rebid_uplift_eur"] == 0.0
 
+    def test_no_vom_double_counting_on_full_cancellation(self) -> None:
+        """If IDA exactly inverts DA prices and the battery starts empty so
+        Stage 2 can't physically dispatch, the optimal strategy is to cancel
+        all DA flow via IDA rebid (no physical dispatch -> no VOM).
+        Codex repro: 1MW/1h, eff=1, DA [10,10,80,80], IDA [80,80,10,10]
+        -> total_cash should be 140 (gross DA + IDA cancellation arb, no VOM).
+        """
+        da = np.array([10.0, 10.0, 80.0, 80.0])
+        ida = np.array([80.0, 80.0, 10.0, 10.0])
+        r = solve_daily_da_id_dispatch(
+            da, ida, dt=1.0, power_mw=1.0, duration_hours=1.0,
+            efficiency=1.0, soc_init_frac=0.0,
+        )
+        # Expect exactly 140 (within solver/rounding tolerance).
+        assert r["total_cash_eur"] == pytest.approx(140.0, abs=0.5)
+
+    def test_equal_prices_total_cash_equals_da_revenue(self) -> None:
+        """When IDA = DA, the optimal Stage 2 is the Stage 1 dispatch
+        unchanged; rebid_uplift = 0 and total_cash = da_revenue. Used to
+        verify VOM is not double-counted on equal-price inputs.
+        """
+        da = np.array([10.0, 10.0, 80.0, 80.0])
+        r = solve_daily_da_id_dispatch(
+            da, da.copy(), dt=1.0, power_mw=1.0, duration_hours=1.0,
+            efficiency=1.0, soc_init_frac=0.0,
+        )
+        assert r["rebid_uplift_eur"] == pytest.approx(0.0, abs=0.01)
+        assert r["total_cash_eur"] == pytest.approx(r["da_revenue_eur"], abs=0.01)
+
     def test_total_cash_equals_da_plus_uplift(self) -> None:
         da_prices = np.array([10.0] * 8 + [60.0] * 8 + [10.0] * 8)
         ida_prices = np.array([15.0] * 8 + [55.0] * 8 + [12.0] * 8)

@@ -996,11 +996,30 @@ def calculate_two_stage_da_id_dispatch(
         return out
 
     dt = _infer_interval_hours(merged.index)
+    # Per-day completeness reference: how many DA periods are expected
+    # for a full local-tz calendar day at this cadence. Days where the
+    # IDA overlap with DA is significantly short of that count are excluded
+    # so the dashboard does not annualise a sparse-coverage day by 365.25.
+    expected_per_day = round(24.0 / dt) if dt > 0 else 24
+    min_required = max(round(0.9 * expected_per_day), 2)
+
+    da_daily_counts = (
+        da_local["price_eur_mwh"].dropna()
+        .groupby(da_local.dropna(subset=["price_eur_mwh"]).index.date)
+        .size()
+        .to_dict()
+    )
+
     records = []
     excluded = 0
     for date, group in merged.groupby(merged.index.date):
         sorted_group = group.sort_index()
-        if sorted_group.isna().any().any() or len(sorted_group) < 2:
+        if sorted_group.isna().any().any() or len(sorted_group) < min_required:
+            excluded += 1
+            continue
+        # IDA must cover at least 90% of the DA day to be a usable rebid sample.
+        da_count = int(da_daily_counts.get(date, 0))
+        if da_count > 0 and len(sorted_group) < round(0.9 * da_count):
             excluded += 1
             continue
         result = solve_daily_da_id_dispatch(

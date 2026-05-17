@@ -332,6 +332,7 @@ def render(
         end_date=end_date,
         power_mw=power_mw,
         duration_hours=duration_hours,
+        efficiency=efficiency,
         capture_rate=capture_rate,
         chart_template=chart_template,
     )
@@ -846,6 +847,7 @@ def _render_intraday_uplift_section(
     end_date,
     power_mw: float,
     duration_hours: float,
+    efficiency: float,
     capture_rate: float,
     chart_template: str,
 ) -> None:
@@ -999,13 +1001,17 @@ def _render_intraday_uplift_section(
             "Stage 1 solves the MILP at DA prices (the committed position "
             "before IDA1 clears). Stage 2 re-dispatches the BESS against "
             "the realised IDA1 prints, settling the difference on the DA "
-            "volumes. With sunk DA cash and zero transaction costs, this "
-            "is the ex-post perfect-foresight upper bound on rebid value — "
-            "interpret it as a ceiling, not a forecast."
+            "volumes. This is the ex-post perfect-foresight CEILING on "
+            "rebid value — interpret as an upper bound, not a forecast: "
+            "the model assumes infinite IDA liquidity, zero bid-ask spread, "
+            "no rebid time-lag penalties, and frictionless physical "
+            "re-dispatching. Real captured value will be a (potentially "
+            "small) fraction of this number."
         )
         two_stage = calculate_two_stage_da_id_dispatch(
             primary_df, id_df, tz=zone_tz, power_mw=power_mw,
-            duration_hours=duration_hours, efficiency=0.88, soc_init_frac=0.0,
+            duration_hours=duration_hours, efficiency=efficiency,
+            soc_init_frac=0.0,
         )
         if two_stage.empty:
             st.info("Not enough overlapping DA+IDA1 days for the MILP.")

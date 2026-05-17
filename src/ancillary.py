@@ -433,15 +433,19 @@ def normalize_auto_fetch_dataset(
             capacity=raw["capacity_price_eur_mw"],
         ))
 
-    product_columns = {
+    capacity_product_columns = {
         "fcr_n_price": ("FCR-N", ""),
         "fcr_d_price": ("FCR-D", ""),
         "fcr_d_up_price": ("FCR-D Up", "Up"),
         "fcr_d_down_price": ("FCR-D Down", "Down"),
         "afrr_up_price": ("aFRR Up", "Up"),
         "afrr_down_price": ("aFRR Down", "Down"),
+        # ESIOS (REE Spain) ancillary bundle column names — without these
+        # entries the wide ESIOS frame is silently ignored downstream.
+        "secondary_up_capacity_eur_mw": ("aFRR Up", "Up"),
+        "secondary_down_capacity_eur_mw": ("aFRR Down", "Down"),
     }
-    for col, (product_label, direction) in product_columns.items():
+    for col, (product_label, direction) in capacity_product_columns.items():
         if col in raw.columns:
             frames.append(_build_standard_frame(
                 idx,
@@ -449,6 +453,21 @@ def normalize_auto_fetch_dataset(
                 zone,
                 direction=direction,
                 capacity=raw[col],
+            ))
+
+    # ESIOS tertiary energy prices (single-sided EUR/MWh) — map to mFRR Up/Down.
+    esios_energy_columns = {
+        "tertiary_up_energy_eur_mwh":   ("mFRR Up", "Up"),
+        "tertiary_down_energy_eur_mwh": ("mFRR Down", "Down"),
+    }
+    for col, (product_label, direction) in esios_energy_columns.items():
+        if col in raw.columns:
+            frames.append(_build_standard_frame(
+                idx,
+                product_label,
+                zone,
+                direction=direction,
+                energy=raw[col],
             ))
 
     if "energy_price_eur_mwh" in raw.columns:

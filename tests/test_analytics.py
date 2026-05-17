@@ -1008,6 +1008,24 @@ class TestTwoStageDaIdDispatch:
         result = calculate_two_stage_da_id_dispatch(da, ida, tz="UTC")
         assert result.empty
 
+    def test_partial_ida_coverage_excludes_day(self) -> None:
+        """A day with only 2 IDA periods but 24 DA periods must not be solved
+        as a 'usable' day — otherwise the UI annualises a sparse-coverage
+        sample by 365.25 and reports a meaningless ceiling.
+        """
+        idx_da = pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC")
+        da = pd.DataFrame({"price_eur_mwh": [50.0] * 24}, index=idx_da)
+        da.index.name = "timestamp"
+        idx_ida = pd.DatetimeIndex(
+            ["2025-01-01T00:00:00Z", "2025-01-01T23:00:00Z"], name="timestamp",
+        )
+        ida = pd.DataFrame(
+            {"intraday_price_eur_mwh": [50.0, 50.0]}, index=idx_ida,
+        )
+        result = calculate_two_stage_da_id_dispatch(da, ida, tz="UTC")
+        # Day should be excluded by the 90%-of-day coverage threshold.
+        assert result.empty
+
     def test_total_cash_decomposition(self) -> None:
         """For each day, total_cash should equal da_revenue + rebid_uplift
         within solver tolerance.

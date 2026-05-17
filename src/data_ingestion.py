@@ -2035,6 +2035,20 @@ def _parse_esios_indicator(
     df[column] = pd.to_numeric(df["value"], errors="coerce")
     df = df.dropna(subset=["timestamp", column])
     # ESIOS sometimes returns rows per geo_id; collapse to one row per timestamp.
+    # If per-geo values diverge meaningfully on the same timestamp, log a
+    # warning — the simple mean can silently hide real geographic variation.
+    # The caller can request explicit geo_ids / geo_agg ESIOS params to
+    # override this default.
+    if "geo_id" in df.columns:
+        std_per_ts = df.groupby("timestamp")[column].transform("std").fillna(0)
+        n_divergent = int((std_per_ts > 1.0).sum())
+        if n_divergent > 0:
+            logger.warning(
+                "ESIOS indicator returned divergent per-geo values for %d "
+                "row(s); collapsing by mean. Pass explicit geo_ids if "
+                "geography matters for this product.",
+                n_divergent,
+            )
     df = df.groupby("timestamp", as_index=False)[column].mean()
     return df[["timestamp", column]].sort_values("timestamp").reset_index(drop=True)
 
