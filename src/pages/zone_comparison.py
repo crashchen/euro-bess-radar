@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from src.analytics import (
@@ -12,6 +13,14 @@ from src.analytics import (
 )
 from src.config import ZONE_TIMEZONES, get_zone_timezone
 from src.export import export_comparison_to_bytes
+from src.portfolio import (
+    build_daily_revenue_matrix,
+    compute_correlation_matrix,
+    compute_efficient_frontier,
+    compute_max_sharpe_portfolio,
+    compute_min_variance_portfolio,
+    compute_zone_stats,
+)
 
 
 def render(
@@ -169,3 +178,161 @@ def render(
             template=chart_template,
         )
         st.plotly_chart(fig_comp, width="stretch")
+
+    _render_portfolio_section(
+        zone_data=zone_data,
+        duration_hours=duration_hours,
+        power_mw=power_mw,
+        efficiency=efficiency,
+        capture_rate=capture_rate,
+        use_lp_dispatch=use_lp_dispatch,
+        chart_template=chart_template,
+    )
+
+
+def _render_portfolio_section(
+    *,
+    zone_data: dict[str, pd.DataFrame],
+    duration_hours: int,
+    power_mw: float,
+    efficiency: float,
+    capture_rate: float,
+    use_lp_dispatch: bool,
+    chart_template: str,
+) -> None:
+    """Cross-zone diversification: correlation, Sharpe, efficient frontier."""
+    with st.expander("Portfolio Analysis (cross-zone diversification)", expanded=False):
+        st.caption(
+            "Treats each zone as a daily-revenue series (EUR/MW) and reports "
+            "pairwise correlation, per-zone Sharpe-like ratio, and the "
+            "long-only Markowitz efficient frontier. Daily returns are "
+            "annualised assuming i.i.d. sampling; the frontier sits on the "
+            "intersection of dates where every zone has a complete local day."
+        )
+
+        rev_df = build_daily_revenue_matrix(
+            zone_data,
+            zone_timezones=ZONE_TIMEZONES,
+            duration_hours=duration_hours,
+            power_mw=power_mw,
+            efficiency=efficiency,
+            capture_rate=capture_rate,
+            use_lp_dispatch=use_lp_dispatch,
+        )
+        if rev_df.empty:
+            st.info("Need at least one zone with a complete day of data.")
+            return
+        if rev_df.shape[1] < 2:
+            st.info(
+                f"Portfolio analysis needs 2+ zones with overlapping dates "
+                f"(currently {rev_df.shape[1]} zone with {len(rev_df)} aligned days)."
+            )
+            return
+
+        st.caption(
+            f"Aligned sample: {len(rev_df)} days across "
+            f"{rev_df.shape[1]} zones ({', '.join(rev_df.columns)})."
+        )
+
+        # ── Correlation heatmap ─────────────────────────────────────────
+        corr = compute_correlation_matrix(rev_df)
+        fig_corr = px.imshow(
+            corr,
+            text_auto=".2f",
+            color_continuous_scale="RdBu_r",
+            color_continuous_midpoint=0.0,
+            zmin=-1, zmax=1,
+            aspect="auto",
+            title="Daily Revenue Correlation",
+            template=chart_template,
+        )
+        st.plotly_chart(fig_corr, width="stretch")
+
+        # ── Per-zone stats ──────────────────────────────────────────────
+        stats = compute_zone_stats(rev_df)
+        st.dataframe(
+            stats,
+            width="stretch",
+            column_config={
+                "mean_daily": st.column_config.NumberColumn(
+                    "Mean (EUR/MW/day)", format="€%.0f",
+                ),
+                "std_daily": st.column_config.NumberColumn(
+                    "Std (EUR/MW/day)", format="€%.0f",
+                ),
+                "sharpe_daily": st.column_config.NumberColumn(
+                    "Sharpe (daily)", format="%.2f",
+                ),
+                "mean_annual": st.column_config.NumberColumn(
+                    "Annualised Mean", format="€%,.0f",
+                ),
+                "std_annual": st.column_config.NumberColumn(
+                    "Annualised Std", format="€%,.0f",
+                ),
+            },
+        )
+
+        # ── Efficient frontier ──────────────────────────────────────────
+        frontier = compute_efficient_frontier(rev_df, n_points=30)
+        min_var = compute_min_variance_portfolio(rev_df)
+        max_sharpe = compute_max_sharpe_portfolio(rev_df)
+
+        single_zone_pts = pd.DataFrame({
+            "annual_risk": stats["std_annual"],
+            "annual_return": stats["mean_annual"],
+            "zone": stats.index,
+        })
+
+        fig_ef = go.Figure()
+        if not frontier.empty:
+            fig_ef.add_trace(go.Scatter(
+                x=frontier["annual_risk"],
+                y=frontier["annual_return"],
+                mode="lines+markers",
+                name="Efficient frontier",
+                line=dict(color="#3498DB", width=2),
+                marker=dict(size=4),
+            ))
+        fig_ef.add_trace(go.Scatter(
+            x=single_zone_pts["annual_risk"],
+            y=single_zone_pts["annual_return"],
+            mode="markers+text",
+            text=single_zone_pts["zone"],
+            textposition="top center",
+            name="Single zone",
+            marker=dict(size=12, color="#888"),
+        ))
+        fig_ef.add_trace(go.Scatter(
+            x=[min_var["annual_risk"]], y=[min_var["annual_return"]],
+            mode="markers", name="Min variance",
+            marker=dict(size=14, color="#27AE60", symbol="diamond"),
+        ))
+        fig_ef.add_trace(go.Scatter(
+            x=[max_sharpe["annual_risk"]], y=[max_sharpe["annual_return"]],
+            mode="markers", name="Max Sharpe",
+            marker=dict(size=14, color="#E74C3C", symbol="star"),
+        ))
+        fig_ef.update_layout(
+            title="Long-Only Markowitz Frontier",
+            xaxis_title="Annualised Std (EUR/MW)",
+            yaxis_title="Annualised Mean Revenue (EUR/MW)",
+            template=chart_template,
+        )
+        st.plotly_chart(fig_ef, width="stretch")
+
+        # ── Optimal weights table ───────────────────────────────────────
+        weights_df = pd.DataFrame({
+            "Min variance": min_var["weights"],
+            "Max Sharpe": max_sharpe["weights"],
+        })
+        st.markdown("**Optimal long-only weights**")
+        st.dataframe(
+            weights_df.style.format("{:.1%}"),
+            width="stretch",
+        )
+        st.caption(
+            f"Min-variance portfolio: €{min_var['annual_return']:,.0f}/MW/yr at "
+            f"€{min_var['annual_risk']:,.0f} std. "
+            f"Max-Sharpe portfolio: €{max_sharpe['annual_return']:,.0f}/MW/yr at "
+            f"€{max_sharpe['annual_risk']:,.0f} std (Sharpe ≈ {max_sharpe['sharpe']:.2f})."
+        )

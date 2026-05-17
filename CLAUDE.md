@@ -132,10 +132,11 @@ Fingrid / Regelleistung / Elexon all detect HTTP 401/403 via the shared `_raise_
 - **Joint co-optimization**: `solve_joint_capacity_batch()` models reserve capacity as power headroom competing with DA charge/discharge in a MILP with binary charge/discharge mutual exclusion. It does not model activation energy, bid acceptance, reserve-specific SoC duration, or qualification constraints.
 - **Mutual exclusion is binary, not relaxed**: `solve_daily_lp()` and `solve_daily_joint_capacity_lp()` both use a binary mode variable via scipy `integrality`. A pure LP relaxation of `p_charge + p_discharge <= power_mw` is degenerate at negative prices (the solver can earn revenue by simultaneously charging and discharging through round-trip losses). Do not weaken this back to an LP-only constraint.
 - **Annualisation caveat**: DA arbitrage revenue is extrapolated from the user-selected sample window, so short windows (for example winter-only periods) can materially overstate or understate full-year merchant potential
+- **Portfolio analysis** (`src/portfolio.py`): treats each zone as a daily-revenue-per-MW series and runs Pearson correlation, Sharpe-like mean/std, and a long-only Markowitz frontier via scipy SLSQP. `build_daily_revenue_matrix()` inner-joins on dates so a single missing local day in any zone drops that date from the whole portfolio view — this keeps correlations and frontier weights computed on a single common sample. Annualisation uses the same `365.25`-day convention as `estimate_annual_arbitrage_revenue` and assumes i.i.d. days (`std_annual = std_daily * sqrt(365.25)`); for short or seasonal samples treat the Sharpe number as a relative ranking, not an absolute investment metric.
 
 ## Commands
 - `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
-- `python -m pytest tests/ -v` — run all tests (274 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
+- `python -m pytest tests/ -v` — run all tests (295 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
 - `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
 - `streamlit run app.py` — launch the dashboard.
 - `python -c "from src.data_ingestion import test_elexon_connection; test_elexon_connection()"` — smoke-test Elexon (no API key needed).
