@@ -36,3 +36,4 @@ htmlcov/
 
 # Prompt files (not project files)
 claude-code-prompt/
+.claude/
