@@ -1517,3 +1517,106 @@ class TestFetchIntradayPrices:
                 pd.Timestamp("2025-01-01", tz="UTC"),
                 pd.Timestamp("2025-01-02", tz="UTC"),
             )
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    def test_sequence_passed_through_to_client(
+        self, _mock_key: MagicMock, mock_client_cls: MagicMock,
+    ) -> None:
+        """Regression for the IDA round selector: the sequence arg must
+        reach entsoe-py unchanged so a user requesting IDA2 doesn't
+        silently receive IDA1 data.
+        """
+        idx = pd.date_range("2025-01-01", periods=4, freq="h", tz="UTC")
+        mock_client = MagicMock()
+        mock_client.query_intraday_prices.return_value = pd.Series(
+            [50.0] * 4, index=idx, name="price",
+        )
+        mock_client_cls.return_value = mock_client
+        fetch_intraday_prices(
+            "DE_LU",
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+            sequence=2,
+        )
+        kwargs = mock_client.query_intraday_prices.call_args.kwargs
+        assert kwargs["sequence"] == 2
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    def test_no_matching_data_returns_none(
+        self, _mock_key: MagicMock, mock_client_cls: MagicMock,
+    ) -> None:
+        """entsoe-py raises NoMatchingDataError (subclass of Exception, NOT
+        ValueError) when a supported zone has no IDA print in the window.
+        The fetcher must catch this explicitly.
+        """
+        from entsoe.exceptions import NoMatchingDataError
+        mock_client = MagicMock()
+        mock_client.query_intraday_prices.side_effect = NoMatchingDataError("nope")
+        mock_client_cls.return_value = mock_client
+        result = fetch_intraday_prices(
+            "DE_LU",
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+        )
+        assert result is None
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    def test_http_401_propagates_as_auth_error(
+        self, _mock_key: MagicMock, mock_client_cls: MagicMock,
+    ) -> None:
+        """ENTSO-E 401/403 during the query comes back as requests.HTTPError;
+        classify as DataSourceAuthError so the sidebar can prompt for
+        ENTSOE_API_KEY rather than a generic network error.
+        """
+        import requests as _rq
+        resp = MagicMock()
+        resp.status_code = 401
+        mock_client = MagicMock()
+        mock_client.query_intraday_prices.side_effect = _rq.HTTPError(
+            "401 Client Error", response=resp,
+        )
+        mock_client_cls.return_value = mock_client
+        with pytest.raises(DataSourceAuthError):
+            fetch_intraday_prices(
+                "DE_LU",
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    def test_successful_fetch_persists_to_sqlite_cache(
+        self, _mock_key: MagicMock, mock_client_cls: MagicMock,
+        tmp_path, monkeypatch,
+    ) -> None:
+        """A successful IDA fetch must write to SQLite so a subsequent
+        read_intraday_cache returns the same data without another API call.
+        """
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+
+        idx = pd.date_range("2025-01-01", periods=4, freq="h", tz="UTC")
+        mock_client = MagicMock()
+        mock_client.query_intraday_prices.return_value = pd.Series(
+            [40.0, 42.0, 44.0, 46.0], index=idx, name="price",
+        )
+        mock_client_cls.return_value = mock_client
+        fetched = di.fetch_intraday_prices(
+            "DE_LU",
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+        )
+        assert fetched is not None and len(fetched) == 4
+
+        cached = di.read_intraday_cache(
+            "DE_LU",
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+            sequence=1,
+        )
+        assert cached is not None
+        assert len(cached) == 4
+        assert cached["intraday_price_eur_mwh"].tolist() == [40.0, 42.0, 44.0, 46.0]

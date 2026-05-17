@@ -1793,6 +1793,74 @@ def fetch_entsoe_imbalance_prices(
 INTRADAY_SUPPORTED_ZONES: set[str] = {"DE_LU", "NL", "BE", "FR", "AT", "IT_NORD"}
 
 
+try:
+    from entsoe.exceptions import NoMatchingDataError as _EntsoeNoMatchingDataError
+except ImportError:  # pragma: no cover — defensive against older entsoe-py
+    _EntsoeNoMatchingDataError = ()
+
+
+def _ida_cache_table(zone: str, sequence: int) -> str:
+    """SQLite table name for one zone × IDA round."""
+    return f"ida_prices_{zone.lower()}_seq{sequence}"
+
+
+def write_intraday_cache(
+    df: pd.DataFrame, zone: str, sequence: int,
+) -> None:
+    """Persist IDA prices to SQLite. Auction prints are final once published,
+    so we INSERT OR REPLACE on the timestamp key without freshness tracking.
+    """
+    if df.empty:
+        return
+    table = _ida_cache_table(zone, sequence)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            f'CREATE TABLE IF NOT EXISTS "{table}" '
+            "(timestamp TEXT PRIMARY KEY, intraday_price_eur_mwh REAL NOT NULL)"
+        )
+        rows = [
+            (ts.isoformat() if hasattr(ts, "isoformat") else str(ts), float(price))
+            for ts, price in df["intraday_price_eur_mwh"].items()
+        ]
+        conn.executemany(
+            f'INSERT OR REPLACE INTO "{table}" '
+            "(timestamp, intraday_price_eur_mwh) VALUES (?, ?)",
+            rows,
+        )
+
+
+def read_intraday_cache(
+    zone: str, start: pd.Timestamp, end: pd.Timestamp, *, sequence: int = 1,
+) -> pd.DataFrame | None:
+    """Return cached IDA rows in [start, end) or None when the table is empty.
+
+    Lets the UI render IDA analytics across browser refreshes without
+    re-hitting the ENTSO-E API. The caller still owns the "did we cover
+    the requested window" decision — the helper just returns what is
+    persisted.
+    """
+    if not DB_PATH.exists():
+        return None
+    table = _ida_cache_table(zone, sequence)
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            df = pd.read_sql_query(
+                f'SELECT timestamp, intraday_price_eur_mwh FROM "{table}" '
+                "WHERE timestamp >= ? AND timestamp < ?",
+                conn,
+                params=(start.isoformat(), end.isoformat()),
+            )
+    except (sqlite3.DatabaseError, pd.errors.DatabaseError):
+        return None
+    if df.empty:
+        return None
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    df = df.dropna(subset=["timestamp"]).set_index("timestamp").sort_index()
+    df.index.name = "timestamp"
+    return df
+
+
 def fetch_intraday_prices(
     zone: str,
     start: pd.Timestamp,
@@ -1834,17 +1902,39 @@ def fetch_intraday_prices(
         series = client.query_intraday_prices(
             zone, start=start_q, end=end_q, sequence=sequence,
         )
+    except _EntsoeNoMatchingDataError as exc:
+        # entsoe-py raises NoMatchingDataError (Exception subclass, NOT
+        # ValueError) when a supported zone has no IDA print in the window.
+        # That is "no data," not an error — let the UI render a friendly
+        # message rather than a stack trace.
+        logger.info(
+            "ENTSO-E IDA%d: no data for %s in window: %s",
+            sequence, zone, exc,
+        )
+        return None
+    except requests.HTTPError as exc:
+        # entsoe-py propagates ENTSO-E 401/403 as HTTPError. Classify as
+        # an auth error so the sidebar can prompt for ENTSOE_API_KEY
+        # instead of surfacing a generic network failure.
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in (401, 403):
+            raise DataSourceAuthError(
+                f"ENTSO-E auth failed (HTTP {status}) on IDA{sequence} for "
+                f"{zone}. Check ENTSOE_API_KEY in .env."
+            ) from exc
+        raise DataSourceNetworkError(
+            f"ENTSO-E IDA{sequence} fetch failed for {zone}: {exc}"
+        ) from exc
     except requests.RequestException as exc:
         raise DataSourceNetworkError(
-            f"ENTSO-E intraday IDA{sequence} fetch failed for {zone}: {exc}"
+            f"ENTSO-E IDA{sequence} fetch failed for {zone}: {exc}"
         ) from exc
     except (ValueError, TypeError, KeyError) as exc:
-        # entsoe-py raises NoMatchingDataError as a ValueError subclass when a
-        # zone simply has no IDA data for the window; treat that as "no data"
-        # not as a hard error so the UI can surface a friendly message.
+        # Some older entsoe-py releases raised ValueError for missing data;
+        # keep the soft-fail to stay compatible with installations pinned
+        # below 0.7.11.
         logger.info(
-            "ENTSO-E intraday IDA%d unavailable for %s: %s",
-            sequence, zone, exc,
+            "ENTSO-E IDA%d unavailable for %s: %s", sequence, zone, exc,
         )
         return None
 
@@ -1857,7 +1947,15 @@ def fetch_intraday_prices(
     df["intraday_price_eur_mwh"] = pd.to_numeric(
         df.iloc[:, 0], errors="coerce",
     )
-    return df[["intraday_price_eur_mwh"]]
+    out = df[["intraday_price_eur_mwh"]]
+    # Persist to SQLite so browser refresh / page re-render doesn't trigger
+    # a second slow ENTSO-E call. IDA prints are final once published, so
+    # we can opportunistically cache without freshness logic.
+    try:
+        write_intraday_cache(out, zone, sequence)
+    except sqlite3.DatabaseError as exc:  # pragma: no cover — defensive
+        logger.warning("Could not persist IDA%d cache for %s: %s", sequence, zone, exc)
+    return out
 
 
 # ── Connection tests ──────────────────────────────────────────────────────────

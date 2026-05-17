@@ -40,6 +40,7 @@ from src.data_ingestion import (
     DataSourceParseError,
     build_zone_query_window,
     fetch_intraday_prices,
+    read_intraday_cache,
 )
 from src.dispatch import solve_joint_capacity_batch
 from src.scenario import (
@@ -304,19 +305,6 @@ def render(
                             "Supplementary revenue opportunity from DA-vs-imbalance price spread. "
                             "Not added to headline total without co-optimization."
                         )
-
-        # Intraday uplift (P5-A Phase 1)
-        _render_intraday_uplift_section(
-            primary_zone=primary_zone,
-            primary_df=primary_df,
-            zone_tz=zone_tz,
-            start_date=start_date,
-            end_date=end_date,
-            power_mw=power_mw,
-            duration_hours=duration_hours,
-            capture_rate=capture_rate,
-            chart_template=chart_template,
-        )
     else:
         dispatch_label = revenue.get("dispatch_method", "greedy")
         r1.metric(
@@ -332,6 +320,20 @@ def render(
         r2.metric("Revenue per MW", f"\u20ac{revenue['annual_revenue_eur_per_mw']:,.0f}/MW/yr")
         r3.metric("Avg Daily Revenue", f"\u20ac{revenue['avg_daily_revenue']:,.0f}")
         st.info("Upload or auto-fetch ancillary services data to see the full revenue stack.")
+
+    # Intraday uplift (P5-A Phase 1) \u2014 always rendered, regardless of whether
+    # ancillary data is loaded, so DA-only users can still see ID estimates.
+    _render_intraday_uplift_section(
+        primary_zone=primary_zone,
+        primary_df=primary_df,
+        zone_tz=zone_tz,
+        start_date=start_date,
+        end_date=end_date,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        capture_rate=capture_rate,
+        chart_template=chart_template,
+    )
 
     # CapEx / Payback
     if capex_eur_kwh > 0:
@@ -872,6 +874,22 @@ def _render_intraday_uplift_section(
             "dispatch problem."
         )
 
+        # Try SQLite cache first so a browser refresh doesn't trigger
+        # another live ENTSO-E call. The cache is opportunistic — we don't
+        # validate coverage; on a partial hit the user can re-fetch.
+        if cache_key not in st.session_state:
+            try:
+                api_start, api_end = build_zone_query_window(
+                    primary_zone, start_date, end_date,
+                )
+                cached = read_intraday_cache(
+                    primary_zone, api_start, api_end, sequence=1,
+                )
+                if cached is not None and not cached.empty:
+                    st.session_state[cache_key] = cached
+            except ValueError:
+                pass  # zone-window build can raise; fall through to button
+
         c1, c2 = st.columns([1, 3])
         fetch = c1.button("Fetch IDA1 prices", key=f"fetch_ida_{primary_zone}")
         rebid_share = c2.slider(
@@ -881,7 +899,9 @@ def _render_intraday_uplift_section(
                 "Fraction of BESS capacity assumed available for ID rebid "
                 "after the DA position is committed. 0.25 = conservative "
                 "single-cycle screening; higher values assume more "
-                "DA-position headroom is freed for ID."
+                "DA-position headroom is freed for ID. EU practitioner "
+                "ranges typically fall in 0.10–0.40 depending on DA "
+                "commitment strategy and SoC management."
             ),
         )
 
