@@ -69,10 +69,10 @@ def build_daily_revenue_matrix(
         if revenue_col == "lp_revenue":
             rev = daily.set_index("date")["lp_revenue"] * capture_rate
         else:
-            # Greedy fallback: spread * energy * sqrt(eff) * capture_rate per cycle/day.
+            # Greedy fallback mirrors estimate_annual_arbitrage_revenue:
+            # spread * energy * round-trip efficiency * capture_rate.
             energy_mwh = power_mw * duration_hours
-            sqrt_eff = math.sqrt(efficiency)
-            rev = daily.set_index("date")["spread"] * energy_mwh * sqrt_eff * capture_rate
+            rev = daily.set_index("date")["spread"] * energy_mwh * efficiency * capture_rate
 
         # Normalize to per-MW for portfolio comparison.
         series[zone] = rev / power_mw

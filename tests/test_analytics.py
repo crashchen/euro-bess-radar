@@ -544,6 +544,8 @@ class TestIntradayUplift:
         assert result["avg_abs_spread"] == pytest.approx(10.0)
         # uplift = 10 * 0.25 * 2.0 * 1.0 * 1.0 * 365.25 = 1826.25
         assert result["annual_uplift_per_mw"] == pytest.approx(1826.25, rel=1e-3)
+        assert result["annual_uplift_unadjusted_per_mw"] == pytest.approx(1826.25, rel=1e-3)
+        assert result["coverage_adjustment_factor"] == pytest.approx(1.0)
 
     def test_equal_prices_zero_uplift(self) -> None:
         result = calculate_intraday_uplift(
@@ -568,18 +570,23 @@ class TestIntradayUplift:
         assert result["avg_abs_spread"] == result_low["avg_abs_spread"]
 
     def test_partial_coverage_reflected(self) -> None:
-        """When IDA only covers half the DA periods, coverage_pct reflects it."""
+        """Partial IDA coverage reduces headline annualised uplift."""
         result = calculate_intraday_uplift(
             self._make_da(periods=48), self._make_ida(periods=24),
         )
         assert result["coverage_pct"] == pytest.approx(50.0)
+        assert result["coverage_adjustment_factor"] == pytest.approx(0.5)
         assert result["n_periods"] == 24
+        assert result["annual_uplift_unadjusted_per_mw"] == pytest.approx(639.19, abs=0.01)
+        assert result["annual_uplift_per_mw"] == pytest.approx(319.59, abs=0.01)
 
     def test_empty_inputs_safe(self) -> None:
         empty_da = pd.DataFrame(columns=["price_eur_mwh"])
         empty_ida = pd.DataFrame(columns=["intraday_price_eur_mwh"])
         result = calculate_intraday_uplift(empty_da, empty_ida)
         assert result["annual_uplift_per_mw"] == 0.0
+        assert result["annual_uplift_unadjusted_per_mw"] == 0.0
+        assert result["coverage_adjustment_factor"] == 0.0
         assert result["n_periods"] == 0
 
     def test_rebid_share_scales_uplift_linearly(self) -> None:

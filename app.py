@@ -32,6 +32,7 @@ from src.data_ingestion import (
 from src.export import export_to_bytes, export_to_pdf_bytes
 from src.pages import (
     ancillary_services,
+    forward_scenarios,
     heatmaps,
     market_overview,
     renewable_correlation,
@@ -184,6 +185,7 @@ if fetch_btn or "zone_data" in st.session_state:
     tab_names = [
         "Market Overview", "Heatmaps", "Revenue Estimation",
         "Renewable Correlation", "Zone Comparison", "Ancillary Services",
+        "Forward Scenarios",
     ]
     tabs = st.tabs(tab_names)
 
@@ -263,6 +265,16 @@ if fetch_btn or "zone_data" in st.session_state:
             start_date=start_date,
             end_date=end_date,
             anc_df=anc_df,
+        )
+
+    with tabs[6]:
+        forward_scenarios.render(
+            zone_data=zone_data,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            capture_rate=capture_rate,
+            chart_template=chart_template,
         )
 
     # ── Export button ────────────────────────────────────────────────────

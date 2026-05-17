@@ -1087,12 +1087,15 @@ def calculate_intraday_uplift(
 
     Returns:
         Dict with avg_abs_spread, p50, p90, mean_signed, coverage_pct,
-        annual_uplift_per_mw, assumptions_used.
+        annual_uplift_per_mw, annual_uplift_unadjusted_per_mw,
+        coverage_adjustment_factor, assumptions_used.
     """
     empty = {
         "avg_abs_spread": 0.0, "p50_abs": 0.0, "p90_abs": 0.0,
         "mean_signed": 0.0, "coverage_pct": 0.0,
         "annual_uplift_per_mw": 0.0,
+        "annual_uplift_unadjusted_per_mw": 0.0,
+        "coverage_adjustment_factor": 0.0,
         "rebid_share": rebid_share,
         "n_periods": 0,
     }
@@ -1117,12 +1120,15 @@ def calculate_intraday_uplift(
     avg_abs = float(abs_spread.mean())
 
     # Coverage: share of DA periods that also have an IDA price.
-    coverage_pct = round(100.0 * len(merged) / max(len(da), 1), 1)
+    coverage_ratio = len(merged) / max(len(da), 1)
+    coverage_pct = round(100.0 * coverage_ratio, 1)
 
-    annual_uplift = (
+    annual_uplift_unadjusted = (
         avg_abs * rebid_share * duration_hours
         * cycles_per_day * capture_rate * 365.25
     )
+    # Sparse IDA history should not be silently treated as full-year coverage.
+    annual_uplift = annual_uplift_unadjusted * coverage_ratio
 
     return {
         "avg_abs_spread": round(avg_abs, 2),
@@ -1131,6 +1137,8 @@ def calculate_intraday_uplift(
         "mean_signed": round(float(signed.mean()), 2),
         "coverage_pct": coverage_pct,
         "annual_uplift_per_mw": round(annual_uplift, 2),
+        "annual_uplift_unadjusted_per_mw": round(annual_uplift_unadjusted, 2),
+        "coverage_adjustment_factor": round(float(coverage_ratio), 4),
         "rebid_share": rebid_share,
         "n_periods": len(merged),
     }

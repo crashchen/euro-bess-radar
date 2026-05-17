@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.analytics import calculate_daily_spreads
 from src.portfolio import (
     DAYS_PER_YEAR,
     build_daily_revenue_matrix,
@@ -77,8 +78,34 @@ class TestBuildDailyRevenueMatrix:
         out_1mw = build_daily_revenue_matrix(zd, power_mw=1.0)
         out_5mw = build_daily_revenue_matrix(zd, power_mw=5.0)
         # Per-MW normalisation makes the two outputs equal up to ordering of
-        # operations; sqrt(eff) and capture cancel out at the same power.
+        # operations; efficiency and capture cancel out at the same power.
         pd.testing.assert_series_equal(out_1mw["A"], out_5mw["A"], check_exact=False)
+
+    def test_greedy_revenue_uses_roundtrip_efficiency(self) -> None:
+        """Portfolio greedy fallback must match the main revenue model.
+
+        A previous implementation used sqrt(efficiency), which quietly
+        overstated non-LP portfolio returns relative to Revenue Estimation.
+        """
+        prices = _make_zone_prices("2025-01-01", 1, 50.0, 30.0)
+        zd = {"A": prices}
+        efficiency = 0.88
+        capture = 0.70
+        duration = 2.0
+
+        daily = calculate_daily_spreads(prices, duration_hours=duration)
+        expected_per_mw = daily["spread"].iloc[0] * duration * efficiency * capture
+
+        out = build_daily_revenue_matrix(
+            zd,
+            power_mw=1.0,
+            duration_hours=duration,
+            efficiency=efficiency,
+            capture_rate=capture,
+            use_lp_dispatch=False,
+        )
+
+        assert out["A"].iloc[0] == pytest.approx(expected_per_mw)
 
 
 class TestCorrelationMatrix:

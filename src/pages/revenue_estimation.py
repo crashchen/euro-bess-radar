@@ -961,14 +961,26 @@ def _render_intraday_uplift_section(
             help="Positive = IDA prints above DA on average (BESS buys DA, sells IDA).",
         )
         m4.metric(
-            "Est. annual uplift",
+            "Coverage-adjusted uplift",
             f"€{uplift['annual_uplift_per_mw'] * power_mw:,.0f}",
             help=(
                 f"= avg|IDA-DA| * rebid_share={uplift['rebid_share']:.0%} * "
                 f"duration={duration_hours}h * 1 cycle/day * "
-                f"capture={capture_rate:.0%} * 365.25 * power={power_mw} MW."
+                f"capture={capture_rate:.0%} * 365.25 * "
+                f"coverage={uplift['coverage_pct']:.0f}% * power={power_mw} MW."
             ),
         )
+
+        if uplift["coverage_pct"] < 90.0:
+            unadjusted = uplift.get(
+                "annual_uplift_unadjusted_per_mw",
+                uplift["annual_uplift_per_mw"],
+            )
+            st.warning(
+                f"IDA1 coverage is only {uplift['coverage_pct']:.0f}% of DA periods. "
+                "The headline uplift is coverage-adjusted; the full-coverage "
+                f"equivalent would be €{unadjusted * power_mw:,.0f}/yr."
+            )
 
         merged = primary_df[["price_eur_mwh"]].join(
             id_df[["intraday_price_eur_mwh"]], how="inner",
@@ -990,8 +1002,10 @@ def _render_intraday_uplift_section(
         st.caption(
             f"Sample: {uplift['n_periods']} periods "
             f"({uplift['coverage_pct']:.0f}% of DA periods have an IDA1 print). "
-            "This is a screening estimate at a fixed rebid share; the "
-            "two-stage MILP below produces an ex-post upper bound."
+            "The Phase-1 headline scales the annual estimate by this coverage "
+            "instead of assuming sparse IDA prints represent a full year. This "
+            "is a screening estimate at a fixed rebid share; the two-stage "
+            "MILP below produces an ex-post upper bound."
         )
 
         # ── Phase 2: two-stage DA + ID MILP ─────────────────────────────
