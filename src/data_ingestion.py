@@ -1800,7 +1800,7 @@ except ImportError:  # pragma: no cover — defensive against older entsoe-py
 
 
 def _ida_cache_table(zone: str, sequence: int) -> str:
-    """SQLite table name for one zone × IDA round."""
+    """SQLite table name for one zone x IDA round."""
     return f"ida_prices_{zone.lower()}_seq{sequence}"
 
 

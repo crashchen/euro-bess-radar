@@ -26,13 +26,6 @@ from src.config import (
     ANCILLARY_ENERGY_ACTIVATION_SHARE,
     HOURS_PER_YEAR,
 )
-from src.degradation import (
-    calculate_annual_throughput_mwh,
-    calculate_degradation_cost,
-    calculate_levelized_cost_of_storage,
-    calculate_net_revenue,
-    estimate_battery_lifetime,
-)
 from src.data_ingestion import (
     INTRADAY_SUPPORTED_ZONES,
     DataSourceAuthError,
@@ -41,6 +34,13 @@ from src.data_ingestion import (
     build_zone_query_window,
     fetch_intraday_prices,
     read_intraday_cache,
+)
+from src.degradation import (
+    calculate_annual_throughput_mwh,
+    calculate_degradation_cost,
+    calculate_levelized_cost_of_storage,
+    calculate_net_revenue,
+    estimate_battery_lifetime,
 )
 from src.dispatch import solve_joint_capacity_batch
 from src.scenario import (
@@ -900,7 +900,7 @@ def _render_intraday_uplift_section(
                 "after the DA position is committed. 0.25 = conservative "
                 "single-cycle screening; higher values assume more "
                 "DA-position headroom is freed for ID. EU practitioner "
-                "ranges typically fall in 0.10–0.40 depending on DA "
+                "ranges typically fall in 0.10-0.40 depending on DA "
                 "commitment strategy and SoC management."
             ),
         )
@@ -961,9 +961,9 @@ def _render_intraday_uplift_section(
             "Est. annual uplift",
             f"€{uplift['annual_uplift_per_mw'] * power_mw:,.0f}",
             help=(
-                f"= avg|IDA-DA| × rebid_share={uplift['rebid_share']:.0%} × "
-                f"duration={duration_hours}h × 1 cycle/day × "
-                f"capture={capture_rate:.0%} × 365.25 × power={power_mw} MW."
+                f"= avg|IDA-DA| * rebid_share={uplift['rebid_share']:.0%} * "
+                f"duration={duration_hours}h * 1 cycle/day * "
+                f"capture={capture_rate:.0%} * 365.25 * power={power_mw} MW."
             ),
         )
 

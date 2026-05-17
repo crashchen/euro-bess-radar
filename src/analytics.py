@@ -1038,7 +1038,7 @@ def calculate_intraday_uplift(
         "coverage_pct": coverage_pct,
         "annual_uplift_per_mw": round(annual_uplift, 2),
         "rebid_share": rebid_share,
-        "n_periods": int(len(merged)),
+        "n_periods": len(merged),
     }
 
 
