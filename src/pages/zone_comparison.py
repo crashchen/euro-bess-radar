@@ -203,11 +203,10 @@ def _render_portfolio_section(
     """Cross-zone diversification: correlation, Sharpe, efficient frontier."""
     with st.expander("Portfolio Analysis (cross-zone diversification)", expanded=False):
         st.caption(
-            "Treats each zone as a daily-revenue series (EUR/MW) and reports "
+            "Treats each zone as a daily revenue-per-MW series and reports "
             "pairwise correlation, per-zone Sharpe-like ratio, and the "
-            "long-only Markowitz efficient frontier. Daily returns are "
-            "annualised assuming i.i.d. sampling; the frontier sits on the "
-            "intersection of dates where every zone has a complete local day."
+            "long-only Markowitz efficient frontier. Weights are MW shares "
+            "(sum = 1, all ≥ 0)."
         )
 
         rev_df = build_daily_revenue_matrix(
@@ -220,7 +219,16 @@ def _render_portfolio_section(
             use_lp_dispatch=use_lp_dispatch,
         )
         if rev_df.empty:
-            st.info("Need at least one zone with a complete day of data.")
+            # Distinguish "no zone has a complete day" from "zones exist but
+            # share no overlapping dates" — the user fix differs (fetch
+            # longer range vs widen zone selection).
+            if any((df is not None and not df.empty) for df in zone_data.values()):
+                st.info(
+                    "Selected zones have no overlapping complete local days. "
+                    "Try widening the date range so the zones share a sample."
+                )
+            else:
+                st.info("Need at least one zone with a complete day of data.")
             return
         if rev_df.shape[1] < 2:
             st.info(
@@ -229,9 +237,26 @@ def _render_portfolio_section(
             )
             return
 
+        n_aligned = len(rev_df)
         st.caption(
-            f"Aligned sample: {len(rev_df)} days across "
-            f"{rev_df.shape[1]} zones ({', '.join(rev_df.columns)})."
+            f"Aligned sample: {n_aligned} days across "
+            f"{rev_df.shape[1]} zones ({', '.join(rev_df.columns)}). "
+            "Per-zone numbers below are computed on this intersection — "
+            "they will differ from the Zone Comparison table above, which "
+            "uses each zone's full available history."
+        )
+        if n_aligned < 90:
+            st.warning(
+                f"Only {n_aligned} aligned days — frontier and Sharpe values "
+                "are statistically noisy. Treat as directional, not "
+                "investment-grade. 180+ days recommended for meaningful "
+                "correlation structure."
+            )
+        st.caption(
+            "Annual std uses i.i.d. √N scaling, which understates true risk "
+            "because EU DA revenue has weekly seasonality, DST 23/25-h days, "
+            "and weather-driven autocorrelation. Use Sharpe as a *relative* "
+            "ranking only."
         )
 
         # ── Correlation heatmap ─────────────────────────────────────────

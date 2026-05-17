@@ -193,6 +193,16 @@ def compute_min_variance_portfolio(rev_df: pd.DataFrame) -> dict:
     if rev_df.empty:
         return {"weights": pd.Series(dtype=float), "annual_return": 0.0, "annual_risk": 0.0}
     mean_d = rev_df.mean().to_numpy()
+    # Single-row inputs: cov is NaN under the default ddof=1; we still want a
+    # usable answer (equal weights, zero risk) instead of propagating NaN.
+    if len(rev_df) < 2:
+        w = np.full(rev_df.shape[1], 1.0 / rev_df.shape[1])
+        annual_ret = float(w @ mean_d) * DAYS_PER_YEAR
+        return {
+            "weights": pd.Series(w, index=rev_df.columns, name="weight"),
+            "annual_return": annual_ret,
+            "annual_risk": 0.0,
+        }
     cov_d = rev_df.cov().to_numpy()
     w = _solve_min_variance(mean_d, cov_d)
     if w is None:
@@ -211,6 +221,17 @@ def compute_max_sharpe_portfolio(rev_df: pd.DataFrame) -> dict:
     if rev_df.empty:
         return {"weights": pd.Series(dtype=float), "annual_return": 0.0, "annual_risk": 0.0, "sharpe": 0.0}
     mean_d = rev_df.mean().to_numpy()
+    # Single-row inputs: cov is undefined; treat as zero-risk equal-weight so
+    # the dashboard doesn't surface NaN risk + NaN Sharpe.
+    if len(rev_df) < 2:
+        w = np.full(rev_df.shape[1], 1.0 / rev_df.shape[1])
+        annual_ret = float(w @ mean_d) * DAYS_PER_YEAR
+        return {
+            "weights": pd.Series(w, index=rev_df.columns, name="weight"),
+            "annual_return": annual_ret,
+            "annual_risk": 0.0,
+            "sharpe": float("inf") if annual_ret > 0 else 0.0,
+        }
     cov_d = rev_df.cov().to_numpy()
     n = len(mean_d)
 
@@ -262,8 +283,19 @@ def compute_efficient_frontier(
         return pd.DataFrame(columns=["annual_return", "annual_risk"])
 
     mean_d = rev_df.mean().to_numpy()
-    cov_d = rev_df.cov().to_numpy()
     n = len(mean_d)
+
+    # Single-row inputs: cov is undefined under ddof=1. Return one equal-weight
+    # row with zero risk so the UI has something stable to plot.
+    if len(rev_df) < 2:
+        w = np.full(n, 1.0 / n)
+        ret_a = float(w @ mean_d) * DAYS_PER_YEAR
+        row = {"annual_return": ret_a, "annual_risk": 0.0}
+        for zone, weight in zip(rev_df.columns, w, strict=True):
+            row[f"weight_{zone}"] = float(weight)
+        return pd.DataFrame([row])
+
+    cov_d = rev_df.cov().to_numpy()
 
     if n == 1:
         ret_a, risk_a = _portfolio_stats(np.array([1.0]), mean_d, cov_d)
@@ -274,8 +306,14 @@ def compute_efficient_frontier(
     # single-zone means; for each, solve min-variance subject to that return.
     target_lo = float(mean_d.min())
     target_hi = float(mean_d.max())
-    if target_hi <= target_lo:
-        target_grid = np.array([target_lo])
+    if target_hi - target_lo < 1e-9:
+        # All zones share the same mean — frontier collapses to one point.
+        w = np.full(n, 1.0 / n)
+        ret_a, risk_a = _portfolio_stats(w, mean_d, cov_d)
+        row = {"annual_return": ret_a, "annual_risk": risk_a}
+        for zone, weight in zip(rev_df.columns, w, strict=True):
+            row[f"weight_{zone}"] = float(weight)
+        return pd.DataFrame([row])
     else:
         target_grid = np.linspace(target_lo, target_hi, n_points)
 
@@ -292,4 +330,12 @@ def compute_efficient_frontier(
 
     if not rows:
         return pd.DataFrame(columns=["annual_return", "annual_risk"])
-    return pd.DataFrame(rows).sort_values("annual_risk").reset_index(drop=True)
+
+    # Filter to the upper branch: for a given risk level, only keep the
+    # portfolio with the highest return. Sampling target returns from min
+    # to max single-zone mean otherwise leaves dominated lower-branch
+    # points on the chart, which is not what "efficient" means.
+    df = pd.DataFrame(rows).sort_values("annual_risk").reset_index(drop=True)
+    cummax_return = df["annual_return"].cummax()
+    df = df[df["annual_return"] >= cummax_return - 1e-9].reset_index(drop=True)
+    return df

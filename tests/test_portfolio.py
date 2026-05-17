@@ -196,3 +196,44 @@ class TestEfficientFrontier:
     def test_empty_input_returns_empty(self) -> None:
         ef = compute_efficient_frontier(pd.DataFrame())
         assert ef.empty
+
+    def test_dominated_lower_branch_filtered(self) -> None:
+        """An 'efficient' frontier must not contain dominated portfolios:
+        for a given risk level, only the highest-return point should
+        survive. Sampling target returns from worst-to-best mean otherwise
+        leaves lower-branch points on the chart that are strictly worse
+        than the upper branch.
+        """
+        # high_ret_low_risk dominates: 100% weight there is the only
+        # point on the true efficient frontier.
+        df = pd.DataFrame({
+            "low_ret_high_risk": [0.0, 20.0, 0.0, 20.0],
+            "high_ret_low_risk": [19.0, 21.0, 19.0, 21.0],
+        })
+        ef = compute_efficient_frontier(df, n_points=10)
+        # Either the frontier is a single point (the dominant zone) OR all
+        # returns are strictly non-decreasing as risk increases.
+        assert (ef["annual_return"].diff().dropna() >= -1e-6).all()
+
+    def test_single_aligned_day_returns_zero_risk(self) -> None:
+        """With only one common date, daily covariance is undefined; the
+        helpers must still produce a usable equal-weight result rather
+        than NaN risk that leaks into the UI.
+        """
+        df = pd.DataFrame({"A": [10.0], "B": [12.0]})
+        mv = compute_min_variance_portfolio(df)
+        ms = compute_max_sharpe_portfolio(df)
+        ef = compute_efficient_frontier(df)
+        assert mv["annual_risk"] == 0.0
+        assert ms["annual_risk"] == 0.0
+        assert len(ef) == 1
+        assert ef["annual_risk"].iloc[0] == 0.0
+
+    def test_all_zones_same_mean_collapses_to_one_point(self) -> None:
+        """When every zone has the same mean revenue (degenerate frontier),
+        return a single equal-weight point instead of an empty frame.
+        """
+        df = pd.DataFrame({"A": [1.0] * 4, "B": [1.0] * 4})
+        ef = compute_efficient_frontier(df)
+        assert len(ef) == 1
+        assert ef["annual_risk"].iloc[0] == pytest.approx(0.0)
