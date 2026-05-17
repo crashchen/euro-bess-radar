@@ -951,6 +951,81 @@ def calculate_imbalance_spread(
     }
 
 
+def calculate_two_stage_da_id_dispatch(
+    da_prices: pd.DataFrame,
+    intraday_prices: pd.DataFrame,
+    *,
+    tz: str | None = None,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    soc_init_frac: float = 0.0,
+) -> pd.DataFrame:
+    """Per-day two-stage DA + ID dispatch with ex-post-perfect IDA knowledge.
+
+    For every local-tz day with COMPLETE DA and IDA series of matching length,
+    runs :func:`src.dispatch.solve_daily_da_id_dispatch`. Days where the two
+    series do not align at the same cadence are skipped (counted in the
+    ``excluded_days_due_to_missing`` frame attribute) — typical with IDA1
+    series that have sparser coverage than DA.
+
+    Returns:
+        DataFrame columns ``[date, da_revenue, ida_lp_value, implicit_mtm,
+        rebid_uplift, total_cash, da_n_cycles, ida_n_cycles]``.
+    """
+    from src.dispatch import solve_daily_da_id_dispatch
+
+    da_local = _to_local(da_prices, tz)
+    ida_local = _to_local(intraday_prices, tz)
+    da_series = da_local["price_eur_mwh"]
+
+    # Align on intersection of timestamps — the rebid model needs both
+    # prices for the same delivery period.
+    merged = da_local[["price_eur_mwh"]].join(
+        ida_local[["intraday_price_eur_mwh"]], how="inner",
+    )
+    merged = merged.dropna()
+    if merged.empty:
+        out = pd.DataFrame(
+            columns=[
+                "date", "da_revenue", "ida_lp_value", "implicit_mtm",
+                "rebid_uplift", "total_cash", "da_n_cycles", "ida_n_cycles",
+            ],
+        )
+        out.attrs["excluded_days_due_to_missing"] = 0
+        return out
+
+    dt = _infer_interval_hours(merged.index)
+    records = []
+    excluded = 0
+    for date, group in merged.groupby(merged.index.date):
+        sorted_group = group.sort_index()
+        if sorted_group.isna().any().any() or len(sorted_group) < 2:
+            excluded += 1
+            continue
+        result = solve_daily_da_id_dispatch(
+            sorted_group["price_eur_mwh"].to_numpy(),
+            sorted_group["intraday_price_eur_mwh"].to_numpy(),
+            dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+            efficiency=efficiency, soc_init_frac=soc_init_frac,
+        )
+        records.append({
+            "date": date,
+            "da_revenue": result["da_revenue_eur"],
+            "ida_lp_value": result["ida_lp_value_eur"],
+            "implicit_mtm": result["implicit_mtm_eur"],
+            "rebid_uplift": result["rebid_uplift_eur"],
+            "total_cash": result["total_cash_eur"],
+            "da_n_cycles": result["da_n_cycles"],
+            "ida_n_cycles": result["ida_n_cycles"],
+        })
+    # Reference the loop bookkeeping variable so it stays in scope.
+    _ = da_series
+    out = pd.DataFrame.from_records(records)
+    out.attrs["excluded_days_due_to_missing"] = excluded
+    return out
+
+
 def calculate_intraday_uplift(
     da_prices: pd.DataFrame,
     intraday_prices: pd.DataFrame,

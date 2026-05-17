@@ -30,6 +30,8 @@ from src.data_ingestion import (
     fetch_elexon_system_prices,
     fetch_entsoe_imbalance_prices,
     fetch_entsoe_prices,
+    fetch_esios_ancillary_prices,
+    fetch_esios_indicator,
     fetch_fingrid_afrr_prices,
     fetch_fingrid_data,
     fetch_fingrid_fcr_prices,
@@ -1620,3 +1622,156 @@ class TestFetchIntradayPrices:
         assert cached is not None
         assert len(cached) == 4
         assert cached["intraday_price_eur_mwh"].tolist() == [40.0, 42.0, 44.0, 46.0]
+
+
+# ── Test 15: REE ESIOS (Spain) ──────────────────────────────────────────────
+
+class TestFetchEsiosIndicator:
+    @patch("src.data_ingestion.requests.get")
+    @patch("src.data_ingestion.get_esios_api_key", return_value="fake-key")
+    def test_returns_correct_schema(
+        self, _mock_key: MagicMock, mock_get: MagicMock,
+    ) -> None:
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "indicator": {
+                "values": [
+                    {"datetime": "2025-01-01T00:00:00+00:00", "value": 12.5, "geo_id": 8741},
+                    {"datetime": "2025-01-01T01:00:00+00:00", "value": 13.0, "geo_id": 8741},
+                ],
+            },
+        }
+        mock_get.return_value = mock_resp
+
+        df = fetch_esios_indicator(
+            634,
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+            column="secondary_up",
+        )
+        assert list(df.columns) == ["timestamp", "secondary_up"]
+        assert len(df) == 2
+        assert df["secondary_up"].iloc[0] == pytest.approx(12.5)
+
+    @patch("src.data_ingestion.requests.get")
+    @patch("src.data_ingestion.get_esios_api_key", return_value="fake-key")
+    def test_collapses_multi_geo_rows_by_mean(
+        self, _mock_key: MagicMock, mock_get: MagicMock,
+    ) -> None:
+        """ESIOS sometimes returns one row per geo_id for the same timestamp;
+        the fetcher collapses to one row per timestamp so downstream merges
+        on timestamp do not blow up.
+        """
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {
+            "indicator": {
+                "values": [
+                    {"datetime": "2025-01-01T00:00:00+00:00", "value": 10.0, "geo_id": 1},
+                    {"datetime": "2025-01-01T00:00:00+00:00", "value": 20.0, "geo_id": 2},
+                ],
+            },
+        }
+        mock_get.return_value = mock_resp
+        df = fetch_esios_indicator(
+            634,
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+            column="x",
+        )
+        assert len(df) == 1
+        assert df["x"].iloc[0] == pytest.approx(15.0)  # mean of 10 and 20
+
+    @patch("src.data_ingestion.get_esios_api_key", return_value="")
+    def test_missing_key_raises_auth_error(self, _mock_key: MagicMock) -> None:
+        with pytest.raises(DataSourceAuthError):
+            fetch_esios_indicator(
+                634,
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
+
+    @patch("src.data_ingestion.time.sleep")
+    @patch("src.data_ingestion.requests.get")
+    @patch("src.data_ingestion.get_esios_api_key", return_value="bad-key")
+    def test_http_401_propagates_as_auth_error(
+        self, _mock_key: MagicMock, mock_get: MagicMock, _mock_sleep: MagicMock,
+    ) -> None:
+        unauth = MagicMock()
+        unauth.status_code = 401
+        unauth.raise_for_status = MagicMock()
+        mock_get.return_value = unauth
+        with pytest.raises(DataSourceAuthError):
+            fetch_esios_indicator(
+                634,
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
+        # Bypassed retry: one GET, not multiple
+        assert mock_get.call_count == 1
+
+    @patch("src.data_ingestion.requests.get")
+    @patch("src.data_ingestion.get_esios_api_key", return_value="fake-key")
+    def test_bundle_merges_indicators_on_timestamp(
+        self, _mock_key: MagicMock, mock_get: MagicMock,
+    ) -> None:
+        """fetch_esios_ancillary_prices should merge 4 indicator series into a
+        single wide table keyed on timestamp.
+        """
+        def _make_payload(value: float) -> dict:
+            return {
+                "indicator": {
+                    "values": [
+                        {"datetime": "2025-01-01T00:00:00+00:00", "value": value, "geo_id": 1},
+                        {"datetime": "2025-01-01T01:00:00+00:00", "value": value + 1, "geo_id": 1},
+                    ],
+                },
+            }
+
+        # Each indicator returns a slightly different value
+        side_effects = [
+            MagicMock(json=lambda v=v: _make_payload(v), status_code=200, raise_for_status=MagicMock())
+            for v in (10.0, 11.0, 20.0, 21.0)
+        ]
+        mock_get.side_effect = side_effects
+        df = fetch_esios_ancillary_prices(
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+        )
+        expected_cols = {
+            "timestamp",
+            "secondary_up_capacity_eur_mw",
+            "secondary_down_capacity_eur_mw",
+            "tertiary_up_energy_eur_mwh",
+            "tertiary_down_energy_eur_mwh",
+        }
+        assert expected_cols <= set(df.columns)
+        assert len(df) == 2
+        assert df["secondary_up_capacity_eur_mw"].iloc[0] == pytest.approx(10.0)
+
+    @patch("src.data_ingestion.fetch_esios_indicator")
+    def test_bundle_continues_when_one_indicator_fails(
+        self, mock_fetch: MagicMock,
+    ) -> None:
+        """A partial failure should not erase successful indicators — the
+        user is better off with N-1 series than zero.
+        """
+        good_df = pd.DataFrame({
+            "timestamp": [pd.Timestamp("2025-01-01", tz="UTC")],
+            "secondary_up_capacity_eur_mw": [12.0],
+        })
+        mock_fetch.side_effect = [
+            good_df,
+            DataSourceNetworkError("oops"),
+            DataSourceNetworkError("oops"),
+            DataSourceNetworkError("oops"),
+        ]
+        df = fetch_esios_ancillary_prices(
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+        )
+        assert "secondary_up_capacity_eur_mw" in df.columns
+        assert len(df) == 1

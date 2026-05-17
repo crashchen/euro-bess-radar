@@ -26,6 +26,14 @@ REGELLEISTUNG_API_URL = (
 )
 NETZTRANSPARENZ_BASE_URL = "https://www.netztransparenz.de"
 
+# REE ESIOS (Spain). Token required — request via consultasios@ree.es.
+ESIOS_BASE_URL = "https://api.esios.ree.es"
+ESIOS_API_KEY = os.getenv("ESIOS_API_KEY", "")
+
+# Terna (Italy) transparency report — CSV download endpoint for MSD
+# (Mercato Servizi di Dispacciamento) accepted bids.
+TERNA_BASE_URL = "https://www.terna.it"
+
 # --- FX Rates (approximate annual averages, update as needed) ---
 GBP_EUR_YEARLY: dict[int, float] = {
     2023: 1.15,
@@ -173,6 +181,11 @@ def get_api_key() -> str:
 def get_fingrid_api_key() -> str:
     """Load optional Fingrid API key from environment."""
     return os.getenv("FINGRID_API_KEY", "")
+
+
+def get_esios_api_key() -> str:
+    """Load optional ESIOS (REE Spain) API key from environment."""
+    return os.getenv("ESIOS_API_KEY", "")
 
 
 def is_elexon_zone(zone_code: str) -> bool:

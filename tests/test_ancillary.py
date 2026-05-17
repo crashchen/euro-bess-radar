@@ -54,6 +54,25 @@ class TestTemplateGeneration:
         assert lines[1].split(",")[1] == "0"
         assert lines[2].split(",")[1] == "1"
 
+    def test_it_balancing_parses_marginal_prices(self) -> None:
+        """IT_BALANCING uses the same marginal_price_up/down columns as
+        RO_BALANCING — verify they flow into energy_price_up/down_eur_mwh
+        so downstream stack maths see the data on the right side.
+        """
+        from src.ancillary import parse_ancillary_csv
+
+        csv_str = (
+            "date,hour,marginal_price_up,marginal_price_down\n"
+            "2025-01-01,1,55.0,30.0\n"
+            "2025-01-01,2,60.0,28.0\n"
+        )
+        df = parse_ancillary_csv(csv_str, "IT_BALANCING")
+        assert len(df) == 2
+        assert "energy_price_up_eur_mwh" in df.columns
+        assert df["energy_price_up_eur_mwh"].iloc[0] == 55.0
+        assert df["energy_price_down_eur_mwh"].iloc[0] == 30.0
+        assert (df["zone"] == "IT").all()
+
 # ── Parsing ──────────────────────────────────────────────────────────────────
 
 @pytest.fixture

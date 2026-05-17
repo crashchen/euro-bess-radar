@@ -20,6 +20,7 @@ from src.analytics import (
     calculate_monthly_spreads,
     calculate_negative_price_hours,
     calculate_spread_percentiles,
+    calculate_two_stage_da_id_dispatch,
     calculate_yearly_revenue_breakdown,
     compare_zones,
     estimate_annual_arbitrage_revenue,
@@ -964,3 +965,61 @@ class TestDailyDispatch:
         )
         # Within 2% — VOM cost accounts for the small difference
         assert rev_lp["annual_revenue_eur"] >= rev_greedy["annual_revenue_eur"] * 0.98
+
+
+# ── Two-stage DA + ID dispatch (P5-A Phase 2) ───────────────────────────────
+
+class TestTwoStageDaIdDispatch:
+    def _make_prices(self, base: float, swing: float, periods: int = 48) -> pd.DataFrame:
+        """24h-cycle prices with a clean spread for ordered dispatch."""
+        idx = pd.date_range("2025-01-01", periods=periods, freq="h", tz="UTC")
+        hours = np.arange(periods) % 24
+        prices = base + swing * np.sin((hours - 5) * np.pi / 12)
+        df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+        df.index.name = "timestamp"
+        return df
+
+    def test_two_day_window_produces_two_rows(self) -> None:
+        da = self._make_prices(50.0, 25.0, periods=48)
+        ida = da.rename(columns={"price_eur_mwh": "intraday_price_eur_mwh"})
+        result = calculate_two_stage_da_id_dispatch(
+            da, ida, tz="UTC", power_mw=1.0, duration_hours=2.0,
+        )
+        assert len(result) == 2
+        assert {"date", "da_revenue", "ida_lp_value", "implicit_mtm",
+                "rebid_uplift", "total_cash"} <= set(result.columns)
+
+    def test_uplift_zero_when_ida_equals_da(self) -> None:
+        da = self._make_prices(50.0, 25.0, periods=48)
+        ida = da.rename(columns={"price_eur_mwh": "intraday_price_eur_mwh"})
+        result = calculate_two_stage_da_id_dispatch(
+            da, ida, tz="UTC", power_mw=1.0, duration_hours=2.0,
+        )
+        # Within tiny MILP tolerance.
+        assert result["rebid_uplift"].abs().max() < 1.0
+
+    def test_empty_when_no_overlap(self) -> None:
+        da = self._make_prices(50.0, 25.0, periods=24)
+        idx2 = pd.date_range("2026-06-01", periods=24, freq="h", tz="UTC")
+        ida = pd.DataFrame(
+            {"intraday_price_eur_mwh": [60.0] * 24}, index=idx2,
+        )
+        ida.index.name = "timestamp"
+        result = calculate_two_stage_da_id_dispatch(da, ida, tz="UTC")
+        assert result.empty
+
+    def test_total_cash_decomposition(self) -> None:
+        """For each day, total_cash should equal da_revenue + rebid_uplift
+        within solver tolerance.
+        """
+        da = self._make_prices(50.0, 25.0, periods=48)
+        ida_arr = da["price_eur_mwh"].to_numpy() + 5.0
+        ida = pd.DataFrame(
+            {"intraday_price_eur_mwh": ida_arr}, index=da.index,
+        )
+        ida.index.name = "timestamp"
+        result = calculate_two_stage_da_id_dispatch(
+            da, ida, tz="UTC", power_mw=1.0, duration_hours=2.0,
+        )
+        diff = (result["total_cash"] - (result["da_revenue"] + result["rebid_uplift"])).abs()
+        assert diff.max() < 0.01

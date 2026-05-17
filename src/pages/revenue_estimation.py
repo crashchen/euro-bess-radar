@@ -13,6 +13,7 @@ from src.analytics import (
     calculate_imbalance_spread,
     calculate_intraday_uplift,
     calculate_monthly_revenue,
+    calculate_two_stage_da_id_dispatch,
     calculate_yearly_revenue_breakdown,
     estimate_annual_arbitrage_revenue,
 )
@@ -987,6 +988,71 @@ def _render_intraday_uplift_section(
         st.caption(
             f"Sample: {uplift['n_periods']} periods "
             f"({uplift['coverage_pct']:.0f}% of DA periods have an IDA1 print). "
-            "This is a screening estimate at a fixed rebid share; a proper "
-            "two-stage DA + ID dispatch model is a Phase-2 deliverable."
+            "This is a screening estimate at a fixed rebid share; the "
+            "two-stage MILP below produces an ex-post upper bound."
         )
+
+        # ── Phase 2: two-stage DA + ID MILP ─────────────────────────────
+        st.divider()
+        st.markdown("**Phase 2 — Two-Stage DA + ID Dispatch (ex-post perfect)**")
+        st.caption(
+            "Stage 1 solves the MILP at DA prices (the committed position "
+            "before IDA1 clears). Stage 2 re-dispatches the BESS against "
+            "the realised IDA1 prints, settling the difference on the DA "
+            "volumes. With sunk DA cash and zero transaction costs, this "
+            "is the ex-post perfect-foresight upper bound on rebid value — "
+            "interpret it as a ceiling, not a forecast."
+        )
+        two_stage = calculate_two_stage_da_id_dispatch(
+            primary_df, id_df, tz=zone_tz, power_mw=power_mw,
+            duration_hours=duration_hours, efficiency=0.88, soc_init_frac=0.0,
+        )
+        if two_stage.empty:
+            st.info("Not enough overlapping DA+IDA1 days for the MILP.")
+        else:
+            n_days = len(two_stage)
+            total_da = float(two_stage["da_revenue"].sum())
+            total_uplift = float(two_stage["rebid_uplift"].sum())
+            total_cash = float(two_stage["total_cash"].sum())
+            uplift_share = (
+                100.0 * total_uplift / total_cash if total_cash > 0 else 0.0
+            )
+            # Annualise on the same 365.25-day basis used elsewhere.
+            scale = 365.25 / n_days if n_days > 0 else 0.0
+            t1, t2, t3, t4 = st.columns(4)
+            t1.metric(
+                "Sample DA Revenue",
+                f"€{total_da:,.0f}",
+                help=f"Sum across {n_days} aligned days.",
+            )
+            t2.metric(
+                "Sample Rebid Uplift",
+                f"€{total_uplift:,.0f}",
+                delta=f"+{uplift_share:.1f}% vs DA-only",
+            )
+            t3.metric(
+                "Annualised Total",
+                f"€{total_cash * scale:,.0f}",
+                help=f"Sample {n_days} days scaled to 365.25 days.",
+            )
+            t4.metric(
+                "Annualised Uplift",
+                f"€{total_uplift * scale:,.0f}",
+                help="Ceiling — assumes perfect IDA knowledge at Stage 2.",
+            )
+
+            # Per-day uplift bar
+            ts_plot = two_stage.copy()
+            ts_plot["date"] = pd.to_datetime(ts_plot["date"])
+            fig_ts = px.bar(
+                ts_plot, x="date", y="rebid_uplift",
+                title="Per-Day Rebid Uplift (Stage 2 - Stage 1)",
+                labels={"rebid_uplift": "EUR", "date": ""},
+                template=chart_template,
+            )
+            st.plotly_chart(fig_ts, width="stretch")
+            st.caption(
+                "Rebid uplift is clamped at zero per day (the Stage-1 "
+                "schedule is always a feasible Stage-2 solution, so the "
+                "uplift cannot be negative)."
+            )

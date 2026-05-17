@@ -350,6 +350,100 @@ def solve_joint_capacity_batch(
     return result
 
 
+def solve_daily_da_id_dispatch(
+    da_prices: np.ndarray,
+    ida_prices: np.ndarray,
+    dt: float,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    soc_init_frac: float = 0.5,
+) -> dict:
+    """Two-stage DA + ID dispatch with ex-post-perfect IDA knowledge.
+
+    Stage 1 solves the DA-only MILP using ``da_prices``; this is the
+    position committed before IDA1 clears. Stage 2 assumes the operator
+    can observe the IDA1 print and re-dispatch physically at IDA prices,
+    settling the DA-vs-IDA difference on the originally committed
+    volumes.
+
+    With sunk DA settlement and no rebid transaction costs, the
+    optimal Stage 2 reduces to a standalone MILP at IDA prices: the
+    DA position contributes only a constant mark-to-market term to
+    total cash, not a constraint on physical flows. This is the
+    "ex-post perfect-foresight" upper bound on rebid value, useful as
+    a screening benchmark and the natural extension of the Phase-1
+    average-spread heuristic.
+
+    Cash accounting (per interval, then summed):
+        da_value      = (da_discharge - da_charge) * DA * dt
+        ida_lp_value  = (final_discharge - final_charge) * IDA * dt
+                        (maximised by re-solving solve_daily_lp at IDA)
+        implicit_mtm  = (da_discharge - da_charge) * IDA * dt
+                        (= what holding DA to maturity is worth at IDA)
+        rebid_uplift  = ida_lp_value - implicit_mtm
+                        (extra cash from rebid; >=0 by construction
+                         because the Stage-1 DA schedule is itself a
+                         feasible Stage-2 solution at any IDA prices)
+        total_cash    = da_value + rebid_uplift
+
+    Returns:
+        Dict with da_revenue_eur, ida_lp_value_eur, implicit_mtm_eur,
+        rebid_uplift_eur, total_cash_eur, plus DA-stage and IDA-stage
+        dispatch details (p_charge, p_discharge, soc, n_cycles).
+    """
+    n = len(da_prices)
+    if n == 0 or n != len(ida_prices) or np.isnan(da_prices).any() or np.isnan(ida_prices).any():
+        zeros = np.zeros(max(n, 0))
+        return {
+            "da_revenue_eur": 0.0,
+            "ida_lp_value_eur": 0.0,
+            "implicit_mtm_eur": 0.0,
+            "rebid_uplift_eur": 0.0,
+            "total_cash_eur": 0.0,
+            "da_p_charge": zeros, "da_p_discharge": zeros,
+            "ida_p_charge": zeros, "ida_p_discharge": zeros,
+            "da_soc": np.zeros(max(n, 0) + 1),
+            "ida_soc": np.zeros(max(n, 0) + 1),
+            "da_n_cycles": 0.0, "ida_n_cycles": 0.0,
+        }
+
+    stage_1 = solve_daily_lp(
+        da_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency, soc_init_frac=soc_init_frac,
+    )
+    stage_2 = solve_daily_lp(
+        ida_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency, soc_init_frac=soc_init_frac,
+    )
+
+    da_net = stage_1["p_discharge"] - stage_1["p_charge"]
+    implicit_mtm = float((da_net * ida_prices * dt).sum())
+    ida_lp_value = stage_2["revenue_eur"]  # already net of VOM
+    rebid_uplift = ida_lp_value - implicit_mtm
+    # Numerical floor: with VOM the Stage-2 MILP can in theory return a
+    # value epsilon below the DA-as-Stage-2 baseline due to solver
+    # tolerance. Clamp at zero so the UI never shows a negative "uplift."
+    rebid_uplift = max(rebid_uplift, 0.0)
+    total_cash = stage_1["revenue_eur"] + rebid_uplift
+
+    return {
+        "da_revenue_eur": round(stage_1["revenue_eur"], 6),
+        "ida_lp_value_eur": round(ida_lp_value, 6),
+        "implicit_mtm_eur": round(implicit_mtm, 6),
+        "rebid_uplift_eur": round(rebid_uplift, 6),
+        "total_cash_eur": round(total_cash, 6),
+        "da_p_charge": stage_1["p_charge"],
+        "da_p_discharge": stage_1["p_discharge"],
+        "ida_p_charge": stage_2["p_charge"],
+        "ida_p_discharge": stage_2["p_discharge"],
+        "da_soc": stage_1["soc"],
+        "ida_soc": stage_2["soc"],
+        "da_n_cycles": stage_1["n_cycles"],
+        "ida_n_cycles": stage_2["n_cycles"],
+    }
+
+
 def solve_dispatch_batch(
     price_df: pd.DataFrame,
     power_mw: float = 1.0,

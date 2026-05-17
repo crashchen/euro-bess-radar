@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from src.dispatch import (
+    solve_daily_da_id_dispatch,
     solve_daily_joint_capacity_lp,
     solve_daily_lp,
     solve_dispatch_batch,
@@ -325,3 +326,71 @@ class TestSolveJointCapacityBatch:
 
         assert len(result) == 1
         assert result.attrs["excluded_days_due_to_missing"] == 1
+
+
+class TestSolveDailyDaIdDispatch:
+    def test_ida_equal_to_da_yields_zero_uplift(self) -> None:
+        """When IDA prints the same as DA, the optimal Stage-2 solution is
+        the Stage-1 schedule itself, so rebid uplift = 0.
+        """
+        prices = np.array([20.0] * 12 + [80.0] * 12)
+        r = solve_daily_da_id_dispatch(
+            prices, prices.copy(), dt=1.0, power_mw=1.0,
+            duration_hours=2.0, efficiency=0.88, soc_init_frac=0.0,
+        )
+        assert r["rebid_uplift_eur"] == pytest.approx(0.0, abs=1.0)
+        # Total cash equals DA revenue when nothing changes.
+        assert r["total_cash_eur"] == pytest.approx(r["da_revenue_eur"], abs=1.0)
+
+    def test_ida_flipped_unlocks_cancellation_arb(self) -> None:
+        """If IDA prices flip relative to DA, the DA position becomes
+        unfavourable; cancelling at IDA captures cancellation arbitrage.
+        Total cash should significantly exceed DA-only.
+        """
+        da_prices = np.array([20.0] * 12 + [80.0] * 12)
+        ida_prices = np.array([80.0] * 12 + [20.0] * 12)
+        r = solve_daily_da_id_dispatch(
+            da_prices, ida_prices, dt=1.0, power_mw=1.0,
+            duration_hours=2.0, efficiency=0.88, soc_init_frac=0.0,
+        )
+        assert r["rebid_uplift_eur"] > 50.0  # at least ~50 EUR captured
+        assert r["total_cash_eur"] > r["da_revenue_eur"] + 50.0
+
+    def test_uplift_is_non_negative(self) -> None:
+        """Stage-1 dispatch is always a feasible Stage-2 solution at any
+        IDA prices, so the optimal uplift cannot drop below zero —
+        guaranteed by both the math and our explicit max(.,0) clamp.
+        """
+        da_prices = np.array([20.0] * 12 + [80.0] * 12)
+        for ida_offset in [-30.0, -10.0, 0.0, 10.0, 30.0]:
+            ida = da_prices + ida_offset
+            r = solve_daily_da_id_dispatch(
+                da_prices, ida, dt=1.0, power_mw=1.0,
+                duration_hours=2.0, efficiency=0.88, soc_init_frac=0.0,
+            )
+            assert r["rebid_uplift_eur"] >= -1e-6
+
+    def test_mismatched_lengths_returns_zero(self) -> None:
+        r = solve_daily_da_id_dispatch(
+            np.array([50.0] * 24),
+            np.array([60.0] * 23),
+            dt=1.0,
+        )
+        assert r["da_revenue_eur"] == 0.0
+        assert r["rebid_uplift_eur"] == 0.0
+
+    def test_nan_input_returns_zero(self) -> None:
+        prices = np.array([20.0, np.nan, 80.0])
+        r = solve_daily_da_id_dispatch(prices, prices.copy(), dt=1.0)
+        assert r["rebid_uplift_eur"] == 0.0
+
+    def test_total_cash_equals_da_plus_uplift(self) -> None:
+        da_prices = np.array([10.0] * 8 + [60.0] * 8 + [10.0] * 8)
+        ida_prices = np.array([15.0] * 8 + [55.0] * 8 + [12.0] * 8)
+        r = solve_daily_da_id_dispatch(
+            da_prices, ida_prices, dt=1.0, power_mw=1.0,
+            duration_hours=2.0, efficiency=0.88, soc_init_frac=0.0,
+        )
+        assert r["total_cash_eur"] == pytest.approx(
+            r["da_revenue_eur"] + r["rebid_uplift_eur"], abs=0.01,
+        )

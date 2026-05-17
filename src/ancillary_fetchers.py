@@ -52,6 +52,34 @@ AUTO_FETCHERS: dict[str, list[dict[str, Any]]] = {
             "source": "ENTSO-E",
         },
     ],
+    "NL": [
+        {
+            "name": "Imbalance prices",
+            "fetcher": "fetch_entsoe_imbalance_prices",
+            "source": "ENTSO-E (TenneT)",
+        },
+    ],
+    "BE": [
+        {
+            "name": "Imbalance prices",
+            "fetcher": "fetch_entsoe_imbalance_prices",
+            "source": "ENTSO-E (Elia)",
+        },
+    ],
+    "FR": [
+        {
+            "name": "Imbalance prices",
+            "fetcher": "fetch_entsoe_imbalance_prices",
+            "source": "ENTSO-E (RTE)",
+        },
+    ],
+    "AT": [
+        {
+            "name": "Imbalance prices",
+            "fetcher": "fetch_entsoe_imbalance_prices",
+            "source": "ENTSO-E (APG)",
+        },
+    ],
     "SE_3": [
         {
             "name": "Imbalance prices",
@@ -106,6 +134,13 @@ AUTO_FETCHERS: dict[str, list[dict[str, Any]]] = {
             "name": "Imbalance prices",
             "fetcher": "fetch_entsoe_imbalance_prices",
             "source": "ENTSO-E",
+        },
+    ],
+    "ES": [
+        {
+            "name": "Secondary/tertiary reserves",
+            "fetcher": "fetch_esios_ancillary_prices",
+            "source": "ESIOS (REE)",
         },
     ],
 }

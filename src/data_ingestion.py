@@ -23,12 +23,14 @@ from src.config import (
     DEFAULT_QUERY_TIMEZONE,
     ELEXON_BASE_URL,
     ELEXON_MARKET_INDEX_ENDPOINT,
+    ESIOS_BASE_URL,
     FINGRID_BASE_URL,
     GBP_EUR_YEARLY,
     MAX_SHORT_GAP_HOURS,
     PRICE_CACHE_TTL_HOURS,
     REGELLEISTUNG_API_URL,
     get_api_key,
+    get_esios_api_key,
     get_fingrid_api_key,
     get_zone_timezone,
     is_elexon_zone,
@@ -1956,6 +1958,157 @@ def fetch_intraday_prices(
     except sqlite3.DatabaseError as exc:  # pragma: no cover — defensive
         logger.warning("Could not persist IDA%d cache for %s: %s", sequence, zone, exc)
     return out
+
+
+# ── REE ESIOS (Spain) ─────────────────────────────────────────────────────────
+
+# Stable indicator IDs at ESIOS for the most common balancing-reserve products
+# used in the Spanish electricity market. Capacity prices are EUR/MW, energy
+# prices are EUR/MWh; ESIOS publishes them hourly. IDs are stable across
+# ESIOS API versions but new SRS rules (Nov 2024) added 15-min indicators
+# alongside the legacy hourly ones — we use the hourly set so cadence
+# matches DA prices.
+ESIOS_INDICATORS: dict[str, dict[str, int]] = {
+    "secondary_up_capacity":   {"id": 634, "unit": "EUR/MW"},
+    "secondary_down_capacity": {"id": 635, "unit": "EUR/MW"},
+    "tertiary_up_energy":      {"id": 672, "unit": "EUR/MWh"},
+    "tertiary_down_energy":    {"id": 673, "unit": "EUR/MWh"},
+}
+
+
+@retry(max_retries=3, backoff=2.0, exceptions=(requests.RequestException, ValueError))
+def _call_esios_api(
+    indicator_id: int,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> dict[str, Any]:
+    """One ESIOS indicator GET request with retries.
+
+    401/403 bypass retry as DataSourceAuthError so the UI can prompt for
+    ESIOS_API_KEY rather than looping a guaranteed failure.
+    """
+    api_key = get_esios_api_key()
+    if not api_key:
+        raise DataSourceAuthError(
+            "ESIOS_API_KEY missing. Request one at consultasios@ree.es "
+            "and add it to .env."
+        )
+    headers = {
+        "Accept": "application/json; application/vnd.esios-api-v1+json",
+        "Content-Type": "application/json",
+        "x-api-key": api_key,
+    }
+    params = {
+        "start_date": start.isoformat(),
+        "end_date": end.isoformat(),
+    }
+    resp = requests.get(
+        f"{ESIOS_BASE_URL}/indicators/{indicator_id}",
+        params=params, headers=headers, timeout=30,
+    )
+    _raise_if_auth_failed(resp, "ESIOS", "Check ESIOS_API_KEY in .env.")
+    resp.raise_for_status()
+    return resp.json()
+
+
+def _parse_esios_indicator(
+    payload: dict[str, Any], column: str,
+) -> pd.DataFrame:
+    """Convert an ESIOS indicator JSON payload to a UTC-indexed DataFrame.
+
+    The response shape is ``{"indicator": {"values": [{"datetime", "value",
+    "geo_id", ...}, ...]}}``; we keep only the time series and drop geo
+    breakdowns since BESS revenue valuation is at system level.
+    """
+    indicator = payload.get("indicator", {}) if isinstance(payload, dict) else {}
+    values = indicator.get("values") or []
+    if not values:
+        return pd.DataFrame(columns=["timestamp", column])
+
+    df = pd.DataFrame(values)
+    if "datetime" not in df.columns or "value" not in df.columns:
+        raise DataSourceParseError(
+            f"ESIOS indicator payload missing datetime/value columns: "
+            f"{list(df.columns)}"
+        )
+    df["timestamp"] = pd.to_datetime(df["datetime"], utc=True, errors="coerce")
+    df[column] = pd.to_numeric(df["value"], errors="coerce")
+    df = df.dropna(subset=["timestamp", column])
+    # ESIOS sometimes returns rows per geo_id; collapse to one row per timestamp.
+    df = df.groupby("timestamp", as_index=False)[column].mean()
+    return df[["timestamp", column]].sort_values("timestamp").reset_index(drop=True)
+
+
+def fetch_esios_indicator(
+    indicator_id: int,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    *,
+    column: str = "value",
+) -> pd.DataFrame:
+    """Fetch a single ESIOS indicator time series.
+
+    Args:
+        indicator_id: ESIOS indicator ID (see ``ESIOS_INDICATORS`` for the
+            most common balancing-reserve products).
+        start: Start timestamp (UTC).
+        end: Exclusive end timestamp (UTC).
+        column: Output column name (default ``"value"``).
+
+    Returns:
+        DataFrame with columns ``[timestamp, <column>]`` (UTC, hourly).
+    """
+    logger.info("Fetching ESIOS indicator %d", indicator_id)
+    try:
+        payload = _call_esios_api(indicator_id, start, end)
+    except requests.RequestException as exc:
+        raise DataSourceNetworkError(
+            f"ESIOS indicator {indicator_id} fetch failed: {exc}"
+        ) from exc
+    return _parse_esios_indicator(payload, column)
+
+
+def fetch_esios_ancillary_prices(
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> pd.DataFrame:
+    """Fetch the ESIOS bundle of secondary/tertiary reserve prices.
+
+    Returns:
+        DataFrame with columns:
+        ``[timestamp, secondary_up_capacity_eur_mw,
+        secondary_down_capacity_eur_mw, tertiary_up_energy_eur_mwh,
+        tertiary_down_energy_eur_mwh]``.
+
+        Individual indicator failures are logged but don't fail the call —
+        the user still gets whatever indicators ESIOS returned. An
+        all-empty result returns an empty frame with the schema columns
+        present so downstream merges remain stable.
+    """
+    column_map = {
+        "secondary_up_capacity":   "secondary_up_capacity_eur_mw",
+        "secondary_down_capacity": "secondary_down_capacity_eur_mw",
+        "tertiary_up_energy":      "tertiary_up_energy_eur_mwh",
+        "tertiary_down_energy":    "tertiary_down_energy_eur_mwh",
+    }
+    merged: pd.DataFrame | None = None
+    for slug, output_col in column_map.items():
+        meta = ESIOS_INDICATORS[slug]
+        try:
+            df = fetch_esios_indicator(meta["id"], start, end, column=output_col)
+        except (DataSourceNetworkError, DataSourceParseError) as exc:
+            logger.warning(
+                "ESIOS indicator %d (%s) unavailable: %s",
+                meta["id"], slug, exc,
+            )
+            continue
+        if df.empty:
+            continue
+        merged = df if merged is None else merged.merge(df, on="timestamp", how="outer")
+
+    if merged is None or merged.empty:
+        return pd.DataFrame(columns=["timestamp", *column_map.values()])
+    return merged.sort_values("timestamp").reset_index(drop=True)
 
 
 # ── Connection tests ──────────────────────────────────────────────────────────

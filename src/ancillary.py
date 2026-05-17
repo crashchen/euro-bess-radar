@@ -84,6 +84,21 @@ ANCILLARY_TEMPLATES: dict[str, dict] = {
         ],
         "resolution": "30min settlement periods",
     },
+    "IT_BALANCING": {
+        "description": (
+            "Italy MSD (Mercato Servizi di Dispacciamento) accepted-bid prices "
+            "from Terna's Transparency Report. Used when richer-than-imbalance "
+            "data is needed; ENTSO-E imbalance via auto-fetch still covers all "
+            "7 IT zones for free. The Terna live API requires OAuth credentials "
+            "(developer.terna.it) — defer to manual CSV upload for now."
+        ),
+        "source_url": "https://www.terna.it/en/electric-system/transparency-report/download-center",
+        "expected_columns": [
+            "date", "hour",
+            "marginal_price_up", "marginal_price_down",
+        ],
+        "resolution": "hourly",
+    },
 }
 
 
