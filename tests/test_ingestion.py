@@ -30,6 +30,7 @@ from src.data_ingestion import (
     fetch_elexon_system_prices,
     fetch_entsoe_imbalance_prices,
     fetch_entsoe_prices,
+    fetch_intraday_prices,
     fetch_fingrid_afrr_prices,
     fetch_fingrid_data,
     fetch_fingrid_fcr_prices,
@@ -1437,3 +1438,82 @@ class TestFetchEntsoeImbalancePrices:
         assert "imbalance_price_long" in result.columns
         assert "imbalance_price_short" in result.columns
         assert len(result) == 24
+
+
+# ── Test 14: ENTSO-E Intraday Auction prices (IDA1/2/3) ────────────────────
+
+class TestFetchIntradayPrices:
+    def test_unsupported_zone_returns_none(self) -> None:
+        """Zones outside INTRADAY_SUPPORTED_ZONES return None without an API call."""
+        result = fetch_intraday_prices(
+            "RO",
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+        )
+        assert result is None
+
+    def test_invalid_sequence_raises(self) -> None:
+        with pytest.raises(ValueError):
+            fetch_intraday_prices(
+                "DE_LU",
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+                sequence=4,
+            )
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    def test_returns_correct_schema(
+        self, _mock_key: MagicMock, mock_client_cls: MagicMock,
+    ) -> None:
+        idx = pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC")
+        raw = pd.Series([45.0 + i for i in range(24)], index=idx, name="price")
+        mock_client = MagicMock()
+        mock_client.query_intraday_prices.return_value = raw
+        mock_client_cls.return_value = mock_client
+
+        result = fetch_intraday_prices(
+            "DE_LU",
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+            sequence=1,
+        )
+        assert result is not None
+        assert "intraday_price_eur_mwh" in result.columns
+        assert len(result) == 24
+        # UTC-normalised index
+        assert str(result.index.tz) == "UTC"
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    def test_no_data_returns_none_not_error(
+        self, _mock_key: MagicMock, mock_client_cls: MagicMock,
+    ) -> None:
+        """entsoe-py raises NoMatchingDataError (a ValueError subclass) when
+        a zone simply has no IDA data — surface as None, not an exception.
+        """
+        mock_client = MagicMock()
+        mock_client.query_intraday_prices.side_effect = ValueError("no data")
+        mock_client_cls.return_value = mock_client
+        result = fetch_intraday_prices(
+            "DE_LU",
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+        )
+        assert result is None
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    def test_network_error_propagates(
+        self, _mock_key: MagicMock, mock_client_cls: MagicMock,
+    ) -> None:
+        import requests as _rq
+        mock_client = MagicMock()
+        mock_client.query_intraday_prices.side_effect = _rq.Timeout("boom")
+        mock_client_cls.return_value = mock_client
+        with pytest.raises(DataSourceNetworkError):
+            fetch_intraday_prices(
+                "DE_LU",
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )

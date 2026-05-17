@@ -951,6 +951,97 @@ def calculate_imbalance_spread(
     }
 
 
+def calculate_intraday_uplift(
+    da_prices: pd.DataFrame,
+    intraday_prices: pd.DataFrame,
+    *,
+    tz: str | None = None,
+    rebid_share: float = 0.25,
+    cycles_per_day: float = 1.0,
+    capture_rate: float = 0.70,
+    duration_hours: float = 1.0,
+) -> dict[str, float]:
+    """Estimate additional BESS revenue from re-bidding into the intraday
+    auction after a DA position.
+
+    Joins DA and IDA prices on the delivery timestamp, computes the absolute
+    ID-DA spread per period, then annualises a screening-grade rebid uplift:
+
+        uplift_per_mw =
+            mean(|IDA - DA|) * rebid_share * duration_hours
+                * cycles_per_day * capture_rate * 365.25
+
+    Caveats baked into the formula (and surfaced in the UI):
+    - Single-stage estimate: we do not model two-stage DA + ID dispatch.
+    - rebid_share assumes only that share of the BESS capacity is free for
+      ID after the DA position is committed; the default 0.25 is
+      intentionally conservative.
+    - Treats the absolute price delta as fully captureable on average,
+      which over-states value when IDA-DA differences are uncorrelated
+      with feasible BESS rebid direction.
+
+    Args:
+        da_prices: DataFrame with 'price_eur_mwh' column, DatetimeIndex (UTC).
+        intraday_prices: DataFrame with 'intraday_price_eur_mwh' column,
+            DatetimeIndex (UTC).
+        tz: IANA timezone for local-time grouping (only affects coverage stats).
+        rebid_share: Fraction of BESS energy assumed free for ID after DA.
+        cycles_per_day: Average DA cycles already counted; ID uplift assumes a
+            similar throughput is available for rebid.
+        capture_rate: Share of theoretical spread actually realised.
+        duration_hours: BESS duration in hours.
+
+    Returns:
+        Dict with avg_abs_spread, p50, p90, mean_signed, coverage_pct,
+        annual_uplift_per_mw, assumptions_used.
+    """
+    empty = {
+        "avg_abs_spread": 0.0, "p50_abs": 0.0, "p90_abs": 0.0,
+        "mean_signed": 0.0, "coverage_pct": 0.0,
+        "annual_uplift_per_mw": 0.0,
+        "rebid_share": rebid_share,
+        "n_periods": 0,
+    }
+    if da_prices is None or da_prices.empty:
+        return empty
+    if intraday_prices is None or intraday_prices.empty:
+        return empty
+    if "intraday_price_eur_mwh" not in intraday_prices.columns:
+        return empty
+
+    da = _to_local(da_prices, tz)
+    ida = _to_local(intraday_prices, tz)
+
+    merged = da[["price_eur_mwh"]].join(
+        ida[["intraday_price_eur_mwh"]], how="inner",
+    ).dropna()
+    if merged.empty:
+        return empty
+
+    signed = merged["intraday_price_eur_mwh"] - merged["price_eur_mwh"]
+    abs_spread = signed.abs()
+    avg_abs = float(abs_spread.mean())
+
+    # Coverage: share of DA periods that also have an IDA price.
+    coverage_pct = round(100.0 * len(merged) / max(len(da), 1), 1)
+
+    annual_uplift = (
+        avg_abs * rebid_share * duration_hours
+        * cycles_per_day * capture_rate * 365.25
+    )
+
+    return {
+        "avg_abs_spread": round(avg_abs, 2),
+        "p50_abs": round(float(abs_spread.quantile(0.5)), 2),
+        "p90_abs": round(float(abs_spread.quantile(0.9)), 2),
+        "mean_signed": round(float(signed.mean()), 2),
+        "coverage_pct": coverage_pct,
+        "annual_uplift_per_mw": round(annual_uplift, 2),
+        "rebid_share": rebid_share,
+        "n_periods": int(len(merged)),
+    }
+
+
 # ── Zone comparison ──────────────────────────────────────────────────────────
 
 def compare_zones(

@@ -1784,6 +1784,82 @@ def fetch_entsoe_imbalance_prices(
     return None
 
 
+# ── ENTSO-E Intraday Auction Prices ──────────────────────────────────────────
+
+# IDA = Intraday Auction. ENTSO-E publishes opening (IDA1) and reopening
+# (IDA2 / IDA3) auction prices for the zones that participate in SIDC. Other
+# zones still trade intraday continuously but those rolling weighted averages
+# are not exposed through entsoe-py — we treat them as unavailable here.
+INTRADAY_SUPPORTED_ZONES: set[str] = {"DE_LU", "NL", "BE", "FR", "AT", "IT_NORD"}
+
+
+def fetch_intraday_prices(
+    zone: str,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+    *,
+    sequence: int = 1,
+) -> pd.DataFrame | None:
+    """Fetch ENTSO-E intraday auction (IDA) prices for a zone.
+
+    Args:
+        zone: Bidding zone code.
+        start: Start timestamp (UTC).
+        end: End timestamp (UTC).
+        sequence: IDA round — 1 (15:00 D-1), 2 (22:00 D-1), or 3 (10:00 day-of).
+
+    Returns:
+        DataFrame indexed by UTC timestamp with column
+        ``intraday_price_eur_mwh``, or None when the zone does not publish
+        intraday auction results.
+    """
+    if zone not in INTRADAY_SUPPORTED_ZONES:
+        logger.info("Intraday auction prices not available for %s", zone)
+        return None
+    if sequence not in (1, 2, 3):
+        raise ValueError(f"IDA sequence must be 1, 2 or 3 (got {sequence})")
+
+    try:
+        client = EntsoePandasClient(api_key=get_api_key())
+    except OSError as exc:
+        raise DataSourceAuthError(
+            "ENTSO-E API key missing or invalid. Set ENTSOE_API_KEY in .env."
+        ) from exc
+
+    start_q = start.tz_convert(DEFAULT_QUERY_TIMEZONE)
+    end_q = end.tz_convert(DEFAULT_QUERY_TIMEZONE)
+
+    logger.info("Fetching ENTSO-E IDA%d prices for %s", sequence, zone)
+    try:
+        series = client.query_intraday_prices(
+            zone, start=start_q, end=end_q, sequence=sequence,
+        )
+    except requests.RequestException as exc:
+        raise DataSourceNetworkError(
+            f"ENTSO-E intraday IDA{sequence} fetch failed for {zone}: {exc}"
+        ) from exc
+    except (ValueError, TypeError, KeyError) as exc:
+        # entsoe-py raises NoMatchingDataError as a ValueError subclass when a
+        # zone simply has no IDA data for the window; treat that as "no data"
+        # not as a hard error so the UI can surface a friendly message.
+        logger.info(
+            "ENTSO-E intraday IDA%d unavailable for %s: %s",
+            sequence, zone, exc,
+        )
+        return None
+
+    if series is None or (isinstance(series, (pd.DataFrame, pd.Series)) and series.empty):
+        return None
+
+    df = series.to_frame(name="intraday_price_eur_mwh") if isinstance(series, pd.Series) else series
+    df.index = df.index.tz_convert("UTC")
+    df.index.name = "timestamp"
+    df["intraday_price_eur_mwh"] = pd.to_numeric(
+        df.iloc[:, 0], errors="coerce",
+    )
+    return df[["intraday_price_eur_mwh"]]
+
+
 # ── Connection tests ──────────────────────────────────────────────────────────
 
 def test_elexon_connection() -> None:

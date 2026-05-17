@@ -15,6 +15,7 @@ from src.analytics import (
     build_spread_heatmap,
     calculate_daily_spreads,
     calculate_imbalance_spread,
+    calculate_intraday_uplift,
     calculate_monthly_revenue,
     calculate_monthly_spreads,
     calculate_negative_price_hours,
@@ -512,6 +513,87 @@ class TestImbalanceSpread:
         imb.index.name = "timestamp"
         result = calculate_imbalance_spread(da, imb)
         assert result["avg_spread"] == 0.0
+
+
+# ── Intraday uplift (P5-A Phase 1) ──────────────────────────────────────────
+
+class TestIntradayUplift:
+    def _make_da(self, periods: int = 24, price: float = 50.0) -> pd.DataFrame:
+        idx = pd.date_range("2025-01-01", periods=periods, freq="h", tz="UTC")
+        df = pd.DataFrame({"price_eur_mwh": [price] * periods}, index=idx)
+        df.index.name = "timestamp"
+        return df
+
+    def _make_ida(self, periods: int = 24, price: float = 60.0) -> pd.DataFrame:
+        idx = pd.date_range("2025-01-01", periods=periods, freq="h", tz="UTC")
+        df = pd.DataFrame({"intraday_price_eur_mwh": [price] * periods}, index=idx)
+        df.index.name = "timestamp"
+        return df
+
+    def test_basic_uplift_positive_when_prices_differ(self) -> None:
+        result = calculate_intraday_uplift(
+            self._make_da(price=50.0),
+            self._make_ida(price=60.0),
+            rebid_share=0.25,
+            cycles_per_day=1.0,
+            capture_rate=1.0,
+            duration_hours=2.0,
+        )
+        # avg|IDA-DA| = 10
+        assert result["avg_abs_spread"] == pytest.approx(10.0)
+        # uplift = 10 * 0.25 * 2.0 * 1.0 * 1.0 * 365.25 = 1826.25
+        assert result["annual_uplift_per_mw"] == pytest.approx(1826.25, rel=1e-3)
+
+    def test_equal_prices_zero_uplift(self) -> None:
+        result = calculate_intraday_uplift(
+            self._make_da(price=50.0), self._make_ida(price=50.0),
+        )
+        assert result["avg_abs_spread"] == 0.0
+        assert result["annual_uplift_per_mw"] == 0.0
+
+    def test_signed_mean_distinguishes_direction(self) -> None:
+        """Signed mean tells you which side prints higher on average; the
+        absolute average alone hides direction.
+        """
+        result = calculate_intraday_uplift(
+            self._make_da(price=50.0), self._make_ida(price=60.0),
+        )
+        assert result["mean_signed"] == pytest.approx(10.0)
+        result_low = calculate_intraday_uplift(
+            self._make_da(price=50.0), self._make_ida(price=40.0),
+        )
+        assert result_low["mean_signed"] == pytest.approx(-10.0)
+        # Absolute spread is symmetric.
+        assert result["avg_abs_spread"] == result_low["avg_abs_spread"]
+
+    def test_partial_coverage_reflected(self) -> None:
+        """When IDA only covers half the DA periods, coverage_pct reflects it."""
+        result = calculate_intraday_uplift(
+            self._make_da(periods=48), self._make_ida(periods=24),
+        )
+        assert result["coverage_pct"] == pytest.approx(50.0)
+        assert result["n_periods"] == 24
+
+    def test_empty_inputs_safe(self) -> None:
+        empty_da = pd.DataFrame(columns=["price_eur_mwh"])
+        empty_ida = pd.DataFrame(columns=["intraday_price_eur_mwh"])
+        result = calculate_intraday_uplift(empty_da, empty_ida)
+        assert result["annual_uplift_per_mw"] == 0.0
+        assert result["n_periods"] == 0
+
+    def test_rebid_share_scales_uplift_linearly(self) -> None:
+        r_low = calculate_intraday_uplift(
+            self._make_da(price=50.0), self._make_ida(price=60.0),
+            rebid_share=0.1,
+        )
+        r_high = calculate_intraday_uplift(
+            self._make_da(price=50.0), self._make_ida(price=60.0),
+            rebid_share=0.4,
+        )
+        # 0.4 / 0.1 = 4x (rounding to 2 dp introduces ~0.01 EUR noise).
+        assert r_high["annual_uplift_per_mw"] == pytest.approx(
+            r_low["annual_uplift_per_mw"] * 4.0, abs=0.05,
+        )
 
 
 # ── Renewable correlation ────────────────────────────────────────────────────

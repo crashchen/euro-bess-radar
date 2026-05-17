@@ -11,6 +11,7 @@ from src.analytics import (
     calculate_daily_dispatch,
     calculate_daily_spreads,
     calculate_imbalance_spread,
+    calculate_intraday_uplift,
     calculate_monthly_revenue,
     calculate_yearly_revenue_breakdown,
     estimate_annual_arbitrage_revenue,
@@ -31,6 +32,14 @@ from src.degradation import (
     calculate_levelized_cost_of_storage,
     calculate_net_revenue,
     estimate_battery_lifetime,
+)
+from src.data_ingestion import (
+    INTRADAY_SUPPORTED_ZONES,
+    DataSourceAuthError,
+    DataSourceNetworkError,
+    DataSourceParseError,
+    build_zone_query_window,
+    fetch_intraday_prices,
 )
 from src.dispatch import solve_joint_capacity_batch
 from src.scenario import (
@@ -295,6 +304,19 @@ def render(
                             "Supplementary revenue opportunity from DA-vs-imbalance price spread. "
                             "Not added to headline total without co-optimization."
                         )
+
+        # Intraday uplift (P5-A Phase 1)
+        _render_intraday_uplift_section(
+            primary_zone=primary_zone,
+            primary_df=primary_df,
+            zone_tz=zone_tz,
+            start_date=start_date,
+            end_date=end_date,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            capture_rate=capture_rate,
+            chart_template=chart_template,
+        )
     else:
         dispatch_label = revenue.get("dispatch_method", "greedy")
         r1.metric(
@@ -810,3 +832,141 @@ def _render_monthly_seasonality(
     )
     report_figures["monthly_seasonality"] = fig_monthly
     st.plotly_chart(fig_monthly, width="stretch")
+
+
+def _render_intraday_uplift_section(
+    *,
+    primary_zone: str,
+    primary_df: pd.DataFrame,
+    zone_tz: str,
+    start_date,
+    end_date,
+    power_mw: float,
+    duration_hours: float,
+    capture_rate: float,
+    chart_template: str,
+) -> None:
+    """ENTSO-E intraday auction (IDA1) uplift estimation — Phase-1 screening.
+
+    Fetches IDA1 prices on demand (so the dashboard doesn't slow down for
+    users who don't need ID analysis), computes the per-period |IDA-DA|
+    spread, and shows an annualised rebid uplift estimate at a
+    user-controlled rebid share.
+    """
+    if primary_zone not in INTRADAY_SUPPORTED_ZONES:
+        with st.expander("Intraday Uplift (IDA1)", expanded=False):
+            st.info(
+                f"ENTSO-E does not publish intraday auction prices for "
+                f"{primary_zone}. Supported zones: "
+                + ", ".join(sorted(INTRADAY_SUPPORTED_ZONES))
+                + "."
+            )
+        return
+
+    cache_key = f"intraday_cache::{primary_zone}::{start_date}::{end_date}"
+    with st.expander("Intraday Uplift (IDA1)", expanded=False):
+        st.caption(
+            "Estimates additional revenue from re-bidding into the ENTSO-E "
+            "Intraday Auction 1 (IDA1, 15:00 D-1) after a DA position. "
+            "Phase-1 screening only — does not solve a two-stage DA + ID "
+            "dispatch problem."
+        )
+
+        c1, c2 = st.columns([1, 3])
+        fetch = c1.button("Fetch IDA1 prices", key=f"fetch_ida_{primary_zone}")
+        rebid_share = c2.slider(
+            "Rebid share",
+            min_value=0.0, max_value=0.5, value=0.25, step=0.05,
+            help=(
+                "Fraction of BESS capacity assumed available for ID rebid "
+                "after the DA position is committed. 0.25 = conservative "
+                "single-cycle screening; higher values assume more "
+                "DA-position headroom is freed for ID."
+            ),
+        )
+
+        if fetch:
+            try:
+                api_start, api_end = build_zone_query_window(
+                    primary_zone, start_date, end_date,
+                )
+                with st.spinner(f"Fetching IDA1 for {primary_zone}..."):
+                    df = fetch_intraday_prices(
+                        primary_zone, api_start, api_end, sequence=1,
+                    )
+                if df is None or df.empty:
+                    st.warning("No IDA1 data returned for this window.")
+                    st.session_state.pop(cache_key, None)
+                else:
+                    st.session_state[cache_key] = df
+                    st.success(f"Fetched {len(df)} IDA1 periods.")
+            except DataSourceAuthError as exc:
+                st.error(f"Auth error: {exc}")
+                return
+            except (DataSourceNetworkError, DataSourceParseError) as exc:
+                st.error(f"Fetch failed: {exc}")
+                return
+
+        id_df = st.session_state.get(cache_key)
+        if id_df is None or id_df.empty:
+            st.info("Click *Fetch IDA1 prices* to load intraday auction data.")
+            return
+
+        uplift = calculate_intraday_uplift(
+            primary_df,
+            id_df,
+            tz=zone_tz,
+            rebid_share=rebid_share,
+            cycles_per_day=1.0,
+            capture_rate=capture_rate,
+            duration_hours=duration_hours,
+        )
+
+        if uplift["n_periods"] == 0:
+            st.warning(
+                "DA and IDA1 series have no overlapping periods in this "
+                "window — nothing to compute."
+            )
+            return
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Avg |IDA-DA|", f"€{uplift['avg_abs_spread']:.1f}/MWh")
+        m2.metric("P90 |IDA-DA|", f"€{uplift['p90_abs']:.1f}/MWh")
+        m3.metric(
+            "Mean signed",
+            f"€{uplift['mean_signed']:+.1f}/MWh",
+            help="Positive = IDA prints above DA on average (BESS buys DA, sells IDA).",
+        )
+        m4.metric(
+            "Est. annual uplift",
+            f"€{uplift['annual_uplift_per_mw'] * power_mw:,.0f}",
+            help=(
+                f"= avg|IDA-DA| × rebid_share={uplift['rebid_share']:.0%} × "
+                f"duration={duration_hours}h × 1 cycle/day × "
+                f"capture={capture_rate:.0%} × 365.25 × power={power_mw} MW."
+            ),
+        )
+
+        merged = primary_df[["price_eur_mwh"]].join(
+            id_df[["intraday_price_eur_mwh"]], how="inner",
+        ).dropna()
+        if not merged.empty:
+            signed = (
+                merged["intraday_price_eur_mwh"] - merged["price_eur_mwh"]
+            ).rename("IDA - DA (EUR/MWh)")
+            fig = px.histogram(
+                signed.reset_index(),
+                x="IDA - DA (EUR/MWh)",
+                nbins=50,
+                title=f"IDA1 vs DA price delta ({primary_zone})",
+                template=chart_template,
+            )
+            fig.add_vline(x=0, line_dash="dot", line_color="grey")
+            st.plotly_chart(fig, width="stretch")
+
+        st.caption(
+            f"Sample: {uplift['n_periods']} periods "
+            f"({uplift['coverage_pct']:.0f}% of DA periods have an IDA1 print). "
+            "This is a screening estimate at a fixed rebid share; a proper "
+            "two-stage DA + ID dispatch model is a Phase-2 deliverable."
+        )

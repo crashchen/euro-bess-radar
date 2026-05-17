@@ -65,6 +65,13 @@ Tests in `tests/` are heavily mocked (no live API calls) and mirror the module l
 - Covers: RO, SE_3, Italian bidding zones, and other ENTSO-E zones where imbalance data is available
 - Returns: imbalance/balancing prices in EUR/MWh
 
+### ENTSO-E Intraday Auction Prices (IDA1/2/3)
+- Uses same ENTSO-E API key as DA prices via `entsoe-py.query_intraday_prices(zone, start, end, sequence)`.
+- `INTRADAY_SUPPORTED_ZONES` (data_ingestion.py) lists the SIDC participants that publish auction results — currently `{DE_LU, NL, BE, FR, AT, IT_NORD}`. Other zones return `None` rather than raising.
+- Sequence: 1 = IDA1 (15:00 D-1 opening auction), 2 = IDA2 (22:00 D-1), 3 = IDA3 (10:00 day-of-delivery). The dashboard currently uses IDA1 only.
+- `entsoe-py` raises `NoMatchingDataError` (a `ValueError` subclass) when a supported zone has no IDA data for the requested window — this is mapped to `None`, not a hard error.
+- Auth failures raise `DataSourceAuthError`; network failures raise `DataSourceNetworkError`.
+
 ## Geographic Scope
 
 Three tiers of zones:
@@ -133,10 +140,11 @@ Fingrid / Regelleistung / Elexon all detect HTTP 401/403 via the shared `_raise_
 - **Mutual exclusion is binary, not relaxed**: `solve_daily_lp()` and `solve_daily_joint_capacity_lp()` both use a binary mode variable via scipy `integrality`. A pure LP relaxation of `p_charge + p_discharge <= power_mw` is degenerate at negative prices (the solver can earn revenue by simultaneously charging and discharging through round-trip losses). Do not weaken this back to an LP-only constraint.
 - **Annualisation caveat**: DA arbitrage revenue is extrapolated from the user-selected sample window, so short windows (for example winter-only periods) can materially overstate or understate full-year merchant potential
 - **Portfolio analysis** (`src/portfolio.py`): treats each zone as a daily-revenue-per-MW series and runs Pearson correlation, Sharpe-like mean/std, and a long-only Markowitz frontier via scipy SLSQP. `build_daily_revenue_matrix()` inner-joins on dates so a single missing local day in any zone drops that date from the whole portfolio view — this keeps correlations and frontier weights computed on a single common sample. Annualisation uses the same `365.25`-day convention as `estimate_annual_arbitrage_revenue` and assumes i.i.d. days (`std_annual = std_daily * sqrt(365.25)`); for short or seasonal samples treat the Sharpe number as a relative ranking, not an absolute investment metric.
+- **Intraday uplift (P5-A Phase 1)** (`analytics.calculate_intraday_uplift`): joins DA and IDA1 prices on the delivery timestamp and reports `avg|IDA-DA|`, `mean_signed` (positive ⇒ IDA usually prints above DA), and an annualised rebid uplift = `avg|IDA-DA| * rebid_share * duration_hours * cycles_per_day * capture_rate * 365.25`. The default `rebid_share=0.25` is intentionally conservative; the model is a single-stage screening estimate, NOT a proper two-stage DA + ID dispatch. The Revenue Estimation UI fetches IDA1 on demand (button-gated, cached per `(zone, start, end)` in session state) so the dashboard does not slow down for users who do not need ID analysis. Phase 2 (proper two-stage DA + ID dispatch) is a future workstream.
 
 ## Commands
 - `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
-- `python -m pytest tests/ -v` — run all tests (295 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
+- `python -m pytest tests/ -v` — run all tests (309 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
 - `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
 - `streamlit run app.py` — launch the dashboard.
 - `python -c "from src.data_ingestion import test_elexon_connection; test_elexon_connection()"` — smoke-test Elexon (no API key needed).
