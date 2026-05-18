@@ -84,8 +84,18 @@ def parse_forward_csv(csv_content: str | Path) -> pd.DataFrame:
         text = csv_content.read_text(encoding="utf-8-sig")
     else:
         text = csv_content
-    df = pd.read_csv(io.StringIO(text), comment="#")
+    # Strip only FULL-line comments (optional leading whitespace + '#').
+    # pandas' built-in `comment="#"` would otherwise truncate any field
+    # value containing '#' (e.g. a `source` cell "Desk #1" -> "Desk ").
+    no_comments = "\n".join(
+        line for line in text.splitlines() if not line.lstrip().startswith("#")
+    )
+    df = pd.read_csv(io.StringIO(no_comments))
     df.columns = [c.strip().lower() for c in df.columns]
+    # Preserve user-supplied row order before any further sorting — used by
+    # build_forward_synthetic_prices to honour the "later-in-CSV wins on
+    # overlap" contract.
+    df["_csv_order"] = range(len(df))
 
     missing = [c for c in REQUIRED_COLUMNS if c not in df.columns]
     if missing:
@@ -125,10 +135,24 @@ def parse_forward_csv(csv_content: str | Path) -> pd.DataFrame:
     df["shape"] = df["shape"].fillna("base").astype(str).str.strip().str.lower()
     df["contract"] = df["contract"].astype(str).where(df["contract"].notna(), other=None)
 
+    # peak/offpeak rows are stored but the v1 synthetic-price path only
+    # supports baseload. Surface a warning so users don't think a "peak"
+    # price was applied to the peak hours specifically.
+    non_base = df[df["shape"] != "base"]
+    if not non_base.empty:
+        logger.warning(
+            "Forward CSV contains %d row(s) with shape != 'base'. "
+            "v1 forward-scenario engine treats every row as baseload; "
+            "peak/offpeak shaping is not yet implemented and these rows "
+            "will be applied at their listed price as if they were base.",
+            len(non_base),
+        )
+
     return df[[
         "zone", "contract",
         "delivery_start", "delivery_end",
         "price_eur_mwh", "shape", "source", "as_of",
+        "_csv_order",
     ]].sort_values(["zone", "delivery_start"]).reset_index(drop=True)
 
 
@@ -178,6 +202,18 @@ def _build_normalised_shape(
     # hour-of-week = weekday * 24 + hour
     bucket = series.index.weekday * 24 + series.index.hour
     by_bucket = series.groupby(bucket).mean()
+    covered = int(by_bucket.shape[0])
+    if covered < 168:
+        # A short history (e.g. 3 days = 72 buckets) silently filled the
+        # missing buckets with factor=1.0 in earlier versions. That made
+        # the synthetic curve under-spread for buckets the history never
+        # saw. Warn so the user knows the shape is partial.
+        logger.warning(
+            "Historical reference covers only %d/168 hour-of-week buckets; "
+            "missing buckets fall back to factor 1.0 (flat). Fetch a "
+            "longer history (>=1 week) for a fully-recovered shape.",
+            covered,
+        )
     overall = float(by_bucket.mean())
     if overall <= 0:
         # Degenerate shape (all-negative or zero historical mean). Fall back to
@@ -225,7 +261,7 @@ def build_forward_synthetic_prices(
     target_tz = tz or "UTC"
 
     frames: list[pd.DataFrame] = []
-    for priority, (_, row) in enumerate(zone_forwards.iterrows()):
+    for _, row in zone_forwards.iterrows():
         start = pd.Timestamp(row["delivery_start"]).tz_localize(target_tz)
         end = pd.Timestamp(row["delivery_end"]).tz_localize(target_tz)
         if end <= start:
@@ -234,8 +270,19 @@ def build_forward_synthetic_prices(
         if len(idx) == 0:
             continue
         local_bucket = idx.weekday * 24 + idx.hour
-        factors = shape.reindex(local_bucket).to_numpy()
+        raw_factors = shape.reindex(local_bucket).to_numpy()
+        # Per-contract renormalisation: the formula's invariant is
+        # mean(hourly_price) == forward_base over the CONTRACT window.
+        # The global mean-1 normalisation alone only guarantees that
+        # invariant when the window spans full weeks; a 24h or weekend
+        # contract otherwise comes in above or below its quoted base.
+        window_mean = float(raw_factors.mean())
+        factors = raw_factors / window_mean if window_mean > 0 else raw_factors
         prices = float(row["price_eur_mwh"]) * factors
+        # Preserve the user's CSV row order as overlap priority so the
+        # later-in-CSV-wins contract holds even after parse_forward_csv
+        # has sorted rows by (zone, delivery_start).
+        priority = int(row.get("_csv_order", 0))
         frame = pd.DataFrame({
             "price_eur_mwh": prices,
             "contract": row.get("contract") or "",
@@ -313,26 +360,39 @@ def summarise_forward_revenue(
         end = pd.Timestamp(row["delivery_end"])
         mask = (daily["date"] >= start) & (daily["date"] < end)
         period = daily.loc[mask]
-        n_days = len(period)
-        if n_days == 0:
+        if period.empty:
             continue
-        # LP revenue path wins when available; otherwise greedy spread * energy.
-        if "lp_revenue" in period.columns and period["lp_revenue"].notna().any():
-            per_day = period["lp_revenue"].mean() * capture_rate
+        # LP revenue path wins when available. Drop NaN LP days from
+        # BOTH the mean and the day count so a single NaN doesn't
+        # inflate the period revenue (mean ignores NaN but multiplying
+        # by raw n_days would still scale a partial-coverage mean to
+        # a full-period total).
+        use_lp = (
+            "lp_revenue" in period.columns
+            and period["lp_revenue"].notna().any()
+        )
+        if use_lp:
+            lp_clean = period["lp_revenue"].dropna()
+            per_day = float(lp_clean.mean()) * capture_rate
+            valid_days = len(lp_clean)
         else:
+            spread_clean = period["spread"].dropna() if "spread" in period.columns else pd.Series(dtype=float)
             per_day = (
-                period["spread"].mean()
+                float(spread_clean.mean())
                 * energy_mwh
                 * (efficiency ** 0.5)
                 * capture_rate
-            )
-        period_revenue = per_day * n_days
+            ) if not spread_clean.empty else 0.0
+            valid_days = len(spread_clean)
+        if valid_days == 0:
+            continue
+        period_revenue = per_day * valid_days
         annualised_per_mw = per_day * 365.25 / power_mw if power_mw > 0 else 0.0
         rows.append({
             "contract": row.get("contract") or "",
             "delivery_start": start,
             "delivery_end": end,
-            "days_in_period": n_days,
+            "days_in_period": valid_days,
             "forward_base": float(row["price_eur_mwh"]),
             "avg_daily_spread": float(period["spread"].mean()) if "spread" in period.columns else float("nan"),
             "period_revenue_eur": round(period_revenue, 2),

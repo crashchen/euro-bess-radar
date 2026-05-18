@@ -66,17 +66,30 @@ def render(
 
             **Method**: for each contract,
             `hourly_price[t] = forward_base * historical_shape[hour_of_week(t)]`,
-            where the historical shape comes from the cached DA series for
-            the same zone (the one shown in Market Overview). This
-            preserves the intra-day spread pattern that drives BESS
-            arbitrage while letting the level move with the forward.
+            normalised per contract window so the synthetic mean equals
+            the forward base over the contract period. The historical
+            shape comes from the cached DA series for the same zone (the
+            one shown in Market Overview). This preserves the intra-day
+            spread pattern that drives BESS arbitrage while letting the
+            level move with the forward.
 
             **Caveats** to read every output through:
-            - Real future shape may differ from history (RE penetration
-              shifts the spread curve over time).
+            - **Shape drift over the horizon**: high-RE penetration is
+              steepening the "duck curve" year-on-year. Applying a 2025
+              shape to a Cal-2030 contract systematically understates
+              the spread you'd actually see in 2030 — treat far-dated
+              numbers as a low bound, and consider running a sensitivity
+              with an RE-amplified shape if you trust the analysis to
+              drive investment sizing.
             - Capture rate is applied identically to forward and historical
               analyses; revisit this assumption when the forward implies a
               very different volatility regime.
+            - **Peak / off-peak rows are not yet shape-aware**: the v1
+              engine treats every row's price as a baseload. A "peak"
+              quote will not be applied to the peak hours specifically;
+              upload baseload quotes only until that's added.
+            - **Forward is a single number per period**: this engine
+              cannot recover intra-period shape from forwards alone.
             - Currently shows BESS case at {power_mw:.1f} MW / {duration_hours}h /
               {efficiency:.0%} eff / {capture_rate:.0%} capture (set in
               the sidebar).
@@ -145,14 +158,23 @@ def render(
 
     all_summaries: list[pd.DataFrame] = []
     all_synth: dict[str, pd.DataFrame] = {}
-    for zone in fwd_with_history:
+    # Long-horizon contracts (multi-year forwards) make the MILP path
+    # sequential and slow — show a progress bar so the user knows the
+    # browser hasn't frozen.
+    progress = st.progress(0.0, text="Solving forward dispatch...")
+    for i, zone in enumerate(fwd_with_history):
         tz = get_zone_timezone(zone)
         synth = build_forward_synthetic_prices(
             forward_df, zone_data[zone], zone=zone, tz=tz,
         )
         if synth.empty:
+            progress.progress((i + 1) / len(fwd_with_history), text=f"Skipped {zone} (no synth)")
             continue
         all_synth[zone] = synth
+        progress.progress(
+            (i + 0.3) / len(fwd_with_history),
+            text=f"Solving MILP dispatch for {zone} ({len(synth):,} hours)...",
+        )
         # Use MILP dispatch when the sidebar opts in by data volume; for
         # screening we just run the LP path always — it's cheap and the
         # same path the rest of the dashboard uses.
@@ -171,9 +193,12 @@ def render(
             efficiency=efficiency, capture_rate=capture_rate,
         )
         if summary.empty:
+            progress.progress((i + 1) / len(fwd_with_history), text=f"No revenue for {zone}")
             continue
         summary.insert(0, "zone", zone)
         all_summaries.append(summary)
+        progress.progress((i + 1) / len(fwd_with_history), text=f"Done: {zone}")
+    progress.empty()
 
     if not all_summaries:
         st.warning(
@@ -230,18 +255,35 @@ def render(
         },
     )
 
-    # Synthetic price preview chart per zone
+    # Synthetic price preview chart per zone. For multi-year forwards the
+    # hourly point count (>8760 per year) makes Plotly sluggish; downsample
+    # to a daily mean when the period exceeds ~3000 hours so the browser
+    # stays responsive.
     st.markdown("**Synthetic hourly price preview**")
     zone_pick = st.selectbox(
         "Zone", options=list(all_synth.keys()),
         index=0, key="forward_preview_zone",
     )
-    synth_pick = all_synth[zone_pick].reset_index()
+    synth_pick_full = all_synth[zone_pick]
+    if len(synth_pick_full) > 3000:
+        synth_pick = (
+            synth_pick_full[["price_eur_mwh", "contract"]]
+            .resample("D")
+            .agg({"price_eur_mwh": "mean", "contract": "first"})
+            .reset_index()
+        )
+        chart_title = (
+            f"Synthetic forward daily-mean prices - {zone_pick} "
+            f"(downsampled from {len(synth_pick_full):,} hourly points)"
+        )
+    else:
+        synth_pick = synth_pick_full.reset_index()
+        chart_title = f"Synthetic forward hourly prices - {zone_pick}"
     fig = px.line(
         synth_pick,
         x="timestamp", y="price_eur_mwh",
         color="contract",
-        title=f"Synthetic forward hourly prices — {zone_pick}",
+        title=chart_title,
         labels={"price_eur_mwh": "EUR/MWh", "timestamp": ""},
         template=chart_template,
     )

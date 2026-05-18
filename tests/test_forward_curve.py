@@ -285,6 +285,132 @@ class TestSummariseForwardRevenue:
         assert out.empty
 
 
+class TestReviewFollowUpFixes:
+    """Regressions for findings from Codex/Gemini review of 8d275b3."""
+
+    def test_inline_hash_in_source_field_preserved(self) -> None:
+        """Codex P2: pd.read_csv(..., comment='#') was truncating field
+        values that contained '#' (e.g. 'Desk #1' -> 'Desk '). Strip
+        comments only on full lines so cell contents survive.
+        """
+        csv = (
+            "# leading comment\n"
+            "zone,delivery_start,delivery_end,price_eur_mwh,source\n"
+            "DE_LU,2027-01-01,2027-02-01,80,Desk #1\n"
+        )
+        df = parse_forward_csv(csv)
+        assert df["source"].iloc[0] == "Desk #1"
+
+    def test_non_base_shape_warns_logger(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Gemini P0: peak/offpeak rows must surface a warning so the user
+        knows their peak price is being treated as baseload by the v1 engine.
+        """
+        import logging
+        csv = (
+            "zone,delivery_start,delivery_end,price_eur_mwh,shape\n"
+            "DE_LU,2027-01-01,2027-02-01,150,peak\n"
+        )
+        with caplog.at_level(logging.WARNING, logger="src.forward_curve"):
+            parse_forward_csv(csv)
+        assert any("shape != 'base'" in msg for msg in caplog.messages)
+
+    def test_csv_row_order_preserved_as_overlap_priority(
+        self, historical_sine: pd.DataFrame,
+    ) -> None:
+        """Codex P1: parse_forward_csv sorts by (zone, delivery_start);
+        the 'later in CSV wins' semantic on overlap must use the
+        original row order, not the post-sort position.
+        """
+        # Put the OVERRIDE row first in CSV order, then the broader Cal row.
+        # Without the fix, the post-sort priority assigns the override a
+        # smaller priority and the broader Cal wins on the overlap.
+        csv = (
+            "zone,contract,delivery_start,delivery_end,price_eur_mwh\n"
+            "DE_LU,Jan-override,2027-01-15,2027-01-22,200\n"
+            "DE_LU,Cal-later,2027-01-01,2027-02-01,80\n"
+        )
+        forward = parse_forward_csv(csv)
+        synth = build_forward_synthetic_prices(
+            forward, historical_sine, zone="DE_LU", tz="Europe/Berlin",
+        )
+        jan_lo = pd.Timestamp("2027-01-14 23:00:00", tz="UTC")
+        jan_hi = pd.Timestamp("2027-01-21 23:00:00", tz="UTC")
+        jan_window = synth[(synth.index >= jan_lo) & (synth.index < jan_hi)]
+        # Cal-later was uploaded AFTER Jan-override, so Cal must win on
+        # the overlap region (later in CSV wins).
+        assert (jan_window["forward_base"] == 80.0).all()
+
+    def test_short_contract_baseload_preserved_per_window(
+        self, historical_sine: pd.DataFrame,
+    ) -> None:
+        """Codex P1: a 24h contract used to come out with mean != forward
+        base because the shape was normalised globally, not over the
+        contract window. After fix, mean over the contract window must
+        equal the forward base exactly (within float epsilon).
+        """
+        csv = (
+            "zone,contract,delivery_start,delivery_end,price_eur_mwh\n"
+            "DE_LU,OneDay,2027-03-15,2027-03-16,100\n"
+        )
+        forward = parse_forward_csv(csv)
+        synth = build_forward_synthetic_prices(
+            forward, historical_sine, zone="DE_LU", tz="Europe/Berlin",
+        )
+        assert float(synth["price_eur_mwh"].mean()) == pytest.approx(100.0, rel=1e-6)
+
+    def test_short_history_warns_about_partial_buckets(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Codex P1: a history shorter than a full week silently flat-fills
+        the missing hour-of-week buckets with factor 1.0. Warn the user
+        so they know the recovered shape is partial.
+        """
+        import logging
+        # Only 72 hours = 3 days of history.
+        idx = pd.date_range("2025-01-01", periods=72, freq="h", tz="UTC")
+        short = pd.DataFrame(
+            {"price_eur_mwh": [50.0 + (i % 24) * 2.0 for i in range(72)]},
+            index=idx,
+        )
+        forward = parse_forward_csv(
+            "zone,delivery_start,delivery_end,price_eur_mwh\n"
+            "DE_LU,2027-03-01,2027-03-08,100\n"
+        )
+        with caplog.at_level(logging.WARNING, logger="src.forward_curve"):
+            build_forward_synthetic_prices(
+                forward, short, zone="DE_LU", tz="Europe/Berlin",
+            )
+        assert any("hour-of-week buckets" in msg for msg in caplog.messages)
+
+    def test_nan_lp_day_excluded_from_period_revenue(self) -> None:
+        """Codex P2: pandas mean() skips NaN but multiplying by raw n_days
+        would scale a partial mean to a full-period total. Drop NaN LP
+        days from both the numerator and the denominator.
+        """
+        from src.forward_curve import summarise_forward_revenue
+        # Two days in the period; one has NaN lp_revenue, the other 100.
+        daily = pd.DataFrame({
+            "date": [pd.Timestamp("2027-03-01"), pd.Timestamp("2027-03-02")],
+            "spread": [50.0, 50.0],
+            "lp_revenue": [100.0, float("nan")],
+            "n_cycles": [1.0, 0.0],
+        })
+        forward = parse_forward_csv(
+            "zone,contract,delivery_start,delivery_end,price_eur_mwh\n"
+            "DE_LU,TwoDays,2027-03-01,2027-03-03,100\n"
+        )
+        summary = summarise_forward_revenue(
+            daily, forward, zone="DE_LU",
+            power_mw=1.0, duration_hours=2.0,
+        )
+        # 1 valid LP day * mean(100) * capture(0.7) = 70 EUR period revenue,
+        # NOT 1 valid day's worth scaled up to 2 days.
+        assert summary["days_in_period"].iloc[0] == 1
+        assert summary["period_revenue_eur"].iloc[0] == pytest.approx(70.0)
+
+
 class TestListSupportedZones:
     def test_returns_sorted_unique(self) -> None:
         csv = (
