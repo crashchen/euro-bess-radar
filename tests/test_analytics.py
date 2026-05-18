@@ -281,6 +281,25 @@ class TestNegativePrices:
         result = calculate_negative_price_hours(df)
         assert result["negative_hours"] == 0
 
+    def test_mixed_resolution_accumulates_per_day_dt(self) -> None:
+        """DE_LU-style mixed window: 24 hourly negatives + 96 15-min negatives.
+        Before the per-day fix, frame-mode dt=0.25h gave 30 hours total.
+        After the fix: 24 * 1.0 + 96 * 0.25 = 48 physical hours.
+        """
+        day1_idx = pd.date_range("2025-10-04", periods=24, freq="h", tz="UTC")
+        day2_idx = pd.date_range("2025-10-05", periods=96, freq="15min", tz="UTC")
+        idx = day1_idx.append(day2_idx)
+        prices = [-10.0] * 24 + [-5.0] * 96
+        df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+        df.index.name = "timestamp"
+
+        result = calculate_negative_price_hours(df)
+
+        assert result["negative_intervals"] == 120
+        # 24 hourly hours + 96 * 0.25 = 48 physical hours.
+        assert result["negative_hours"] == 48.0
+        assert result["total_negative_hours"] == 48.0
+
 
 class TestFilterToCompleteLocalDays:
     def test_drops_entire_day_with_one_nan(self) -> None:
@@ -1048,3 +1067,42 @@ class TestTwoStageDaIdDispatch:
         )
         diff = (result["total_cash"] - (result["da_revenue"] + result["rebid_uplift"])).abs()
         assert diff.max() < 0.01
+
+    def test_mixed_resolution_same_physical_shape_same_revenue(self) -> None:
+        """Two adjacent days with identical 24h physical price shape, one at
+        60-min cadence and one at 15-min cadence. Per-day dt must give both
+        days the same total_cash (within MILP tolerance). The pre-fix code
+        used frame-mode dt=0.25h and solved the hourly day as 6 hours of
+        wall clock.
+        """
+        day1_idx = pd.date_range("2025-10-04", periods=24, freq="h", tz="UTC")
+        day1_da = [20.0] * 12 + [80.0] * 12
+        day1_ida = [22.0] * 12 + [78.0] * 12
+
+        day2_idx = pd.date_range("2025-10-05", periods=96, freq="15min", tz="UTC")
+        day2_da = [20.0] * 48 + [80.0] * 48
+        day2_ida = [22.0] * 48 + [78.0] * 48
+
+        idx = day1_idx.append(day2_idx)
+        da_df = pd.DataFrame(
+            {"price_eur_mwh": day1_da + day2_da}, index=idx,
+        )
+        ida_df = pd.DataFrame(
+            {"intraday_price_eur_mwh": day1_ida + day2_ida}, index=idx,
+        )
+        da_df.index.name = ida_df.index.name = "timestamp"
+
+        result = calculate_two_stage_da_id_dispatch(
+            da_df, ida_df, tz="UTC", power_mw=1.0, duration_hours=2.0,
+            efficiency=1.0,
+        )
+
+        assert len(result) == 2
+        cash_day1 = float(result.iloc[0]["total_cash"])
+        cash_day2 = float(result.iloc[1]["total_cash"])
+        assert cash_day1 > 0 and cash_day2 > 0
+        ratio = max(cash_day1, cash_day2) / min(cash_day1, cash_day2)
+        assert ratio < 1.05, (
+            f"per-day dt regression in two-stage: "
+            f"day1={cash_day1:.2f} day2={cash_day2:.2f}"
+        )

@@ -638,8 +638,20 @@ def calculate_negative_price_hours(df: pd.DataFrame) -> dict[str, float]:
 
     total = len(prices)
     neg_count = len(negative)
-    interval_hours = _infer_interval_hours(df.index)
-    negative_hours = round(neg_count * interval_hours, 2)
+
+    # Accumulate physical hours per local-day segment so mixed-resolution
+    # windows (e.g. DE_LU spanning the 2025-10 60min->15min boundary)
+    # report real wall-clock hours instead of count * frame-mode dt.
+    if prices.empty:
+        negative_hours = 0.0
+    else:
+        total_hours = 0.0
+        for _, day_group in prices.groupby(prices.index.date):
+            if day_group.empty:
+                continue
+            day_dt = _infer_interval_hours(day_group.index)
+            total_hours += int((day_group < 0).sum()) * day_dt
+        negative_hours = round(total_hours, 2)
 
     return {
         "negative_hours": negative_hours,
@@ -995,14 +1007,6 @@ def calculate_two_stage_da_id_dispatch(
         out.attrs["excluded_days_due_to_missing"] = 0
         return out
 
-    dt = _infer_interval_hours(merged.index)
-    # Per-day completeness reference: how many DA periods are expected
-    # for a full local-tz calendar day at this cadence. Days where the
-    # IDA overlap with DA is significantly short of that count are excluded
-    # so the dashboard does not annualise a sparse-coverage day by 365.25.
-    expected_per_day = round(24.0 / dt) if dt > 0 else 24
-    min_required = max(round(0.9 * expected_per_day), 2)
-
     da_daily_counts = (
         da_local["price_eur_mwh"].dropna()
         .groupby(da_local.dropna(subset=["price_eur_mwh"]).index.date)
@@ -1014,6 +1018,15 @@ def calculate_two_stage_da_id_dispatch(
     excluded = 0
     for date, group in merged.groupby(merged.index.date):
         sorted_group = group.sort_index()
+        # Per-day completeness + dt reference. Inferring dt globally
+        # collapses mixed-resolution windows (e.g. DE_LU 2025-10
+        # 60min→15min) to the mode and mis-solves the other side.
+        day_dt = _infer_interval_hours(sorted_group.index)
+        if day_dt <= 0:
+            excluded += 1
+            continue
+        expected_per_day = round(24.0 / day_dt)
+        min_required = max(round(0.9 * expected_per_day), 2)
         if sorted_group.isna().any().any() or len(sorted_group) < min_required:
             excluded += 1
             continue
@@ -1025,7 +1038,7 @@ def calculate_two_stage_da_id_dispatch(
         result = solve_daily_da_id_dispatch(
             sorted_group["price_eur_mwh"].to_numpy(),
             sorted_group["intraday_price_eur_mwh"].to_numpy(),
-            dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+            dt=day_dt, power_mw=power_mw, duration_hours=duration_hours,
             efficiency=efficiency, soc_init_frac=soc_init_frac,
         )
         records.append({

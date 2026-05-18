@@ -423,3 +423,64 @@ class TestSolveDailyDaIdDispatch:
         assert r["total_cash_eur"] == pytest.approx(
             r["da_revenue_eur"] + r["rebid_uplift_eur"], abs=0.01,
         )
+
+
+class TestMixedResolutionDtInference:
+    """Mixed-resolution windows (DE_LU 2025-10 60min→15min switch).
+
+    Before the per-day fix, frame-global dt inference produced mode=0.25h
+    and the hourly side was solved as if each calendar day were 6 physical
+    hours, inflating revenue ~4x. These tests pin the per-day behaviour.
+    """
+
+    def _build_mixed_frame(self) -> pd.DataFrame:
+        """Day 1 (hourly) + Day 2 (15-min). Same physical shape: 12h cheap,
+        12h expensive. With per-day dt both days must produce comparable
+        revenue scaled by their identical 24-hour wall-clock duration.
+        """
+        day1_idx = pd.date_range("2025-10-04", periods=24, freq="h", tz="UTC")
+        day1_prices = [20.0] * 12 + [80.0] * 12
+
+        day2_idx = pd.date_range("2025-10-05", periods=96, freq="15min", tz="UTC")
+        day2_prices = [20.0] * 48 + [80.0] * 48
+
+        idx = day1_idx.append(day2_idx)
+        prices = day1_prices + day2_prices
+        df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+        df.index.name = "timestamp"
+        return df
+
+    def test_dispatch_batch_solves_each_day_at_native_cadence(self) -> None:
+        df = self._build_mixed_frame()
+        result = solve_dispatch_batch(
+            df, power_mw=1.0, duration_hours=2.0, efficiency=1.0,
+        )
+
+        assert len(result) == 2
+        rev_day1 = float(result.iloc[0]["lp_revenue"])
+        rev_day2 = float(result.iloc[1]["lp_revenue"])
+
+        # Same physical shape and wall clock → both days within 10% of each
+        # other. The old global-dt code reported ~4x divergence.
+        assert rev_day1 > 0 and rev_day2 > 0
+        ratio = max(rev_day1, rev_day2) / min(rev_day1, rev_day2)
+        assert ratio < 1.10, (
+            f"per-day dt regression: day1={rev_day1:.2f} day2={rev_day2:.2f}"
+        )
+
+    def test_joint_capacity_batch_per_day_dt(self) -> None:
+        df = self._build_mixed_frame()
+        result = solve_joint_capacity_batch(
+            df, capacity_price_eur_mw_h=5.0,
+            power_mw=1.0, duration_hours=2.0,
+        )
+
+        assert len(result) == 2
+        # Capacity revenue is dt-linear: 24 hours * 5 EUR/MW/h * availability
+        # * commitment. With per-day dt, both days should report nearly
+        # identical capacity revenue (within a small MILP tolerance).
+        cap_day1 = float(result.iloc[0]["joint_capacity_revenue"])
+        cap_day2 = float(result.iloc[1]["joint_capacity_revenue"])
+        assert cap_day1 > 0 and cap_day2 > 0
+        ratio = max(cap_day1, cap_day2) / min(cap_day1, cap_day2)
+        assert ratio < 1.05

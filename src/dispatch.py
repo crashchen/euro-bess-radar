@@ -303,7 +303,6 @@ def solve_joint_capacity_batch(
     """Run joint DA + reserve-capacity MILP for each local calendar day."""
     local = _to_local(price_df, tz)
     prices = local["price_eur_mwh"]
-    dt = _infer_interval_hours(local.index)
 
     records = []
     excluded_days = 0
@@ -312,6 +311,10 @@ def solve_joint_capacity_batch(
         if sorted_group.isna().any():
             excluded_days += 1
             continue
+        # Infer dt from this day's own index so mixed-resolution windows
+        # (e.g. DE_LU crossing the 2025-10 60min→15min boundary) solve
+        # each side at its native cadence instead of the frame mode.
+        dt = _infer_interval_hours(sorted_group.index)
         result = solve_daily_joint_capacity_lp(
             sorted_group.values,
             dt=dt,
@@ -480,7 +483,6 @@ def solve_dispatch_batch(
     """
     local = _to_local(price_df, tz)
     prices = local["price_eur_mwh"]
-    dt = _infer_interval_hours(local.index)
 
     records = []
     excluded_days = 0
@@ -489,6 +491,9 @@ def solve_dispatch_batch(
         if sorted_group.isna().any():
             excluded_days += 1
             continue
+        # Per-day dt — see solve_joint_capacity_batch for the mixed-
+        # resolution rationale.
+        dt = _infer_interval_hours(sorted_group.index)
         result = solve_daily_lp(
             sorted_group.values,
             dt=dt,
