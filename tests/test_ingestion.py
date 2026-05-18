@@ -75,6 +75,107 @@ class TestFetchEntsoePrices:
             )
 
 
+class TestRetryAuthBypass:
+    """The shared retry decorator must not retry on authentication errors.
+
+    Before this fix, invalid-token responses from entsoe-py were caught by
+    the bare ``@retry(exceptions=(Exception,))`` wrapper and re-tried 3
+    times with exponential backoff before reaching the auth-classifier.
+    """
+
+    def test_auth_error_raises_on_first_attempt(self) -> None:
+        from src.data_ingestion import _looks_like_auth_error, retry
+
+        call_count = {"n": 0}
+
+        @retry(
+            max_retries=3, backoff=0.0,
+            auth_check=lambda exc: _looks_like_auth_error(exc),
+        )
+        def fake_call() -> None:
+            call_count["n"] += 1
+            raise RuntimeError("Invalid token: 401 Unauthorized")
+
+        with pytest.raises(RuntimeError, match="Invalid token"):
+            fake_call()
+        assert call_count["n"] == 1, (
+            "auth errors must not be retried — saw "
+            f"{call_count['n']} attempts"
+        )
+
+    def test_network_error_still_retries(self) -> None:
+        from src.data_ingestion import _looks_like_auth_error, retry
+
+        call_count = {"n": 0}
+
+        @retry(
+            max_retries=3, backoff=0.0,
+            auth_check=lambda exc: _looks_like_auth_error(exc),
+        )
+        def fake_call() -> None:
+            call_count["n"] += 1
+            raise requests.ConnectionError("connection reset by peer")
+
+        with pytest.raises(requests.ConnectionError):
+            fake_call()
+        # 1 initial attempt + 3 retries = 4 total
+        assert call_count["n"] == 4
+
+    def test_entsoe_invalid_token_no_retry(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """End-to-end: an entsoe-py-flavoured auth error reaches the user as
+        DataSourceAuthError, with only one underlying attempt and no
+        ``securityToken=...`` in the captured logs.
+        """
+        with (
+            patch("src.data_ingestion.get_api_key", return_value="fake-key"),
+            patch(
+                "entsoe.EntsoePandasClient.query_day_ahead_prices",
+                side_effect=Exception(
+                    "401 Client Error: Unauthorized for url: "
+                    "https://web-api.tp.entsoe.eu/api?securityToken=LEAKED&"
+                    "documentType=A44"
+                ),
+            ) as mock_call,
+            caplog.at_level(logging.ERROR, logger="src.data_ingestion"),
+            pytest.raises(DataSourceAuthError),
+        ):
+            fetch_entsoe_prices(
+                "DE_LU",
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
+        # No retry on auth -> exactly one upstream call.
+        assert mock_call.call_count == 1
+        # No leaked credentials anywhere in captured logs.
+        assert "LEAKED" not in caplog.text
+        assert "securityToken=LEAKED" not in caplog.text
+
+
+class TestScrubSecrets:
+    def test_redacts_security_token(self) -> None:
+        from src.data_ingestion import _scrub_secrets
+        url = (
+            "HTTPSConnectionPool(host='web-api.tp.entsoe.eu', port=443): "
+            "Max retries exceeded with url: /api?securityToken=abcdef123456"
+            "&documentType=A44 (Caused by ...)"
+        )
+        out = _scrub_secrets(url)
+        assert "abcdef123456" not in out
+        assert "securityToken=***" in out
+        # Keep the rest of the URL intact for debuggability.
+        assert "documentType=A44" in out
+
+    def test_redacts_multiple_secret_keys(self) -> None:
+        from src.data_ingestion import _scrub_secrets
+        text = "api_key=AAA&token=BBB&apiKey=CCC&other=keep"
+        out = _scrub_secrets(text)
+        for leaked in ("AAA", "BBB", "CCC"):
+            assert leaked not in out
+        assert "other=keep" in out
+
+
 # ── Test 2: Elexon schema ───────────────────────────────────────────────────
 
 class TestFetchElexonPrices:

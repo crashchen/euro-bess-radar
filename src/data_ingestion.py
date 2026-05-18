@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import itertools
 import logging
+import re
 import sqlite3
 import time
 from collections.abc import Callable
@@ -87,14 +88,47 @@ def _raise_if_auth_failed(
         )
 
 
+# ── Secret scrubbing ─────────────────────────────────────────────────────────
+
+# entsoe-py and other upstream clients embed credentials directly in request
+# URLs (e.g. ``...?securityToken=abcdef...&periodStart=...``). When a network
+# error fires and the exception stringifies the URL, those credentials end
+# up in logs and Streamlit error panels. Strip them at the boundary.
+_SECRET_QS_KEYS = (
+    "securityToken", "security_token", "api_key", "apiKey", "x-api-key",
+    "token", "key",
+)
+_SECRET_QS_RE = re.compile(
+    r"(?i)\b(" + "|".join(re.escape(k) for k in _SECRET_QS_KEYS) + r")=[^&\s\"']+",
+)
+
+
+def _scrub_secrets(text: str) -> str:
+    """Redact credential-bearing query-string params in arbitrary text.
+
+    Preserves the surrounding URL so the operator can still identify the
+    failing endpoint.
+    """
+    return _SECRET_QS_RE.sub(r"\1=***", text)
+
+
 # ── Retry decorator ──────────────────────────────────────────────────────────
 
 def retry(
     max_retries: int = 3,
     backoff: float = 2.0,
     exceptions: tuple[type[Exception], ...] = (Exception,),
+    auth_check: Callable[[Exception], bool] | None = None,
 ) -> Callable[..., Any]:
-    """Decorator: retry with exponential backoff on exception."""
+    """Decorator: retry with exponential backoff on exception.
+
+    Args:
+        max_retries, backoff, exceptions: standard retry knobs.
+        auth_check: optional predicate. When set, any caught exception that
+            matches it is re-raised immediately without retry or sleep. Used
+            to ensure invalid-token errors propagate to the UI as auth
+            failures instead of stalling the user with 3 backoff cycles.
+    """
     def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -103,12 +137,19 @@ def retry(
                 try:
                     return func(*args, **kwargs)
                 except exceptions as exc:
+                    # Auth failures never recover by retrying. Re-raise now
+                    # so the caller can surface a ``set API key`` prompt
+                    # instead of a stale ``request failed`` message after
+                    # several seconds of backoff.
+                    if auth_check is not None and auth_check(exc):
+                        raise
                     last_exc = exc
                     if attempt < max_retries:
                         wait = backoff ** attempt
                         logger.warning(
                             "%s failed (attempt %d/%d), retrying in %.1fs: %s",
-                            func.__name__, attempt + 1, max_retries, wait, exc,
+                            func.__name__, attempt + 1, max_retries, wait,
+                            _scrub_secrets(str(exc)),
                         )
                         time.sleep(wait)
             raise last_exc  # type: ignore[misc]
@@ -670,12 +711,15 @@ def clean_prices(
 
 # ── ENTSO-E fetcher ──────────────────────────────────────────────────────────
 
-@retry(max_retries=3, backoff=2.0)
+@retry(
+    max_retries=3, backoff=2.0,
+    auth_check=lambda exc: _looks_like_auth_error(exc),
+)
 def _call_entsoe_api(
     client: EntsoePandasClient, zone: str,
     start: pd.Timestamp, end: pd.Timestamp,
 ) -> pd.Series:
-    """Call entsoe-py with retry logic."""
+    """Call entsoe-py with retry logic. Auth failures bypass retry."""
     return client.query_day_ahead_prices(zone, start=start, end=end)
 
 
@@ -706,19 +750,25 @@ def fetch_entsoe_prices(
     try:
         raw = _call_entsoe_api(client, zone, start_q, end_q)
     except requests.RequestException as exc:
-        logger.exception("ENTSO-E request failed for %s", zone)
+        # entsoe-py exception strings often embed the full request URL
+        # including ``securityToken=...``; scrub before logging.
+        logger.error(
+            "ENTSO-E request failed for %s: %s", zone, _scrub_secrets(str(exc)),
+        )
         raise DataSourceNetworkError(
             f"ENTSO-E request failed for {zone}. Please retry."
-        ) from exc
+        ) from None
     except Exception as exc:
-        logger.exception("ENTSO-E fetch failed for %s", zone)
+        logger.error(
+            "ENTSO-E fetch failed for %s: %s", zone, _scrub_secrets(str(exc)),
+        )
         if _looks_like_auth_error(exc):
             raise DataSourceAuthError(
                 "ENTSO-E API authentication failed. Check your token and permissions."
-            ) from exc
+            ) from None
         raise DataSourceParseError(
             f"ENTSO-E returned data for {zone} in an unexpected format."
-        ) from exc
+        ) from None
 
     if isinstance(raw, pd.DataFrame):
         series = raw.iloc[:, 0]
@@ -1121,12 +1171,15 @@ _RENEWABLE_COLS = [
 _NON_GENERATION_COLUMN_TERMS = ("consumption", "load", "demand")
 
 
-@retry(max_retries=3, backoff=2.0)
+@retry(
+    max_retries=3, backoff=2.0,
+    auth_check=lambda exc: _looks_like_auth_error(exc),
+)
 def _call_entsoe_generation(
     client: EntsoePandasClient, zone: str,
     start: pd.Timestamp, end: pd.Timestamp,
 ) -> pd.DataFrame:
-    """Call entsoe-py generation query with retry."""
+    """Call entsoe-py generation query with retry. Auth bypasses retry."""
     return client.query_generation(zone, start=start, end=end)
 
 
@@ -1162,19 +1215,25 @@ def fetch_generation_data(
     try:
         raw = _call_entsoe_generation(client, zone, start_q, end_q)
     except requests.RequestException as exc:
-        logger.exception("ENTSO-E generation request failed for %s", zone)
+        logger.error(
+            "ENTSO-E generation request failed for %s: %s",
+            zone, _scrub_secrets(str(exc)),
+        )
         raise DataSourceNetworkError(
             f"Generation data request failed for {zone}. Please retry."
-        ) from exc
+        ) from None
     except Exception as exc:
-        logger.exception("ENTSO-E generation fetch failed for %s", zone)
+        logger.error(
+            "ENTSO-E generation fetch failed for %s: %s",
+            zone, _scrub_secrets(str(exc)),
+        )
         if _looks_like_auth_error(exc):
             raise DataSourceAuthError(
                 "ENTSO-E API authentication failed while fetching generation data."
-            ) from exc
+            ) from None
         raise DataSourceParseError(
             f"Generation data for {zone} could not be parsed or was unavailable."
-        ) from exc
+        ) from None
 
     if raw.empty:
         return pd.DataFrame(columns=_RENEWABLE_COLS)
@@ -1755,13 +1814,22 @@ def fetch_entsoe_imbalance_prices(
     try:
         raw = client.query_imbalance_prices(zone, start=start_q, end=end_q)
     except requests.RequestException as exc:
-        logger.warning("ENTSO-E imbalance request failed for %s: %s", zone, exc)
+        logger.warning(
+            "ENTSO-E imbalance request failed for %s: %s",
+            zone, _scrub_secrets(str(exc)),
+        )
         return None
     except (ValueError, TypeError, KeyError) as exc:
-        logger.warning("ENTSO-E imbalance data unavailable for %s: %s", zone, exc)
+        logger.warning(
+            "ENTSO-E imbalance data unavailable for %s: %s",
+            zone, _scrub_secrets(str(exc)),
+        )
         return None
     except Exception as exc:
-        logger.warning("ENTSO-E imbalance fetch unavailable for %s: %s", zone, exc)
+        logger.warning(
+            "ENTSO-E imbalance fetch unavailable for %s: %s",
+            zone, _scrub_secrets(str(exc)),
+        )
         return None
 
     if raw is None or (isinstance(raw, (pd.DataFrame, pd.Series)) and raw.empty):
@@ -1911,7 +1979,7 @@ def fetch_intraday_prices(
         # message rather than a stack trace.
         logger.info(
             "ENTSO-E IDA%d: no data for %s in window: %s",
-            sequence, zone, exc,
+            sequence, zone, _scrub_secrets(str(exc)),
         )
         return None
     except requests.HTTPError as exc:
@@ -1923,22 +1991,43 @@ def fetch_intraday_prices(
             raise DataSourceAuthError(
                 f"ENTSO-E auth failed (HTTP {status}) on IDA{sequence} for "
                 f"{zone}. Check ENTSOE_API_KEY in .env."
-            ) from exc
+            ) from None
         raise DataSourceNetworkError(
-            f"ENTSO-E IDA{sequence} fetch failed for {zone}: {exc}"
-        ) from exc
+            f"ENTSO-E IDA{sequence} fetch failed for {zone}: "
+            f"{_scrub_secrets(str(exc))}"
+        ) from None
     except requests.RequestException as exc:
         raise DataSourceNetworkError(
-            f"ENTSO-E IDA{sequence} fetch failed for {zone}: {exc}"
-        ) from exc
+            f"ENTSO-E IDA{sequence} fetch failed for {zone}: "
+            f"{_scrub_secrets(str(exc))}"
+        ) from None
     except (ValueError, TypeError, KeyError) as exc:
         # Some older entsoe-py releases raised ValueError for missing data;
         # keep the soft-fail to stay compatible with installations pinned
         # below 0.7.11.
         logger.info(
-            "ENTSO-E IDA%d unavailable for %s: %s", sequence, zone, exc,
+            "ENTSO-E IDA%d unavailable for %s: %s",
+            sequence, zone, _scrub_secrets(str(exc)),
         )
         return None
+    except Exception as exc:
+        # entsoe-py custom exceptions (e.g. InvalidTokenError) can carry the
+        # request URL — including securityToken — in their stringification.
+        # Classify auth-flavoured strings and otherwise wrap as parse error;
+        # never let the raw exception escape to Streamlit.
+        scrubbed = _scrub_secrets(str(exc))
+        logger.error(
+            "ENTSO-E IDA%d fetch failed for %s: %s", sequence, zone, scrubbed,
+        )
+        if _looks_like_auth_error(exc):
+            raise DataSourceAuthError(
+                f"ENTSO-E auth failed on IDA{sequence} for {zone}. "
+                "Check ENTSOE_API_KEY in .env."
+            ) from None
+        raise DataSourceParseError(
+            f"ENTSO-E IDA{sequence} returned data for {zone} in an "
+            f"unexpected format: {scrubbed}"
+        ) from None
 
     if series is None or (isinstance(series, (pd.DataFrame, pd.Series)) and series.empty):
         return None
