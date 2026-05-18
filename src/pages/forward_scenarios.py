@@ -188,9 +188,10 @@ def render(
                 synth[["price_eur_mwh"]], tz=tz, duration_hours=duration_hours,
             )
         summary = summarise_forward_revenue(
-            daily, forward_df, zone=zone,
+            daily, forward_df, synth, zone=zone,
             power_mw=power_mw, duration_hours=duration_hours,
             efficiency=efficiency, capture_rate=capture_rate,
+            tz=tz,
         )
         if summary.empty:
             progress.progress((i + 1) / len(fwd_with_history), text=f"No revenue for {zone}")

@@ -260,7 +260,8 @@ class TestSummariseForwardRevenue:
             synth[["price_eur_mwh"]], tz="Europe/Berlin", duration_hours=2.0,
         )
         summary = summarise_forward_revenue(
-            ds, forward, zone="DE_LU", power_mw=1.0, duration_hours=2.0,
+            ds, forward, synth, zone="DE_LU",
+            power_mw=1.0, duration_hours=2.0, tz="Europe/Berlin",
         )
         assert len(summary) == 2
         assert set(summary["contract"]) == {"Mar-2027", "Apr-2027"}
@@ -273,13 +274,138 @@ class TestSummariseForwardRevenue:
             apr["period_revenue_eur"] / apr["days_in_period"]
         )
 
+    def test_overlap_days_attributed_to_winner_not_double_counted(
+        self, historical_sine: pd.DataFrame,
+    ) -> None:
+        """Codex P0 repro: Cal-2027 + Jan-2027 overlap. The synthetic series
+        only realises one winner per day, but the pre-fix summary summed
+        revenue over each contract's full [start, end) window, so Jan days
+        were counted in BOTH contract totals.
+
+        After the fix:
+        - Each calendar day is attributed to exactly one contract — the
+          one that won that day's hours in build_forward_synthetic_prices.
+        - sum(days_in_period) over all summary rows must equal the number
+          of unique calendar days covered by the synthetic series.
+        """
+        csv = (
+            "zone,contract,delivery_start,delivery_end,price_eur_mwh\n"
+            "DE_LU,Cal-2027,2027-01-01,2027-02-01,80\n"
+            "DE_LU,Jan-2027,2027-01-01,2027-02-01,200\n"
+        )
+        forward = parse_forward_csv(csv)
+        synth = build_forward_synthetic_prices(
+            forward, historical_sine, zone="DE_LU", tz="Europe/Berlin",
+        )
+        ds = calculate_daily_spreads(
+            synth[["price_eur_mwh"]], tz="Europe/Berlin", duration_hours=2.0,
+        )
+        summary = summarise_forward_revenue(
+            ds, forward, synth, zone="DE_LU",
+            power_mw=1.0, duration_hours=2.0, tz="Europe/Berlin",
+        )
+
+        # Synthetic local-day coverage: count unique local dates.
+        synth_local_dates = (
+            synth.index.tz_convert("Europe/Berlin").normalize().unique()
+        )
+        n_unique_days = len(synth_local_dates)
+
+        # All days attributed; none double-counted.
+        assert int(summary["days_in_period"].sum()) == n_unique_days
+
+        # Jan-2027 (uploaded second) wins on the overlap, so Cal-2027
+        # either gets zero days (full overlap) or no row at all.
+        cal_rows = summary[summary["contract"] == "Cal-2027"]
+        if not cal_rows.empty:
+            assert int(cal_rows["days_in_period"].iloc[0]) == 0
+
+        # Jan-2027 carries the full coverage at its forward base.
+        jan_row = summary[summary["contract"] == "Jan-2027"].iloc[0]
+        assert int(jan_row["days_in_period"]) == n_unique_days
+        assert float(jan_row["forward_base"]) == 200.0
+
+    def test_duplicate_and_blank_labels_do_not_merge(
+        self, historical_sine: pd.DataFrame,
+    ) -> None:
+        """Codex P0 repro: when two rows share a contract label (or both
+        are blank), an earlier label-keyed attribution silently merged
+        their days. With CSV-row id (_csv_order) as the join key, each
+        row gets only the days where it actually won, so total days
+        equal unique calendar days.
+        """
+        # Two non-overlapping rows with BLANK labels — the legitimate
+        # case where the user uploaded raw period quotes without naming.
+        csv_blank = (
+            "zone,contract,delivery_start,delivery_end,price_eur_mwh\n"
+            "DE_LU,,2027-01-01,2027-01-05,80\n"
+            "DE_LU,,2027-01-05,2027-01-10,100\n"
+        )
+        forward = parse_forward_csv(csv_blank)
+        synth = build_forward_synthetic_prices(
+            forward, historical_sine, zone="DE_LU", tz="Europe/Berlin",
+        )
+        ds = calculate_daily_spreads(
+            synth[["price_eur_mwh"]], tz="Europe/Berlin", duration_hours=2.0,
+        )
+        summary = summarise_forward_revenue(
+            ds, forward, synth, zone="DE_LU",
+            power_mw=1.0, duration_hours=2.0, tz="Europe/Berlin",
+        )
+        unique_days = len(
+            synth.index.tz_convert("Europe/Berlin").normalize().unique()
+        )
+        # Pre-fix: each blank-label row collected ALL unique days
+        # (sum = 2 * unique_days). Post-fix: each row gets only its own.
+        assert int(summary["days_in_period"].sum()) == unique_days
+        # And the two forward_base values are still distinguishable.
+        assert sorted(summary["forward_base"].tolist()) == [80.0, 100.0]
+
+    def test_partial_overlap_splits_days_per_winner(
+        self, historical_sine: pd.DataFrame,
+    ) -> None:
+        """A Cal contract that overlaps a Jan contract in the first 31 days
+        and runs alone Feb-Dec must report Jan's days against Jan and
+        Feb-Dec days against Cal — exactly the calendar split.
+        """
+        csv = (
+            "zone,contract,delivery_start,delivery_end,price_eur_mwh\n"
+            "DE_LU,Cal-2027,2027-01-01,2027-03-01,80\n"
+            "DE_LU,Jan-2027,2027-01-01,2027-02-01,200\n"
+        )
+        forward = parse_forward_csv(csv)
+        synth = build_forward_synthetic_prices(
+            forward, historical_sine, zone="DE_LU", tz="Europe/Berlin",
+        )
+        ds = calculate_daily_spreads(
+            synth[["price_eur_mwh"]], tz="Europe/Berlin", duration_hours=2.0,
+        )
+        summary = summarise_forward_revenue(
+            ds, forward, synth, zone="DE_LU",
+            power_mw=1.0, duration_hours=2.0, tz="Europe/Berlin",
+        )
+
+        jan = summary[summary["contract"] == "Jan-2027"].iloc[0]
+        cal = summary[summary["contract"] == "Cal-2027"].iloc[0]
+        # Jan-2027 should win all 31 January days (uploaded later -> wins
+        # on overlap). Cal-2027 keeps Feb (~28 days, ignoring last-day
+        # exclusive boundary slop).
+        assert 28 <= int(jan["days_in_period"]) <= 31
+        # Cal coverage = total - jan; no double-count.
+        synth_local_dates = (
+            synth.index.tz_convert("Europe/Berlin").normalize().unique()
+        )
+        assert int(cal["days_in_period"]) == (
+            len(synth_local_dates) - int(jan["days_in_period"])
+        )
+
     def test_empty_daily_returns_empty_summary(self) -> None:
         forward = parse_forward_csv(
             "zone,delivery_start,delivery_end,price_eur_mwh\n"
             "DE_LU,2027-01-01,2027-02-01,80\n"
         )
         out = summarise_forward_revenue(
-            pd.DataFrame(), forward, zone="DE_LU",
+            pd.DataFrame(), forward, pd.DataFrame(), zone="DE_LU",
             power_mw=1.0, duration_hours=2.0,
         )
         assert out.empty
@@ -401,9 +527,21 @@ class TestReviewFollowUpFixes:
             "zone,contract,delivery_start,delivery_end,price_eur_mwh\n"
             "DE_LU,TwoDays,2027-03-01,2027-03-03,100\n"
         )
+        # Minimal synthetic frame covering both days under the same
+        # contract label so the summary's per-day attribution lands here.
+        synth_idx = pd.date_range(
+            "2027-03-01 00:00", "2027-03-03 00:00", freq="h",
+            tz="Europe/Berlin", inclusive="left",
+        ).tz_convert("UTC")
+        synth = pd.DataFrame(
+            {"price_eur_mwh": 100.0, "contract": "TwoDays",
+             "forward_base": 100.0, "shape_factor": 1.0},
+            index=synth_idx,
+        )
+        synth.index.name = "timestamp"
         summary = summarise_forward_revenue(
-            daily, forward, zone="DE_LU",
-            power_mw=1.0, duration_hours=2.0,
+            daily, forward, synth, zone="DE_LU",
+            power_mw=1.0, duration_hours=2.0, tz="Europe/Berlin",
         )
         # 1 valid LP day * mean(100) * capture(0.7) = 70 EUR period revenue,
         # NOT 1 valid day's worth scaled up to 2 days.

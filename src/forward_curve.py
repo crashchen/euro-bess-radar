@@ -305,61 +305,154 @@ def build_forward_synthetic_prices(
     out.index.name = "timestamp"
     out = out.reset_index().sort_values(["timestamp", "_priority"])
     out = out.drop_duplicates(subset="timestamp", keep="last")
-    out = out.set_index("timestamp").drop(columns="_priority")
+    # ``_priority`` is preserved on the output so downstream code
+    # (summarise_forward_revenue) can break ties consistently with this
+    # function's dedup rule when a local day is split between two
+    # contracts at exactly equal hours.
+    out = out.set_index("timestamp")
     return out
+
+
+_SUMMARY_COLUMNS = [
+    "contract", "delivery_start", "delivery_end", "days_in_period",
+    "forward_base", "avg_daily_spread", "period_revenue_eur",
+    "annualised_revenue_eur_per_mw",
+]
 
 
 def summarise_forward_revenue(
     daily_spreads: pd.DataFrame,
     forward_df: pd.DataFrame,
+    synthetic_df: pd.DataFrame,
     *,
     zone: str,
     power_mw: float,
     duration_hours: float,
     efficiency: float = 0.88,
     capture_rate: float = 0.70,
+    tz: str | None = None,
 ) -> pd.DataFrame:
     """Aggregate forward dispatch results to per-contract revenue.
 
-    Joins the per-day daily-spread / LP-revenue output back to the
-    forward contract whose delivery period contains that day, and
-    annualises within the contract using the same EUR/MW/yr convention
-    used by ``estimate_annual_arbitrage_revenue``.
+    Attributes each local-tz delivery day to the contract that actually
+    won that day's hours in :func:`build_forward_synthetic_prices` (i.e.
+    the overlap-priority winner), then aggregates per contract. This
+    differs from a naive ``[delivery_start, delivery_end)`` mask, which
+    double-counts days when two contracts overlap (e.g. a Cal-2027 and a
+    Jan-2027 quote both report the same Jan days in their period totals
+    even though the synthetic price series only realised the Jan winner).
 
     Args:
         daily_spreads: Output of ``calculate_daily_spreads`` or
             ``calculate_daily_dispatch`` on the synthetic forward prices.
         forward_df: The original parsed forward DataFrame.
+        synthetic_df: Output of ``build_forward_synthetic_prices`` for
+            the same zone — required so each day is attributed to the
+            single winning contract on overlap, matching the dispatch
+            actually run on the synthetic series.
         zone: Zone code to filter forward contracts on.
         power_mw, duration_hours, efficiency, capture_rate: BESS params
             for revenue scaling.
+        tz: IANA timezone for resolving synthetic timestamps to local
+            calendar dates. Must match the tz used to compute
+            ``daily_spreads`` for the dates to align.
 
     Returns:
-        DataFrame with one row per forward contract containing columns
+        DataFrame with one row per forward contract THAT CLAIMED AT
+        LEAST ONE DAY in the synthetic series, containing columns
         ``[contract, delivery_start, delivery_end, days_in_period,
         forward_base, avg_daily_spread, period_revenue_eur,
-        annualised_revenue_eur_per_mw]``.
+        annualised_revenue_eur_per_mw]``. The sum of ``days_in_period``
+        over the returned rows equals the number of unique calendar
+        days covered by the synthetic series — i.e. overlap days are
+        attributed to exactly one contract.
     """
-    if daily_spreads.empty:
-        return pd.DataFrame(
-            columns=[
-                "contract", "delivery_start", "delivery_end", "days_in_period",
-                "forward_base", "avg_daily_spread", "period_revenue_eur",
-                "annualised_revenue_eur_per_mw",
-            ],
-        )
+    if daily_spreads.empty or synthetic_df is None or synthetic_df.empty:
+        return pd.DataFrame(columns=_SUMMARY_COLUMNS)
 
-    zone_forwards = forward_df[forward_df["zone"] == zone].reset_index(drop=True)
+    # Use the CSV row order (_csv_order) as the stable row id. ``contract``
+    # is a user-facing label that may be blank or repeat across rows —
+    # joining on it would silently merge distinct contracts, so we key
+    # the attribution on ``_csv_order`` and only carry the label for
+    # display.
+    if "_csv_order" not in forward_df.columns:
+        forward_df = forward_df.copy()
+        forward_df["_csv_order"] = range(len(forward_df))
+    zone_forwards = forward_df[forward_df["zone"] == zone].copy()
+    if zone_forwards.empty:
+        return pd.DataFrame(columns=_SUMMARY_COLUMNS)
+
+    # Map every local-tz date in the synthetic series to the contract ROW
+    # that actually held it. The synthetic series is already overlap-
+    # resolved (one winner per timestamp), so a per-date majority vote
+    # attributes the day to whichever row owned most of its hours. On
+    # exact-hour ties (rare, but possible when two contracts split a day
+    # evenly), the higher ``_priority`` (later in CSV) wins — same rule
+    # build_forward_synthetic_prices applies at dedup.
+    synth_local_idx = synthetic_df.index
+    if tz is not None and synth_local_idx.tz is not None:
+        synth_local_idx = synth_local_idx.tz_convert(tz)
+    if "_priority" in synthetic_df.columns:
+        priority_per_row = synthetic_df["_priority"].to_numpy()
+    else:
+        # Legacy path: synthetic frame without _priority. Fall back to
+        # contract label as the (unstable) row id. This branch is only
+        # reached by test/external callers that construct a synth by hand.
+        priority_per_row = pd.Categorical(synthetic_df["contract"]).codes
+
+    synth_view = pd.DataFrame({
+        "_row": priority_per_row,
+    }, index=pd.DatetimeIndex(synth_local_idx).date)
+
+    def _attribute_day(group: pd.DataFrame) -> int:
+        counts = group["_row"].value_counts()
+        top = counts.iloc[0]
+        tied = counts[counts == top].index
+        if len(tied) == 1:
+            return int(tied[0])
+        # Among tied rows, pick the one with the highest priority value
+        # (== latest CSV order, matching the dedup rule).
+        return int(max(tied))
+
+    row_per_date = synth_view.groupby(level=0).apply(_attribute_day)
+
     daily = daily_spreads.copy()
-    daily["date"] = pd.to_datetime(daily["date"])
+    daily["_date"] = pd.to_datetime(daily["date"]).dt.date
+    daily["_row"] = daily["_date"].map(row_per_date)
+    # Days that fall inside the union of declared delivery windows but
+    # missed the synthetic mapping are a quiet signal that something
+    # upstream (tz mismatch, partial history coverage) excluded them.
+    # Surface a warning instead of silently zeroing them.
+    unmapped = daily.loc[daily["_row"].isna(), "_date"]
+    if not unmapped.empty:
+        bounds = zone_forwards.assign(
+            _start=pd.to_datetime(zone_forwards["delivery_start"]).dt.date,
+            _end=pd.to_datetime(zone_forwards["delivery_end"]).dt.date,
+        )
+        in_bounds = unmapped.apply(
+            lambda d: bool(
+                ((bounds["_start"] <= d) & (d < bounds["_end"])).any()
+            )
+        )
+        n_in_bounds = int(in_bounds.sum())
+        if n_in_bounds:
+            logger.warning(
+                "Forward summary dropped %d day(s) inside a declared "
+                "delivery window for %s — likely a tz mismatch between "
+                "daily_spreads and the synthetic frame.",
+                n_in_bounds, zone,
+            )
+    daily = daily.dropna(subset=["_row"])
+    if daily.empty:
+        return pd.DataFrame(columns=_SUMMARY_COLUMNS)
+    daily["_row"] = daily["_row"].astype(int)
 
     energy_mwh = power_mw * duration_hours
     rows: list[dict] = []
     for _, row in zone_forwards.iterrows():
-        start = pd.Timestamp(row["delivery_start"])
-        end = pd.Timestamp(row["delivery_end"])
-        mask = (daily["date"] >= start) & (daily["date"] < end)
-        period = daily.loc[mask]
+        row_id = int(row["_csv_order"])
+        contract_label = row.get("contract") or ""
+        period = daily.loc[daily["_row"] == row_id]
         if period.empty:
             continue
         # LP revenue path wins when available. Drop NaN LP days from
@@ -376,7 +469,10 @@ def summarise_forward_revenue(
             per_day = float(lp_clean.mean()) * capture_rate
             valid_days = len(lp_clean)
         else:
-            spread_clean = period["spread"].dropna() if "spread" in period.columns else pd.Series(dtype=float)
+            spread_clean = (
+                period["spread"].dropna()
+                if "spread" in period.columns else pd.Series(dtype=float)
+            )
             per_day = (
                 float(spread_clean.mean())
                 * energy_mwh
@@ -389,17 +485,20 @@ def summarise_forward_revenue(
         period_revenue = per_day * valid_days
         annualised_per_mw = per_day * 365.25 / power_mw if power_mw > 0 else 0.0
         rows.append({
-            "contract": row.get("contract") or "",
-            "delivery_start": start,
-            "delivery_end": end,
+            "contract": contract_label,
+            "delivery_start": pd.Timestamp(row["delivery_start"]),
+            "delivery_end": pd.Timestamp(row["delivery_end"]),
             "days_in_period": valid_days,
             "forward_base": float(row["price_eur_mwh"]),
-            "avg_daily_spread": float(period["spread"].mean()) if "spread" in period.columns else float("nan"),
+            "avg_daily_spread": (
+                float(period["spread"].mean())
+                if "spread" in period.columns else float("nan")
+            ),
             "period_revenue_eur": round(period_revenue, 2),
             "annualised_revenue_eur_per_mw": round(annualised_per_mw, 2),
         })
 
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=_SUMMARY_COLUMNS)
 
 
 def list_supported_zones(forward_df: pd.DataFrame) -> Iterable[str]:
