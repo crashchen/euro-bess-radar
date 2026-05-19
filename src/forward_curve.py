@@ -473,10 +473,17 @@ def summarise_forward_revenue(
                 period["spread"].dropna()
                 if "spread" in period.columns else pd.Series(dtype=float)
             )
+            # Apply round-trip efficiency ONCE on the net (sell-buy) spread,
+            # matching estimate_annual_arbitrage_revenue and portfolio.py.
+            # The earlier ``efficiency ** 0.5`` factor under-discounted the
+            # spread (sqrt(0.88) ~= 0.938 vs 0.88), so the same daily spread
+            # produced ~11% higher revenue in Forward than in Revenue Estimation
+            # — investors comparing the two tabs would see inconsistent
+            # numbers for the same parameters.
             per_day = (
                 float(spread_clean.mean())
                 * energy_mwh
-                * (efficiency ** 0.5)
+                * efficiency
                 * capture_rate
             ) if not spread_clean.empty else 0.0
             valid_days = len(spread_clean)

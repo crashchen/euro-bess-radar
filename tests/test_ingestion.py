@@ -1830,6 +1830,43 @@ class TestFetchEsiosIndicator:
         # Bypassed retry: one GET, not multiple
         assert mock_get.call_count == 1
 
+    @patch("src.data_ingestion.time.sleep")
+    @patch("src.data_ingestion.get_esios_api_key", return_value="fake-key")
+    def test_network_error_message_scrubbed_and_cause_suppressed(
+        self,
+        _mock_key: MagicMock,
+        _mock_sleep: MagicMock,
+    ) -> None:
+        """PR5c: ESIOS uses a header API key so the URL itself does NOT
+        carry credentials, but request exception strings still embed the
+        upstream URL and any params. Streamlit's ``__cause__`` rendering
+        would leak that URL chain. Match the ENTSO-E pattern: scrub +
+        ``from None``.
+        """
+        with (
+            patch(
+                "src.data_ingestion.requests.get",
+                side_effect=requests.ConnectionError(
+                    "HTTPSConnectionPool: failed connecting to "
+                    "https://api.esios.ree.es/indicators/634?"
+                    "start_date=2025-01-01&end_date=2025-01-02&"
+                    "api_key=SHOULD-BE-REDACTED"
+                ),
+            ),
+            pytest.raises(DataSourceNetworkError) as exc_info,
+        ):
+            fetch_esios_indicator(
+                634,
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
+        # ``from None`` suppresses the cause chain so __cause__ is None.
+        assert exc_info.value.__cause__ is None
+        # Even if a secret accidentally shows up in the upstream string
+        # (api_key here), it must not appear in the surfaced message.
+        assert "SHOULD-BE-REDACTED" not in str(exc_info.value)
+        assert "api_key=***" in str(exc_info.value)
+
     @patch("src.data_ingestion.requests.get")
     @patch("src.data_ingestion.get_esios_api_key", return_value="fake-key")
     def test_bundle_merges_indicators_on_timestamp(

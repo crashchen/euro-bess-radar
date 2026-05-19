@@ -6,7 +6,10 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.analytics import calculate_daily_spreads
+from src.analytics import (
+    calculate_daily_spreads,
+    estimate_annual_arbitrage_revenue,
+)
 from src.forward_curve import (
     build_forward_synthetic_prices,
     find_overlapping_contracts,
@@ -272,6 +275,53 @@ class TestSummariseForwardRevenue:
         apr = summary[summary["contract"] == "Apr-2027"].iloc[0]
         assert (mar["period_revenue_eur"] / mar["days_in_period"]) > (
             apr["period_revenue_eur"] / apr["days_in_period"]
+        )
+
+    def test_per_day_revenue_matches_historical_path(
+        self, historical_sine: pd.DataFrame,
+    ) -> None:
+        """Codex P1 / PR5 repro: ``summarise_forward_revenue`` used
+        ``efficiency ** 0.5`` while ``estimate_annual_arbitrage_revenue``
+        applies the full ``efficiency``. Identical daily spreads therefore
+        produced ~11% higher per-day revenue in the Forward tab than the
+        Revenue Estimation tab — inconsistent EUR/MW/yr for the same
+        parameter set. After the fix the two paths must agree.
+        """
+        # Single non-overlapping contract so attribution is trivial.
+        forward = parse_forward_csv(
+            "zone,contract,delivery_start,delivery_end,price_eur_mwh\n"
+            "DE_LU,Mar-2027,2027-03-01,2027-03-15,100\n"
+        )
+        synth = build_forward_synthetic_prices(
+            forward, historical_sine, zone="DE_LU", tz="Europe/Berlin",
+        )
+        ds = calculate_daily_spreads(
+            synth[["price_eur_mwh"]], tz="Europe/Berlin", duration_hours=2.0,
+        )
+        summary = summarise_forward_revenue(
+            ds, forward, synth, zone="DE_LU",
+            power_mw=1.0, duration_hours=2.0,
+            efficiency=0.88, capture_rate=0.70, tz="Europe/Berlin",
+        )
+        row = summary.iloc[0]
+        forward_per_day = row["period_revenue_eur"] / row["days_in_period"]
+
+        # Build the historical-path expected per-day using the SAME spread
+        # series feeding the same EUR/MW/yr formula.
+        rev = estimate_annual_arbitrage_revenue(
+            ds, power_mw=1.0, duration_hours=2.0,
+            roundtrip_efficiency=0.88, capture_rate=0.70,
+        )
+        # estimate_annual_arbitrage_revenue returns annual EUR/MW; convert
+        # to per-day at the same convention summarise uses.
+        hist_per_day = rev["annual_revenue_eur_per_mw"] / 365.25
+
+        # Tolerance accounts for round(...,2) on both summary and revenue
+        # paths. The pre-fix divergence was ~11% (sqrt(0.88) vs 0.88), so
+        # any 0.1% threshold catches the regression with room to spare.
+        assert forward_per_day == pytest.approx(hist_per_day, rel=1e-3), (
+            f"forward={forward_per_day:.4f} historical={hist_per_day:.4f} "
+            "(efficiency double-application regression)"
         )
 
     def test_overlap_days_attributed_to_winner_not_double_counted(

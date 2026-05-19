@@ -914,51 +914,105 @@ def calculate_imbalance_spread(
     imbalance_prices: pd.DataFrame,
     tz: str | None = None,
 ) -> dict[str, float]:
-    """Estimate additional BESS revenue from DA-vs-imbalance spread.
+    """Estimate additional BESS revenue from DA-vs-imbalance arbitrage.
 
-    Merges day-ahead and imbalance prices on timestamp, calculates the
-    absolute spread, and estimates annualised value per MW.
+    Balancing markets price imbalance asymmetrically: ``imbalance_price_long``
+    is what the TSO pays surplus parties when the system is short, while
+    ``imbalance_price_short`` is what the TSO charges deficit parties when
+    the system is long. A BESS can only arbitrage in the FEASIBLE direction:
+    if its DA position is long (already bought), it can resell into the
+    imbalance market at ``imb_long`` (profit only when ``imb_long > DA``);
+    if its DA position is short (already sold), it can buy back at
+    ``imb_short`` (profit only when ``imb_short < DA``).
+
+    The previous implementation used ``abs(imb - DA)`` which implicitly
+    assumed bidirectional trading at the same price — that systematically
+    over-counted unrealisable trades and inflated the annual estimate.
 
     Args:
         da_prices: DataFrame with 'price_eur_mwh' column and DatetimeIndex.
-        imbalance_prices: DataFrame with 'imbalance_price_long' (and optionally
-            'imbalance_price_short') columns and DatetimeIndex.
+        imbalance_prices: DataFrame with 'imbalance_price_long' and
+            optionally 'imbalance_price_short' columns. When only one side
+            is published (the typical ENTSO-E case for many zones), only
+            the corresponding arbitrage direction is modelled.
         tz: IANA timezone for local-time grouping.
 
     Returns:
-        Dict with avg_spread, p50, p90, negative_pct, estimated_annual_value_per_mw.
+        Dict with avg_spread, p50, p90, zero_share, estimated_annual_value_per_mw.
+        ``zero_share`` is the fraction of intervals where neither direction
+        is profitable (clamped-to-zero arbitrage); it replaces the old
+        ``negative_pct`` field whose value was always zero under abs().
     """
     da = _to_local(da_prices, tz)
     imb = _to_local(imbalance_prices, tz)
 
-    # Pick the best imbalance price column
-    if "imbalance_price_long" in imb.columns:
-        imb_col = "imbalance_price_long"
-    elif "imbalance_price_eur_mwh" in imb.columns:
-        imb_col = "imbalance_price_eur_mwh"
-    else:
-        return {"avg_spread": 0.0, "p50": 0.0, "p90": 0.0,
-                "negative_pct": 0.0, "estimated_annual_value_per_mw": 0.0}
+    empty = {
+        "avg_spread": 0.0, "p50": 0.0, "p90": 0.0,
+        "zero_share": 0.0,
+        # Legacy alias kept for back-compat with callers that read this key.
+        "negative_pct": 0.0,
+        "estimated_annual_value_per_mw": 0.0,
+    }
 
-    merged = da[["price_eur_mwh"]].join(imb[[imb_col]], how="inner")
+    # Identify available imbalance columns. ``imbalance_price_eur_mwh``
+    # (single-column legacy export) is treated as the long price since the
+    # ENTSO-E single-price convention publishes the surplus price.
+    long_col = (
+        "imbalance_price_long" if "imbalance_price_long" in imb.columns
+        else "imbalance_price_eur_mwh" if "imbalance_price_eur_mwh" in imb.columns
+        else None
+    )
+    short_col = (
+        "imbalance_price_short" if "imbalance_price_short" in imb.columns
+        else None
+    )
+    if long_col is None and short_col is None:
+        return empty
+
+    cols = [c for c in (long_col, short_col) if c is not None]
+    merged = da[["price_eur_mwh"]].join(imb[cols], how="inner").dropna(
+        subset=["price_eur_mwh"],
+    )
     if merged.empty:
-        return {"avg_spread": 0.0, "p50": 0.0, "p90": 0.0,
-                "negative_pct": 0.0, "estimated_annual_value_per_mw": 0.0}
+        return empty
 
-    spread = (merged[imb_col] - merged["price_eur_mwh"]).abs()
-    avg_spread = float(spread.mean())
+    da_price = merged["price_eur_mwh"]
+    long_arb = (
+        (merged[long_col] - da_price).clip(lower=0.0)
+        if long_col is not None else pd.Series(0.0, index=merged.index)
+    )
+    short_arb = (
+        (da_price - merged[short_col]).clip(lower=0.0)
+        if short_col is not None else pd.Series(0.0, index=merged.index)
+    )
+    # Per interval, BESS captures whichever direction is feasible AND
+    # profitable. They are mutually exclusive on a single delivery period
+    # (a single MW slot can't be simultaneously long and short), so we
+    # take the max rather than the sum.
+    arb = pd.concat([long_arb, short_arb], axis=1).max(axis=1)
+    arb = arb.dropna()
+    if arb.empty:
+        return empty
+
+    avg_spread = float(arb.mean())
     interval_hours = _infer_interval_hours(merged.index)
 
-    # Annualize: assume BESS captures spread on each interval
+    # Annualise: the realised arbitrage value per interval is
+    # ``arb[i] * interval_hours``; scale to a full year of intervals.
     hours_per_year = 8766.0
-    intervals_per_year = hours_per_year / interval_hours
+    intervals_per_year = hours_per_year / interval_hours if interval_hours > 0 else 0.0
     annual_value = avg_spread * interval_hours * intervals_per_year
 
+    zero_share = round(float((arb <= 0).mean() * 100), 1)
     return {
         "avg_spread": round(avg_spread, 2),
-        "p50": round(float(spread.quantile(0.5)), 2),
-        "p90": round(float(spread.quantile(0.9)), 2),
-        "negative_pct": round(float((spread <= 0).mean() * 100), 1),
+        "p50": round(float(arb.quantile(0.5)), 2),
+        "p90": round(float(arb.quantile(0.9)), 2),
+        "zero_share": zero_share,
+        # Back-compat: legacy callers read ``negative_pct``; we now
+        # surface the same idea (share of un-arbitrageable intervals)
+        # under the more accurate name AND keep the old key wired.
+        "negative_pct": zero_share,
         "estimated_annual_value_per_mw": round(annual_value, 2),
     }
 

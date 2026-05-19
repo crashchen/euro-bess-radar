@@ -2172,9 +2172,17 @@ def fetch_esios_indicator(
     try:
         payload = _call_esios_api(indicator_id, start, end)
     except requests.RequestException as exc:
+        # ESIOS passes the API key via ``x-api-key`` header (not URL), so
+        # the exception string typically does NOT carry credentials.
+        # The request URL still embeds query params (start_date, end_date,
+        # indicator_id) — not sensitive, but Streamlit panels render
+        # __cause__ chains, leaking the full upstream URL into the UI.
+        # Match the ENTSO-E pattern from PR2: scrub + ``from None`` so
+        # only the cleaned message reaches the user.
         raise DataSourceNetworkError(
-            f"ESIOS indicator {indicator_id} fetch failed: {exc}"
-        ) from exc
+            f"ESIOS indicator {indicator_id} fetch failed: "
+            f"{_scrub_secrets(str(exc))}"
+        ) from None
     return _parse_esios_indicator(payload, column)
 
 

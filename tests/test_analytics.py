@@ -534,6 +534,60 @@ class TestImbalanceSpread:
         result = calculate_imbalance_spread(da, imb)
         assert result["avg_spread"] == 0.0
 
+    def test_long_only_unprofitable_direction_clamped_to_zero(self) -> None:
+        """Gemini P1 repro / PR5b: when only ``imbalance_price_long`` is
+        published and it is BELOW DA at every interval, the previous
+        ``abs()`` formula counted (DA - long) as positive arbitrage even
+        though the BESS cannot sell its DA-long position to a buyer
+        paying less than DA. The correct value is zero.
+        """
+        idx = pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC")
+        da = pd.DataFrame({"price_eur_mwh": [80.0] * 24}, index=idx)
+        da.index.name = "timestamp"
+        # imb_long = 50 < DA=80 — selling at imb_long would LOSE money.
+        imb = pd.DataFrame({"imbalance_price_long": [50.0] * 24}, index=idx)
+        imb.index.name = "timestamp"
+        result = calculate_imbalance_spread(da, imb)
+        assert result["avg_spread"] == 0.0
+        assert result["estimated_annual_value_per_mw"] == 0.0
+        assert result["zero_share"] == pytest.approx(100.0)
+
+    def test_two_sided_picks_max_of_long_and_short_arbitrage(self) -> None:
+        """Both imb_long and imb_short published. On any interval the BESS
+        captures whichever direction is feasible AND profitable, but never
+        both on the same MW. Confirm the per-interval arb is
+        max(imb_long-DA, DA-imb_short, 0), not the sum.
+        """
+        idx = pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC")
+        da = pd.DataFrame({"price_eur_mwh": [60.0] * 24}, index=idx)
+        da.index.name = "timestamp"
+        imb = pd.DataFrame(
+            {
+                # imb_long - DA = +10 (long direction profitable)
+                "imbalance_price_long": [70.0] * 24,
+                # DA - imb_short = +5 (short direction also profitable but smaller)
+                "imbalance_price_short": [55.0] * 24,
+            },
+            index=idx,
+        )
+        imb.index.name = "timestamp"
+        result = calculate_imbalance_spread(da, imb)
+        # max(10, 5) = 10, not 15 (sum) and not 7.5 (abs-mean).
+        assert result["avg_spread"] == pytest.approx(10.0)
+
+    def test_short_only_arbitrage_when_short_below_da(self) -> None:
+        """Only ``imbalance_price_short`` is published and it is BELOW DA:
+        the BESS can buy back its DA-short position cheap, profit
+        (DA - imb_short)."""
+        idx = pd.date_range("2025-01-01", periods=24, freq="h", tz="UTC")
+        da = pd.DataFrame({"price_eur_mwh": [60.0] * 24}, index=idx)
+        da.index.name = "timestamp"
+        imb = pd.DataFrame({"imbalance_price_short": [40.0] * 24}, index=idx)
+        imb.index.name = "timestamp"
+        result = calculate_imbalance_spread(da, imb)
+        assert result["avg_spread"] == pytest.approx(20.0)
+        assert result["estimated_annual_value_per_mw"] > 0
+
 
 # ── Intraday uplift (P5-A Phase 1) ──────────────────────────────────────────
 
