@@ -15,6 +15,7 @@ from src.config import (
     ANCILLARY_ENERGY_ACTIVATION_SHARE,
     HOURS_PER_YEAR,
 )
+from src.data_ingestion import DataSourceParseError
 from src.time_utils import (
     gb_settlement_period_to_utc,
     parse_regelleistung_time_block_start,
@@ -569,6 +570,19 @@ def parse_ancillary_csv(
 
     # Strip whitespace from column names
     df.columns = df.columns.str.strip()
+
+    # Reject CSVs missing the template's required columns rather than
+    # silently bucketing the rows into ``product_type == UNKNOWN``. Codex
+    # showed that a DE_FCR template with only ``product`` and
+    # ``capacity_price_eur_mw`` still produced an annualised revenue —
+    # which is a real data-quality footgun for downstream forecasts.
+    expected_cols = list(ANCILLARY_TEMPLATES[template_key]["expected_columns"])
+    missing = [c for c in expected_cols if c not in df.columns]
+    if missing:
+        raise DataSourceParseError(
+            f"Ancillary CSV for template {template_key} is missing required "
+            f"column(s): {missing}. Expected columns: {expected_cols}."
+        )
 
     # Parse timestamp
     idx = pd.DatetimeIndex([], tz="UTC", name="timestamp")

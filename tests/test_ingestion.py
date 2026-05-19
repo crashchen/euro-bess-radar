@@ -1542,6 +1542,22 @@ class TestFetchEntsoeImbalancePrices:
         assert "imbalance_price_short" in result.columns
         assert len(result) == 24
 
+    @patch("src.data_ingestion.get_api_key", side_effect=OSError("missing key"))
+    def test_missing_api_key_raises_auth_error(
+        self, _mock_key: MagicMock,
+    ) -> None:
+        """Pre-fix the imbalance fetcher logged a warning and returned None
+        when the API key was missing, leaving the UI to render "no data" with
+        no actionable hint. Now mirror DA/IDA: raise DataSourceAuthError so
+        the sidebar can prompt the user to set ENTSOE_API_KEY.
+        """
+        with pytest.raises(DataSourceAuthError, match="ENTSOE_API_KEY"):
+            fetch_entsoe_imbalance_prices(
+                "RO",
+                pd.Timestamp("2025-01-01", tz="UTC"),
+                pd.Timestamp("2025-01-02", tz="UTC"),
+            )
+
 
 # ── Test 14: ENTSO-E Intraday Auction prices (IDA1/2/3) ────────────────────
 

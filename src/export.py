@@ -31,11 +31,30 @@ _HEADER_FILL = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="
 _PRICE_FMT = "#,##0.00"
 _PCT_FMT = "0.0%"
 
+# Strings whose first non-whitespace character is one of these are
+# interpreted by Excel / LibreOffice Calc / Google Sheets as a formula. A
+# malicious uploader can smuggle ``=HYPERLINK("//evil/...", "Click")`` or
+# ``=cmd|'/C calc'!A1`` through any free-text field (e.g. ancillary CSV
+# ``product``, forward CSV ``contract``) and have it execute when the
+# recipient opens the export. Prefix a single quote so the cell is forced
+# to text mode. Gemini-3.1 P0 flagged that checking ``value[0]`` alone
+# misses payloads with a leading space (Calc still evaluates them).
+_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r", "\n", "|")
+
+
+def _safe_cell_value(value):
+    """Return ``value`` with formula triggers neutralised for spreadsheet writes."""
+    if isinstance(value, str) and value:
+        stripped = value.lstrip()
+        if stripped and stripped[0] in _FORMULA_TRIGGERS:
+            return "'" + value
+    return value
+
 
 def _write_header_row(ws, row: int, headers: list[str]) -> None:
     """Write a styled header row."""
     for col, header in enumerate(headers, 1):
-        cell = ws.cell(row=row, column=col, value=header)
+        cell = ws.cell(row=row, column=col, value=_safe_cell_value(header))
         cell.font = _HEADER_FONT
         cell.fill = _HEADER_FILL
         cell.alignment = Alignment(horizontal="center")
@@ -54,8 +73,8 @@ def _auto_column_width(ws) -> None:
 
 def _write_kv_pair(ws, row: int, key: str, value, fmt: str | None = None) -> int:
     """Write a key-value pair to the summary sheet."""
-    ws.cell(row=row, column=1, value=key).font = Font(bold=True)
-    cell = ws.cell(row=row, column=2, value=value)
+    ws.cell(row=row, column=1, value=_safe_cell_value(key)).font = Font(bold=True)
+    cell = ws.cell(row=row, column=2, value=_safe_cell_value(value))
     if fmt:
         cell.number_format = fmt
     return row + 1
@@ -242,7 +261,10 @@ def _build_table_sheet(ws, title: str, df: pd.DataFrame) -> None:
             elif isinstance(value, pd.Timestamp):
                 cell.value = str(value)
             else:
-                cell.value = value
+                # User-supplied cells (e.g. ancillary CSV ``product``,
+                # forward CSV ``contract``) flow through this branch as
+                # plain strings. Neutralise formula-trigger leading chars.
+                cell.value = _safe_cell_value(value)
 
     _auto_column_width(ws)
 
@@ -653,21 +675,29 @@ def export_comparison_to_bytes(comparison_df: pd.DataFrame) -> bytes:
     Returns:
         Excel file as bytes.
     """
+    # Sanitise any string cells before handing to to_excel so a future
+    # callers that pass uploaded data (today everything is internal) cannot
+    # smuggle a leading-=/+/-/@ formula through this path. Codex flagged
+    # this as defence-in-depth — no live exploit, but cheap to harden.
+    safe_df = comparison_df.copy()
+    for col in safe_df.select_dtypes(include=["object", "string"]).columns:
+        safe_df[col] = safe_df[col].map(_safe_cell_value)
+
     buf = BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        comparison_df.to_excel(writer, sheet_name="Zone Comparison", index=False)
+        safe_df.to_excel(writer, sheet_name="Zone Comparison", index=False)
         ws = writer.sheets["Zone Comparison"]
 
         # Apply styled headers and number formats. Analytics stores negative_pct
         # as percentage points for UI readability; Excel percent cells need ratios.
-        for col_idx, col_name in enumerate(comparison_df.columns, 1):
+        for col_idx, col_name in enumerate(safe_df.columns, 1):
             label, fmt = _COMPARISON_COLUMNS.get(col_name, (col_name, None))
-            cell = ws.cell(row=1, column=col_idx, value=label)
+            cell = ws.cell(row=1, column=col_idx, value=_safe_cell_value(label))
             cell.font = _HEADER_FONT
             cell.fill = _HEADER_FILL
             cell.alignment = Alignment(horizontal="center")
             if fmt:
-                for row_idx in range(2, len(comparison_df) + 2):
+                for row_idx in range(2, len(safe_df) + 2):
                     data_cell = ws.cell(row=row_idx, column=col_idx)
                     if col_name == "negative_pct" and data_cell.value is not None:
                         data_cell.value = data_cell.value / 100

@@ -208,6 +208,25 @@ class TestParsing:
         with pytest.raises(ValueError, match="Unknown template"):
             parse_ancillary_csv("a,b\n1,2", "INVALID")
 
+    def test_missing_required_column_raises(self) -> None:
+        """Codex P0 repro: a DE_FCR upload missing ``date`` used to silently
+        bucket rows as UNKNOWN and still produce annualised revenue. The
+        parser must now reject incomplete uploads instead.
+        """
+        from src.data_ingestion import DataSourceParseError
+        csv = "product,capacity_price_eur_mw\nFCR-N,10.00\n"
+        with pytest.raises(DataSourceParseError, match="missing required column"):
+            parse_ancillary_csv(csv, "DE_FCR")
+
+    def test_missing_required_column_lists_all(self) -> None:
+        """Error message lists EVERY missing column, not just the first."""
+        from src.data_ingestion import DataSourceParseError
+        csv = "irrelevant\n1\n"
+        with pytest.raises(
+            DataSourceParseError, match=r"\['date', 'product', 'capacity_price_eur_mw'\]",
+        ):
+            parse_ancillary_csv(csv, "DE_FCR")
+
     def test_semicolon_delimiter(self) -> None:
         csv = "date;product;capacity_price_eur_mw\n2025-01-01;POS;10.00\n"
         df = parse_ancillary_csv(csv, "DE_FCR")

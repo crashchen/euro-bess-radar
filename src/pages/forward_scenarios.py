@@ -290,10 +290,27 @@ def render(
     )
     st.plotly_chart(fig, width="stretch")
 
-    # Download summary
+    # Download summary. Neutralise spreadsheet formula injection on any
+    # user-supplied string column (the ``contract`` field is the obvious
+    # vector — an uploaded `=HYPERLINK("//evil/", "x")` would be executed
+    # by Excel / Calc / Sheets when the user opens the export). Include
+    # both ``object`` and pandas StringDtype so a future dtype-upgrade
+    # cannot silently re-introduce the hole (Gemini-3.1 P1).
+    _FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r", "\n", "|")
+
+    def _safe_csv(v):
+        if isinstance(v, str) and v:
+            stripped = v.lstrip()
+            if stripped and stripped[0] in _FORMULA_TRIGGERS:
+                return "'" + v
+        return v
+
+    safe_summary = summary_all.copy()
+    for col in safe_summary.select_dtypes(include=["object", "string"]).columns:
+        safe_summary[col] = safe_summary[col].map(_safe_csv)
     st.download_button(
         "Download forward summary (CSV)",
-        data=summary_all.to_csv(index=False),
+        data=safe_summary.to_csv(index=False),
         file_name="forward_scenario_summary.csv",
         mime="text/csv",
     )

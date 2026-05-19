@@ -1804,8 +1804,15 @@ def fetch_entsoe_imbalance_prices(
     try:
         client = EntsoePandasClient(api_key=get_api_key())
     except OSError as exc:
-        logger.warning("Cannot create ENTSO-E client: %s", exc)
-        return None
+        # Missing API key was previously logged at WARNING and silently
+        # turned into None. DA/IDA both raise here so the sidebar can
+        # surface a "set ENTSOE_API_KEY in .env" hint; mirror that
+        # behaviour so the user is not left wondering why imbalance
+        # data never appears.
+        raise DataSourceAuthError(
+            "ENTSO-E API key missing or invalid for imbalance prices. "
+            "Set ENTSOE_API_KEY in .env."
+        ) from exc
 
     start_q = start.tz_convert(DEFAULT_QUERY_TIMEZONE)
     end_q = end.tz_convert(DEFAULT_QUERY_TIMEZONE)
