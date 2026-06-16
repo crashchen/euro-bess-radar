@@ -71,10 +71,9 @@ def simulate_da_milp_replay(
     power_mw: float = 1.0,
     duration_hours: float = 1.0,
     efficiency: float = 0.88,
-    capture_rate: float = 0.70,
+    capture_rate: float = 1.0,
     capex_eur_kwh: float = 0.0,
     soc_init_frac: float = 0.5,
-    include_reserve_headroom: bool = False,
 ) -> dict[str, Any]:
     """Replay one local day with the existing DA MILP dispatch solver."""
     day = _select_local_day(price_df, simulation_date, tz)
@@ -116,7 +115,6 @@ def simulate_da_milp_replay(
         efficiency=efficiency,
         capex_eur_kwh=capex_eur_kwh,
         daily_fce=daily_fce,
-        include_reserve_headroom=include_reserve_headroom,
     )
 
 
@@ -129,10 +127,9 @@ def simulate_da_id_replay(
     power_mw: float = 1.0,
     duration_hours: float = 1.0,
     efficiency: float = 0.88,
-    capture_rate: float = 0.70,
+    capture_rate: float = 1.0,
     capex_eur_kwh: float = 0.0,
     soc_init_frac: float = 0.5,
-    include_reserve_headroom: bool = False,
 ) -> dict[str, Any]:
     """Replay one local day with the ex-post DA + IDA1 two-stage solver."""
     da_day = _select_local_day(da_prices, simulation_date, tz)
@@ -166,15 +163,36 @@ def simulate_da_id_replay(
         dt=dt,
         capture_rate=capture_rate,
     )
+    # ida_p_* is the FINAL physical schedule after ex-post rebid, so FCE
+    # based on it equals real battery wear.
     daily_fce = _full_equivalent_cycles(
         result["ida_p_discharge"],
         dt=dt,
         capacity_mwh=power_mw * duration_hours,
     )
+    # Traded volume = DA gross + |ID rebid delta|. Rebalancing factor
+    # > 1.0 only when ID rebid moves physical away from DA position.
+    da_charge = np.asarray(result["da_p_charge"], dtype=float)
+    da_discharge = np.asarray(result["da_p_discharge"], dtype=float)
+    ida_charge = np.asarray(result["ida_p_charge"], dtype=float)
+    ida_discharge = np.asarray(result["ida_p_discharge"], dtype=float)
+    da_gross_volume = float((da_charge + da_discharge).sum() * dt)
+    id_delta_volume = float((
+        np.abs(ida_charge - da_charge) + np.abs(ida_discharge - da_discharge)
+    ).sum() * dt)
+    traded_volume = da_gross_volume + id_delta_volume
+
+    extra_columns = {
+        "intraday_price_eur_mwh": merged["intraday_price_eur_mwh"].to_numpy(),
+        "da_position_mw": da_discharge - da_charge,
+        "ida_position_mw": ida_discharge - ida_charge,
+        "rebid_delta_mw": (ida_discharge - ida_charge) - (da_discharge - da_charge),
+    }
+
     out = _build_result(
-        merged.rename(columns={"price_eur_mwh": "price_eur_mwh"}),
-        p_charge=result["ida_p_charge"],
-        p_discharge=result["ida_p_discharge"],
+        merged,
+        p_charge=ida_charge,
+        p_discharge=ida_discharge,
         soc=result["ida_soc"],
         interval_revenue=revenue,
         dt=dt,
@@ -183,10 +201,12 @@ def simulate_da_id_replay(
         efficiency=efficiency,
         capex_eur_kwh=capex_eur_kwh,
         daily_fce=daily_fce,
-        include_reserve_headroom=include_reserve_headroom,
+        traded_volume_mwh=traded_volume,
+        extra_columns=extra_columns,
     )
-    out["timeseries"]["intraday_price_eur_mwh"] = merged["intraday_price_eur_mwh"].to_numpy()
-    out["summary"]["rebid_uplift_eur"] = round(float(result["rebid_uplift_eur"]) * capture_rate, 2)
+    out["summary"]["rebid_uplift_eur"] = round(
+        float(result["rebid_uplift_eur"]) * capture_rate, 2
+    )
     return out
 
 
@@ -251,7 +271,8 @@ def _build_result(
     efficiency: float,
     capex_eur_kwh: float,
     daily_fce: float,
-    include_reserve_headroom: bool,
+    traded_volume_mwh: float | None = None,
+    extra_columns: dict[str, np.ndarray] | None = None,
 ) -> dict[str, Any]:
     """Build the cockpit summary and interval DataFrame from solver arrays."""
     capacity_mwh = power_mw * duration_hours
@@ -261,7 +282,11 @@ def _build_result(
     net_dispatch = np.asarray(p_discharge, dtype=float) - np.asarray(p_charge, dtype=float)
     interval_throughput = (np.asarray(p_charge) + np.asarray(p_discharge)) * dt
     physical_throughput = float(interval_throughput.sum())
-    traded_volume = physical_throughput
+    traded_volume = (
+        float(traded_volume_mwh)
+        if traded_volume_mwh is not None
+        else physical_throughput
+    )
     total_revenue = float(np.asarray(interval_revenue).sum())
     active_power = np.abs(net_dispatch)
     active = active_power > 1e-6
@@ -301,11 +326,9 @@ def _build_result(
         "interval_throughput_mwh": interval_throughput,
         "cumulative_throughput_mwh": np.cumsum(interval_throughput),
     })
-    if include_reserve_headroom:
-        ts["reserve_headroom_mw"] = np.maximum(
-            power_mw - np.asarray(p_charge) - np.asarray(p_discharge),
-            0.0,
-        )
+    if extra_columns:
+        for col_name, values in extra_columns.items():
+            ts[col_name] = np.asarray(values)
 
     summary = {
         "total_revenue_eur": total_revenue,

@@ -12,6 +12,7 @@ from src.simulation import (
     _count_dispatch_blocks,
     available_local_dates,
     empty_simulation_result,
+    simulate_da_id_replay,
     simulate_da_milp_replay,
 )
 
@@ -126,3 +127,77 @@ def test_simulation_page_and_app_parse() -> None:
     for path in ("app.py", "src/pages/simulation_cockpit.py"):
         with open(path, encoding="utf-8") as handle:
             ast.parse(handle.read())
+
+
+def test_da_replay_default_capture_rate_is_raw_lp() -> None:
+    prices = _make_prices()
+    raw = simulate_da_milp_replay(
+        prices,
+        simulation_date=prices.index[0].date(),
+        power_mw=1.0,
+        duration_hours=2.0,
+    )
+    derated = simulate_da_milp_replay(
+        prices,
+        simulation_date=prices.index[0].date(),
+        power_mw=1.0,
+        duration_hours=2.0,
+        capture_rate=0.70,
+    )
+    assert raw["summary"]["total_revenue_eur"] > 0
+    assert derated["summary"]["total_revenue_eur"] == pytest.approx(
+        raw["summary"]["total_revenue_eur"] * 0.70,
+        rel=1e-6,
+    )
+
+
+def _make_da_id_pair() -> tuple[pd.DataFrame, pd.DataFrame]:
+    idx = pd.date_range("2026-03-19", periods=24, freq="h", tz="UTC")
+    da = [20.0] * 8 + [90.0] * 8 + [25.0] * 8
+    ida = [25.0] * 8 + [110.0] * 8 + [22.0] * 8
+    da_df = pd.DataFrame({"price_eur_mwh": da}, index=idx)
+    ida_df = pd.DataFrame({"intraday_price_eur_mwh": ida}, index=idx)
+    da_df.index.name = "timestamp"
+    ida_df.index.name = "timestamp"
+    return da_df, ida_df
+
+
+def test_da_id_replay_traded_volume_exceeds_physical_when_rebid() -> None:
+    da, ida = _make_da_id_pair()
+    result = simulate_da_id_replay(
+        da, ida,
+        simulation_date=da.index[0].date(),
+        power_mw=1.0, duration_hours=2.0,
+    )
+    summary = result["summary"]
+    assert summary["physical_throughput_mwh"] > 0
+    assert summary["traded_volume_mwh"] >= summary["physical_throughput_mwh"]
+    assert summary["rebalancing_factor"] >= 1.0
+
+
+def test_da_id_replay_exposes_wholesales_columns() -> None:
+    da, ida = _make_da_id_pair()
+    ts = simulate_da_id_replay(
+        da, ida,
+        simulation_date=da.index[0].date(),
+        power_mw=1.0, duration_hours=2.0,
+    )["timeseries"]
+    for col in ("da_position_mw", "ida_position_mw", "rebid_delta_mw",
+                "intraday_price_eur_mwh"):
+        assert col in ts.columns, f"missing column {col}"
+    assert np.allclose(
+        ts["rebid_delta_mw"],
+        ts["ida_position_mw"] - ts["da_position_mw"],
+    )
+
+
+def test_da_id_replay_no_ida_data_returns_safe_empty() -> None:
+    da, _ = _make_da_id_pair()
+    empty_ida = pd.DataFrame(columns=["intraday_price_eur_mwh"])
+    result = simulate_da_id_replay(
+        da, empty_ida,
+        simulation_date=da.index[0].date(),
+        power_mw=1.0, duration_hours=2.0,
+    )
+    assert result["timeseries"].empty
+    assert "ida1" in result["summary"]["reason"].lower()

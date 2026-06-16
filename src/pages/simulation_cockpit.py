@@ -56,19 +56,14 @@ def render(
             "IDA1 data already fetched in the Revenue Estimation tab."
         ),
     )
-    has_capacity_anc = (
-        anc_df is not None
-        and not anc_df.empty
-        and "capacity_price_eur_mw" in anc_df.columns
-        and anc_df["capacity_price_eur_mw"].notna().any()
-    )
-    reserve_overlay = c3.checkbox(
-        "Reserve headroom overlay",
-        value=bool(has_capacity_anc),
-        disabled=not has_capacity_anc,
+    cockpit_capture_rate = c3.slider(
+        "Capture rate haircut",
+        min_value=0.5, max_value=1.0, value=1.0, step=0.05,
         help=(
-            "Shows uncommitted physical power headroom when reserve capacity "
-            "data exists. It does not model FCR/aFRR activation energy."
+            "1.0 = raw MILP perfect-foresight revenue (what the model achieves "
+            "with full price knowledge). Values < 1.0 derate for forecast "
+            f"slippage. The sidebar value ({capture_rate:.2f}) is intentionally "
+            "ignored here so cockpit shows raw MILP output by default."
         ),
     )
 
@@ -88,10 +83,9 @@ def render(
             power_mw=power_mw,
             duration_hours=duration_hours,
             efficiency=efficiency,
-            capture_rate=capture_rate,
+            capture_rate=cockpit_capture_rate,
             capex_eur_kwh=capex_eur_kwh,
             soc_init_frac=0.5,
-            include_reserve_headroom=reserve_overlay,
         )
     else:
         result = simulate_da_milp_replay(
@@ -101,10 +95,9 @@ def render(
             power_mw=power_mw,
             duration_hours=duration_hours,
             efficiency=efficiency,
-            capture_rate=capture_rate,
+            capture_rate=cockpit_capture_rate,
             capex_eur_kwh=capex_eur_kwh,
             soc_init_frac=0.5,
-            include_reserve_headroom=reserve_overlay,
         )
 
     summary = result["summary"]
@@ -113,18 +106,15 @@ def render(
         st.warning(summary.get("reason") or "No simulation result for this day.")
         return
 
-    _render_kpis(summary)
-    st.caption(
-        f"Annualized values scale this single simulated day by 365.25 and "
-        f"divide by {power_mw:.1f} MW. Use it as an operational replay, not "
-        "a bankable annual forecast."
-    )
+    _render_kpis(summary, power_mw=power_mw)
 
     left, right = st.columns([1.4, 1.0])
     with left:
         _plot_soc(ts, chart_template)
         _plot_dispatch(ts, chart_template)
-        _plot_power_allocation(ts, reserve_overlay, chart_template)
+        _plot_power_allocation(ts, chart_template)
+        if mode == "DA + IDA1 Replay" and "da_position_mw" in ts.columns:
+            _plot_wholesales(ts, chart_template)
     with right:
         _render_health_panel(summary)
         _plot_revenue(ts, chart_template)
@@ -134,16 +124,22 @@ def render(
         st.dataframe(ts, width="stretch", hide_index=True)
 
 
-def _render_kpis(summary: dict) -> None:
+def _render_kpis(summary: dict, *, power_mw: float) -> None:
     r1 = st.columns(3)
-    r1[0].metric("Total Revenue", f"€{summary['total_revenue_eur']:,.0f}")
-    r1[1].metric("EUR/MW/Year", f"€{summary['annualized_eur_per_mw']:,.0f}")
-    r1[2].metric("Number of Trades", f"{summary['number_of_trades']:,}")
+    r1[0].metric("Day Revenue", f"€{summary['total_revenue_eur']:,.0f}")
+    r1[1].metric("Number of Trades", f"{summary['number_of_trades']:,}")
+    r1[2].metric("Rebalancing Factor", f"{summary['rebalancing_factor']:.2f}")
 
     r2 = st.columns(3)
     r2[0].metric("Traded Volume", f"{summary['traded_volume_mwh']:,.1f} MWh")
     r2[1].metric("Physical Throughput", f"{summary['physical_throughput_mwh']:,.1f} MWh")
-    r2[2].metric("Rebalancing Factor", f"{summary['rebalancing_factor']:.2f}")
+    r2[2].metric("Avg C-rate", f"{summary['avg_c_rate']:.2f}")
+
+    st.caption(
+        f"Single-day x 365.25 extrapolation ~= EUR {summary['annualized_eur_per_mw']:,.0f}/MW/yr "
+        f"(power_mw={power_mw:.1f}). Sample-size of 1, NOT a bankable annual figure — "
+        "pick representative days or aggregate a multi-day window for a usable estimate."
+    )
 
 
 def _render_health_panel(summary: dict) -> None:
@@ -204,11 +200,7 @@ def _plot_dispatch(ts: pd.DataFrame, chart_template: str) -> None:
     st.plotly_chart(fig, width="stretch")
 
 
-def _plot_power_allocation(
-    ts: pd.DataFrame,
-    reserve_overlay: bool,
-    chart_template: str,
-) -> None:
+def _plot_power_allocation(ts: pd.DataFrame, chart_template: str) -> None:
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=ts["local_time"], y=ts["available_discharge_mw"],
@@ -225,16 +217,37 @@ def _plot_power_allocation(
         mode="lines", name="Physical position",
         line=dict(color="#FF2D95", width=2),
     ))
-    if reserve_overlay and "reserve_headroom_mw" in ts.columns:
-        fig.add_trace(go.Scatter(
-            x=ts["local_time"], y=ts["reserve_headroom_mw"],
-            mode="lines", name="Reserve headroom overlay",
-            line=dict(color="#7FDBFF", width=1, dash="dot"),
-        ))
     fig.update_layout(
         title="Dynamic Power Allocation",
         xaxis_title="",
         yaxis_title="MW",
+        template=chart_template,
+        height=340,
+    )
+    st.plotly_chart(fig, width="stretch")
+
+
+def _plot_wholesales(ts: pd.DataFrame, chart_template: str) -> None:
+    """DA position vs final IDA position vs rebid delta — enspired-style."""
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=ts["local_time"], y=ts["rebid_delta_mw"],
+        name="ID rebid delta", marker_color="#FF2D95", opacity=0.75,
+    ))
+    fig.add_trace(go.Scatter(
+        x=ts["local_time"], y=ts["da_position_mw"],
+        mode="lines", name="DA position",
+        line=dict(color="#7FB6FF", width=2, dash="dot"),
+    ))
+    fig.add_trace(go.Scatter(
+        x=ts["local_time"], y=ts["ida_position_mw"],
+        mode="lines", name="Physical (DA+ID)",
+        line=dict(color="#FFFFFF", width=2),
+    ))
+    fig.update_layout(
+        title="Wholesales Optimization (DA vs ID rebid vs Physical)",
+        xaxis_title="",
+        yaxis_title="MW (positive = discharge / sell)",
         template=chart_template,
         height=340,
     )
