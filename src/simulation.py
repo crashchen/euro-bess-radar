@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from datetime import date
 from typing import Any
 
@@ -278,19 +279,20 @@ def simulate_replay_batch(
     With `carry_soc=False`, every day re-uses the legacy per-day solve
     starting from `soc_init_frac` (50% by default).
 
-    `mode="DA + IDA1 Replay"` always uses the per-day two-stage solver
-    today; a continuous-horizon DA+ID solver is on the roadmap but not
-    implemented. `carry_soc=True` is silently downgraded to per-day for
-    this mode and `batch.attrs["da_id_carry_soc_supported"]` is set
-    `False` so the UI can warn.
+    Continuous-horizon carry-over is supported for BOTH `"DA MILP
+    Replay"` and `"DA + IDA1 Replay"`: each contiguous clean run is
+    solved once over the whole multi-day horizon (the two-stage DA+ID
+    solver is itself horizon-agnostic, so terminal-neutral applies only
+    at the run end for both the DA and the IDA stage).
+    `batch.attrs["da_id_carry_soc_supported"]` stays `True` for parity
+    with the DA-only path.
     """
     selected_dates = dates or available_local_dates(price_df, tz=tz)
-    use_continuous = (
-        carry_soc and mode == "DA MILP Replay" and len(selected_dates) >= 2
-    )
-    da_id_carry_supported = mode != "DA + IDA1 Replay"
+    has_intraday = intraday_df is not None and not intraday_df.empty
+    is_da_id = mode == "DA + IDA1 Replay"
+    can_continue = carry_soc and len(selected_dates) >= 2
 
-    if use_continuous:
+    if can_continue and not is_da_id:
         rows, excluded_days = _simulate_continuous_da_replay(
             price_df,
             dates=selected_dates,
@@ -302,6 +304,21 @@ def simulate_replay_batch(
             capex_eur_kwh=capex_eur_kwh,
             soc_init_frac=soc_init_frac,
         )
+        use_continuous = True
+    elif can_continue and is_da_id and has_intraday:
+        rows, excluded_days = _simulate_continuous_da_id_replay(
+            price_df,
+            intraday_df,  # type: ignore[arg-type]
+            dates=selected_dates,
+            tz=tz,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            capture_rate=capture_rate,
+            capex_eur_kwh=capex_eur_kwh,
+            soc_init_frac=soc_init_frac,
+        )
+        use_continuous = True
     else:
         rows, excluded_days = _simulate_per_day_replay(
             price_df,
@@ -316,6 +333,7 @@ def simulate_replay_batch(
             capex_eur_kwh=capex_eur_kwh,
             soc_init_frac=soc_init_frac,
         )
+        use_continuous = False
 
     if not rows:
         out = pd.DataFrame(columns=_BATCH_COLUMNS)
@@ -330,7 +348,8 @@ def simulate_replay_batch(
     out.attrs["carry_mode"] = (
         "continuous_horizon" if use_continuous else "per_day_reset"
     )
-    out.attrs["da_id_carry_soc_supported"] = da_id_carry_supported
+    # Continuous DA+ID carry-over is now implemented; kept for UI parity.
+    out.attrs["da_id_carry_soc_supported"] = True
     return out
 
 
@@ -404,7 +423,11 @@ def _simulate_continuous_da_replay(
     capacity_mwh = max(power_mw * duration_hours, 1e-9)
     current_soc_frac = soc_init_frac
 
-    runs = _group_clean_runs(price_df, dates=dates, tz=tz)
+    def build_da_day(local_date: date) -> pd.DataFrame:
+        day = _select_local_day(price_df, local_date, tz)
+        return day[["price_eur_mwh"]] if not day.empty else pd.DataFrame()
+
+    runs = _group_clean_runs(dates=dates, build_day=build_da_day)
     handled_dates: set[date] = set()
 
     for run_dates, slice_df, day_breaks in runs:
@@ -461,21 +484,146 @@ def _simulate_continuous_da_replay(
     return rows, excluded
 
 
-def _group_clean_runs(
-    price_df: pd.DataFrame,
+def _da_id_traded_volume(
+    *,
+    da_charge: np.ndarray,
+    da_discharge: np.ndarray,
+    ida_charge: np.ndarray,
+    ida_discharge: np.ndarray,
+    dt: float,
+) -> float:
+    """DA gross + |ID rebid delta| traded volume (see simulate_da_id_replay)."""
+    da_gross = float((da_charge + da_discharge).sum() * dt)
+    id_delta = float((
+        np.abs(ida_charge - da_charge) + np.abs(ida_discharge - da_discharge)
+    ).sum() * dt)
+    return da_gross + id_delta
+
+
+def _simulate_continuous_da_id_replay(
+    da_prices: pd.DataFrame,
+    ida_prices: pd.DataFrame,
     *,
     dates: list[date],
     tz: str | None,
-) -> list[tuple[list[date], pd.DataFrame, list[tuple[int, int]]]]:
-    """Group `dates` into contiguous segments with NaN-free price slices.
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    capture_rate: float,
+    capex_eur_kwh: float,
+    soc_init_frac: float,
+) -> tuple[list[dict[str, Any]], int]:
+    """Continuous-horizon DA + IDA1 replay.
 
-    Returns a list of `(run_dates, slice_df, day_breaks)` where
-    `day_breaks` is a list of `(start_idx, end_idx)` pairs into
-    `slice_df`'s rows for each local date in `run_dates`. A run breaks
-    whenever:
+    Mirrors `_simulate_continuous_da_replay` but feeds each contiguous
+    clean run's merged DA/IDA prices to `solve_daily_da_id_dispatch`
+    once. That two-stage solver runs `solve_daily_lp` on the DA prices
+    and again on the IDA prices, both terminal-neutral only at the run
+    end — so SoC carries across days in BOTH the committed DA stage and
+    the ex-post IDA rebid stage. Per-day KPI rows slice the run's IDA
+    (final physical) arrays, exactly like the single-day path.
+    """
+    rows: list[dict[str, Any]] = []
+    capacity_mwh = max(power_mw * duration_hours, 1e-9)
+    current_soc_frac = soc_init_frac
+
+    def build_da_id_day(local_date: date) -> pd.DataFrame:
+        da_day = _select_local_day(da_prices, local_date, tz)
+        ida_day = _select_local_day(ida_prices, local_date, tz)
+        if da_day.empty or ida_day.empty or "intraday_price_eur_mwh" not in ida_day.columns:
+            return pd.DataFrame()
+        merged = da_day[["price_eur_mwh"]].join(
+            ida_day[["intraday_price_eur_mwh"]], how="inner",
+        ).dropna()
+        return merged if not merged.empty else pd.DataFrame()
+
+    runs = _group_clean_runs(dates=dates, build_day=build_da_id_day)
+    handled_dates: set[date] = set()
+
+    for run_dates, slice_df, day_breaks in runs:
+        handled_dates.update(run_dates)
+        da_arr = slice_df["price_eur_mwh"].to_numpy(dtype=float)
+        ida_arr = slice_df["intraday_price_eur_mwh"].to_numpy(dtype=float)
+        dt = _infer_interval_hours(pd.DatetimeIndex(slice_df.index))
+        run = solve_daily_da_id_dispatch(
+            da_arr, ida_arr, dt=dt,
+            power_mw=power_mw, duration_hours=duration_hours,
+            efficiency=efficiency, soc_init_frac=current_soc_frac,
+        )
+        full_revenue = _da_id_interval_revenue(
+            da_prices=da_arr, ida_prices=ida_arr, result=run,
+            dt=dt, capture_rate=capture_rate,
+        )
+        da_charge = np.asarray(run["da_p_charge"], dtype=float)
+        da_discharge = np.asarray(run["da_p_discharge"], dtype=float)
+        ida_charge = np.asarray(run["ida_p_charge"], dtype=float)
+        ida_discharge = np.asarray(run["ida_p_discharge"], dtype=float)
+        da_position = da_discharge - da_charge
+        ida_position = ida_discharge - ida_charge
+
+        soc_start_frac = current_soc_frac
+        for local_date, (start, end) in zip(run_dates, day_breaks, strict=True):
+            day_df = slice_df.iloc[start:end]
+            day_ida_charge = ida_charge[start:end]
+            day_ida_discharge = ida_discharge[start:end]
+            day_da_charge = da_charge[start:end]
+            day_da_discharge = da_discharge[start:end]
+            daily_fce = _full_equivalent_cycles(
+                day_ida_discharge, dt=dt, capacity_mwh=capacity_mwh,
+            )
+            traded_volume = _da_id_traded_volume(
+                da_charge=day_da_charge, da_discharge=day_da_discharge,
+                ida_charge=day_ida_charge, ida_discharge=day_ida_discharge,
+                dt=dt,
+            )
+            extra_columns = {
+                "intraday_price_eur_mwh": ida_arr[start:end],
+                "da_position_mw": da_position[start:end],
+                "ida_position_mw": ida_position[start:end],
+                "rebid_delta_mw": ida_position[start:end] - da_position[start:end],
+            }
+            day_result = _build_result(
+                day_df,
+                p_charge=day_ida_charge,
+                p_discharge=day_ida_discharge,
+                soc=run["ida_soc"][start:end + 1],
+                interval_revenue=full_revenue[start:end],
+                dt=dt,
+                power_mw=power_mw,
+                duration_hours=duration_hours,
+                efficiency=efficiency,
+                capex_eur_kwh=capex_eur_kwh,
+                daily_fce=daily_fce,
+                traded_volume_mwh=traded_volume,
+                extra_columns=extra_columns,
+            )
+            rows.append(
+                _summary_row(local_date, "DA + IDA1 Replay", day_result, soc_start_frac)
+            )
+            soc_start_frac = float(run["ida_soc"][end] / capacity_mwh)
+
+        current_soc_frac = min(max(soc_start_frac, 0.0), 1.0)
+
+    excluded = sum(1 for d in dates if d not in handled_dates)
+    return rows, excluded
+
+
+def _group_clean_runs(
+    *,
+    dates: list[date],
+    build_day: Callable[[date], pd.DataFrame],
+) -> list[tuple[list[date], pd.DataFrame, list[tuple[int, int]]]]:
+    """Group `dates` into contiguous segments with clean per-day frames.
+
+    `build_day(local_date)` returns the day's frame (DA-only or merged
+    DA+IDA) or an empty frame when the day is unusable. Returns a list of
+    `(run_dates, slice_df, day_breaks)` where `day_breaks` is a list of
+    `(start_idx, end_idx)` pairs into `slice_df`'s rows for each local
+    date in `run_dates`. A run breaks whenever:
       - the next requested date is more than one calendar day later,
-      - the day's slice is empty,
-      - the day's slice has any NaN price.
+      - the day's frame is empty,
+      - the day's frame has any NaN value,
+      - the day's frame is sparse (non-uniform UTC index).
     """
     if not dates:
         return []
@@ -500,10 +648,10 @@ def _group_clean_runs(
     for local_date in sorted_dates:
         if previous_date is not None and (local_date - previous_date).days != 1:
             flush()
-        day_df = _select_local_day(price_df, local_date, tz)
+        day_df = build_day(local_date)
         if (
             day_df.empty
-            or day_df["price_eur_mwh"].isna().any()
+            or bool(day_df.isna().to_numpy().any())
             or not _is_regular_utc_day(day_df)
         ):
             # Empty / NaN / sparse days break the continuous horizon. A

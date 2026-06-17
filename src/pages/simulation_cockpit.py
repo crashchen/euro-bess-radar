@@ -709,12 +709,6 @@ def _render_multi_day_summary(
         if batch.empty:
             st.warning(f"No valid replay days in this sample. Excluded days: {excluded}.")
             return
-        if carry_soc and not batch.attrs.get("da_id_carry_soc_supported", True):
-            st.info(
-                "Continuous-horizon SoC carry-over is currently DA-only. "
-                "DA + IDA1 multi-day replays fall back to per-day reset; "
-                "a two-stage continuous DA+ID solver is on the roadmap."
-            )
         carry_mode = str(batch.attrs.get("carry_mode", "per_day_reset"))
         _render_batch_kpis(
             batch, requested_days=len(batch_dates),

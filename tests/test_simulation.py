@@ -403,6 +403,66 @@ def test_continuous_horizon_excludes_sparse_day_without_nan() -> None:
     assert batch["n_intervals"].tolist() == [24]
 
 
+def _make_da_id_overnight_pair() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """DA + IDA pair where overnight SoC carry is strictly profitable."""
+    idx = pd.date_range("2026-03-19", periods=48, freq="h", tz="UTC")
+    da = [20.0] * 22 + [5.0, 5.0] + [200.0, 200.0] + [20.0] * 22
+    ida = [22.0] * 22 + [4.0, 4.0] + [210.0, 210.0] + [21.0] * 22
+    da_df = pd.DataFrame({"price_eur_mwh": da}, index=idx)
+    ida_df = pd.DataFrame({"intraday_price_eur_mwh": ida}, index=idx)
+    da_df.index.name = "timestamp"
+    ida_df.index.name = "timestamp"
+    return da_df, ida_df
+
+
+def test_da_id_continuous_horizon_beats_per_day_reset() -> None:
+    """DA + IDA1 multi-day replay must use continuous horizon, not fallback.
+
+    Regression guard for the DA+ID carry-over work: the batch must report
+    carry_mode="continuous_horizon" and capture overnight arbitrage that
+    the per-day terminal-neutral reset cannot.
+    """
+    da_df, ida_df = _make_da_id_overnight_pair()
+    dates = available_local_dates(da_df, tz="UTC")
+    chained = simulate_replay_batch(
+        da_df, mode="DA + IDA1 Replay", intraday_df=ida_df,
+        dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0, carry_soc=True,
+    )
+    reset = simulate_replay_batch(
+        da_df, mode="DA + IDA1 Replay", intraday_df=ida_df,
+        dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0, carry_soc=False,
+    )
+    assert chained.attrs["carry_mode"] == "continuous_horizon"
+    assert chained.attrs["da_id_carry_soc_supported"] is True
+    assert float(chained["total_revenue_eur"].sum()) > float(
+        reset["total_revenue_eur"].sum()
+    ) + 50.0
+    assert chained.iloc[0]["soc_end_pct"] > 60.0
+    assert chained.iloc[1]["soc_start_pct"] == pytest.approx(
+        chained.iloc[0]["soc_end_pct"], abs=1e-6,
+    )
+
+
+def test_da_id_continuous_total_dominates_independent_days() -> None:
+    """Continuous DA+ID total >= sum of independent single-day solves."""
+    da_df, ida_df = _make_da_id_pair()
+    da_df = pd.concat([da_df, da_df.shift(freq="1D")])
+    ida_df = pd.concat([ida_df, ida_df.shift(freq="1D")])
+    dates = available_local_dates(da_df, tz="UTC")
+    chained = simulate_replay_batch(
+        da_df, mode="DA + IDA1 Replay", intraday_df=ida_df,
+        dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0, carry_soc=True,
+    )
+    independent = sum(
+        simulate_da_id_replay(
+            da_df, ida_df, simulation_date=d, tz="UTC",
+            power_mw=1.0, duration_hours=2.0,
+        )["summary"]["total_revenue_eur"]
+        for d in dates
+    )
+    assert float(chained["total_revenue_eur"].sum()) >= independent - 1e-6
+
+
 def test_continuous_horizon_keeps_dst_spring_forward_day() -> None:
     """A 23-local-hour DST day stays uniform in UTC and must be kept."""
     idx = pd.date_range("2026-03-28 00:00", periods=72, freq="h", tz="UTC")
