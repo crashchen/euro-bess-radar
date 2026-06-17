@@ -460,6 +460,133 @@ def solve_daily_da_id_dispatch(
     }
 
 
+def _schedule_value_at_prices(
+    p_charge: np.ndarray,
+    p_discharge: np.ndarray,
+    prices: np.ndarray,
+    dt: float,
+) -> float:
+    """Post-VOM cash of a fixed physical schedule settled at `prices`.
+
+    Matches the objective sign convention of ``solve_daily_lp``:
+    discharge earns ``(price - VOM)`` and charge costs ``(price + VOM)``
+    per MWh. Used to re-settle a schedule chosen at forecast prices
+    against the realised IDA print.
+    """
+    discharge_cash = ((prices - DISPATCH_VOM_COST_EUR_MWH) * p_discharge * dt).sum()
+    charge_cash = ((prices + DISPATCH_VOM_COST_EUR_MWH) * p_charge * dt).sum()
+    return float(discharge_cash - charge_cash)
+
+
+def solve_sequential_da_id_dispatch(
+    da_prices: np.ndarray,
+    ida_forecast: np.ndarray,
+    ida_realised: np.ndarray,
+    dt: float,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    soc_init_frac: float = 0.5,
+) -> dict:
+    """Sequential DA + IDA1 policy under an imperfect IDA forecast.
+
+    Unlike ``solve_daily_da_id_dispatch`` (which re-dispatches with
+    ex-post-perfect knowledge of the realised IDA print and is therefore
+    an upper bound), this models a realistic desk:
+
+      Stage 1 — commit a DA position by solving the DA-only MILP on
+                ``da_prices`` (the position locked in before IDA clears).
+      Stage 2 — choose the physical re-dispatch that is optimal against
+                the IDA *forecast* (``ida_forecast``), NOT the realised
+                price. The desk only knows the forecast when it rebids.
+      Settlement — the executed (forecast-optimal) schedule is settled at
+                the *realised* IDA price; the DA position is marked to
+                realised IDA via the same implicit-MtM accounting as the
+                ex-post solver.
+
+    When ``ida_forecast == ida_realised`` the Stage-2 decision coincides
+    with the perfect-foresight solve and ``realised_total_eur`` equals the
+    ceiling, so the ceiling is a strict upper bound and
+    ``forecast_error_cost_eur >= 0`` by construction (the realised-optimal
+    schedule cannot be beaten at realised prices).
+
+    Returns keys:
+        da_only_revenue_eur     — Stage-1 DA-only revenue (baseline floor).
+        realised_total_eur      — forecast-driven policy settled at realised.
+        ceiling_total_eur       — ex-post perfect-foresight upper bound.
+        forecast_error_cost_eur — ceiling - realised (>= 0).
+        captured_uplift_eur     — realised - da_only (may be negative if
+                                  the forecast misleads the rebid).
+        ida_p_charge/discharge  — executed (forecast-optimal) schedule.
+        ida_soc                 — SoC trajectory of the executed schedule.
+        da_p_charge/discharge, da_soc — Stage-1 committed DA schedule.
+    """
+    n = len(da_prices)
+    lengths_ok = n > 0 and len(ida_forecast) == n and len(ida_realised) == n
+    has_nan = (
+        np.isnan(da_prices).any()
+        or np.isnan(ida_forecast).any()
+        or np.isnan(ida_realised).any()
+    )
+    if not lengths_ok or has_nan:
+        zeros = np.zeros(max(n, 0))
+        return {
+            "da_only_revenue_eur": 0.0,
+            "realised_total_eur": 0.0,
+            "ceiling_total_eur": 0.0,
+            "forecast_error_cost_eur": 0.0,
+            "captured_uplift_eur": 0.0,
+            "da_p_charge": zeros, "da_p_discharge": zeros,
+            "ida_p_charge": zeros, "ida_p_discharge": zeros,
+            "da_soc": np.zeros(max(n, 0) + 1),
+            "ida_soc": np.zeros(max(n, 0) + 1),
+        }
+
+    stage_1 = solve_daily_lp(
+        da_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency, soc_init_frac=soc_init_frac,
+    )
+    # Stage 2: physical re-dispatch chosen against the FORECAST.
+    stage_2_fc = solve_daily_lp(
+        ida_forecast, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency, soc_init_frac=soc_init_frac,
+    )
+
+    da_net = stage_1["p_discharge"] - stage_1["p_charge"]
+    da_gross = float((da_net * da_prices * dt).sum())
+    implicit_mtm = float((da_net * ida_realised * dt).sum())
+    # Executed schedule settled at the realised IDA print.
+    ida_value_realised = _schedule_value_at_prices(
+        stage_2_fc["p_charge"], stage_2_fc["p_discharge"], ida_realised, dt,
+    )
+    realised_total = da_gross - implicit_mtm + ida_value_realised
+
+    ceiling = solve_daily_da_id_dispatch(
+        da_prices, ida_realised, dt=dt, power_mw=power_mw,
+        duration_hours=duration_hours, efficiency=efficiency,
+        soc_init_frac=soc_init_frac,
+    )
+    ceiling_total = ceiling["total_cash_eur"]
+    # Clamp tiny solver-tolerance negatives; the realised-optimal schedule
+    # is feasible for the forecast policy's settlement, so the ceiling is a
+    # true upper bound.
+    forecast_error_cost = max(ceiling_total - realised_total, 0.0)
+
+    return {
+        "da_only_revenue_eur": round(stage_1["revenue_eur"], 6),
+        "realised_total_eur": round(realised_total, 6),
+        "ceiling_total_eur": round(ceiling_total, 6),
+        "forecast_error_cost_eur": round(forecast_error_cost, 6),
+        "captured_uplift_eur": round(realised_total - stage_1["revenue_eur"], 6),
+        "da_p_charge": stage_1["p_charge"],
+        "da_p_discharge": stage_1["p_discharge"],
+        "ida_p_charge": stage_2_fc["p_charge"],
+        "ida_p_discharge": stage_2_fc["p_discharge"],
+        "da_soc": stage_1["soc"],
+        "ida_soc": stage_2_fc["soc"],
+    }
+
+
 def solve_dispatch_batch(
     price_df: pd.DataFrame,
     power_mw: float = 1.0,
