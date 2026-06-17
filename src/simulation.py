@@ -266,68 +266,254 @@ def simulate_replay_batch(
     soc_init_frac: float = 0.5,
     carry_soc: bool = True,
 ) -> pd.DataFrame:
-    """Run replay summaries for many local days without returning all intervals.
+    """Run replay summaries for many local days.
 
-    When `carry_soc=True` (default), each day starts at the terminal SoC of
-    the previous successful day so that multi-day aggregates reflect a real
-    continuous-operation trajectory. Excluded days do NOT advance the
-    carried SoC — the next valid day picks up from the last completed day.
+    With `carry_soc=True` (default) and `mode="DA MILP Replay"`, the
+    requested window is solved as ONE continuous MILP per contiguous
+    no-gap segment (terminal-neutral applied only at the END of each
+    segment), so day N+1 can monetise SoC stored at the end of day N.
+    This fixes the per-day terminal-neutral bias that previously capped
+    multi-day aggregates at the in-day spread.
+
+    With `carry_soc=False`, every day re-uses the legacy per-day solve
+    starting from `soc_init_frac` (50% by default).
+
+    `mode="DA + IDA1 Replay"` always uses the per-day two-stage solver
+    today; a continuous-horizon DA+ID solver is on the roadmap but not
+    implemented. `carry_soc=True` is silently downgraded to per-day for
+    this mode and `batch.attrs["da_id_carry_soc_supported"]` is set
+    `False` so the UI can warn.
     """
     selected_dates = dates or available_local_dates(price_df, tz=tz)
-    rows: list[dict[str, Any]] = []
-    excluded_days = 0
-    capacity_mwh = max(power_mw * duration_hours, 1e-9)
-    current_soc_frac = soc_init_frac
+    use_continuous = (
+        carry_soc and mode == "DA MILP Replay" and len(selected_dates) >= 2
+    )
+    da_id_carry_supported = mode != "DA + IDA1 Replay"
 
-    for local_date in selected_dates:
+    if use_continuous:
+        rows, excluded_days = _simulate_continuous_da_replay(
+            price_df,
+            dates=selected_dates,
+            tz=tz,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            capture_rate=capture_rate,
+            capex_eur_kwh=capex_eur_kwh,
+            soc_init_frac=soc_init_frac,
+        )
+    else:
+        rows, excluded_days = _simulate_per_day_replay(
+            price_df,
+            mode=mode,
+            intraday_df=intraday_df,
+            dates=selected_dates,
+            tz=tz,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            capture_rate=capture_rate,
+            capex_eur_kwh=capex_eur_kwh,
+            soc_init_frac=soc_init_frac,
+        )
+
+    if not rows:
+        out = pd.DataFrame(columns=_BATCH_COLUMNS)
+    else:
+        out = (
+            pd.DataFrame(rows, columns=_BATCH_COLUMNS)
+            .sort_values("date")
+            .reset_index(drop=True)
+        )
+    out.attrs["excluded_days"] = excluded_days
+    out.attrs["carry_soc"] = carry_soc
+    out.attrs["carry_mode"] = (
+        "continuous_horizon" if use_continuous else "per_day_reset"
+    )
+    out.attrs["da_id_carry_soc_supported"] = da_id_carry_supported
+    return out
+
+
+def _simulate_per_day_replay(
+    price_df: pd.DataFrame,
+    *,
+    mode: str,
+    intraday_df: pd.DataFrame | None,
+    dates: list[date],
+    tz: str | None,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    capture_rate: float,
+    capex_eur_kwh: float,
+    soc_init_frac: float,
+) -> tuple[list[dict[str, Any]], int]:
+    """Legacy per-day loop. Every day starts at `soc_init_frac`."""
+    rows: list[dict[str, Any]] = []
+    excluded = 0
+    for local_date in dates:
         if mode == "DA + IDA1 Replay":
             if intraday_df is None or intraday_df.empty:
-                excluded_days += 1
+                excluded += 1
                 continue
             result = simulate_da_id_replay(
-                price_df,
-                intraday_df,
-                simulation_date=local_date,
-                tz=tz,
-                power_mw=power_mw,
-                duration_hours=duration_hours,
-                efficiency=efficiency,
-                capture_rate=capture_rate,
-                capex_eur_kwh=capex_eur_kwh,
-                soc_init_frac=current_soc_frac,
+                price_df, intraday_df,
+                simulation_date=local_date, tz=tz,
+                power_mw=power_mw, duration_hours=duration_hours,
+                efficiency=efficiency, capture_rate=capture_rate,
+                capex_eur_kwh=capex_eur_kwh, soc_init_frac=soc_init_frac,
             )
         else:
             result = simulate_da_milp_replay(
                 price_df,
-                simulation_date=local_date,
-                tz=tz,
+                simulation_date=local_date, tz=tz,
+                power_mw=power_mw, duration_hours=duration_hours,
+                efficiency=efficiency, capture_rate=capture_rate,
+                capex_eur_kwh=capex_eur_kwh, soc_init_frac=soc_init_frac,
+            )
+        if result["timeseries"].empty:
+            excluded += 1
+            continue
+        rows.append(_summary_row(local_date, mode, result, soc_init_frac))
+    return rows, excluded
+
+
+def _simulate_continuous_da_replay(
+    price_df: pd.DataFrame,
+    *,
+    dates: list[date],
+    tz: str | None,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    capture_rate: float,
+    capex_eur_kwh: float,
+    soc_init_frac: float,
+) -> tuple[list[dict[str, Any]], int]:
+    """Solve the requested window as one MILP per contiguous clean run.
+
+    Splits `dates` into maximal contiguous sequences that yield a complete
+    NaN-free price slice (any NaN or missing interval breaks the run at
+    that day). Each run gets one `solve_daily_lp` call with
+    `soc_init_frac` = end-of-previous-run SoC, with terminal-neutral
+    equality applied at the END of the run. Days inside the run keep
+    full multi-day SoC freedom.
+    """
+    rows: list[dict[str, Any]] = []
+    excluded = 0
+    capacity_mwh = max(power_mw * duration_hours, 1e-9)
+    current_soc_frac = soc_init_frac
+
+    runs = _group_clean_runs(price_df, dates=dates, tz=tz)
+    handled_dates: set[date] = set()
+
+    for run_dates, slice_df, day_breaks in runs:
+        handled_dates.update(run_dates)
+        prices = slice_df["price_eur_mwh"].to_numpy(dtype=float)
+        dt = _infer_interval_hours(pd.DatetimeIndex(slice_df.index))
+        run_result = solve_daily_lp(
+            prices,
+            dt=dt,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            soc_init_frac=current_soc_frac,
+        )
+        full_revenue = _da_interval_revenue(
+            prices,
+            run_result["p_charge"],
+            run_result["p_discharge"],
+            dt=dt,
+            capture_rate=capture_rate,
+        )
+
+        soc_start_frac = current_soc_frac
+        for local_date, (start, end) in zip(run_dates, day_breaks, strict=True):
+            day_df = slice_df.iloc[start:end]
+            day_soc_slice = run_result["soc"][start:end + 1]
+            day_p_charge = run_result["p_charge"][start:end]
+            day_p_discharge = run_result["p_discharge"][start:end]
+            day_interval_rev = full_revenue[start:end]
+            daily_fce = _full_equivalent_cycles(
+                day_p_discharge, dt=dt, capacity_mwh=capacity_mwh,
+            )
+            day_result = _build_result(
+                day_df,
+                p_charge=day_p_charge,
+                p_discharge=day_p_discharge,
+                soc=day_soc_slice,
+                interval_revenue=day_interval_rev,
+                dt=dt,
                 power_mw=power_mw,
                 duration_hours=duration_hours,
                 efficiency=efficiency,
-                capture_rate=capture_rate,
                 capex_eur_kwh=capex_eur_kwh,
-                soc_init_frac=current_soc_frac,
+                daily_fce=daily_fce,
             )
+            rows.append(
+                _summary_row(local_date, "DA MILP Replay", day_result, soc_start_frac)
+            )
+            soc_start_frac = float(day_soc_slice[-1] / capacity_mwh)
 
-        ts = result["timeseries"]
-        if ts.empty:
-            excluded_days += 1
+        current_soc_frac = min(max(soc_start_frac, 0.0), 1.0)
+
+    excluded = sum(1 for d in dates if d not in handled_dates)
+    return rows, excluded
+
+
+def _group_clean_runs(
+    price_df: pd.DataFrame,
+    *,
+    dates: list[date],
+    tz: str | None,
+) -> list[tuple[list[date], pd.DataFrame, list[tuple[int, int]]]]:
+    """Group `dates` into contiguous segments with NaN-free price slices.
+
+    Returns a list of `(run_dates, slice_df, day_breaks)` where
+    `day_breaks` is a list of `(start_idx, end_idx)` pairs into
+    `slice_df`'s rows for each local date in `run_dates`. A run breaks
+    whenever:
+      - the next requested date is more than one calendar day later,
+      - the day's slice is empty,
+      - the day's slice has any NaN price.
+    """
+    if not dates:
+        return []
+    sorted_dates = sorted(dates)
+    runs: list[tuple[list[date], pd.DataFrame, list[tuple[int, int]]]] = []
+    current_dates: list[date] = []
+    current_frames: list[pd.DataFrame] = []
+    current_breaks: list[tuple[int, int]] = []
+    cursor = 0
+    previous_date: date | None = None
+
+    def flush() -> None:
+        nonlocal cursor, current_dates, current_frames, current_breaks
+        if current_dates:
+            slice_df = pd.concat(current_frames)
+            runs.append((current_dates, slice_df, current_breaks))
+        current_dates = []
+        current_frames = []
+        current_breaks = []
+        cursor = 0
+
+    for local_date in sorted_dates:
+        if previous_date is not None and (local_date - previous_date).days != 1:
+            flush()
+        day_df = _select_local_day(price_df, local_date, tz)
+        if day_df.empty or day_df["price_eur_mwh"].isna().any():
+            flush()
+            previous_date = None
             continue
-        rows.append(_summary_row(local_date, mode, result, current_soc_frac))
-        if carry_soc:
-            terminal_soc = float(ts["soc_mwh"].iloc[-1])
-            current_soc_frac = min(max(terminal_soc / capacity_mwh, 0.0), 1.0)
+        n = len(day_df)
+        current_dates.append(local_date)
+        current_frames.append(day_df)
+        current_breaks.append((cursor, cursor + n))
+        cursor += n
+        previous_date = local_date
 
-    if not rows:
-        out = pd.DataFrame(columns=_BATCH_COLUMNS)
-        out.attrs["excluded_days"] = excluded_days
-        out.attrs["carry_soc"] = carry_soc
-        return out
-
-    out = pd.DataFrame(rows, columns=_BATCH_COLUMNS).sort_values("date").reset_index(drop=True)
-    out.attrs["excluded_days"] = excluded_days
-    out.attrs["carry_soc"] = carry_soc
-    return out
+    flush()
+    return runs
 
 
 def build_dispatch_event_table(timeseries: pd.DataFrame) -> pd.DataFrame:

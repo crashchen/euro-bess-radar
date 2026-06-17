@@ -297,18 +297,37 @@ def test_replay_batch_da_id_requires_intraday_data() -> None:
     assert batch.attrs["excluded_days"] == len(dates)
 
 
-def _make_two_day_prices() -> pd.DataFrame:
-    """Two-day price series where each day individually clears SoC to 0."""
+def _make_overnight_arbitrage_prices() -> pd.DataFrame:
+    """Two-day prices where overnight SoC carry is strictly profitable.
+
+    Day 1: low all day (20), then a SHORT cheap window at the end (5).
+    Day 2: a SHORT expensive spike at the start (200), then low all day.
+
+    Per-day terminal-neutral dispatch caps each day to its internal
+    spread (20 -> 20 -> 5 on day 1, 200 -> 20 -> 20 on day 2). A true
+    continuous-horizon solve can charge cheap at end of day 1 and
+    discharge into the day 2 morning spike, capturing the 5 -> 200 spread
+    that per-day reset cannot see.
+    """
     idx = pd.date_range("2026-03-19", periods=48, freq="h", tz="UTC")
-    one_day = [20.0] * 8 + [90.0] * 8 + [25.0] * 8
-    prices = one_day + one_day
+    day1 = [20.0] * 22 + [5.0, 5.0]
+    day2 = [200.0, 200.0] + [20.0] * 22
+    prices = day1 + day2
     df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
     df.index.name = "timestamp"
     return df
 
 
-def test_replay_batch_carry_soc_chains_day_end_to_day_start() -> None:
-    prices = _make_two_day_prices()
+def test_replay_batch_carry_soc_produces_higher_revenue_than_reset() -> None:
+    """Continuous-horizon dispatch must capture overnight arbitrage.
+
+    Regression guard for f8cb1d9: the original `carry_soc` implementation
+    only changed `soc_init_frac` per day, but solve_daily_lp pins terminal
+    SoC == initial SoC every day, so carry_soc=True and carry_soc=False
+    produced identical revenue. A correct implementation lets day 1 end
+    with cheap charge stored and day 2 begin discharging into the spike.
+    """
+    prices = _make_overnight_arbitrage_prices()
     dates = available_local_dates(prices, tz="UTC")
     assert len(dates) == 2
 
@@ -323,16 +342,33 @@ def test_replay_batch_carry_soc_chains_day_end_to_day_start() -> None:
 
     assert chained.attrs["carry_soc"] is True
     assert reset.attrs["carry_soc"] is False
-    assert chained.iloc[0]["soc_start_pct"] == pytest.approx(50.0, abs=1e-6)
+    chained_revenue = float(chained["total_revenue_eur"].sum())
+    reset_revenue = float(reset["total_revenue_eur"].sum())
+    assert chained_revenue > reset_revenue + 50.0, (
+        f"carry_soc=True ({chained_revenue:.2f}) must beat reset "
+        f"({reset_revenue:.2f}) on an overnight-arbitrage price path"
+    )
+    # Day 1 should end with stored energy (above 50% baseline) so day 2
+    # can monetise the spike — the smoking gun for true carry-over.
+    assert chained.iloc[0]["soc_end_pct"] > 60.0
     assert chained.iloc[1]["soc_start_pct"] == pytest.approx(
         chained.iloc[0]["soc_end_pct"], abs=1e-6,
     )
-    assert reset.iloc[1]["soc_start_pct"] == pytest.approx(50.0, abs=1e-6)
+
+
+def test_replay_batch_reset_mode_still_resets_each_day_to_50_pct() -> None:
+    prices = _make_overnight_arbitrage_prices()
+    dates = available_local_dates(prices, tz="UTC")
+    reset = simulate_replay_batch(
+        prices, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0, carry_soc=False,
+    )
+    assert all(row == pytest.approx(50.0, abs=1e-6) for row in reset["soc_start_pct"])
 
 
 def test_replay_batch_carry_soc_excluded_day_does_not_advance_soc() -> None:
     """Empty days must not corrupt the carried SoC for the next valid day."""
-    prices = _make_two_day_prices()
+    prices = _make_overnight_arbitrage_prices()
     prices.loc[prices.index[24:32], "price_eur_mwh"] = np.nan
     dates = available_local_dates(prices, tz="UTC")
 

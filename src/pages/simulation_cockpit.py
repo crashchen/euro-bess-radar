@@ -709,9 +709,16 @@ def _render_multi_day_summary(
         if batch.empty:
             st.warning(f"No valid replay days in this sample. Excluded days: {excluded}.")
             return
+        if carry_soc and not batch.attrs.get("da_id_carry_soc_supported", True):
+            st.info(
+                "Continuous-horizon SoC carry-over is currently DA-only. "
+                "DA + IDA1 multi-day replays fall back to per-day reset; "
+                "a two-stage continuous DA+ID solver is on the roadmap."
+            )
+        carry_mode = str(batch.attrs.get("carry_mode", "per_day_reset"))
         _render_batch_kpis(
             batch, requested_days=len(batch_dates),
-            excluded_days=excluded, carry_soc=carry_soc,
+            excluded_days=excluded, carry_mode=carry_mode,
         )
         _plot_batch_summary(batch, chart_template)
         if len(batch) >= 3:
@@ -736,7 +743,7 @@ def _render_batch_kpis(
     *,
     requested_days: int,
     excluded_days: int,
-    carry_soc: bool,
+    carry_mode: str,
 ) -> None:
     avg_daily = float(batch["total_revenue_eur"].mean())
     avg_annualized = float(batch["annualized_eur_per_mw"].mean())
@@ -748,11 +755,13 @@ def _render_batch_kpis(
     cols[2].metric("Avg Annualized", f"EUR {avg_annualized:,.0f}/MW/yr")
     cols[3].metric("Avg FCE/day", f"{batch['daily_fce'].mean():.2f}")
     cols[4].metric("Excluded Days", f"{excluded_days}")
-    soc_note = (
-        "SoC carries across days (continuous operation)."
-        if carry_soc
-        else "Each day resets to 50% SoC (legacy)."
-    )
+    soc_note = {
+        "continuous_horizon": (
+            "Continuous-horizon MILP across the window — overnight SoC "
+            "is free, terminal-neutral only at the segment end."
+        ),
+        "per_day_reset": "Each day resets to 50% SoC (per-day terminal-neutral).",
+    }.get(carry_mode, "")
     st.caption(
         f"Best day: {best['date']} (EUR {best['total_revenue_eur']:,.0f}). "
         f"Highest-cycle day: {stress['date']} ({stress['daily_fce']:.2f} FCE). "
