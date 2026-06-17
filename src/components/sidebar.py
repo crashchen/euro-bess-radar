@@ -138,8 +138,7 @@ def render_sidebar() -> dict:
     Returns:
         Dict with keys: selected_zones, start_date, end_date, power_mw,
         duration_hours, efficiency, capture_rate, capex_eur_kwh,
-        use_lp_dispatch, force_refresh, chart_template,
-        primary_zone_for_fetch, fetch_btn.
+        use_lp_dispatch, force_refresh, primary_zone_for_fetch, fetch_btn.
     """
     st.sidebar.title("BESS Pulse")
     st.sidebar.caption("European BESS Market Screening")
@@ -195,10 +194,7 @@ def render_sidebar() -> dict:
         help="Bypass Streamlit and local price caches for the next fetch only.",
     )
 
-    # Chart theme
-    chart_template = st.sidebar.selectbox(
-        "Chart Theme", ["plotly_dark", "plotly_white", "plotly"], index=0,
-    )
+    st.sidebar.caption("Chart theme: Cockpit dark visual system")
 
     # ── Ancillary services upload ────────────────────────────────────────
     with st.sidebar.expander("Ancillary Services Data"):
@@ -264,7 +260,6 @@ def render_sidebar() -> dict:
         "capex_eur_kwh": capex_eur_kwh,
         "use_lp_dispatch": use_lp_dispatch,
         "force_refresh": force_refresh,
-        "chart_template": chart_template,
         "primary_zone_for_fetch": primary_zone_for_fetch,
         "fetch_btn": fetch_btn,
         "current_zone_date_scope": current_zone_date_scope,

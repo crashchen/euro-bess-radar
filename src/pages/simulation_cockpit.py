@@ -21,7 +21,7 @@ from src.simulation import (
 _C_PRICE = "#FF2D95"      # markets / DA price / interval revenue (magenta)
 _C_PRICE_IDA = "#FFC233"  # IDA price (warm yellow, distinct from DA magenta)
 _C_REVENUE = "#D0D4DC"    # cumulative revenue / neutral totals (light grey)
-_C_SOC = "#00A3FF"        # state of charge / energy storage (cyan)
+_C_SOC = "#7FB6FF"        # state of charge / energy storage (light cyan)
 _C_CHARGE = "#D81B60"     # charging (deep magenta, "power in")
 _C_DISCHARGE = "#00A3FF"  # discharging (cyan, "power out")
 _C_NET = "#FFFFFF"        # net physical / final dispatch line (white)
@@ -132,20 +132,14 @@ def render(
 
     _render_kpis(summary, mode=mode, power_mw=power_mw)
 
-    left, right = st.columns([2.6, 1.0], gap="medium")
-    with left:
-        top_left, top_right = st.columns(2, gap="medium")
-        with top_left:
-            _plot_soc(ts, chart_template, capacity_mwh=power_mw * duration_hours)
-        with top_right:
-            _plot_revenue(ts, chart_template)
-        _plot_dispatch(ts, chart_template)
-        _plot_power_allocation(ts, chart_template, power_mw=power_mw)
-        if mode == "DA + IDA1 Replay" and "da_position_mw" in ts.columns:
-            _plot_wholesales(ts, chart_template, power_mw=power_mw)
-    with right:
-        _render_health_panel(summary)
-        _plot_price(ts, mode, chart_template)
+    _render_health_panel(summary)
+    _plot_price(ts, mode, chart_template)
+    _plot_soc(ts, chart_template, capacity_mwh=power_mw * duration_hours)
+    _plot_dispatch(ts, chart_template)
+    _plot_power_allocation(ts, chart_template, power_mw=power_mw)
+    if mode == "DA + IDA1 Replay" and "da_position_mw" in ts.columns:
+        _plot_wholesales(ts, chart_template, power_mw=power_mw)
+    _plot_revenue(ts, chart_template)
 
     _render_event_table(build_dispatch_event_table(ts))
     _render_multi_day_summary(
@@ -172,42 +166,42 @@ def _inject_cockpit_css() -> None:
         <style>
         .cockpit-hero {
             border: 1px solid rgba(0, 163, 255, 0.18);
-            border-radius: 18px;
-            padding: 18px 20px;
-            margin: 6px 0 18px 0;
+            border-radius: 14px;
+            padding: 12px 14px;
+            margin: 4px 0 14px 0;
             background:
-                radial-gradient(circle at 12% 15%, rgba(255,45,149,0.20), transparent 28%),
-                radial-gradient(circle at 82% 18%, rgba(0,163,255,0.18), transparent 30%),
+                radial-gradient(circle at 10% 14%, rgba(255,45,149,0.14), transparent 24%),
+                radial-gradient(circle at 84% 16%, rgba(0,163,255,0.13), transparent 28%),
                 linear-gradient(135deg, #090d12 0%, #101824 48%, #07090d 100%);
             box-shadow: 0 0 0 1px rgba(255,255,255,0.03) inset,
-                        0 18px 55px rgba(0,0,0,0.35);
+                        0 12px 34px rgba(0,0,0,0.30);
         }
         .cockpit-title {
             color: #f4f7fb;
-            font-size: 1.9rem;
+            font-size: 1.55rem;
             font-weight: 800;
             letter-spacing: -0.04em;
             margin: 0;
         }
         .cockpit-subtitle {
             color: #a8b3c5;
-            font-size: 0.86rem;
-            margin-top: 6px;
+            font-size: 0.78rem;
+            margin-top: 4px;
             max-width: 980px;
         }
         .cockpit-pill-row {
             display: flex;
             flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 14px;
+            gap: 6px;
+            margin-top: 10px;
         }
         .cockpit-pill {
             border: 1px solid rgba(255,255,255,0.12);
             border-radius: 999px;
             color: #dce8f7;
             background: rgba(255,255,255,0.055);
-            padding: 5px 11px;
-            font-size: 0.75rem;
+            padding: 4px 9px;
+            font-size: 0.70rem;
             letter-spacing: 0.02em;
         }
         .cockpit-pill.alert {
@@ -217,17 +211,21 @@ def _inject_cockpit_css() -> None:
         }
         .cockpit-kpi-grid {
             display: grid;
-            grid-template-columns: repeat(6, minmax(0, 1fr));
+            grid-template-columns: repeat(8, minmax(0, 1fr));
             gap: 10px;
-            margin: 10px 0 16px;
+            margin: 8px 0 12px;
         }
         .cockpit-kpi-card {
             border: 1px solid rgba(255,255,255,0.09);
             border-radius: 14px;
-            padding: 13px 14px 12px;
-            min-height: 92px;
+            padding: 10px 12px;
+            min-height: 78px;
             background: linear-gradient(180deg, rgba(20,29,42,0.96), rgba(8,12,18,0.96));
             box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+        }
+        .cockpit-kpi-card.primary {
+            grid-column: span 2;
+            min-height: 88px;
         }
         .cockpit-kpi-card.accent-magenta {
             background: linear-gradient(150deg, rgba(255,45,149,0.82), rgba(91,13,66,0.92));
@@ -236,7 +234,7 @@ def _inject_cockpit_css() -> None:
             background: linear-gradient(150deg, rgba(0,163,255,0.74), rgba(4,51,91,0.95));
         }
         .cockpit-kpi-label {
-            color: rgba(235,241,250,0.78);
+            color: rgba(246,250,255,0.92);
             font-size: 0.72rem;
             font-weight: 700;
             text-transform: uppercase;
@@ -244,27 +242,31 @@ def _inject_cockpit_css() -> None:
         }
         .cockpit-kpi-value {
             color: #ffffff;
-            font-size: 1.55rem;
+            font-size: 1.42rem;
             font-weight: 850;
             letter-spacing: -0.045em;
-            margin-top: 8px;
+            margin-top: 7px;
             line-height: 1.0;
         }
+        .cockpit-kpi-card.primary .cockpit-kpi-value {
+            font-size: 1.72rem;
+        }
         .cockpit-kpi-help {
-            color: rgba(220,232,247,0.62);
+            color: rgba(235,242,252,0.82);
             font-size: 0.72rem;
-            margin-top: 8px;
+            margin-top: 7px;
         }
         .cockpit-health-grid {
             display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-columns: repeat(6, minmax(0, 1fr));
             gap: 10px;
             margin-top: 8px;
         }
         .cockpit-health-card {
             border: 1px solid rgba(0,163,255,0.18);
             border-radius: 14px;
-            padding: 12px;
+            padding: 10px 12px;
+            margin-bottom: 12px;
             background: radial-gradient(circle at 50% 8%, rgba(0,163,255,0.18), transparent 48%),
                         linear-gradient(180deg, rgba(18,27,38,0.94), rgba(7,10,15,0.96));
         }
@@ -282,10 +284,12 @@ def _inject_cockpit_css() -> None:
             margin-top: 4px;
         }
         @media (max-width: 1100px) {
-            .cockpit-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+            .cockpit-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+            .cockpit-health-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
         }
         @media (max-width: 720px) {
             .cockpit-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .cockpit-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
         </style>
         """,
@@ -336,42 +340,34 @@ def _render_cockpit_header(
 def _render_kpis(summary: dict, *, mode: str, power_mw: float) -> None:
     annualized = summary["annualized_eur_per_mw"]
     if mode == "DA + IDA1 Replay" and "rebid_uplift_eur" in summary:
-        final_label = "ID Rebid Uplift"
-        final_value = f"EUR {summary['rebid_uplift_eur']:,.0f}"
-        final_help = "Extra value vs DA-only"
+        optional_card = _kpi_card(
+            "ID Rebid Uplift",
+            f"EUR {summary['rebid_uplift_eur']:,.0f}",
+            "Extra value vs DA-only",
+            "accent-magenta",
+        )
     else:
-        final_label = "Daily FCE"
-        final_value = f"{summary['daily_fce']:.2f}"
-        final_help = "Full equivalent cycles"
+        optional_card = _kpi_card(
+            "Power Basis",
+            f"{power_mw:.1f} MW",
+            "Annualised denominator",
+            "",
+        )
 
     st.markdown(
         f"""
         <div class="cockpit-kpi-grid">
           {_kpi_card("Day Revenue", f"EUR {summary['total_revenue_eur']:,.0f}",
-                     "Selected local day", "accent-magenta")}
+                     "Selected local day", "primary accent-magenta")}
           {_kpi_card("EUR/MW/year", f"EUR {annualized:,.0f}",
-                     "Single-day annualised", "accent-magenta")}
+                     "Single-day annualised", "primary accent-magenta")}
           {_kpi_card("Traded Volume", f"{summary['traded_volume_mwh']:,.1f} MWh",
                      "DA + ID financial volume", "accent-cyan")}
           {_kpi_card("Physical Throughput", f"{summary['physical_throughput_mwh']:,.1f} MWh",
                      "Battery charge + discharge", "accent-cyan")}
           {_kpi_card("Trades", f"{summary['number_of_trades']:,}",
                      "Contiguous dispatch blocks", "")}
-          {_kpi_card("Rebalancing", _fmt_rebal(summary["rebalancing_factor"]),
-                     "Traded / physical volume", "")}
-        </div>
-        <div class="cockpit-kpi-grid">
-          {_kpi_card(final_label, final_value, final_help, "")}
-          {_kpi_card("Power Basis", f"{power_mw:.1f} MW",
-                     "Annualised denominator", "")}
-          {_kpi_card("Avg C-rate", f"{summary['avg_c_rate']:.2f}",
-                     "Active intervals only", "")}
-          {_kpi_card("Max DoD", f"{summary['max_depth_of_discharge_pct']:.1f}%",
-                     "Daily SoC swing", "")}
-          {_kpi_card("SoH Delta", f"{summary['soh_delta_pct']:.4f}%",
-                     "Screening estimate", "")}
-          {_kpi_card("Degradation", f"EUR {summary['degradation_cost_eur']:,.0f}",
-                     "Zero if CapEx is zero", "")}
+          {optional_card}
         </div>
         """,
         unsafe_allow_html=True,

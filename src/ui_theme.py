@@ -9,9 +9,8 @@ import streamlit as st
 _COCKPIT_TEMPLATE_NAME = "bess_cockpit_dark"
 
 
-def cockpit_chart_template(template: str) -> str:
+def cockpit_chart_template() -> str:
     """Return the chart template used by the cockpit visual system."""
-    del template
     _register_cockpit_plotly_template()
     return _COCKPIT_TEMPLATE_NAME
 

@@ -62,7 +62,7 @@ capture_rate = params["capture_rate"]
 capex_eur_kwh = params["capex_eur_kwh"]
 use_lp_dispatch = params["use_lp_dispatch"]
 force_refresh = params["force_refresh"]
-chart_template = cockpit_chart_template(params["chart_template"])
+chart_template = cockpit_chart_template()
 fetch_btn = params["fetch_btn"]
 current_zone_date_scope = params["current_zone_date_scope"]
 
