@@ -34,6 +34,7 @@ def test_hour_of_day_full_coverage_on_short_window() -> None:
     fc, meta = build_ida_forecast(df, target_dates=dates, tz="UTC")
     assert meta["coverage"] == pytest.approx(1.0)
     assert meta["bucket"] == "hour_of_day"
+    assert meta["n_buckets_requested"] == 24
     assert meta["n_buckets_filled"] == 24
     assert meta["fallback_points"] == 0
     assert len(fc) == 24 * len(dates)
@@ -92,6 +93,10 @@ def test_hour_of_week_degrades_on_sub_week_window() -> None:
     )
     assert meta["coverage"] == pytest.approx(0.0)
     assert meta["fallback_points"] == meta["n_target_points"]
+    # All forecast points are global-mean fallbacks, so no bucket is
+    # actually backed by history even though many buckets appear.
+    assert meta["n_buckets_filled"] == 0
+    assert meta["n_buckets_requested"] > 0
 
 
 def test_empty_or_missing_history_returns_empty_frame() -> None:

@@ -11,9 +11,12 @@ prices are excluded from the climatology (leave-one-day-out), so the
 forecast for day D never sees day D. This keeps the cockpit's
 forecast-error numbers honest as a backtest rather than an in-sample fit.
 
-The forecast is intentionally simple (hour-of-week mean). It is NOT a
-trading-grade price model; it exists to demonstrate the *gap* between a
-realistic forecast-driven policy and the perfect-foresight ceiling.
+The forecast is intentionally simple: a climatology mean bucketed by
+hour only (hour-of-day or hour-of-week). It does NOT distinguish the
+minute-of-hour of 15-min data, and is NOT a trading-grade IDA price
+model — it exists only to demonstrate the *gap* between a realistic
+forecast-driven policy and the perfect-foresight ceiling. Surface it in
+the UI as "climatology forecast, hourly bucketed".
 """
 
 from __future__ import annotations
@@ -90,6 +93,7 @@ def build_ida_forecast(
     empty_meta = {
         "coverage": 0.0,
         "n_target_points": 0,
+        "n_buckets_requested": 0,
         "n_buckets_filled": 0,
         "global_mean": float("nan"),
         "bucket": bucket,
@@ -150,7 +154,14 @@ def build_ida_forecast(
     metadata = {
         "coverage": float((forecast_df["n_samples"] > 0).mean()),
         "n_target_points": n_target,
-        "n_buckets_filled": int(forecast_df["bucket"].nunique()),
+        # Distinct buckets appearing in the target window vs. those backed
+        # by >=1 historical sample. Reporting both stops the UI from
+        # implying a forecast is well-supported when every point is a
+        # global-mean fallback (n_buckets_filled == 0).
+        "n_buckets_requested": int(forecast_df["bucket"].nunique()),
+        "n_buckets_filled": int(
+            forecast_df.loc[forecast_df["n_samples"] > 0, "bucket"].nunique()
+        ),
         "global_mean": float(forecast_df[FORECAST_COL].mean()),
         "bucket": bucket,
         "leave_one_day_out": leave_one_day_out,
