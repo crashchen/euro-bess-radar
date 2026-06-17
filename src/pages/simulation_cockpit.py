@@ -15,6 +15,7 @@ from src.simulation import (
     simulate_da_id_replay,
     simulate_da_milp_replay,
     simulate_replay_batch,
+    simulate_sequential_da_id_batch,
 )
 
 # Color semantics — assign concepts to hues so a reader can decode by color.
@@ -153,6 +154,16 @@ def render(
         efficiency=efficiency,
         capture_rate=cockpit_capture_rate,
         capex_eur_kwh=capex_eur_kwh,
+        chart_template=chart_template,
+    )
+    _render_forecast_policy_section(
+        primary_df=primary_df,
+        intraday_df=intraday_df,
+        dates=dates,
+        zone_tz=zone_tz,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
         chart_template=chart_template,
     )
 
@@ -720,6 +731,143 @@ def _render_multi_day_summary(
         if len(batch) >= 7:
             _plot_weekday_heatmap(batch, chart_template)
         st.dataframe(batch, width="stretch", hide_index=True)
+
+
+def _render_forecast_policy_section(
+    *,
+    primary_df: pd.DataFrame,
+    intraday_df: pd.DataFrame | None,
+    dates: list,
+    zone_tz: str,
+    power_mw: float,
+    duration_hours: int,
+    efficiency: float,
+    chart_template: str,
+) -> None:
+    """Three-way DA-only / forecast-realised / perfect-foresight panel."""
+    with st.expander("Forecast-driven IDA policy (vs perfect-foresight ceiling)", expanded=False):
+        st.caption(
+            "Compares a realistic desk that rebids against an IDA *forecast* "
+            "with the ex-post perfect-foresight ceiling. The gap is the "
+            "forecast error cost. Climatology forecast, hourly bucketed — a "
+            "screening estimate, NOT a trading-grade IDA price model."
+        )
+        if intraday_df is None or intraday_df.empty:
+            st.info("Load IDA1 data to run the forecast-driven policy comparison.")
+            return
+
+        c1, c2, c3 = st.columns([1.2, 1.0, 1.0])
+        sample = c1.selectbox(
+            "Replay sample",
+            options=["7 latest days", "30 latest days", "90 latest days", "All loaded days"],
+            index=1,
+            key="forecast_policy_sample",
+        )
+        bucket_label = c2.selectbox(
+            "Forecast climatology",
+            options=["Hour-of-day", "Hour-of-week"],
+            index=0,
+            key="forecast_policy_bucket",
+            help=(
+                "Hour-of-day is robust on short windows; hour-of-week is "
+                "weekday-aware but needs several weeks of history."
+            ),
+        )
+        run = c3.button("Run forecast policy", key="forecast_policy_run")
+        if not run:
+            st.info("Choose a sample and click Run to compare against the ceiling.")
+            return
+
+        bucket = "hour_of_week" if bucket_label == "Hour-of-week" else "hour_of_day"
+        limit = _sample_limit(sample)
+        batch_dates = dates if limit is None else dates[-limit:]
+        with st.spinner(f"Solving {len(batch_dates)} day(s) under forecast + ceiling..."):
+            per_day, summary = simulate_sequential_da_id_batch(
+                primary_df,
+                intraday_df,
+                dates=batch_dates,
+                tz=zone_tz,
+                power_mw=power_mw,
+                duration_hours=duration_hours,
+                efficiency=efficiency,
+                bucket=bucket,
+            )
+
+        if per_day.empty:
+            st.warning(
+                f"No valid forecast-policy days in this sample. "
+                f"Excluded: {summary['excluded_days']}. A leave-one-day-out "
+                "forecast needs at least 2 loaded days."
+            )
+            return
+
+        _render_forecast_policy_kpis(summary)
+        _plot_forecast_policy(per_day, chart_template)
+        meta = summary["forecast_meta"]
+        st.caption(
+            f"Forecast support: {meta['n_buckets_filled']}/"
+            f"{meta['n_buckets_requested']} buckets backed by history, "
+            f"{meta['fallback_points']} global-mean fallback points "
+            f"(coverage {meta['coverage']:.0%}, leave-one-day-out="
+            f"{meta['leave_one_day_out']}). Shape/order is the primary "
+            "signal, but level error still affects the cycling decision via "
+            "round-trip efficiency loss and VOM."
+        )
+        st.dataframe(per_day, width="stretch", hide_index=True)
+
+
+def _render_forecast_policy_kpis(summary: dict) -> None:
+    cols = st.columns(4)
+    cols[0].metric("DA-only", f"EUR {summary['total_da_only_eur']:,.0f}")
+    cols[1].metric(
+        "Forecast realised",
+        f"EUR {summary['total_realised_eur']:,.0f}",
+        delta=f"{summary['total_captured_eur']:,.0f} vs DA-only",
+    )
+    cols[2].metric("Perfect-foresight ceiling", f"EUR {summary['total_ceiling_eur']:,.0f}")
+    cols[3].metric(
+        "Forecast error cost",
+        f"EUR {summary['total_forecast_error_eur']:,.0f}",
+    )
+    rate = summary["capture_rate"]
+    if rate is None:
+        rate_txt = "n/a (no rebid opportunity in window)"
+    else:
+        rate_txt = f"{rate:.0%} of achievable IDA uplift captured"
+    st.caption(
+        f"{rate_txt}. Achievable uplift (ceiling - DA-only): "
+        f"EUR {summary['total_ceiling_uplift_eur']:,.0f}. Captured can be "
+        "negative when the forecast misleads the rebid into churn losses."
+    )
+
+
+def _plot_forecast_policy(per_day: pd.DataFrame, chart_template: str) -> None:
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=per_day["date"], y=per_day["da_only_eur"],
+        name="DA-only", marker_color=_C_REVENUE, opacity=0.85,
+    ))
+    fig.add_trace(go.Bar(
+        x=per_day["date"], y=per_day["realised_eur"],
+        name="Forecast realised", marker_color=_C_PRICE_IDA, opacity=0.85,
+    ))
+    fig.add_trace(go.Scatter(
+        x=per_day["date"], y=per_day["ceiling_eur"],
+        mode="lines+markers", name="Perfect-foresight ceiling",
+        line=dict(color=_C_DISCHARGE, width=2),
+    ))
+    fig.update_layout(
+        title="DA-only vs Forecast-driven vs Perfect-foresight ceiling",
+        xaxis_title="Local date",
+        yaxis_title="EUR/day",
+        barmode="group",
+        template=chart_template,
+        height=340,
+        hovermode="x unified",
+        margin=dict(l=40, r=30, t=50, b=30),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0),
+    )
+    st.plotly_chart(fig, width="stretch")
 
 
 def _sample_limit(sample: str) -> int | None:
