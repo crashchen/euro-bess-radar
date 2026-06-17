@@ -10,7 +10,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 - **Renewables and BESS signal analysis** — quantify how renewable share affects prices and ordered spreads
 - **Ancillary services integration** — manual CSV upload + auto-fetch for DE, FI, GB, RO, SE_3, and Italian zones with per-product reserve lines, manual-over-auto product overrides, and preserved directional/system price fields
 - **Joint MILP co-optimization estimate** for DA arbitrage vs reserve-capacity power headroom
-- **Simulation Cockpit** for single-day interval-level BESS dispatch replay, SoC, revenue, throughput, and battery-health diagnostics
+- **Simulation Cockpit** for interval-level BESS dispatch replay, event tables, multi-day summaries, SoC, revenue, throughput, and battery-health diagnostics
 - **Multi-zone comparison** for market screening
 - **Data Trust diagnostics** showing source, timezone, coverage, source gaps, and imputation per fetched zone
 - **Excel export** with full analytics and sub-hourly negative-price normalization
@@ -64,7 +64,7 @@ euro-bess-radar/
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   └── export.py             # Excel report generation
-├── tests/                    # 394 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 403 passing tests, heavily mocked; 2 PDF tests may skip
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads

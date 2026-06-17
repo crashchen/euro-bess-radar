@@ -11,9 +11,11 @@ import pytest
 from src.simulation import (
     _count_dispatch_blocks,
     available_local_dates,
+    build_dispatch_event_table,
     empty_simulation_result,
     simulate_da_id_replay,
     simulate_da_milp_replay,
+    simulate_replay_batch,
 )
 
 
@@ -226,3 +228,70 @@ def test_da_id_replay_no_ida_data_returns_safe_empty() -> None:
     )
     assert result["timeseries"].empty
     assert "ida1" in result["summary"]["reason"].lower()
+
+
+def test_dispatch_event_table_collapses_contiguous_blocks() -> None:
+    prices = _make_prices()
+    result = simulate_da_milp_replay(
+        prices,
+        simulation_date=prices.index[0].date(),
+        power_mw=1.0,
+        duration_hours=2.0,
+    )
+    ts = result["timeseries"]
+    events = build_dispatch_event_table(ts)
+
+    assert not events.empty
+    assert set(events["event_type"]).issubset({"Charge", "Discharge"})
+    assert events["event_id"].tolist() == list(range(1, len(events) + 1))
+    assert events["energy_mwh"].sum() == pytest.approx(
+        result["summary"]["physical_throughput_mwh"],
+    )
+
+
+def test_dispatch_event_table_empty_when_no_dispatch() -> None:
+    ts = pd.DataFrame({
+        "local_time": pd.date_range("2026-03-19", periods=2, freq="h", tz="UTC"),
+        "net_dispatch_mw": [0.0, 0.0],
+    })
+    events = build_dispatch_event_table(ts)
+    assert events.empty
+    assert "event_type" in events.columns
+
+
+def test_replay_batch_excludes_days_with_missing_prices() -> None:
+    prices = pd.concat([
+        _make_prices(),
+        _make_prices().shift(freq="1D"),
+    ])
+    prices.loc[prices.index[-1], "price_eur_mwh"] = np.nan
+    dates = available_local_dates(prices, tz="UTC")
+
+    batch = simulate_replay_batch(
+        prices,
+        dates=dates,
+        tz="UTC",
+        power_mw=1.0,
+        duration_hours=2.0,
+    )
+
+    assert len(batch) == 1
+    assert batch.attrs["excluded_days"] == 1
+    assert batch["date"].iloc[0] == dates[0]
+
+
+def test_replay_batch_da_id_requires_intraday_data() -> None:
+    prices = _make_prices()
+    dates = available_local_dates(prices, tz="UTC")
+    batch = simulate_replay_batch(
+        prices,
+        mode="DA + IDA1 Replay",
+        intraday_df=None,
+        dates=dates,
+        tz="UTC",
+        power_mw=1.0,
+        duration_hours=2.0,
+    )
+
+    assert batch.empty
+    assert batch.attrs["excluded_days"] == len(dates)

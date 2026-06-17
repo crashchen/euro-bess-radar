@@ -34,6 +34,37 @@ _SIM_COLUMNS = [
     "interval_throughput_mwh",
     "cumulative_throughput_mwh",
 ]
+_BATCH_COLUMNS = [
+    "date",
+    "mode",
+    "total_revenue_eur",
+    "annualized_eur_per_mw",
+    "number_of_trades",
+    "physical_throughput_mwh",
+    "traded_volume_mwh",
+    "rebalancing_factor",
+    "daily_fce",
+    "avg_c_rate",
+    "max_depth_of_discharge_pct",
+    "degradation_cost_eur",
+    "soh_delta_pct",
+    "n_intervals",
+]
+_EVENT_COLUMNS = [
+    "event_id",
+    "event_type",
+    "start_time",
+    "end_time",
+    "duration_h",
+    "avg_power_mw",
+    "energy_mwh",
+    "avg_price_eur_mwh",
+    "revenue_eur",
+    "soc_start_pct",
+    "soc_end_pct",
+    "avg_rebid_delta_mw",
+    "max_abs_rebid_delta_mw",
+]
 
 
 def empty_simulation_result(reason: str = "") -> dict[str, Any]:
@@ -216,6 +247,170 @@ def simulate_da_id_replay(
         float(result["rebid_uplift_eur"]) * capture_rate, 2
     )
     return out
+
+
+def simulate_replay_batch(
+    price_df: pd.DataFrame,
+    *,
+    mode: str = "DA MILP Replay",
+    intraday_df: pd.DataFrame | None = None,
+    tz: str | None = None,
+    dates: list[date] | None = None,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    capture_rate: float = 1.0,
+    capex_eur_kwh: float = 0.0,
+) -> pd.DataFrame:
+    """Run replay summaries for many local days without returning all intervals."""
+    selected_dates = dates or available_local_dates(price_df, tz=tz)
+    rows: list[dict[str, Any]] = []
+    excluded_days = 0
+
+    for local_date in selected_dates:
+        if mode == "DA + IDA1 Replay":
+            if intraday_df is None or intraday_df.empty:
+                excluded_days += 1
+                continue
+            result = simulate_da_id_replay(
+                price_df,
+                intraday_df,
+                simulation_date=local_date,
+                tz=tz,
+                power_mw=power_mw,
+                duration_hours=duration_hours,
+                efficiency=efficiency,
+                capture_rate=capture_rate,
+                capex_eur_kwh=capex_eur_kwh,
+            )
+        else:
+            result = simulate_da_milp_replay(
+                price_df,
+                simulation_date=local_date,
+                tz=tz,
+                power_mw=power_mw,
+                duration_hours=duration_hours,
+                efficiency=efficiency,
+                capture_rate=capture_rate,
+                capex_eur_kwh=capex_eur_kwh,
+            )
+
+        ts = result["timeseries"]
+        if ts.empty:
+            excluded_days += 1
+            continue
+        rows.append(_summary_row(local_date, mode, result))
+
+    if not rows:
+        out = pd.DataFrame(columns=_BATCH_COLUMNS)
+        out.attrs["excluded_days"] = excluded_days
+        return out
+
+    out = pd.DataFrame(rows, columns=_BATCH_COLUMNS).sort_values("date").reset_index(drop=True)
+    out.attrs["excluded_days"] = excluded_days
+    return out
+
+
+def build_dispatch_event_table(timeseries: pd.DataFrame) -> pd.DataFrame:
+    """Collapse interval dispatch into contiguous charge/discharge events."""
+    if timeseries is None or timeseries.empty or "net_dispatch_mw" not in timeseries.columns:
+        return pd.DataFrame(columns=_EVENT_COLUMNS)
+
+    events: list[dict[str, Any]] = []
+    signs = np.where(
+        timeseries["net_dispatch_mw"].abs().to_numpy() > 1e-6,
+        np.sign(timeseries["net_dispatch_mw"].to_numpy()),
+        0.0,
+    )
+    start: int | None = None
+    current_sign = 0.0
+    for pos, sign in enumerate(signs):
+        if sign == 0.0:
+            if start is not None:
+                events.append(_event_row(timeseries, start, pos, current_sign, len(events) + 1))
+                start = None
+                current_sign = 0.0
+            continue
+        if start is None:
+            start = pos
+            current_sign = sign
+        elif sign != current_sign:
+            events.append(_event_row(timeseries, start, pos, current_sign, len(events) + 1))
+            start = pos
+            current_sign = sign
+
+    if start is not None:
+        events.append(_event_row(timeseries, start, len(timeseries), current_sign, len(events) + 1))
+
+    if not events:
+        return pd.DataFrame(columns=_EVENT_COLUMNS)
+    return pd.DataFrame(events, columns=_EVENT_COLUMNS)
+
+
+def _summary_row(
+    local_date: date,
+    mode: str,
+    result: dict[str, Any],
+) -> dict[str, Any]:
+    """Flatten a daily replay result for multi-day cockpit summaries."""
+    summary = result["summary"]
+    ts = result["timeseries"]
+    return {
+        "date": local_date,
+        "mode": mode,
+        "total_revenue_eur": float(summary["total_revenue_eur"]),
+        "annualized_eur_per_mw": float(summary["annualized_eur_per_mw"]),
+        "number_of_trades": int(summary["number_of_trades"]),
+        "physical_throughput_mwh": float(summary["physical_throughput_mwh"]),
+        "traded_volume_mwh": float(summary["traded_volume_mwh"]),
+        "rebalancing_factor": float(summary["rebalancing_factor"]),
+        "daily_fce": float(summary["daily_fce"]),
+        "avg_c_rate": float(summary["avg_c_rate"]),
+        "max_depth_of_discharge_pct": float(summary["max_depth_of_discharge_pct"]),
+        "degradation_cost_eur": float(summary["degradation_cost_eur"]),
+        "soh_delta_pct": float(summary["soh_delta_pct"]),
+        "n_intervals": len(ts),
+    }
+
+
+def _event_row(
+    timeseries: pd.DataFrame,
+    start: int,
+    end: int,
+    sign: float,
+    event_id: int,
+) -> dict[str, Any]:
+    """Summarise one contiguous non-zero physical dispatch event."""
+    window = timeseries.iloc[start:end]
+    index = pd.DatetimeIndex(timeseries["local_time"])
+    dt = _infer_interval_hours(index)
+    event_type = "Discharge" if sign > 0 else "Charge"
+    power_col = "p_discharge_mw" if sign > 0 else "p_charge_mw"
+    power = window[power_col].abs()
+    rebid = (
+        window["rebid_delta_mw"].astype(float)
+        if "rebid_delta_mw" in window.columns
+        else pd.Series([0.0] * len(window), index=window.index)
+    )
+    soc_start = (
+        float(timeseries["soc_pct"].iloc[start - 1])
+        if start > 0 else float(window["soc_pct"].iloc[0])
+    )
+    return {
+        "event_id": event_id,
+        "event_type": event_type,
+        "start_time": window["local_time"].iloc[0],
+        "end_time": window["local_time"].iloc[-1] + pd.Timedelta(hours=dt),
+        "duration_h": float(len(window) * dt),
+        "avg_power_mw": float(power.mean()) if not power.empty else 0.0,
+        "energy_mwh": float(power.sum() * dt),
+        "avg_price_eur_mwh": float(window["price_eur_mwh"].mean()),
+        "revenue_eur": float(window["interval_revenue_eur"].sum()),
+        "soc_start_pct": soc_start,
+        "soc_end_pct": float(window["soc_pct"].iloc[-1]),
+        "avg_rebid_delta_mw": float(rebid.mean()) if not rebid.empty else 0.0,
+        "max_abs_rebid_delta_mw": float(rebid.abs().max()) if not rebid.empty else 0.0,
+    }
 
 
 def _select_local_day(

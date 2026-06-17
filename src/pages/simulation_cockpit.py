@@ -10,8 +10,10 @@ import streamlit as st
 
 from src.simulation import (
     available_local_dates,
+    build_dispatch_event_table,
     simulate_da_id_replay,
     simulate_da_milp_replay,
+    simulate_replay_batch,
 )
 
 # Color semantics — assign concepts to hues so a reader can decode by color.
@@ -134,6 +136,20 @@ def render(
     if mode == "DA + IDA1 Replay" and "da_position_mw" in ts.columns:
         _plot_wholesales(ts, chart_template, power_mw=power_mw)
     _plot_revenue(ts, chart_template)
+    _render_event_table(build_dispatch_event_table(ts))
+    _render_multi_day_summary(
+        primary_df=primary_df,
+        intraday_df=intraday_df,
+        dates=dates,
+        mode=mode,
+        zone_tz=zone_tz,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        capture_rate=cockpit_capture_rate,
+        capex_eur_kwh=capex_eur_kwh,
+        chart_template=chart_template,
+    )
 
     with st.expander("Simulation interval data", expanded=False):
         st.dataframe(ts, width="stretch", hide_index=True)
@@ -363,4 +379,154 @@ def _plot_revenue(ts: pd.DataFrame, chart_template: str) -> None:
         line=dict(color=_C_REVENUE, width=2.5),
     ))
     _apply_panel_layout(fig, "Revenue Stream Replay", "EUR", chart_template, height=260)
+    st.plotly_chart(fig, width="stretch")
+
+
+def _render_event_table(events: pd.DataFrame) -> None:
+    with st.expander("Dispatch event table", expanded=False):
+        st.caption(
+            "Contiguous non-zero physical dispatch blocks. This is a replay "
+            "diagnostic, not an exchange order blotter."
+        )
+        if events.empty:
+            st.info("No non-zero physical dispatch events for this day.")
+            return
+        st.dataframe(
+            events,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "duration_h": st.column_config.NumberColumn("Duration (h)", format="%.2f"),
+                "avg_power_mw": st.column_config.NumberColumn("Avg MW", format="%.2f"),
+                "energy_mwh": st.column_config.NumberColumn("Energy MWh", format="%.2f"),
+                "avg_price_eur_mwh": st.column_config.NumberColumn(
+                    "Avg EUR/MWh", format="%.2f",
+                ),
+                "revenue_eur": st.column_config.NumberColumn("Revenue EUR", format="%.0f"),
+                "soc_start_pct": st.column_config.NumberColumn("Start SoC %", format="%.1f"),
+                "soc_end_pct": st.column_config.NumberColumn("End SoC %", format="%.1f"),
+                "avg_rebid_delta_mw": st.column_config.NumberColumn(
+                    "Avg rebid MW", format="%.2f",
+                ),
+                "max_abs_rebid_delta_mw": st.column_config.NumberColumn(
+                    "Max |rebid| MW", format="%.2f",
+                ),
+            },
+        )
+
+
+def _render_multi_day_summary(
+    *,
+    primary_df: pd.DataFrame,
+    intraday_df: pd.DataFrame | None,
+    dates: list,
+    mode: str,
+    zone_tz: str,
+    power_mw: float,
+    duration_hours: int,
+    efficiency: float,
+    capture_rate: float,
+    capex_eur_kwh: float,
+    chart_template: str,
+) -> None:
+    with st.expander("Multi-day replay summary", expanded=False):
+        st.caption(
+            "Runs the same interval-level replay across multiple loaded local "
+            "days and aggregates daily KPI. This is still historical backtest "
+            "replay, not live trading."
+        )
+        c1, c2 = st.columns([1.2, 1.0])
+        sample = c1.selectbox(
+            "Replay sample",
+            options=["7 latest days", "30 latest days", "90 latest days", "All loaded days"],
+            index=1,
+            key="simulation_batch_sample",
+        )
+        run = c2.button("Run multi-day replay", key="simulation_batch_run")
+        if mode == "DA + IDA1 Replay" and (intraday_df is None or intraday_df.empty):
+            st.info("Load IDA1 data before running a DA + IDA1 multi-day replay.")
+            return
+        if not run:
+            st.info("Choose a replay sample and click Run to aggregate loaded days.")
+            return
+
+        limit = _sample_limit(sample)
+        batch_dates = dates if limit is None else dates[-limit:]
+        with st.spinner(f"Running {len(batch_dates)} daily replay(s)..."):
+            batch = simulate_replay_batch(
+                primary_df,
+                mode=mode,
+                intraday_df=intraday_df,
+                tz=zone_tz,
+                dates=batch_dates,
+                power_mw=power_mw,
+                duration_hours=duration_hours,
+                efficiency=efficiency,
+                capture_rate=capture_rate,
+                capex_eur_kwh=capex_eur_kwh,
+            )
+
+        excluded = int(batch.attrs.get("excluded_days", 0))
+        if batch.empty:
+            st.warning(f"No valid replay days in this sample. Excluded days: {excluded}.")
+            return
+        _render_batch_kpis(batch, requested_days=len(batch_dates), excluded_days=excluded)
+        _plot_batch_summary(batch, chart_template)
+        st.dataframe(batch, width="stretch", hide_index=True)
+
+
+def _sample_limit(sample: str) -> int | None:
+    if sample.startswith("7 "):
+        return 7
+    if sample.startswith("30 "):
+        return 30
+    if sample.startswith("90 "):
+        return 90
+    return None
+
+
+def _render_batch_kpis(
+    batch: pd.DataFrame,
+    *,
+    requested_days: int,
+    excluded_days: int,
+) -> None:
+    avg_daily = float(batch["total_revenue_eur"].mean())
+    avg_annualized = float(batch["annualized_eur_per_mw"].mean())
+    best = batch.loc[batch["total_revenue_eur"].idxmax()]
+    stress = batch.loc[batch["daily_fce"].idxmax()]
+    cols = st.columns(5)
+    cols[0].metric("Valid Days", f"{len(batch)} / {requested_days}")
+    cols[1].metric("Avg Day Revenue", f"EUR {avg_daily:,.0f}")
+    cols[2].metric("Avg Annualized", f"EUR {avg_annualized:,.0f}/MW/yr")
+    cols[3].metric("Avg FCE/day", f"{batch['daily_fce'].mean():.2f}")
+    cols[4].metric("Excluded Days", f"{excluded_days}")
+    st.caption(
+        f"Best day: {best['date']} (EUR {best['total_revenue_eur']:,.0f}). "
+        f"Highest-cycle day: {stress['date']} ({stress['daily_fce']:.2f} FCE)."
+    )
+
+
+def _plot_batch_summary(batch: pd.DataFrame, chart_template: str) -> None:
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=batch["date"], y=batch["total_revenue_eur"],
+        name="Daily revenue", marker_color=_C_PRICE, opacity=0.6,
+    ))
+    fig.add_trace(go.Scatter(
+        x=batch["date"], y=batch["daily_fce"],
+        mode="lines+markers", name="Daily FCE", yaxis="y2",
+        line=dict(color=_C_SOC, width=2),
+    ))
+    fig.update_layout(
+        title="Multi-day Replay: Revenue and Cycle Intensity",
+        xaxis_title="Local date",
+        yaxis_title="EUR/day",
+        yaxis2=dict(title="FCE/day", overlaying="y", side="right"),
+        template=chart_template,
+        height=320,
+        hovermode="x unified",
+        margin=dict(l=40, r=50, t=50, b=30),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0),
+    )
     st.plotly_chart(fig, width="stretch")
