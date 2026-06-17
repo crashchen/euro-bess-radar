@@ -49,6 +49,7 @@ from src.scenario import (
     calculate_npv_distribution,
     sensitivity_table,
 )
+from src.ui_theme import apply_cockpit_plot_theme
 
 
 def render(
@@ -253,7 +254,7 @@ def render(
             if value > 0
         ]
         if component_rows:
-            st.table(pd.DataFrame(component_rows))
+            st.dataframe(pd.DataFrame(component_rows), width="stretch", hide_index=True)
 
         fig_stack = go.Figure()
         palette = px.colors.qualitative.Bold + px.colors.qualitative.Safe
@@ -274,6 +275,7 @@ def render(
             legend_title_text="Source",
         )
         report_figures["revenue_bar"] = fig_stack
+        apply_cockpit_plot_theme(fig_stack)
         st.plotly_chart(fig_stack, width="stretch")
         if anc_source:
             st.caption(f"Ancillary valuation source: {anc_source}")
@@ -486,6 +488,7 @@ def render(
         showlegend=False,
     )
     report_figures["revenue_waterfall"] = fig_wf
+    apply_cockpit_plot_theme(fig_wf)
     st.plotly_chart(fig_wf, width="stretch")
 
     # MILP dispatch details
@@ -529,6 +532,7 @@ def render(
                        annotation_text=f"P50: {percentiles['p50']:.1f}")
     fig_hist.add_vline(x=percentiles["p90"], line_dash="dash", line_color="red",
                        annotation_text=f"P90: {percentiles['p90']:.1f}")
+    apply_cockpit_plot_theme(fig_hist)
     st.plotly_chart(fig_hist, width="stretch")
 
     # Monthly revenue seasonality & volatility
@@ -586,6 +590,7 @@ def render(
             },
         )
         fig_yoy.update_traces(texttemplate="\u20ac%{y:,.0f}", textposition="outside")
+        apply_cockpit_plot_theme(fig_yoy)
         st.plotly_chart(fig_yoy, width="stretch")
 
         # Monthly revenue heatmap (year x month)
@@ -611,6 +616,7 @@ def render(
                 template=chart_template,
                 aspect="auto",
             )
+            apply_cockpit_plot_theme(fig_seasonal)
             st.plotly_chart(fig_seasonal, width="stretch")
 
     # ── Risk analysis — Monte Carlo (P4-B) ─────────────────────────────
@@ -642,6 +648,7 @@ def render(
                          annotation_text=f"P50: \u20ac{mc['p50']:,.0f}")
         fig_mc.add_vline(x=mc["p90"], line_dash="dash", line_color="red",
                          annotation_text=f"P90: \u20ac{mc['p90']:,.0f}")
+        apply_cockpit_plot_theme(fig_mc)
         st.plotly_chart(fig_mc, width="stretch")
 
         # NPV distribution (if CapEx provided)
@@ -683,6 +690,7 @@ def render(
             )
             fig_npv.add_vline(x=0, line_dash="solid", line_color="gray",
                               annotation_text="Break-even")
+            apply_cockpit_plot_theme(fig_npv)
             st.plotly_chart(fig_npv, width="stretch")
 
             # Sensitivity tornado
@@ -730,6 +738,7 @@ def render(
                 barmode="overlay",
                 xaxis_title="NPV Delta (EUR)",
             )
+            apply_cockpit_plot_theme(fig_tornado)
             st.plotly_chart(fig_tornado, width="stretch")
 
     return export_revenue
@@ -772,7 +781,7 @@ def _render_sensitivity_table(
             "Annual Revenue (EUR/MW/yr)": f"\u20ac{rev_d['annual_revenue_eur_per_mw']:,.0f}",
             "Avg Daily Revenue (EUR/MW)": f"\u20ac{rev_d['avg_daily_revenue']:,.0f}",
         })
-    st.table(pd.DataFrame(sens_rows))
+    st.dataframe(pd.DataFrame(sens_rows), width="stretch", hide_index=True)
 
 
 def _render_monthly_seasonality(
@@ -835,6 +844,7 @@ def _render_monthly_seasonality(
         legend=dict(orientation="h", y=-0.15),
     )
     report_figures["monthly_seasonality"] = fig_monthly
+    apply_cockpit_plot_theme(fig_monthly)
     st.plotly_chart(fig_monthly, width="stretch")
 
 
@@ -997,6 +1007,7 @@ def _render_intraday_uplift_section(
                 template=chart_template,
             )
             fig.add_vline(x=0, line_dash="dot", line_color="grey")
+            apply_cockpit_plot_theme(fig)
             st.plotly_chart(fig, width="stretch")
 
         st.caption(
@@ -1070,6 +1081,7 @@ def _render_intraday_uplift_section(
                 labels={"rebid_uplift": "EUR", "date": ""},
                 template=chart_template,
             )
+            apply_cockpit_plot_theme(fig_ts)
             st.plotly_chart(fig_ts, width="stretch")
             st.caption(
                 "Rebid uplift is clamped at zero per day (the Stage-1 "
