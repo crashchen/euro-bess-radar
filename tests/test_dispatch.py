@@ -480,6 +480,27 @@ class TestSolveSequentialDaIdDispatch:
             full_uplift, abs=1e-6,
         )
 
+    def test_wrong_direction_forecast_drives_negative_uplift(self) -> None:
+        # A forecast that inverts the DA shape makes the desk rebid the
+        # wrong way; settled against a realised print that prints like DA,
+        # the rebid destroys value and realised drops BELOW the DA-only
+        # baseline. captured_uplift must be allowed to go negative (the UI
+        # must not clamp it) — naive ID participation can genuinely lose.
+        forecast = np.array([90.0] * 8 + [20.0] * 8 + [88.0] * 8)
+        realised = self._DA.copy()
+        r = solve_sequential_da_id_dispatch(
+            self._DA, forecast, realised,
+            dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        assert r["captured_uplift_eur"] < 0.0
+        assert r["realised_total_eur"] < r["da_only_revenue_eur"]
+        # Ceiling is still a valid upper bound and the decomposition holds.
+        assert r["forecast_error_cost_eur"] >= -1e-6
+        full_uplift = r["ceiling_total_eur"] - r["da_only_revenue_eur"]
+        assert r["captured_uplift_eur"] + r["forecast_error_cost_eur"] == pytest.approx(
+            full_uplift, abs=1e-6,
+        )
+
     def test_nan_or_length_mismatch_returns_zero(self) -> None:
         bad = np.array([20.0, np.nan, 80.0])
         r = solve_sequential_da_id_dispatch(bad, bad.copy(), bad.copy(), dt=1.0)
