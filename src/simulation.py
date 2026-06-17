@@ -48,6 +48,8 @@ _BATCH_COLUMNS = [
     "max_depth_of_discharge_pct",
     "degradation_cost_eur",
     "soh_delta_pct",
+    "soc_start_pct",
+    "soc_end_pct",
     "n_intervals",
 ]
 _EVENT_COLUMNS = [
@@ -261,11 +263,21 @@ def simulate_replay_batch(
     efficiency: float = 0.88,
     capture_rate: float = 1.0,
     capex_eur_kwh: float = 0.0,
+    soc_init_frac: float = 0.5,
+    carry_soc: bool = True,
 ) -> pd.DataFrame:
-    """Run replay summaries for many local days without returning all intervals."""
+    """Run replay summaries for many local days without returning all intervals.
+
+    When `carry_soc=True` (default), each day starts at the terminal SoC of
+    the previous successful day so that multi-day aggregates reflect a real
+    continuous-operation trajectory. Excluded days do NOT advance the
+    carried SoC — the next valid day picks up from the last completed day.
+    """
     selected_dates = dates or available_local_dates(price_df, tz=tz)
     rows: list[dict[str, Any]] = []
     excluded_days = 0
+    capacity_mwh = max(power_mw * duration_hours, 1e-9)
+    current_soc_frac = soc_init_frac
 
     for local_date in selected_dates:
         if mode == "DA + IDA1 Replay":
@@ -282,6 +294,7 @@ def simulate_replay_batch(
                 efficiency=efficiency,
                 capture_rate=capture_rate,
                 capex_eur_kwh=capex_eur_kwh,
+                soc_init_frac=current_soc_frac,
             )
         else:
             result = simulate_da_milp_replay(
@@ -293,21 +306,27 @@ def simulate_replay_batch(
                 efficiency=efficiency,
                 capture_rate=capture_rate,
                 capex_eur_kwh=capex_eur_kwh,
+                soc_init_frac=current_soc_frac,
             )
 
         ts = result["timeseries"]
         if ts.empty:
             excluded_days += 1
             continue
-        rows.append(_summary_row(local_date, mode, result))
+        rows.append(_summary_row(local_date, mode, result, current_soc_frac))
+        if carry_soc:
+            terminal_soc = float(ts["soc_mwh"].iloc[-1])
+            current_soc_frac = min(max(terminal_soc / capacity_mwh, 0.0), 1.0)
 
     if not rows:
         out = pd.DataFrame(columns=_BATCH_COLUMNS)
         out.attrs["excluded_days"] = excluded_days
+        out.attrs["carry_soc"] = carry_soc
         return out
 
     out = pd.DataFrame(rows, columns=_BATCH_COLUMNS).sort_values("date").reset_index(drop=True)
     out.attrs["excluded_days"] = excluded_days
+    out.attrs["carry_soc"] = carry_soc
     return out
 
 
@@ -351,6 +370,7 @@ def _summary_row(
     local_date: date,
     mode: str,
     result: dict[str, Any],
+    soc_start_frac: float,
 ) -> dict[str, Any]:
     """Flatten a daily replay result for multi-day cockpit summaries."""
     summary = result["summary"]
@@ -369,6 +389,8 @@ def _summary_row(
         "max_depth_of_discharge_pct": float(summary["max_depth_of_discharge_pct"]),
         "degradation_cost_eur": float(summary["degradation_cost_eur"]),
         "soh_delta_pct": float(summary["soh_delta_pct"]),
+        "soc_start_pct": float(soc_start_frac * 100.0),
+        "soc_end_pct": float(ts["soc_pct"].iloc[-1]) if not ts.empty else 0.0,
         "n_intervals": len(ts),
     }
 

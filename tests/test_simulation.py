@@ -295,3 +295,50 @@ def test_replay_batch_da_id_requires_intraday_data() -> None:
 
     assert batch.empty
     assert batch.attrs["excluded_days"] == len(dates)
+
+
+def _make_two_day_prices() -> pd.DataFrame:
+    """Two-day price series where each day individually clears SoC to 0."""
+    idx = pd.date_range("2026-03-19", periods=48, freq="h", tz="UTC")
+    one_day = [20.0] * 8 + [90.0] * 8 + [25.0] * 8
+    prices = one_day + one_day
+    df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+    df.index.name = "timestamp"
+    return df
+
+
+def test_replay_batch_carry_soc_chains_day_end_to_day_start() -> None:
+    prices = _make_two_day_prices()
+    dates = available_local_dates(prices, tz="UTC")
+    assert len(dates) == 2
+
+    chained = simulate_replay_batch(
+        prices, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0, carry_soc=True,
+    )
+    reset = simulate_replay_batch(
+        prices, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0, carry_soc=False,
+    )
+
+    assert chained.attrs["carry_soc"] is True
+    assert reset.attrs["carry_soc"] is False
+    assert chained.iloc[0]["soc_start_pct"] == pytest.approx(50.0, abs=1e-6)
+    assert chained.iloc[1]["soc_start_pct"] == pytest.approx(
+        chained.iloc[0]["soc_end_pct"], abs=1e-6,
+    )
+    assert reset.iloc[1]["soc_start_pct"] == pytest.approx(50.0, abs=1e-6)
+
+
+def test_replay_batch_carry_soc_excluded_day_does_not_advance_soc() -> None:
+    """Empty days must not corrupt the carried SoC for the next valid day."""
+    prices = _make_two_day_prices()
+    prices.loc[prices.index[24:32], "price_eur_mwh"] = np.nan
+    dates = available_local_dates(prices, tz="UTC")
+
+    batch = simulate_replay_batch(
+        prices, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0, carry_soc=True,
+    )
+    assert len(batch) == 1
+    assert batch.attrs["excluded_days"] == 1

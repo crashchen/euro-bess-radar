@@ -663,14 +663,24 @@ def _render_multi_day_summary(
             "days and aggregates daily KPI. This is still historical backtest "
             "replay, not live trading."
         )
-        c1, c2 = st.columns([1.2, 1.0])
+        c1, c2, c3 = st.columns([1.2, 1.0, 1.0])
         sample = c1.selectbox(
             "Replay sample",
             options=["7 latest days", "30 latest days", "90 latest days", "All loaded days"],
             index=1,
             key="simulation_batch_sample",
         )
-        run = c2.button("Run multi-day replay", key="simulation_batch_run")
+        carry_soc = c2.checkbox(
+            "Continuous SoC across days",
+            value=True,
+            key="simulation_batch_carry_soc",
+            help=(
+                "When on, day N+1 starts at the end-of-day SoC of day N. "
+                "Off: every day resets to 50%% (legacy behaviour, biases "
+                "evening-peak revenue downward)."
+            ),
+        )
+        run = c3.button("Run multi-day replay", key="simulation_batch_run")
         if mode == "DA + IDA1 Replay" and (intraday_df is None or intraday_df.empty):
             st.info("Load IDA1 data before running a DA + IDA1 multi-day replay.")
             return
@@ -692,14 +702,22 @@ def _render_multi_day_summary(
                 efficiency=efficiency,
                 capture_rate=capture_rate,
                 capex_eur_kwh=capex_eur_kwh,
+                carry_soc=carry_soc,
             )
 
         excluded = int(batch.attrs.get("excluded_days", 0))
         if batch.empty:
             st.warning(f"No valid replay days in this sample. Excluded days: {excluded}.")
             return
-        _render_batch_kpis(batch, requested_days=len(batch_dates), excluded_days=excluded)
+        _render_batch_kpis(
+            batch, requested_days=len(batch_dates),
+            excluded_days=excluded, carry_soc=carry_soc,
+        )
         _plot_batch_summary(batch, chart_template)
+        if len(batch) >= 3:
+            _plot_rolling_summary(batch, chart_template)
+        if len(batch) >= 7:
+            _plot_weekday_heatmap(batch, chart_template)
         st.dataframe(batch, width="stretch", hide_index=True)
 
 
@@ -718,6 +736,7 @@ def _render_batch_kpis(
     *,
     requested_days: int,
     excluded_days: int,
+    carry_soc: bool,
 ) -> None:
     avg_daily = float(batch["total_revenue_eur"].mean())
     avg_annualized = float(batch["annualized_eur_per_mw"].mean())
@@ -729,10 +748,78 @@ def _render_batch_kpis(
     cols[2].metric("Avg Annualized", f"EUR {avg_annualized:,.0f}/MW/yr")
     cols[3].metric("Avg FCE/day", f"{batch['daily_fce'].mean():.2f}")
     cols[4].metric("Excluded Days", f"{excluded_days}")
+    soc_note = (
+        "SoC carries across days (continuous operation)."
+        if carry_soc
+        else "Each day resets to 50% SoC (legacy)."
+    )
     st.caption(
         f"Best day: {best['date']} (EUR {best['total_revenue_eur']:,.0f}). "
-        f"Highest-cycle day: {stress['date']} ({stress['daily_fce']:.2f} FCE)."
+        f"Highest-cycle day: {stress['date']} ({stress['daily_fce']:.2f} FCE). "
+        f"{soc_note}"
     )
+
+
+def _plot_rolling_summary(batch: pd.DataFrame, chart_template: str) -> None:
+    """Rolling 7-day revenue and FCE — smooths weekday seasonality."""
+    window = min(7, len(batch))
+    roll_rev = batch["total_revenue_eur"].rolling(window, min_periods=1).mean()
+    roll_fce = batch["daily_fce"].rolling(window, min_periods=1).mean()
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=batch["date"], y=roll_rev,
+        mode="lines+markers", name=f"{window}-day avg revenue",
+        line=dict(color=_C_PRICE, width=2),
+    ))
+    fig.add_trace(go.Scatter(
+        x=batch["date"], y=roll_fce,
+        mode="lines+markers", name=f"{window}-day avg FCE", yaxis="y2",
+        line=dict(color=_C_SOC, width=2, dash="dot"),
+    ))
+    fig.update_layout(
+        title=f"Rolling {window}-day Revenue and Cycle Intensity",
+        xaxis_title="Local date",
+        yaxis_title="EUR/day (avg)",
+        yaxis2=dict(title="FCE/day (avg)", overlaying="y", side="right"),
+        template=chart_template,
+        height=300,
+        hovermode="x unified",
+        margin=dict(l=40, r=50, t=50, b=30),
+        legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0),
+    )
+    st.plotly_chart(fig, width="stretch")
+
+
+def _plot_weekday_heatmap(batch: pd.DataFrame, chart_template: str) -> None:
+    """Weekday x ISO-week revenue heatmap — exposes weekly seasonality."""
+    dates = pd.to_datetime(batch["date"])
+    df = batch.assign(
+        iso_week=dates.dt.strftime("%G-W%V"),
+        weekday=dates.dt.day_name().str[:3],
+    )
+    weekday_order = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    pivot = (
+        df.pivot_table(
+            index="weekday", columns="iso_week",
+            values="total_revenue_eur", aggfunc="mean",
+        )
+        .reindex(weekday_order)
+    )
+    fig = go.Figure(data=go.Heatmap(
+        z=pivot.values,
+        x=list(pivot.columns),
+        y=list(pivot.index),
+        colorscale="Magma",
+        colorbar=dict(title="EUR/day"),
+        hovertemplate="%{y}, %{x}<br>EUR %{z:,.0f}<extra></extra>",
+    ))
+    fig.update_layout(
+        title="Weekday x Week Revenue Heatmap",
+        template=chart_template,
+        height=300,
+        margin=dict(l=40, r=50, t=50, b=30),
+    )
+    st.plotly_chart(fig, width="stretch")
 
 
 def _plot_batch_summary(batch: pd.DataFrame, chart_template: str) -> None:
