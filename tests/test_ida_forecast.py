@@ -65,15 +65,15 @@ def test_leave_one_day_out_excludes_target_day_anomaly() -> None:
     assert fc_morning < realised_morning - 5.0
 
 
-def test_leave_one_day_in_uses_target_day() -> None:
+def test_in_sample_mode_uses_target_day() -> None:
     df = _make_history(days=5, anomaly_day=2)
     dates = available_local_dates(df, tz="UTC")
     anomaly_date = dates[2]
     with_self, _ = build_ida_forecast(
-        df, target_dates=[anomaly_date], tz="UTC", leave_one_day_out=False,
+        df, target_dates=[anomaly_date], tz="UTC", forecast_mode="in_sample",
     )
     without_self, _ = build_ida_forecast(
-        df, target_dates=[anomaly_date], tz="UTC", leave_one_day_out=True,
+        df, target_dates=[anomaly_date], tz="UTC", forecast_mode="loo",
     )
     # Including the target day pulls the climatology toward its own values,
     # so the two forecasts must differ on the anomalous day.
@@ -126,3 +126,24 @@ def test_invalid_bucket_raises() -> None:
     dates = available_local_dates(df, tz="UTC")
     with pytest.raises(ValueError, match="bucket must be one of"):
         build_ida_forecast(df, target_dates=dates, tz="UTC", bucket="nope")
+
+
+def test_invalid_forecast_mode_raises() -> None:
+    df = _make_history(days=2)
+    dates = available_local_dates(df, tz="UTC")
+    with pytest.raises(ValueError, match="forecast_mode must be one of"):
+        build_ida_forecast(df, target_dates=dates, tz="UTC", forecast_mode="nope")
+
+
+def test_walk_forward_drops_first_day_and_uses_only_prior_days() -> None:
+    df = _make_history(days=4)
+    dates = available_local_dates(df, tz="UTC")
+    fc, meta = build_ida_forecast(
+        df, target_dates=dates, tz="UTC", forecast_mode="walk_forward",
+    )
+    assert meta["forecast_mode"] == "walk_forward"
+    # The earliest target day has no prior history and is dropped; the
+    # remaining 3 days are forecast from strictly-earlier days only.
+    forecast_dates = {ts.tz_convert("UTC").date() for ts in fc.index}
+    assert dates[0] not in forecast_dates
+    assert len(forecast_dates) == 3

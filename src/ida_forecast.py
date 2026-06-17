@@ -31,6 +31,7 @@ from src.analytics import _to_local
 IDA_VALUE_COL = "intraday_price_eur_mwh"
 FORECAST_COL = "forecast_ida_eur_mwh"
 _VALID_BUCKETS = ("hour_of_day", "hour_of_week")
+_VALID_FORECAST_MODES = ("loo", "walk_forward", "in_sample")
 
 
 def _bucket_of(local_index: pd.DatetimeIndex, bucket: str) -> np.ndarray:
@@ -53,16 +54,25 @@ def build_ida_forecast(
     tz: str | None = None,
     value_col: str = IDA_VALUE_COL,
     bucket: str = "hour_of_day",
-    leave_one_day_out: bool = True,
+    forecast_mode: str = "loo",
 ) -> tuple[pd.DataFrame, dict]:
     """Forecast IDA prices at each target day's own timestamps.
 
     For every local date in ``target_dates`` the forecast at each interval
-    is the mean realised price of all history rows sharing that interval's
+    is the mean realised price of the history rows sharing that interval's
     climatology bucket (``hour_of_day`` by default, or ``hour_of_week``).
-    With ``leave_one_day_out=True`` (default) the target day's own rows are
-    removed from the climatology before the mean is taken, so a day is
-    never forecast from itself.
+    ``forecast_mode`` controls which history a day is allowed to see:
+
+    - ``"loo"`` (default): leave-one-day-out cross-validation — every day
+      EXCEPT the target day. This is NOT walk-forward: forecasting Jan 1
+      may use Jan 2/Jan 3 from the loaded sample. It is an unbiased
+      screening estimate of forecast skill, not what a desk could have
+      known in real time.
+    - ``"walk_forward"``: only days strictly BEFORE the target day, so it
+      reflects information available at commit time (the first day(s) have
+      no history and are dropped).
+    - ``"in_sample"``: all days including the target day (optimistic; for
+      diagnostics only).
 
     Empty buckets (no historical sample after exclusion) fall back to the
     climatology's global mean, and those points are flagged with
@@ -77,19 +87,24 @@ def build_ida_forecast(
         value_col: Realised IDA price column.
         bucket: ``"hour_of_day"`` (robust on short windows) or
             ``"hour_of_week"`` (weekday-aware, needs several weeks).
-        leave_one_day_out: Exclude each target day from its own
-            climatology to prevent leakage.
+        forecast_mode: ``"loo"`` (default), ``"walk_forward"``, or
+            ``"in_sample"`` (see above).
 
     Returns:
         ``(forecast_df, metadata)``. ``forecast_df`` is UTC-indexed with
         columns ``[FORECAST_COL, "bucket", "n_samples"]`` covering only the
         timestamps present for the target dates. ``metadata`` has
         ``coverage`` (fraction of target points backed by >=1 sample),
-        ``n_target_points``, ``n_buckets_filled``, ``global_mean``,
-        ``bucket``, ``leave_one_day_out``, and ``fallback_points``.
+        ``n_target_points``, ``n_buckets_filled``, ``n_buckets_requested``,
+        ``global_mean``, ``bucket``, ``forecast_mode``, and
+        ``fallback_points``.
     """
     if bucket not in _VALID_BUCKETS:
         raise ValueError(f"bucket must be one of {_VALID_BUCKETS}, got {bucket!r}")
+    if forecast_mode not in _VALID_FORECAST_MODES:
+        raise ValueError(
+            f"forecast_mode must be one of {_VALID_FORECAST_MODES}, got {forecast_mode!r}"
+        )
     empty_meta = {
         "coverage": 0.0,
         "n_target_points": 0,
@@ -97,7 +112,7 @@ def build_ida_forecast(
         "n_buckets_filled": 0,
         "global_mean": float("nan"),
         "bucket": bucket,
-        "leave_one_day_out": leave_one_day_out,
+        "forecast_mode": forecast_mode,
         "fallback_points": 0,
     }
     if ida_history is None or ida_history.empty or value_col not in ida_history.columns:
@@ -121,9 +136,15 @@ def build_ida_forecast(
         day_rows = local[local["_date"] == target]
         if day_rows.empty:
             continue
-        clim = local[local["_date"] != target] if leave_one_day_out else local
+        if forecast_mode == "walk_forward":
+            clim = local[local["_date"] < target]
+        elif forecast_mode == "in_sample":
+            clim = local
+        else:  # "loo"
+            clim = local[local["_date"] != target]
         if clim.empty:
-            # Only the target day is loaded — no out-of-sample climatology.
+            # No usable climatology (only the target day, or no prior days
+            # in walk-forward mode) — skip; the day is excluded downstream.
             continue
         bucket_mean = clim.groupby("_bucket")[value_col].mean()
         bucket_count = clim.groupby("_bucket")[value_col].size()
@@ -164,7 +185,7 @@ def build_ida_forecast(
         ),
         "global_mean": float(forecast_df[FORECAST_COL].mean()),
         "bucket": bucket,
-        "leave_one_day_out": leave_one_day_out,
+        "forecast_mode": forecast_mode,
         "fallback_points": fallback_points,
     }
     return forecast_df, metadata

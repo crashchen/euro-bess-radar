@@ -747,16 +747,17 @@ def _render_forecast_policy_section(
     """Three-way DA-only / forecast-realised / perfect-foresight panel."""
     with st.expander("Forecast-driven IDA policy (vs perfect-foresight ceiling)", expanded=False):
         st.caption(
-            "Compares a realistic desk that rebids against an IDA *forecast* "
-            "with the ex-post perfect-foresight ceiling. The gap is the "
-            "forecast error cost. Climatology forecast, hourly bucketed — a "
-            "screening estimate, NOT a trading-grade IDA price model."
+            "Compares a climatology-forecast rebid policy with the ex-post "
+            "perfect-foresight ceiling; the gap is the forecast error cost. "
+            "Climatology forecast, hourly bucketed — a screening estimate, "
+            "NOT a trading-grade IDA price model. Values are raw solver "
+            "outputs and do NOT apply the sidebar capture-rate haircut."
         )
         if intraday_df is None or intraday_df.empty:
             st.info("Load IDA1 data to run the forecast-driven policy comparison.")
             return
 
-        c1, c2, c3 = st.columns([1.2, 1.0, 1.0])
+        c1, c2, c3, c4 = st.columns([1.2, 1.0, 1.1, 1.0])
         sample = c1.selectbox(
             "Replay sample",
             options=["7 latest days", "30 latest days", "90 latest days", "All loaded days"],
@@ -773,12 +774,25 @@ def _render_forecast_policy_section(
                 "weekday-aware but needs several weeks of history."
             ),
         )
-        run = c3.button("Run forecast policy", key="forecast_policy_run")
+        mode_label = c3.selectbox(
+            "Forecast information",
+            options=["LOO cross-validation", "Walk-forward"],
+            index=0,
+            key="forecast_policy_mode",
+            help=(
+                "LOO uses every loaded day except the target day (may use "
+                "FUTURE days — unbiased skill estimate, not what a desk knew "
+                "in real time). Walk-forward uses only days strictly before "
+                "the target (drops the earliest day with no history)."
+            ),
+        )
+        run = c4.button("Run forecast policy", key="forecast_policy_run")
         if not run:
             st.info("Choose a sample and click Run to compare against the ceiling.")
             return
 
         bucket = "hour_of_week" if bucket_label == "Hour-of-week" else "hour_of_day"
+        forecast_mode = "walk_forward" if mode_label == "Walk-forward" else "loo"
         limit = _sample_limit(sample)
         batch_dates = dates if limit is None else dates[-limit:]
         with st.spinner(f"Solving {len(batch_dates)} day(s) under forecast + ceiling..."):
@@ -791,27 +805,33 @@ def _render_forecast_policy_section(
                 duration_hours=duration_hours,
                 efficiency=efficiency,
                 bucket=bucket,
+                forecast_mode=forecast_mode,
             )
 
         if per_day.empty:
             st.warning(
                 f"No valid forecast-policy days in this sample. "
                 f"Excluded: {summary['excluded_days']}. A leave-one-day-out "
-                "forecast needs at least 2 loaded days."
+                "forecast needs at least 2 loaded days; walk-forward needs at "
+                "least one day before the target."
             )
             return
 
         _render_forecast_policy_kpis(summary)
         _plot_forecast_policy(per_day, chart_template)
         meta = summary["forecast_meta"]
+        mode_note = {
+            "loo": "LOO cross-validation (may use future days except target)",
+            "walk_forward": "walk-forward (prior days only)",
+            "in_sample": "in-sample (includes target day)",
+        }.get(meta["forecast_mode"], meta["forecast_mode"])
         st.caption(
             f"Forecast support: {meta['n_buckets_filled']}/"
             f"{meta['n_buckets_requested']} buckets backed by history, "
             f"{meta['fallback_points']} global-mean fallback points "
-            f"(coverage {meta['coverage']:.0%}, leave-one-day-out="
-            f"{meta['leave_one_day_out']}). Shape/order is the primary "
-            "signal, but level error still affects the cycling decision via "
-            "round-trip efficiency loss and VOM."
+            f"(coverage {meta['coverage']:.0%}, {mode_note}). Shape/order is "
+            "the primary signal, but level error still affects the cycling "
+            "decision via round-trip efficiency loss and VOM."
         )
         st.dataframe(per_day, width="stretch", hide_index=True)
 

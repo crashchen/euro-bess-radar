@@ -716,12 +716,13 @@ def simulate_sequential_da_id_batch(
     duration_hours: float = 1.0,
     efficiency: float = 0.88,
     bucket: str = "hour_of_day",
-    leave_one_day_out: bool = True,
+    forecast_mode: str = "loo",
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Per-day three-way DA+ID comparison under an imperfect IDA forecast.
 
-    For each local day this builds a leave-one-day-out IDA forecast (see
-    `ida_forecast.build_ida_forecast`) and runs
+    For each local day this builds an IDA forecast (see
+    `ida_forecast.build_ida_forecast`; `forecast_mode` selects "loo"
+    cross-validation, "walk_forward", or "in_sample") and runs
     `solve_sequential_da_id_dispatch` to get three benchmarks:
       - DA-only baseline (no IDA participation),
       - forecast-driven realised (rebid at forecast, settle at realised),
@@ -729,17 +730,21 @@ def simulate_sequential_da_id_batch(
 
     Each day is solved standalone (per-day terminal-neutral) so the
     comparison isolates *forecast quality* from the multi-day SoC-carry
-    effect that `simulate_replay_batch` models separately.
+    effect that `simulate_replay_batch` models separately. All values are
+    raw solver outputs — the cockpit's DA-slippage capture haircut is NOT
+    applied here, so this panel stays a clean forecast-quality comparison.
 
-    Returns `(per_day_df, summary)`. `summary` aggregates totals, the
-    forecast metadata from the generator, and a `forecast_error_share`
-    (= total forecast error / total ceiling uplift) — the fraction of the
-    achievable rebid value lost to the imperfect forecast.
+    Returns `(per_day_df, summary)`. `summary` carries absolute EUR totals
+    (`total_da_only_eur`, `total_realised_eur`, `total_ceiling_eur`,
+    `total_forecast_error_eur`, `total_ceiling_uplift_eur`,
+    `total_captured_eur`), the forecast metadata, and a guarded
+    `capture_rate` (= total captured / total achievable uplift; None when
+    no rebid opportunity exists in the window).
     """
     selected = dates or available_local_dates(da_prices, tz=tz)
     forecast_df, fc_meta = build_ida_forecast(
         ida_prices, target_dates=selected, tz=tz,
-        bucket=bucket, leave_one_day_out=leave_one_day_out,
+        bucket=bucket, forecast_mode=forecast_mode,
     )
 
     rows: list[dict[str, Any]] = []
