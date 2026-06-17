@@ -170,8 +170,16 @@ def simulate_da_id_replay(
         dt=dt,
         capacity_mwh=power_mw * duration_hours,
     )
-    # Traded volume = DA gross + |ID rebid delta|. Rebalancing factor
-    # > 1.0 only when ID rebid moves physical away from DA position.
+    # Traded volume = financial transaction volume across the two market
+    # sessions. DA gross is the volume committed at the DA auction; the
+    # |ID rebid delta| is the additional volume traded on ID to move the
+    # physical schedule away from the DA commitment. When DA == IDA (no
+    # rebid) the delta is zero and traded_volume == physical_throughput.
+    # The abs is applied per leg (charge and discharge) so a sign-flipped
+    # rebid (e.g. DA buys, IDA sells) counts both legs as new trades.
+    # MILP mutual exclusion ensures p_charge and p_discharge are never
+    # simultaneously non-zero, so the per-leg abs cannot overcount within
+    # a single interval.
     da_charge = np.asarray(result["da_p_charge"], dtype=float)
     da_discharge = np.asarray(result["da_p_discharge"], dtype=float)
     ida_charge = np.asarray(result["ida_p_charge"], dtype=float)
@@ -330,6 +338,15 @@ def _build_result(
         for col_name, values in extra_columns.items():
             ts[col_name] = np.asarray(values)
 
+    # Rebalancing factor: traded / physical. Edge cases:
+    #   physical == 0 and traded == 0 → 1.0 (no activity, no rebalancing)
+    #   physical == 0 and traded  > 0 → inf (DA was fully unwound on ID,
+    #     so all volume was for rebalancing — UI renders this as "Inf")
+    #   otherwise → traded / physical
+    if physical_throughput <= 0:
+        rebalancing_factor = 1.0 if traded_volume <= 0 else float("inf")
+    else:
+        rebalancing_factor = traded_volume / physical_throughput
     summary = {
         "total_revenue_eur": total_revenue,
         "annualized_eur_per_mw": total_revenue * DAYS_PER_YEAR / power_mw
@@ -337,8 +354,7 @@ def _build_result(
         "number_of_trades": _count_dispatch_blocks(net_dispatch),
         "physical_throughput_mwh": physical_throughput,
         "traded_volume_mwh": traded_volume,
-        "rebalancing_factor": traded_volume / physical_throughput
-        if physical_throughput > 0 else 0.0,
+        "rebalancing_factor": rebalancing_factor,
         "daily_fce": max(daily_fce, 0.0),
         "avg_c_rate": avg_c_rate,
         "max_depth_of_discharge_pct": _max_dod_pct(soc, capacity_mwh),

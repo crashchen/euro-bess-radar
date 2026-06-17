@@ -191,6 +191,31 @@ def test_da_id_replay_exposes_wholesales_columns() -> None:
     )
 
 
+def test_da_id_replay_full_unwind_reports_inf_rebalancing_factor() -> None:
+    """Edge case Codex flagged: DA traded but IDA fully unwound (physical=0).
+
+    Old code returned 0.0 (divide-by-zero guard), which is the OPPOSITE
+    operational signal. New code returns float('inf') and the UI formats
+    it as 'Inf'.
+    """
+    import math
+    idx = pd.date_range("2026-03-19", periods=2, freq="h", tz="UTC")
+    da = pd.DataFrame({"price_eur_mwh": [0.0, 100.0]}, index=idx)
+    da.index.name = "timestamp"
+    # IDA flat at midpoint -> stage-2 has no profitable trade, unwinds.
+    ida = pd.DataFrame({"intraday_price_eur_mwh": [50.0, 50.0]}, index=idx)
+    ida.index.name = "timestamp"
+    result = simulate_da_id_replay(
+        da, ida,
+        simulation_date=idx[0].date(),
+        power_mw=1.0, duration_hours=1.0, efficiency=1.0,
+    )
+    summary = result["summary"]
+    assert summary["physical_throughput_mwh"] == pytest.approx(0.0, abs=1e-6)
+    assert summary["traded_volume_mwh"] > 0
+    assert math.isinf(summary["rebalancing_factor"])
+
+
 def test_da_id_replay_no_ida_data_returns_safe_empty() -> None:
     da, _ = _make_da_id_pair()
     empty_ida = pd.DataFrame(columns=["intraday_price_eur_mwh"])
