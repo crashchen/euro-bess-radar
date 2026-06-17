@@ -41,11 +41,13 @@ from src.pages import (
     simulation_cockpit,
     zone_comparison,
 )
+from src.ui_theme import cockpit_chart_template, inject_global_cockpit_theme
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="BESS Pulse", layout="wide", page_icon="\u26a1")
+inject_global_cockpit_theme()
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 params = render_sidebar()
@@ -60,7 +62,7 @@ capture_rate = params["capture_rate"]
 capex_eur_kwh = params["capex_eur_kwh"]
 use_lp_dispatch = params["use_lp_dispatch"]
 force_refresh = params["force_refresh"]
-chart_template = params["chart_template"]
+chart_template = cockpit_chart_template(params["chart_template"])
 fetch_btn = params["fetch_btn"]
 current_zone_date_scope = params["current_zone_date_scope"]
 

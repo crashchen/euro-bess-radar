@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from html import escape
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -45,18 +46,14 @@ def render(
     chart_template: str,
 ) -> None:
     """Render an enspired-like historical simulation cockpit."""
-    st.subheader(f"Simulation Cockpit — {primary_zone}")
-    st.caption(
-        "Backtest replay, not live trading. This cockpit replays one local "
-        "day through the project MILP dispatch model using already-loaded "
-        "market data; it is not actual enspired dispatch or asset telemetry."
-    )
+    _inject_cockpit_css()
 
     dates = available_local_dates(primary_df, tz=zone_tz)
     if not dates:
         st.info("Fetch day-ahead prices first to run a simulation replay.")
         return
 
+    header_slot = st.empty()
     c1, c2, c3 = st.columns([1.2, 1.4, 1.4])
     selected_day = c1.selectbox(
         "Simulation day",
@@ -82,6 +79,16 @@ def render(
             f"slippage. The sidebar value ({capture_rate:.2f}) is intentionally "
             "ignored here so cockpit shows raw MILP output by default."
         ),
+    )
+    _render_cockpit_header(
+        target=header_slot,
+        primary_zone=primary_zone,
+        selected_day=selected_day,
+        mode=mode,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        capture_rate=cockpit_capture_rate,
     )
 
     if mode == "DA + IDA1 Replay":
@@ -124,18 +131,22 @@ def render(
         return
 
     _render_kpis(summary, mode=mode, power_mw=power_mw)
-    _render_health_panel(summary)
 
-    # All time-series stacked vertically so the X axis (time) lines up
-    # across charts — the single biggest "looks like Grafana" lever
-    # available inside Streamlit's linear layout.
-    _plot_price(ts, mode, chart_template)
-    _plot_soc(ts, chart_template, capacity_mwh=power_mw * duration_hours)
-    _plot_dispatch(ts, chart_template)
-    _plot_power_allocation(ts, chart_template, power_mw=power_mw)
-    if mode == "DA + IDA1 Replay" and "da_position_mw" in ts.columns:
-        _plot_wholesales(ts, chart_template, power_mw=power_mw)
-    _plot_revenue(ts, chart_template)
+    left, right = st.columns([2.6, 1.0], gap="medium")
+    with left:
+        top_left, top_right = st.columns(2, gap="medium")
+        with top_left:
+            _plot_soc(ts, chart_template, capacity_mwh=power_mw * duration_hours)
+        with top_right:
+            _plot_revenue(ts, chart_template)
+        _plot_dispatch(ts, chart_template)
+        _plot_power_allocation(ts, chart_template, power_mw=power_mw)
+        if mode == "DA + IDA1 Replay" and "da_position_mw" in ts.columns:
+            _plot_wholesales(ts, chart_template, power_mw=power_mw)
+    with right:
+        _render_health_panel(summary)
+        _plot_price(ts, mode, chart_template)
+
     _render_event_table(build_dispatch_event_table(ts))
     _render_multi_day_summary(
         primary_df=primary_df,
@@ -155,41 +166,216 @@ def render(
         st.dataframe(ts, width="stretch", hide_index=True)
 
 
+def _inject_cockpit_css() -> None:
+    st.markdown(
+        """
+        <style>
+        .cockpit-hero {
+            border: 1px solid rgba(0, 163, 255, 0.18);
+            border-radius: 18px;
+            padding: 18px 20px;
+            margin: 6px 0 18px 0;
+            background:
+                radial-gradient(circle at 12% 15%, rgba(255,45,149,0.20), transparent 28%),
+                radial-gradient(circle at 82% 18%, rgba(0,163,255,0.18), transparent 30%),
+                linear-gradient(135deg, #090d12 0%, #101824 48%, #07090d 100%);
+            box-shadow: 0 0 0 1px rgba(255,255,255,0.03) inset,
+                        0 18px 55px rgba(0,0,0,0.35);
+        }
+        .cockpit-title {
+            color: #f4f7fb;
+            font-size: 1.9rem;
+            font-weight: 800;
+            letter-spacing: -0.04em;
+            margin: 0;
+        }
+        .cockpit-subtitle {
+            color: #a8b3c5;
+            font-size: 0.86rem;
+            margin-top: 6px;
+            max-width: 980px;
+        }
+        .cockpit-pill-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 14px;
+        }
+        .cockpit-pill {
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 999px;
+            color: #dce8f7;
+            background: rgba(255,255,255,0.055);
+            padding: 5px 11px;
+            font-size: 0.75rem;
+            letter-spacing: 0.02em;
+        }
+        .cockpit-pill.alert {
+            color: #ffc233;
+            border-color: rgba(255,194,51,0.35);
+            background: rgba(255,194,51,0.09);
+        }
+        .cockpit-kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            gap: 10px;
+            margin: 10px 0 16px;
+        }
+        .cockpit-kpi-card {
+            border: 1px solid rgba(255,255,255,0.09);
+            border-radius: 14px;
+            padding: 13px 14px 12px;
+            min-height: 92px;
+            background: linear-gradient(180deg, rgba(20,29,42,0.96), rgba(8,12,18,0.96));
+            box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+        }
+        .cockpit-kpi-card.accent-magenta {
+            background: linear-gradient(150deg, rgba(255,45,149,0.82), rgba(91,13,66,0.92));
+        }
+        .cockpit-kpi-card.accent-cyan {
+            background: linear-gradient(150deg, rgba(0,163,255,0.74), rgba(4,51,91,0.95));
+        }
+        .cockpit-kpi-label {
+            color: rgba(235,241,250,0.78);
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.075em;
+        }
+        .cockpit-kpi-value {
+            color: #ffffff;
+            font-size: 1.55rem;
+            font-weight: 850;
+            letter-spacing: -0.045em;
+            margin-top: 8px;
+            line-height: 1.0;
+        }
+        .cockpit-kpi-help {
+            color: rgba(220,232,247,0.62);
+            font-size: 0.72rem;
+            margin-top: 8px;
+        }
+        .cockpit-health-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 8px;
+        }
+        .cockpit-health-card {
+            border: 1px solid rgba(0,163,255,0.18);
+            border-radius: 14px;
+            padding: 12px;
+            background: radial-gradient(circle at 50% 8%, rgba(0,163,255,0.18), transparent 48%),
+                        linear-gradient(180deg, rgba(18,27,38,0.94), rgba(7,10,15,0.96));
+        }
+        .cockpit-health-value {
+            color: #00a3ff;
+            font-size: 1.45rem;
+            font-weight: 800;
+            letter-spacing: -0.04em;
+        }
+        .cockpit-health-label {
+            color: #a8b3c5;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.065em;
+            margin-top: 4px;
+        }
+        @media (max-width: 1100px) {
+            .cockpit-kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+        }
+        @media (max-width: 720px) {
+            .cockpit-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def _fmt_rebal(value: float) -> str:
     if not math.isfinite(value):
         return "Inf"
     return f"{value:.2f}"
 
 
-def _render_kpis(summary: dict, *, mode: str, power_mw: float) -> None:
-    # Row 1: financials & volumes (operationally what matters most).
-    r1 = st.columns(3)
-    r1[0].metric("Day Revenue", f"EUR {summary['total_revenue_eur']:,.0f}")
-    r1[1].metric("Traded Volume", f"{summary['traded_volume_mwh']:,.1f} MWh")
-    r1[2].metric("Physical Throughput", f"{summary['physical_throughput_mwh']:,.1f} MWh")
-
-    # Row 2: execution metrics. Rebid Uplift shown only in DA+ID mode where
-    # it carries information; otherwise show Daily FCE as a third execution
-    # signal (battery-cycle intensity).
-    r2 = st.columns(3)
-    r2[0].metric("Number of Trades", f"{summary['number_of_trades']:,}")
-    r2[1].metric(
-        "Rebalancing Factor",
-        _fmt_rebal(summary["rebalancing_factor"]),
-        help=(
-            "Traded volume / physical throughput. 1.0 = no rebid. "
-            ">1.0 = ID rebid moved physical away from DA position. "
-            "Inf = DA position was fully unwound on ID."
-        ),
+def _render_cockpit_header(
+    *,
+    target,
+    primary_zone: str,
+    selected_day,
+    mode: str,
+    power_mw: float,
+    duration_hours: int,
+    efficiency: float,
+    capture_rate: float,
+) -> None:
+    target.markdown(
+        f"""
+        <div class="cockpit-hero">
+          <div class="cockpit-title">Simulation Cockpit | {escape(primary_zone)}</div>
+          <div class="cockpit-subtitle">
+            Historical replay of BESS dispatch and monetisation paths. This is
+            a backtest cockpit, not live telemetry, not actual enspired dispatch,
+            and not an executable trading instruction.
+          </div>
+          <div class="cockpit-pill-row">
+            <span class="cockpit-pill alert">Historical Replay | Not Live Trading</span>
+            <span class="cockpit-pill">{escape(mode)}</span>
+            <span class="cockpit-pill">Local day {selected_day}</span>
+            <span class="cockpit-pill">{power_mw:.1f} MW / {duration_hours}h</span>
+            <span class="cockpit-pill">{efficiency:.0%} efficiency</span>
+            <span class="cockpit-pill">{capture_rate:.0%} capture</span>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
+
+
+def _render_kpis(summary: dict, *, mode: str, power_mw: float) -> None:
+    annualized = summary["annualized_eur_per_mw"]
     if mode == "DA + IDA1 Replay" and "rebid_uplift_eur" in summary:
-        r2[2].metric(
-            "ID Rebid Uplift",
-            f"EUR {summary['rebid_uplift_eur']:,.0f}",
-            help="Extra EUR captured by re-dispatching at IDA1 prices vs DA-only.",
-        )
+        final_label = "ID Rebid Uplift"
+        final_value = f"EUR {summary['rebid_uplift_eur']:,.0f}"
+        final_help = "Extra value vs DA-only"
     else:
-        r2[2].metric("Daily FCE", f"{summary['daily_fce']:.2f}")
+        final_label = "Daily FCE"
+        final_value = f"{summary['daily_fce']:.2f}"
+        final_help = "Full equivalent cycles"
+
+    st.markdown(
+        f"""
+        <div class="cockpit-kpi-grid">
+          {_kpi_card("Day Revenue", f"EUR {summary['total_revenue_eur']:,.0f}",
+                     "Selected local day", "accent-magenta")}
+          {_kpi_card("EUR/MW/year", f"EUR {annualized:,.0f}",
+                     "Single-day annualised", "accent-magenta")}
+          {_kpi_card("Traded Volume", f"{summary['traded_volume_mwh']:,.1f} MWh",
+                     "DA + ID financial volume", "accent-cyan")}
+          {_kpi_card("Physical Throughput", f"{summary['physical_throughput_mwh']:,.1f} MWh",
+                     "Battery charge + discharge", "accent-cyan")}
+          {_kpi_card("Trades", f"{summary['number_of_trades']:,}",
+                     "Contiguous dispatch blocks", "")}
+          {_kpi_card("Rebalancing", _fmt_rebal(summary["rebalancing_factor"]),
+                     "Traded / physical volume", "")}
+        </div>
+        <div class="cockpit-kpi-grid">
+          {_kpi_card(final_label, final_value, final_help, "")}
+          {_kpi_card("Power Basis", f"{power_mw:.1f} MW",
+                     "Annualised denominator", "")}
+          {_kpi_card("Avg C-rate", f"{summary['avg_c_rate']:.2f}",
+                     "Active intervals only", "")}
+          {_kpi_card("Max DoD", f"{summary['max_depth_of_discharge_pct']:.1f}%",
+                     "Daily SoC swing", "")}
+          {_kpi_card("SoH Delta", f"{summary['soh_delta_pct']:.4f}%",
+                     "Screening estimate", "")}
+          {_kpi_card("Degradation", f"EUR {summary['degradation_cost_eur']:,.0f}",
+                     "Zero if CapEx is zero", "")}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.caption(
         f"Single-day x 365.25 extrapolation ~= EUR {summary['annualized_eur_per_mw']:,.0f}/MW/yr "
@@ -198,19 +384,43 @@ def _render_kpis(summary: dict, *, mode: str, power_mw: float) -> None:
     )
 
 
+def _kpi_card(label: str, value: str, help_text: str, accent: str) -> str:
+    class_name = f"cockpit-kpi-card {accent}".strip()
+    return (
+        f'<div class="{class_name}">'
+        f'<div class="cockpit-kpi-label">{escape(label)}</div>'
+        f'<div class="cockpit-kpi-value">{escape(value)}</div>'
+        f'<div class="cockpit-kpi-help">{escape(help_text)}</div>'
+        "</div>"
+    )
+
+
 def _render_health_panel(summary: dict) -> None:
-    with st.container(border=True):
-        st.markdown("**Battery Health Snapshot**")
-        cols = st.columns(5)
-        cols[0].metric("Daily FCE", f"{summary['daily_fce']:.2f}")
-        cols[1].metric("Avg C-rate", f"{summary['avg_c_rate']:.2f}")
-        cols[2].metric("Max DoD", f"{summary['max_depth_of_discharge_pct']:.1f}%")
-        cols[3].metric("SoH Delta", f"{summary['soh_delta_pct']:.4f}%")
-        cols[4].metric(
-            "Degradation Cost",
-            f"EUR {summary['degradation_cost_eur']:,.0f}",
-            help="Screening-level FEC amortisation from the CapEx input. Zero if CapEx is zero.",
-        )
+    st.markdown(
+        f"""
+        <div class="cockpit-health-card">
+          <div class="cockpit-kpi-label">Battery Health Snapshot</div>
+          <div class="cockpit-health-grid">
+            {_health_metric("Daily FCE", f"{summary['daily_fce']:.2f}")}
+            {_health_metric("Avg C-rate", f"{summary['avg_c_rate']:.2f}")}
+            {_health_metric("Max DoD", f"{summary['max_depth_of_discharge_pct']:.1f}%")}
+            {_health_metric("SoH Delta", f"{summary['soh_delta_pct']:.4f}%")}
+            {_health_metric("Degradation", f"EUR {summary['degradation_cost_eur']:,.0f}")}
+            {_health_metric("Rebalancing", _fmt_rebal(summary["rebalancing_factor"]))}
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def _health_metric(label: str, value: str) -> str:
+    return (
+        "<div>"
+        f'<div class="cockpit-health-value">{escape(value)}</div>'
+        f'<div class="cockpit-health-label">{escape(label)}</div>'
+        "</div>"
+    )
 
 
 def _apply_panel_layout(
@@ -222,15 +432,37 @@ def _apply_panel_layout(
 ) -> None:
     """Shared layout: unified hover, compact margins, consistent height."""
     fig.update_layout(
-        title=title,
+        title=dict(text=title, font=dict(color="#edf4ff", size=14)),
         xaxis_title="",
         yaxis_title=y_title,
-        template=template,
+        template=_cockpit_plot_template(template),
         height=height,
         hovermode="x unified",
-        margin=dict(l=40, r=20, t=50, b=30),
+        paper_bgcolor="#07090d",
+        plot_bgcolor="#0b1118",
+        font=dict(color="#dce8f7", size=11),
+        margin=dict(l=46, r=22, t=48, b=28),
         legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0),
     )
+    fig.update_xaxes(
+        showgrid=True,
+        gridcolor="rgba(255,255,255,0.08)",
+        zeroline=False,
+        linecolor="rgba(255,255,255,0.16)",
+        tickfont=dict(color="#a8b3c5"),
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor="rgba(255,255,255,0.08)",
+        zerolinecolor="rgba(255,255,255,0.22)",
+        linecolor="rgba(255,255,255,0.16)",
+        tickfont=dict(color="#a8b3c5"),
+    )
+
+
+def _cockpit_plot_template(template: str) -> str:
+    """Keep cockpit visuals dark even if the global dashboard theme is light."""
+    return template if "dark" in template.lower() else "plotly_dark"
 
 
 def _plot_price(ts: pd.DataFrame, mode: str, chart_template: str) -> None:
