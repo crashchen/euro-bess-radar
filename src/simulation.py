@@ -16,7 +16,13 @@ from src.degradation import (
     DEFAULT_EOL_CAPACITY_PCT,
     calculate_degradation_cost,
 )
-from src.dispatch import DISPATCH_VOM_COST_EUR_MWH, solve_daily_da_id_dispatch, solve_daily_lp
+from src.dispatch import (
+    DISPATCH_VOM_COST_EUR_MWH,
+    solve_daily_da_id_dispatch,
+    solve_daily_lp,
+    solve_sequential_da_id_dispatch,
+)
+from src.ida_forecast import FORECAST_COL, build_ida_forecast
 
 DAYS_PER_YEAR = 365.25
 _SIM_COLUMNS = [
@@ -687,6 +693,159 @@ def _is_regular_utc_day(day_df: pd.DataFrame) -> bool:
     utc_index = pd.DatetimeIndex(day_df.index).tz_convert("UTC").sort_values()
     deltas = np.diff(utc_index.asi8)
     return bool(np.all(deltas == deltas[0]))
+
+
+_SEQ_COLUMNS = [
+    "date",
+    "da_only_eur",
+    "realised_eur",
+    "ceiling_eur",
+    "forecast_error_eur",
+    "captured_eur",
+    "forecast_coverage",
+]
+
+
+def simulate_sequential_da_id_batch(
+    da_prices: pd.DataFrame,
+    ida_prices: pd.DataFrame,
+    *,
+    dates: list[date] | None = None,
+    tz: str | None = None,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    bucket: str = "hour_of_day",
+    leave_one_day_out: bool = True,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Per-day three-way DA+ID comparison under an imperfect IDA forecast.
+
+    For each local day this builds a leave-one-day-out IDA forecast (see
+    `ida_forecast.build_ida_forecast`) and runs
+    `solve_sequential_da_id_dispatch` to get three benchmarks:
+      - DA-only baseline (no IDA participation),
+      - forecast-driven realised (rebid at forecast, settle at realised),
+      - perfect-foresight ceiling (ex-post optimal rebid).
+
+    Each day is solved standalone (per-day terminal-neutral) so the
+    comparison isolates *forecast quality* from the multi-day SoC-carry
+    effect that `simulate_replay_batch` models separately.
+
+    Returns `(per_day_df, summary)`. `summary` aggregates totals, the
+    forecast metadata from the generator, and a `forecast_error_share`
+    (= total forecast error / total ceiling uplift) — the fraction of the
+    achievable rebid value lost to the imperfect forecast.
+    """
+    selected = dates or available_local_dates(da_prices, tz=tz)
+    forecast_df, fc_meta = build_ida_forecast(
+        ida_prices, target_dates=selected, tz=tz,
+        bucket=bucket, leave_one_day_out=leave_one_day_out,
+    )
+
+    rows: list[dict[str, Any]] = []
+    excluded = 0
+    if not forecast_df.empty:
+        coverage_by_point = forecast_df["n_samples"] > 0
+        for local_date in selected:
+            row = _sequential_day_row(
+                da_prices, ida_prices, forecast_df, coverage_by_point,
+                local_date=local_date, tz=tz, power_mw=power_mw,
+                duration_hours=duration_hours, efficiency=efficiency,
+            )
+            if row is None:
+                excluded += 1
+                continue
+            rows.append(row)
+    else:
+        excluded = len(selected)
+
+    if not rows:
+        per_day = pd.DataFrame(columns=_SEQ_COLUMNS)
+    else:
+        per_day = (
+            pd.DataFrame(rows, columns=_SEQ_COLUMNS)
+            .sort_values("date")
+            .reset_index(drop=True)
+        )
+
+    if per_day.empty:
+        total_da_only = total_realised = total_ceiling = total_error = 0.0
+        total_ceiling_uplift = total_captured = 0.0
+    else:
+        total_da_only = float(per_day["da_only_eur"].sum())
+        total_realised = float(per_day["realised_eur"].sum())
+        total_ceiling = float(per_day["ceiling_eur"].sum())
+        total_error = float(per_day["forecast_error_eur"].sum())
+        total_ceiling_uplift = total_ceiling - total_da_only
+        total_captured = total_realised - total_da_only
+    # capture_rate = captured / achievable uplift. Left None when there is
+    # effectively no rebid opportunity in the window (achievable ~ 0), where
+    # the ratio is meaningless; it can be negative when the forecast misleads
+    # the rebid into churn losses below the DA-only baseline.
+    capture_rate = (
+        total_captured / total_ceiling_uplift
+        if total_ceiling_uplift > 1e-6 else None
+    )
+    summary = {
+        "valid_days": len(per_day),
+        "excluded_days": excluded,
+        "total_da_only_eur": total_da_only,
+        "total_realised_eur": total_realised,
+        "total_ceiling_eur": total_ceiling,
+        "total_forecast_error_eur": total_error,
+        "total_ceiling_uplift_eur": total_ceiling_uplift,
+        "total_captured_eur": total_captured,
+        "capture_rate": capture_rate,
+        "forecast_meta": fc_meta,
+    }
+    per_day.attrs["summary"] = summary
+    return per_day, summary
+
+
+def _sequential_day_row(
+    da_prices: pd.DataFrame,
+    ida_prices: pd.DataFrame,
+    forecast_df: pd.DataFrame,
+    coverage_by_point: pd.Series,
+    *,
+    local_date: date,
+    tz: str | None,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+) -> dict[str, Any] | None:
+    """Solve one day's three-way sequential comparison, or None if unusable."""
+    da_day = _select_local_day(da_prices, local_date, tz)
+    ida_day = _select_local_day(ida_prices, local_date, tz)
+    if da_day.empty or ida_day.empty or "intraday_price_eur_mwh" not in ida_day.columns:
+        return None
+    merged = (
+        da_day[["price_eur_mwh"]]
+        .join(ida_day[["intraday_price_eur_mwh"]], how="inner")
+        .join(forecast_df[[FORECAST_COL]], how="inner")
+        .dropna()
+    )
+    if merged.empty or not _is_regular_utc_day(merged):
+        return None
+
+    dt = _infer_interval_hours(pd.DatetimeIndex(merged.index))
+    result = solve_sequential_da_id_dispatch(
+        merged["price_eur_mwh"].to_numpy(dtype=float),
+        merged[FORECAST_COL].to_numpy(dtype=float),
+        merged["intraday_price_eur_mwh"].to_numpy(dtype=float),
+        dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency,
+    )
+    day_coverage = float(coverage_by_point.reindex(merged.index).fillna(False).mean())
+    return {
+        "date": local_date,
+        "da_only_eur": result["da_only_revenue_eur"],
+        "realised_eur": result["realised_total_eur"],
+        "ceiling_eur": result["ceiling_total_eur"],
+        "forecast_error_eur": result["forecast_error_cost_eur"],
+        "captured_eur": result["captured_uplift_eur"],
+        "forecast_coverage": day_coverage,
+    }
 
 
 def build_dispatch_event_table(timeseries: pd.DataFrame) -> pd.DataFrame:

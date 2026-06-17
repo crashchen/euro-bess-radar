@@ -16,6 +16,7 @@ from src.simulation import (
     simulate_da_id_replay,
     simulate_da_milp_replay,
     simulate_replay_batch,
+    simulate_sequential_da_id_batch,
 )
 
 
@@ -479,3 +480,68 @@ def test_continuous_horizon_keeps_dst_spring_forward_day() -> None:
     )
     assert batch.attrs["excluded_days"] == 0
     assert batch.attrs["carry_mode"] == "continuous_horizon"
+
+
+def _make_seq_history(days: int = 5, *, anomaly_day: int | None = None):
+    """DA + IDA over `days` with a fixed daily shape; one IDA day optionally
+    inverted to act as an out-of-climatology anomaly the forecast misses."""
+    shape = np.array(
+        [10, 10, 10, 10, 10, 12, 20, 45, 60, 50, 30, 25,
+         22, 28, 45, 72, 92, 80, 55, 40, 30, 20, 15, 12],
+        dtype=float,
+    )
+    idx = pd.date_range("2026-03-16", periods=24 * days, freq="h", tz="UTC")
+    da = np.tile(shape, days)
+    ida = np.tile(shape, days).astype(float)
+    if anomaly_day is not None:
+        s = anomaly_day * 24
+        ida[s:s + 24] = shape[::-1]
+    da_df = pd.DataFrame({"price_eur_mwh": da}, index=idx)
+    ida_df = pd.DataFrame({"intraday_price_eur_mwh": ida}, index=idx)
+    da_df.index.name = "timestamp"
+    ida_df.index.name = "timestamp"
+    return da_df, ida_df
+
+
+def test_sequential_batch_three_way_ordering_and_identity() -> None:
+    da_df, ida_df = _make_seq_history(days=5, anomaly_day=2)
+    dates = available_local_dates(da_df, tz="UTC")
+    per_day, summary = simulate_sequential_da_id_batch(
+        da_df, ida_df, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    assert summary["valid_days"] == 5
+    # Per-day identity: captured + forecast_error == ceiling - da_only.
+    lhs = per_day["captured_eur"] + per_day["forecast_error_eur"]
+    rhs = per_day["ceiling_eur"] - per_day["da_only_eur"]
+    assert np.allclose(lhs, rhs, atol=1e-6)
+    # Realised never exceeds the perfect-foresight ceiling.
+    assert (per_day["realised_eur"] <= per_day["ceiling_eur"] + 1e-6).all()
+    # The anomaly day carries most of the achievable uplift the forecast misses.
+    anomaly_row = per_day.iloc[2]
+    assert anomaly_row["ceiling_eur"] - anomaly_row["da_only_eur"] > 50.0
+    assert anomaly_row["forecast_error_eur"] > 50.0
+
+
+def test_sequential_batch_capture_rate_none_when_no_opportunity() -> None:
+    # DA shape == IDA shape every day -> ceiling == da_only, no rebid value,
+    # so capture_rate is undefined (None) rather than a divide-by-zero blowup.
+    da_df, ida_df = _make_seq_history(days=4, anomaly_day=None)
+    dates = available_local_dates(da_df, tz="UTC")
+    _, summary = simulate_sequential_da_id_batch(
+        da_df, ida_df, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    assert summary["total_ceiling_uplift_eur"] == pytest.approx(0.0, abs=1e-6)
+    assert summary["capture_rate"] is None
+
+
+def test_sequential_batch_missing_intraday_excludes_all_days() -> None:
+    da_df, _ = _make_seq_history(days=3)
+    empty_ida = pd.DataFrame(columns=["intraday_price_eur_mwh"])
+    empty_ida.index = pd.DatetimeIndex([], name="timestamp")
+    dates = available_local_dates(da_df, tz="UTC")
+    per_day, summary = simulate_sequential_da_id_batch(
+        da_df, empty_ida, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    assert per_day.empty
+    assert summary["excluded_days"] == len(dates)
+    assert summary["capture_rate"] is None
