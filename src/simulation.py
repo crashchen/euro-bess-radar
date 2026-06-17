@@ -501,7 +501,17 @@ def _group_clean_runs(
         if previous_date is not None and (local_date - previous_date).days != 1:
             flush()
         day_df = _select_local_day(price_df, local_date, tz)
-        if day_df.empty or day_df["price_eur_mwh"].isna().any():
+        if (
+            day_df.empty
+            or day_df["price_eur_mwh"].isna().any()
+            or not _is_regular_utc_day(day_df)
+        ):
+            # Empty / NaN / sparse days break the continuous horizon. A
+            # sparse day (e.g. a missing 02:00 interval that upstream
+            # cleaning did not reindex to NaN) would otherwise compress
+            # the MILP time axis. DST spring-forward (23 local hours) and
+            # fall-back (25 local hours) days are NOT sparse — their UTC
+            # index is still uniform — so they pass this guard.
             flush()
             previous_date = None
             continue
@@ -514,6 +524,21 @@ def _group_clean_runs(
 
     flush()
     return runs
+
+
+def _is_regular_utc_day(day_df: pd.DataFrame) -> bool:
+    """True if the day's UTC index has a single uniform interval delta.
+
+    DST-safe sparsity check: a missing interval leaves a gap in the UTC
+    index (non-uniform delta), while DST transition days stay uniform in
+    UTC even though their LOCAL hour count is 23 or 25. Used to keep the
+    continuous-horizon MILP from silently compressing a sparse day.
+    """
+    if len(day_df) < 2:
+        return True
+    utc_index = pd.DatetimeIndex(day_df.index).tz_convert("UTC").sort_values()
+    deltas = np.diff(utc_index.asi8)
+    return bool(np.all(deltas == deltas[0]))
 
 
 def build_dispatch_event_table(timeseries: pd.DataFrame) -> pd.DataFrame:

@@ -378,3 +378,44 @@ def test_replay_batch_carry_soc_excluded_day_does_not_advance_soc() -> None:
     )
     assert len(batch) == 1
     assert batch.attrs["excluded_days"] == 1
+
+
+def test_continuous_horizon_excludes_sparse_day_without_nan() -> None:
+    """A 23-interval day with no NaN must not be absorbed into a run.
+
+    Without the UTC-regularity guard the continuous-horizon MILP would
+    compress the missing interval and silently distort the time axis.
+    """
+    idx1 = pd.date_range("2026-03-19 00:00", periods=24, freq="h", tz="UTC")
+    idx2 = pd.date_range("2026-03-20 00:00", periods=24, freq="h", tz="UTC").delete(2)
+    idx = idx1.append(idx2)
+    prices = [20.0] * 22 + [5.0, 5.0] + [200.0, 200.0] + [20.0] * 21
+    df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+    df.index.name = "timestamp"
+    dates = available_local_dates(df, tz="UTC")
+
+    batch = simulate_replay_batch(
+        df, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0, carry_soc=True,
+    )
+    assert len(batch) == 1
+    assert batch.attrs["excluded_days"] == 1
+    assert batch["n_intervals"].tolist() == [24]
+
+
+def test_continuous_horizon_keeps_dst_spring_forward_day() -> None:
+    """A 23-local-hour DST day stays uniform in UTC and must be kept."""
+    idx = pd.date_range("2026-03-28 00:00", periods=72, freq="h", tz="UTC")
+    prices = list(np.linspace(10.0, 100.0, 72))
+    df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
+    df.index.name = "timestamp"
+    dates = available_local_dates(df, tz="Europe/Berlin")
+    # 2026-03-29 is the Berlin spring-forward day (23 local hours).
+    assert pd.Timestamp("2026-03-29").date() in dates
+
+    batch = simulate_replay_batch(
+        df, dates=dates, tz="Europe/Berlin",
+        power_mw=1.0, duration_hours=2.0, carry_soc=True,
+    )
+    assert batch.attrs["excluded_days"] == 0
+    assert batch.attrs["carry_mode"] == "continuous_horizon"
