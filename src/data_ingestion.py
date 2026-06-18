@@ -1884,6 +1884,8 @@ def _ida_cache_table(zone: str, sequence: int) -> str:
 
 IDA_SOURCE_ENTSOE = "ENTSO-E intraday auction"
 IDA_SOURCE_MANUAL = "Manual CSV"
+IDA_SOURCE_MIXED = "Mixed"
+IDA_SOURCE_LEGACY = "Unknown (pre-provenance cache)"
 _IDA_SOURCE_TABLE = "ida_price_sources"
 
 
@@ -1895,10 +1897,10 @@ def write_intraday_cache(
     so we INSERT OR REPLACE on the timestamp key without freshness tracking.
 
     ``source`` (``IDA_SOURCE_ENTSOE`` for the live fetch, ``IDA_SOURCE_MANUAL``
-    for an uploaded CSV) is recorded in a durable ``ida_price_sources``
-    sidecar table keyed by (zone, sequence), so Data Trust can label cached
-    IDA provenance after a session/server restart rather than relying on
-    ephemeral session state.
+    for an uploaded CSV) is stored PER ROW, so a table that mixes manually
+    uploaded and live-fetched intervals is labelled ``Mixed`` in the durable
+    ``ida_price_sources`` sidecar rather than inheriting only the last write's
+    source. Data Trust reads that sidecar so provenance survives a restart.
     """
     if df.empty:
         return
@@ -1907,28 +1909,58 @@ def write_intraday_cache(
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             f'CREATE TABLE IF NOT EXISTS "{table}" '
-            "(timestamp TEXT PRIMARY KEY, intraday_price_eur_mwh REAL NOT NULL)"
+            "(timestamp TEXT PRIMARY KEY, intraday_price_eur_mwh REAL NOT NULL, "
+            "source TEXT)"
         )
+        _ensure_intraday_source_column(conn, table)
         rows = [
-            (ts.isoformat() if hasattr(ts, "isoformat") else str(ts), float(price))
+            (ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+             float(price), source)
             for ts, price in df["intraday_price_eur_mwh"].items()
         ]
         conn.executemany(
             f'INSERT OR REPLACE INTO "{table}" '
-            "(timestamp, intraday_price_eur_mwh) VALUES (?, ?)",
+            "(timestamp, intraday_price_eur_mwh, source) VALUES (?, ?, ?)",
             rows,
         )
-        _record_intraday_source(conn, table, zone, sequence, source)
+        _record_intraday_source(conn, table, zone, sequence)
+
+
+def _ensure_intraday_source_column(conn: sqlite3.Connection, table: str) -> None:
+    """Add the per-row ``source`` column to a pre-provenance IDA price table.
+
+    Older caches (and the synthetic seed table) predate per-row provenance;
+    their rows are backfilled with a clearly-labelled legacy sentinel so they
+    are never silently attributed to a real source.
+    """
+    existing = {row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')}
+    if "source" not in existing:
+        conn.execute(f'ALTER TABLE "{table}" ADD COLUMN source TEXT')
+    conn.execute(
+        f'UPDATE "{table}" SET source = ? WHERE source IS NULL',
+        (IDA_SOURCE_LEGACY,),
+    )
 
 
 def _record_intraday_source(
-    conn: sqlite3.Connection, table: str, zone: str, sequence: int, source: str,
+    conn: sqlite3.Connection, table: str, zone: str, sequence: int,
 ) -> None:
     """Upsert a provenance row reflecting the FULL cached extent of one
-    (zone, sequence) IDA table after a write (not just the incremental rows)."""
+    (zone, sequence) IDA table after a write. The label is derived from the
+    DISTINCT per-row sources: a single source when uniform, else ``Mixed``."""
     n, first, last = conn.execute(
         f'SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM "{table}"'
     ).fetchone()
+    distinct = sorted(
+        row[0] for row in conn.execute(f'SELECT DISTINCT source FROM "{table}"')
+        if row[0] is not None
+    )
+    if not distinct:
+        label = IDA_SOURCE_LEGACY
+    elif len(distinct) == 1:
+        label = distinct[0]
+    else:
+        label = IDA_SOURCE_MIXED
     conn.execute(
         f'CREATE TABLE IF NOT EXISTS "{_IDA_SOURCE_TABLE}" '
         "(zone TEXT, sequence INTEGER, source TEXT, rows INTEGER, "
@@ -1939,7 +1971,7 @@ def _record_intraday_source(
         f'INSERT OR REPLACE INTO "{_IDA_SOURCE_TABLE}" '
         "(zone, sequence, source, rows, first_timestamp, last_timestamp, imported_at) "
         "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (zone, int(sequence), source, int(n), first, last,
+        (zone, int(sequence), label, int(n), first, last,
          datetime.now(UTC).isoformat()),
     )
 
@@ -2024,6 +2056,31 @@ def generate_intraday_template_csv() -> str:
     )
 
 
+def _coerce_intraday_sequence(
+    values: pd.Series, default_sequence: int,
+) -> pd.Series:
+    """Map a raw ``sequence`` column to numeric IDA rounds.
+
+    Blank / NA cells fall back to ``default_sequence``. Bare ``1/2/3`` and
+    ``IDA1/IDA2/IDA3`` labels (case-insensitive, optional separator) are
+    accepted. Any other non-blank value raises ``ValueError`` rather than
+    being silently coerced to the default round — a non-numeric ``sequence``
+    must never quietly send IDA2/IDA3 data into the IDA1 table.
+    """
+    text = values.astype("string").str.strip()
+    is_blank = text.isna() | (text.str.len() == 0)
+    cleaned = text.str.upper().str.replace(r"^IDA[\s_-]*", "", regex=True)
+    numeric = pd.to_numeric(cleaned, errors="coerce")
+    invalid = (~is_blank) & numeric.isna()
+    if invalid.any():
+        bad = sorted(set(text[invalid].dropna().tolist()))
+        raise ValueError(
+            f"IDA 'sequence' values not understood: {bad}. "
+            "Use 1/2/3 or IDA1/IDA2/IDA3."
+        )
+    return numeric.where(~is_blank, other=float(default_sequence))
+
+
 def parse_intraday_csv(
     content: str,
     *,
@@ -2033,10 +2090,11 @@ def parse_intraday_csv(
     """Parse a manual IDA price CSV into a normalised long frame.
 
     Required columns: ``timestamp`` and ``ida_price_eur_mwh`` (header match
-    is case-insensitive). Optional ``sequence`` (1/2/3) and ``zone`` columns
-    fall back to ``default_sequence`` / ``default_zone`` when absent or blank.
-    Timestamps are coerced to UTC (a naive value is assumed UTC). Negative
-    prices are retained; only unparseable timestamp/price rows are dropped.
+    is case-insensitive). Optional ``sequence`` (``1/2/3`` or ``IDA1/2/3``)
+    and ``zone`` columns fall back to ``default_sequence`` / ``default_zone``
+    when absent or blank. Timestamps are coerced to UTC (a naive value is
+    assumed UTC). Negative prices are retained; only unparseable
+    timestamp/price rows are dropped.
 
     Args:
         content: Raw CSV text.
@@ -2070,11 +2128,11 @@ def parse_intraday_csv(
             raw[cols["ida_price_eur_mwh"]], errors="coerce",
         ),
     })
+    # Carry raw sequence/zone so validation runs only on rows that survive the
+    # timestamp/price dropna (garbage in an already-dropped row must not fail
+    # the whole upload).
     if "sequence" in cols:
-        seq = pd.to_numeric(raw[cols["sequence"]], errors="coerce")
-        out["sequence"] = seq.fillna(default_sequence)
-    else:
-        out["sequence"] = default_sequence
+        out["_seq_raw"] = raw[cols["sequence"]]
     if "zone" in cols:
         zone_ser = raw[cols["zone"]].astype("string").str.strip()
         out["zone"] = zone_ser.where(zone_ser.str.len() > 0, other=default_zone)
@@ -2092,11 +2150,16 @@ def parse_intraday_csv(
             "IDA CSV has rows without a zone and no default zone was provided."
         )
     out["zone"] = out["zone"].astype(str)
+
+    if "_seq_raw" in out.columns:
+        seq = _coerce_intraday_sequence(out.pop("_seq_raw"), default_sequence)
+    else:
+        seq = pd.Series(float(default_sequence), index=out.index)
     # Reject fractional sequences (e.g. 1.5) BEFORE the int cast, which would
     # otherwise silently truncate them to a valid round (1.5 -> IDA1).
-    if not (out["sequence"].dropna() % 1 == 0).all():
+    if not (seq.dropna() % 1 == 0).all():
         raise ValueError("IDA 'sequence' must be a whole number (1, 2 or 3).")
-    out["sequence"] = out["sequence"].astype(int)
+    out["sequence"] = seq.astype(int)
     bad_seq = sorted(int(s) for s in set(out["sequence"].unique()) - {1, 2, 3})
     if bad_seq:
         raise ValueError(f"IDA 'sequence' must be 1, 2 or 3; got {bad_seq}.")

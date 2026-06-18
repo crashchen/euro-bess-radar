@@ -1813,6 +1813,41 @@ class TestParseIntradayCsv:
                 default_zone="DE_LU",
             )
 
+    def test_ida_label_sequence_is_parsed_not_dropped(self) -> None:
+        # 'IDA2' must map to round 2, not be coerced to the default round.
+        df = parse_intraday_csv(
+            "timestamp,ida_price_eur_mwh,sequence,zone\n"
+            "2026-01-01T00:00:00+00:00,5,IDA2,DE_LU\n"
+            "2026-01-01T01:00:00+00:00,6,ida_3,NL\n",
+            default_zone="DE_LU",
+        )
+        assert set(zip(df["zone"], df["sequence"], strict=True)) == {
+            ("DE_LU", 2), ("NL", 3),
+        }
+
+    def test_non_numeric_sequence_raises_not_coerced(self) -> None:
+        # Regression: 'IDA2'-style typos or garbage must not silently become
+        # the default round (which would file the rows under the wrong table).
+        with pytest.raises(ValueError, match="not understood"):
+            parse_intraday_csv(
+                "timestamp,ida_price_eur_mwh,sequence\n2026-01-01,5,bogus\n",
+                default_zone="DE_LU",
+            )
+
+    @pytest.mark.filterwarnings("ignore:Could not infer format")
+    def test_garbage_sequence_in_dropped_row_is_tolerated(self) -> None:
+        # A bad sequence on a row that is dropped for a bad timestamp must not
+        # fail the whole upload. ('notadate' triggers pandas per-element date
+        # parsing, which is the intended robust-coerce behaviour here.)
+        df = parse_intraday_csv(
+            "timestamp,ida_price_eur_mwh,sequence\n"
+            "notadate,5,bogus\n"
+            "2026-01-01T00:00:00+00:00,6,1\n",
+            default_zone="DE_LU",
+        )
+        assert len(df) == 1
+        assert df["sequence"].iloc[0] == 1
+
     def test_unknown_zone_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown bidding zone"):
             parse_intraday_csv(
@@ -1878,8 +1913,46 @@ class TestParseIntradayCsv:
         )
         di.write_intraday_cache(live, "DE_LU", 1)  # default source = ENTSO-E
         relabelled = di.read_intraday_sources()
-        assert relabelled[("DE_LU", 1)]["source"] == di.IDA_SOURCE_ENTSOE
+        # Manual + live rows coexist in the table, so provenance is Mixed
+        # (not the last writer's source).
+        assert relabelled[("DE_LU", 1)]["source"] == di.IDA_SOURCE_MIXED
         assert relabelled[("DE_LU", 1)]["rows"] == 3  # union of both writes
+
+    def test_legacy_table_without_source_column_is_migrated(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        """A pre-provenance IDA table (no source column, e.g. the synthetic
+        seed) is migrated and its legacy rows are labelled, not silently
+        attributed to a real source."""
+        from src import data_ingestion as di
+        db = tmp_path / "legacy.db"
+        monkeypatch.setattr(di, "DB_PATH", db)
+        with sqlite3.connect(db) as conn:
+            conn.execute(
+                'CREATE TABLE "ida_prices_de_lu_seq1" '
+                "(timestamp TEXT PRIMARY KEY, intraday_price_eur_mwh REAL NOT NULL)"
+            )
+            conn.execute(
+                'INSERT INTO "ida_prices_de_lu_seq1" VALUES '
+                '("2026-01-01T00:00:00+00:00", 45.0)'
+            )
+        # A manual upload onto the legacy table migrates it and marks Mixed
+        # (legacy sentinel + Manual CSV).
+        parsed = di.parse_intraday_csv(
+            "timestamp,ida_price_eur_mwh,sequence,zone\n"
+            "2026-01-01T01:00:00+00:00,40,1,DE_LU\n",
+            default_zone="DE_LU",
+        )
+        di.persist_intraday_frame(parsed)
+        assert di.read_intraday_sources()[("DE_LU", 1)]["source"] == di.IDA_SOURCE_MIXED
+        # The legacy price row is still readable (migration preserved data).
+        cached = di.read_intraday_cache(
+            "DE_LU",
+            pd.Timestamp("2026-01-01", tz="UTC"),
+            pd.Timestamp("2026-01-02", tz="UTC"),
+            sequence=1,
+        )
+        assert cached is not None and len(cached) == 2
 
 
 # ── Test 15: REE ESIOS (Spain) ──────────────────────────────────────────────
