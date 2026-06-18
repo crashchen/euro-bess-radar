@@ -501,6 +501,44 @@ class TestSolveSequentialDaIdDispatch:
             full_uplift, abs=1e-6,
         )
 
+    def test_default_threshold_is_backward_compatible_always_rebid(self) -> None:
+        # forecast_uplift is non-negative by construction, so the default 0.0
+        # gate always rebids — same policy as before the deadband existed.
+        forecast = 0.5 * self._DA + 0.5 * self._REALISED
+        r = solve_sequential_da_id_dispatch(
+            self._DA, forecast, self._REALISED,
+            dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        assert r["forecast_uplift_eur"] >= -1e-9
+        assert r["rebid"] is True
+
+    def test_deadband_holds_da_schedule_and_neutralises_churn_loss(self) -> None:
+        # A wrong-direction forecast loses money when followed unconditionally.
+        forecast = np.array([90.0] * 8 + [20.0] * 8 + [88.0] * 8)
+        realised = self._DA.copy()
+        ungated = solve_sequential_da_id_dispatch(
+            self._DA, forecast, realised,
+            dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        assert ungated["rebid"] is True
+        assert ungated["captured_uplift_eur"] < 0.0  # churn loss
+
+        # A deadband just above the forecast-predicted uplift makes the desk
+        # hold its committed DA schedule, turning the realised loss into
+        # break-even (captured == 0, realised == da_only).
+        threshold = ungated["forecast_uplift_eur"] + 1.0
+        gated = solve_sequential_da_id_dispatch(
+            self._DA, forecast, realised,
+            dt=1.0, power_mw=1.0, duration_hours=2.0,
+            min_rebid_uplift_eur=threshold,
+        )
+        assert gated["rebid"] is False
+        assert gated["captured_uplift_eur"] == pytest.approx(0.0, abs=1e-6)
+        assert gated["realised_total_eur"] == pytest.approx(
+            gated["da_only_revenue_eur"], abs=1e-6,
+        )
+        assert gated["realised_total_eur"] > ungated["realised_total_eur"]
+
     def test_nan_or_length_mismatch_returns_zero(self) -> None:
         bad = np.array([20.0, np.nan, 80.0])
         r = solve_sequential_da_id_dispatch(bad, bad.copy(), bad.copy(), dt=1.0)

@@ -487,6 +487,7 @@ def solve_sequential_da_id_dispatch(
     duration_hours: float = 1.0,
     efficiency: float = 0.88,
     soc_init_frac: float = 0.5,
+    min_rebid_uplift_eur: float = 0.0,
 ) -> dict:
     """Sequential DA + IDA1 policy under an imperfect IDA forecast.
 
@@ -510,6 +511,16 @@ def solve_sequential_da_id_dispatch(
     ``forecast_error_cost_eur >= 0`` by construction (the realised-optimal
     schedule cannot be beaten at realised prices).
 
+    ``min_rebid_uplift_eur`` is a risk gate / deadband: the policy only
+    rebids when the FORECAST-predicted uplift of the rebid over holding the
+    committed DA schedule reaches this hurdle (in EUR for the horizon).
+    The forecast uplift is non-negative by construction, so the default
+    ``0.0`` reproduces the always-rebid policy; a positive value makes the
+    desk hold its DA schedule on marginal days (where a small forecast edge
+    can be flipped into a realised loss), avoiding churn. When the gate
+    holds, the executed schedule equals the DA schedule and settles to
+    exactly ``da_only``.
+
     Returns keys:
         da_only_revenue_eur     — Stage-1 DA-only comparison baseline.
         realised_total_eur      — forecast-driven policy settled at realised.
@@ -517,7 +528,12 @@ def solve_sequential_da_id_dispatch(
         forecast_error_cost_eur — ceiling - realised (>= 0).
         captured_uplift_eur     — realised - da_only (may be negative if
                                   the forecast misleads the rebid).
-        ida_p_charge/discharge  — executed (forecast-optimal) schedule.
+        forecast_uplift_eur     — forecast-predicted uplift driving the gate
+                                  (>= 0; what the desk expected to gain).
+        rebid                   — True if the gate let the rebid through,
+                                  False if it held the DA schedule.
+        ida_p_charge/discharge  — executed schedule (forecast-optimal rebid,
+                                  or the DA schedule when the gate holds).
         ida_soc                 — SoC trajectory of the executed schedule.
         da_p_charge/discharge, da_soc — Stage-1 committed DA schedule.
     """
@@ -536,6 +552,8 @@ def solve_sequential_da_id_dispatch(
             "ceiling_total_eur": 0.0,
             "forecast_error_cost_eur": 0.0,
             "captured_uplift_eur": 0.0,
+            "forecast_uplift_eur": 0.0,
+            "rebid": False,
             "da_p_charge": zeros, "da_p_discharge": zeros,
             "ida_p_charge": zeros, "ida_p_discharge": zeros,
             "da_soc": np.zeros(max(n, 0) + 1),
@@ -554,10 +572,30 @@ def solve_sequential_da_id_dispatch(
 
     da_net = stage_1["p_discharge"] - stage_1["p_charge"]
     da_gross = float((da_net * da_prices * dt).sum())
+
+    # Risk gate / deadband: the desk only deviates from its committed DA
+    # schedule when the FORECAST-predicted uplift of rebidding clears
+    # `min_rebid_uplift_eur`. That uplift is non-negative by construction
+    # (stage_2_fc is forecast-optimal and holding the DA schedule yields
+    # da_only under the forecast), so a 0.0 threshold reproduces the
+    # always-rebid policy, while a positive threshold suppresses churn on
+    # marginal/no-opportunity days (a tiny forecast edge that realised prices
+    # can flip into a loss). When the gate holds, the executed schedule IS
+    # the DA schedule, which settles to exactly da_only.
+    forecast_mtm = float((da_net * ida_forecast * dt).sum())
+    ida_value_forecast = _schedule_value_at_prices(
+        stage_2_fc["p_charge"], stage_2_fc["p_discharge"], ida_forecast, dt,
+    )
+    forecast_uplift = (
+        da_gross - forecast_mtm + ida_value_forecast - stage_1["revenue_eur"]
+    )
+    rebid = forecast_uplift >= min_rebid_uplift_eur
+    executed = stage_2_fc if rebid else stage_1
+
     implicit_mtm = float((da_net * ida_realised * dt).sum())
     # Executed schedule settled at the realised IDA print.
     ida_value_realised = _schedule_value_at_prices(
-        stage_2_fc["p_charge"], stage_2_fc["p_discharge"], ida_realised, dt,
+        executed["p_charge"], executed["p_discharge"], ida_realised, dt,
     )
     realised_total = da_gross - implicit_mtm + ida_value_realised
 
@@ -578,12 +616,14 @@ def solve_sequential_da_id_dispatch(
         "ceiling_total_eur": round(ceiling_total, 6),
         "forecast_error_cost_eur": round(forecast_error_cost, 6),
         "captured_uplift_eur": round(realised_total - stage_1["revenue_eur"], 6),
+        "forecast_uplift_eur": round(forecast_uplift, 6),
+        "rebid": bool(rebid),
         "da_p_charge": stage_1["p_charge"],
         "da_p_discharge": stage_1["p_discharge"],
-        "ida_p_charge": stage_2_fc["p_charge"],
-        "ida_p_discharge": stage_2_fc["p_discharge"],
+        "ida_p_charge": executed["p_charge"],
+        "ida_p_discharge": executed["p_discharge"],
         "da_soc": stage_1["soc"],
-        "ida_soc": stage_2_fc["soc"],
+        "ida_soc": executed["soc"],
     }
 
 
