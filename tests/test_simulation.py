@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import ast
+from datetime import date
 
 import numpy as np
 import pandas as pd
 import pytest
 
+import src.simulation as sim
 from src.simulation import (
     _count_dispatch_blocks,
+    _group_clean_runs,
     available_local_dates,
     build_dispatch_event_table,
     empty_simulation_result,
@@ -480,6 +483,67 @@ def test_continuous_horizon_keeps_dst_spring_forward_day() -> None:
     )
     assert batch.attrs["excluded_days"] == 0
     assert batch.attrs["carry_mode"] == "continuous_horizon"
+
+
+def test_group_clean_runs_splits_long_run_at_interval_cap(monkeypatch) -> None:
+    """A contiguous run longer than the interval cap is chunked.
+
+    Performance guard: without the cap a 90-day 15-min run is one giant
+    binary MILP that hangs the dashboard. The split must stay contiguous
+    (every day kept, in order, each chunk's day_breaks covering its slice)
+    so the continuous solvers can seed the next chunk with the prior end
+    SoC (a soft terminal-neutral reset at each boundary).
+    """
+    monkeypatch.setattr(sim, "MAX_CONTINUOUS_REPLAY_INTERVALS", 48)
+    start = pd.Timestamp("2026-01-01", tz="UTC")
+    days = [(start + pd.Timedelta(days=i)).date() for i in range(5)]
+
+    def build_day(d: date) -> pd.DataFrame:
+        idx = pd.date_range(pd.Timestamp(d, tz="UTC"), periods=24, freq="h")
+        return pd.DataFrame({"price_eur_mwh": np.arange(24.0)}, index=idx)
+
+    runs = _group_clean_runs(dates=days, build_day=build_day)
+    # 5 * 24 = 120 intervals, cap 48 -> [d1,d2], [d3,d4], [d5].
+    assert [len(slice_df) for _, slice_df, _ in runs] == [48, 48, 24]
+    assert all(len(slice_df) <= 48 for _, slice_df, _ in runs)
+    covered = [d for run_dates, _, _ in runs for d in run_dates]
+    assert covered == days  # every day kept exactly once, in order
+    for _, slice_df, breaks in runs:
+        assert breaks[0][0] == 0
+        assert breaks[-1][1] == len(slice_df)
+
+
+def test_chunked_continuous_run_keeps_within_chunk_carry(monkeypatch) -> None:
+    """A forced chunk split must not break within-chunk SoC carry-over.
+
+    cap=48 puts the day1->day2 overnight arbitrage inside the first chunk
+    and day3 in a second chunk. The intra-chunk carry must still beat
+    per-day reset, and the split must keep all days.
+    """
+    monkeypatch.setattr(sim, "MAX_CONTINUOUS_REPLAY_INTERVALS", 48)
+    idx = pd.date_range("2026-03-19", periods=72, freq="h", tz="UTC")
+    day1 = [20.0] * 22 + [5.0, 5.0]
+    day2 = [200.0, 200.0] + [20.0] * 22
+    day3 = [20.0] * 24
+    df = pd.DataFrame({"price_eur_mwh": day1 + day2 + day3}, index=idx)
+    df.index.name = "timestamp"
+    dates = available_local_dates(df, tz="UTC")
+    assert len(dates) == 3
+
+    carry = simulate_replay_batch(
+        df, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0, carry_soc=True,
+    )
+    reset = simulate_replay_batch(
+        df, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0, carry_soc=False,
+    )
+    assert carry.attrs["carry_mode"] == "continuous_horizon"
+    assert carry.attrs["excluded_days"] == 0
+    assert len(carry) == 3
+    assert float(carry["total_revenue_eur"].sum()) > float(
+        reset["total_revenue_eur"].sum()
+    ) + 50.0
 
 
 def _make_seq_history(days: int = 5, *, anomaly_day: int | None = None):

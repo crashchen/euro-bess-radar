@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from src.analytics import _infer_interval_hours, _to_local
+from src.config import MAX_CONTINUOUS_REPLAY_INTERVALS
 from src.degradation import (
     DEFAULT_CYCLE_LIFE,
     DEFAULT_EOL_CAPACITY_PCT,
@@ -629,7 +630,14 @@ def _group_clean_runs(
       - the next requested date is more than one calendar day later,
       - the day's frame is empty,
       - the day's frame has any NaN value,
-      - the day's frame is sparse (non-uniform UTC index).
+      - the day's frame is sparse (non-uniform UTC index),
+      - adding the day would push the run past
+        `MAX_CONTINUOUS_REPLAY_INTERVALS` (a performance cap — a single
+        large MILP for 90 days of 15-min data otherwise hangs the
+        dashboard). This split is a *soft* reset: the caller seeds the
+        next run with the end-of-previous-run SoC, so SoC still carries
+        across the boundary, but terminal-neutral equality is re-applied
+        at each chunk edge. The split is contiguous (no day is dropped).
     """
     if not dates:
         return []
@@ -670,6 +678,11 @@ def _group_clean_runs(
             previous_date = None
             continue
         n = len(day_df)
+        if current_dates and cursor + n > MAX_CONTINUOUS_REPLAY_INTERVALS:
+            # Soft size-cap reset: flush the accumulated chunk but keep
+            # `previous_date` so the next chunk stays contiguous. The
+            # continuous solvers seed it with the prior chunk's end SoC.
+            flush()
         current_dates.append(local_date)
         current_frames.append(day_df)
         current_breaks.append((cursor, cursor + n))
