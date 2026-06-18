@@ -17,26 +17,30 @@ def test_source_label_distinguishes_elexon_from_entsoe() -> None:
     assert "ENTSO-E" in source_label_for_zone("DE_LU")
 
 
-def test_intraday_source_table_labels_manual_uploads() -> None:
-    manual = {
+def test_intraday_source_table_labels_sources() -> None:
+    sources = {
         ("DE_LU", 1): {
+            "source": "Manual CSV",
             "rows": 24,
             "first": pd.Timestamp("2026-01-01", tz="UTC"),
             "last": pd.Timestamp("2026-01-01 23:00", tz="UTC"),
+            "imported_at": "2026-06-18T10:00:00+00:00",
         },
-        ("NL", 2): {"rows": 5, "first": pd.NaT, "last": pd.NaT},
+        ("NL", 2): {
+            "source": "ENTSO-E intraday auction",
+            "rows": 5, "first": pd.NaT, "last": pd.NaT, "imported_at": None,
+        },
     }
-    table = build_intraday_source_table(manual)
+    table = build_intraday_source_table(sources)
     assert len(table) == 2
-    assert (table["source"] == "Manual CSV").all()
     # Sorted by (zone, sequence): DE_LU/1 then NL/2.
     assert table.iloc[0]["zone"] == "DE_LU"
-    assert table.iloc[0]["sequence"] == 1
+    assert table.iloc[0]["source"] == "Manual CSV"
     assert table.iloc[0]["rows"] == 24
+    assert table.iloc[1]["source"] == "ENTSO-E intraday auction"
 
 
-def test_intraday_source_table_empty_when_no_manual_uploads() -> None:
-    assert build_intraday_source_table(None).empty
+def test_intraday_source_table_empty_when_no_sources() -> None:
     assert build_intraday_source_table({}).empty
 
 

@@ -21,6 +21,7 @@ from src.data_ingestion import (
     generate_intraday_template_csv,
     parse_intraday_csv,
     persist_intraday_frame,
+    read_intraday_sources,
 )
 
 ANCILLARY_STATE_KEYS = (
@@ -59,9 +60,10 @@ def _parse_and_store_intraday_upload(
 
     The parsed prices are written to the same ``ida_prices_{zone}_seq{n}``
     SQLite tables the live fetch uses, so the Revenue and Simulation Cockpit
-    tabs pick them up through their existing cache-first read. The set of
-    (zone, sequence) pairs sourced from a manual upload is tracked in
-    ``intraday_manual_sources`` so Data Trust can label them ``manual_csv``.
+    tabs pick them up through their existing cache-first read. Provenance is
+    recorded durably in the ``ida_price_sources`` sidecar table (by
+    ``persist_intraday_frame`` -> ``write_intraday_cache``), so Data Trust can
+    label these rows ``Manual CSV`` even after this session ends.
     """
     try:
         content = uploaded_file.getvalue().decode("utf-8-sig")
@@ -76,14 +78,6 @@ def _parse_and_store_intraday_upload(
         return
 
     summaries = persist_intraday_frame(parsed)
-    manual = dict(st.session_state.get("intraday_manual_sources", {}))
-    for s in summaries:
-        manual[(s["zone"], s["sequence"])] = {
-            "rows": int(s["rows"]),
-            "first": s["first"],
-            "last": s["last"],
-        }
-    st.session_state["intraday_manual_sources"] = manual
     # Drop any cached session frames so the next render rehydrates from the
     # freshly written SQLite rows (cache key is zone/window scoped).
     for key in [k for k in st.session_state if str(k).startswith("intraday_cache::")]:
@@ -295,7 +289,11 @@ def render_sidebar() -> dict:
             _parse_and_store_intraday_upload(
                 ida_file, primary_zone_for_fetch, int(ida_seq),
             )
-        manual_sources = st.session_state.get("intraday_manual_sources", {})
+        manual_sources = {
+            key: meta
+            for key, meta in read_intraday_sources().items()
+            if meta.get("source") == "Manual CSV"
+        }
         if manual_sources:
             loaded = ", ".join(
                 f"{zone} IDA{seq} ({meta['rows']})"

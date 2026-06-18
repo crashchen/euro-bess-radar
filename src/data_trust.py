@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src.config import get_zone_timezone, is_elexon_zone
-from src.data_ingestion import summarize_price_data_quality
+from src.data_ingestion import read_intraday_sources, summarize_price_data_quality
 
 QUALITY_COLUMNS = [
     "zone", "source", "timezone", "first_timestamp_utc", "last_timestamp_utc",
@@ -16,37 +16,42 @@ QUALITY_COLUMNS = [
 
 INTRADAY_SOURCE_COLUMNS = [
     "zone", "sequence", "source", "rows",
-    "first_timestamp_utc", "last_timestamp_utc",
+    "first_timestamp_utc", "last_timestamp_utc", "imported_at",
 ]
 
 
 def build_intraday_source_table(
-    manual_sources: dict[tuple[str, int], dict] | None,
+    sources: dict[tuple[str, int], dict] | None = None,
 ) -> pd.DataFrame:
-    """Build an audit table of manually uploaded IDA price sources.
+    """Build an audit table of cached IDA price provenance.
 
-    ENTSO-E currently returns no intraday-auction data for the tested SIDC
-    zones/windows, so IDA prices in the cockpit/uplift panels may come from
-    a manual CSV upload instead of the API. This surfaces those uploads with
-    ``source = "Manual CSV"`` so the IDA-driven numbers are traceable rather
-    than appearing to be API-sourced.
+    Provenance is read from the durable ``ida_price_sources`` SQLite sidecar
+    (written by ``write_intraday_cache``) so it survives a session/server
+    restart — manually uploaded IDA prices stay labelled ``Manual CSV`` even
+    after the uploading session is gone, and a later live fetch relabels the
+    same (zone, sequence) instead of leaving a stale manual label.
 
     Args:
-        manual_sources: Session mapping ``(zone, sequence) -> {"rows",
-            "first", "last"}`` populated by the sidebar IDA upload handler.
+        sources: Optional pre-built provenance mapping ``(zone, sequence) ->
+            {"source", "rows", "first", "last", "imported_at"}``. When None,
+            it is read from the database (the normal path; the argument exists
+            for testing).
 
     Returns:
-        One row per uploaded (zone, sequence), sorted by zone then sequence.
+        One row per (zone, sequence), sorted by zone then sequence.
     """
+    if sources is None:
+        sources = read_intraday_sources()
     rows: list[dict[str, object]] = []
-    for (zone, sequence), meta in sorted((manual_sources or {}).items()):
+    for (zone, sequence), meta in sorted((sources or {}).items()):
         rows.append({
             "zone": str(zone),
             "sequence": int(sequence),
-            "source": "Manual CSV",
+            "source": meta.get("source", "Manual CSV"),
             "rows": int(meta.get("rows", 0)),
             "first_timestamp_utc": meta.get("first", pd.NaT),
             "last_timestamp_utc": meta.get("last", pd.NaT),
+            "imported_at": meta.get("imported_at"),
         })
     if not rows:
         return pd.DataFrame(columns=INTRADAY_SOURCE_COLUMNS)

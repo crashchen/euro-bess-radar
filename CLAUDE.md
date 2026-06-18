@@ -72,7 +72,7 @@ Tests in `tests/` are heavily mocked (no live API calls) and mirror the module l
 - `entsoe-py` raises `NoMatchingDataError` (a `ValueError` subclass) when a supported zone has no IDA data for the requested window — this is mapped to `None`, not a hard error.
 - Auth failures raise `DataSourceAuthError`; network failures raise `DataSourceNetworkError`.
 - **Live IDA coverage is currently empty in practice**: ENTSO-E returns a `No matching data found` acknowledgement for the IDA auction query (`A44` + `contract_MarketAgreement.type=A07` + classificationSequence) across the tested SIDC zones/windows — an upstream data gap, NOT a code/parsing bug (verified at the raw-HTTP layer). The `diag/ida-resolution` branch holds the reproducible diagnostic.
-- **Manual IDA CSV fallback**: `parse_intraday_csv()` + `persist_intraday_frame()` (data_ingestion.py) let users upload IDA prices when the API has nothing. Minimal schema `timestamp, ida_price_eur_mwh` with optional per-row `sequence` (1/2/3) and `zone`; rows write to the SAME `ida_prices_{zone}_seq{n}` SQLite tables the live fetch uses, so the Revenue/Cockpit cache-first reads consume them unchanged. `app.py` reads the IDA cache cache-first so the cockpit sees uploads without a Revenue-tab visit. Manual uploads are labelled `source=Manual CSV` in the Data Trust tab via `build_intraday_source_table()`.
+- **Manual IDA CSV fallback**: `parse_intraday_csv()` + `persist_intraday_frame()` (data_ingestion.py) let users upload IDA prices when the API has nothing. Minimal schema `timestamp, ida_price_eur_mwh` with optional per-row `sequence` (1/2/3, must be a whole number — fractional values are rejected, not truncated) and `zone`; rows write to the SAME `ida_prices_{zone}_seq{n}` SQLite tables the live fetch uses, so the Revenue/Cockpit cache-first reads consume them unchanged. `app.py` reads the IDA cache cache-first so the cockpit sees uploads without a Revenue-tab visit. **Provenance is durable, not session-bound**: `write_intraday_cache(..., source=...)` upserts a row into the `ida_price_sources` sidecar table on every IDA write (manual or live), so Data Trust's `build_intraday_source_table()` (which reads that table, via `read_intraday_sources()`) labels cached IDA as `Manual CSV` / `ENTSO-E intraday auction` even after a session restart, and a later live fetch relabels a previously-manual `(zone, sequence)` instead of leaving a stale label.
 
 ## Geographic Scope
 
@@ -152,7 +152,7 @@ Fingrid / Regelleistung / Elexon all detect HTTP 401/403 via the shared `_raise_
 
 ## Commands
 - `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
-- `python -m pytest tests/ -v` — run all tests (446 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
+- `python -m pytest tests/ -v` — run all tests (448 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
 - `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
 - `streamlit run app.py` — launch the dashboard.
 - `python -c "from src.data_ingestion import test_elexon_connection; test_elexon_connection()"` — smoke-test Elexon (no API key needed).

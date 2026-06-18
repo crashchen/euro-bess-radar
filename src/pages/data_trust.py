@@ -15,7 +15,6 @@ def render(
     *,
     zone_data: dict[str, pd.DataFrame],
     zone_timezones: dict[str, str] | None = None,
-    intraday_manual_sources: dict[tuple[str, int], dict] | None = None,
 ) -> None:
     """Render source and data-quality diagnostics for fetched zones."""
     st.subheader("Data Trust — Source Traceability")
@@ -84,14 +83,18 @@ def render(
         },
     )
 
-    intraday_sources = build_intraday_source_table(intraday_manual_sources)
+    intraday_sources = build_intraday_source_table()
     if not intraday_sources.empty:
         st.markdown("**Intraday (IDA) price sources**")
-        st.caption(
-            "IDA prices below were imported from a manual CSV (not the ENTSO-E "
-            "intraday-auction API). The cockpit and IDA1 uplift numbers that use "
-            "them are only as trustworthy as the uploaded file."
-        )
+        if (intraday_sources["source"] == "Manual CSV").any():
+            st.caption(
+                "Provenance of cached intraday (IDA) prices. Rows marked "
+                "'Manual CSV' were imported from an upload, not the ENTSO-E "
+                "intraday-auction API — the cockpit/uplift numbers that use them "
+                "are only as trustworthy as the uploaded file."
+            )
+        else:
+            st.caption("Provenance of cached intraday (IDA) prices.")
         st.dataframe(
             intraday_sources,
             width="stretch",
@@ -106,6 +109,9 @@ def render(
                 ),
                 "last_timestamp_utc": st.column_config.DatetimeColumn(
                     "Last UTC", format="YYYY-MM-DD HH:mm",
+                ),
+                "imported_at": st.column_config.DatetimeColumn(
+                    "Imported (UTC)", format="YYYY-MM-DD HH:mm",
                 ),
             },
         )

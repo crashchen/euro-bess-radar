@@ -1805,6 +1805,14 @@ class TestParseIntradayCsv:
                 default_zone="DE_LU",
             )
 
+    def test_fractional_sequence_raises_not_truncated(self) -> None:
+        # 1.5 must NOT be silently truncated to IDA1.
+        with pytest.raises(ValueError, match="whole number"):
+            parse_intraday_csv(
+                "timestamp,ida_price_eur_mwh,sequence\n2026-01-01,5,1.5\n",
+                default_zone="DE_LU",
+            )
+
     def test_unknown_zone_raises(self) -> None:
         with pytest.raises(ValueError, match="Unknown bidding zone"):
             parse_intraday_csv(
@@ -1838,6 +1846,40 @@ class TestParseIntradayCsv:
         )
         assert cached is not None
         assert cached["intraday_price_eur_mwh"].tolist() == [40.0, 42.0]
+
+    def test_provenance_is_durable_and_relabelled_by_live_write(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        """Manual provenance survives in SQLite (not just session state), and a
+        later live write to the same (zone, sequence) relabels it."""
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+
+        parsed = di.parse_intraday_csv(
+            "timestamp,ida_price_eur_mwh,sequence,zone\n"
+            "2026-01-01T00:00:00+00:00,40,1,DE_LU\n"
+            "2026-01-01T01:00:00+00:00,42,1,DE_LU\n",
+            default_zone="DE_LU",
+        )
+        di.persist_intraday_frame(parsed)
+
+        sources = di.read_intraday_sources()
+        assert sources[("DE_LU", 1)]["source"] == di.IDA_SOURCE_MANUAL
+        assert sources[("DE_LU", 1)]["rows"] == 2
+        assert sources[("DE_LU", 1)]["imported_at"]  # timestamp recorded
+
+        # A live fetch writing the same table relabels provenance (no stale
+        # "Manual CSV" after a real fetch arrives).
+        live = pd.DataFrame(
+            {"intraday_price_eur_mwh": [50.0]},
+            index=pd.DatetimeIndex(
+                [pd.Timestamp("2026-01-01T02:00:00+00:00")], name="timestamp",
+            ),
+        )
+        di.write_intraday_cache(live, "DE_LU", 1)  # default source = ENTSO-E
+        relabelled = di.read_intraday_sources()
+        assert relabelled[("DE_LU", 1)]["source"] == di.IDA_SOURCE_ENTSOE
+        assert relabelled[("DE_LU", 1)]["rows"] == 3  # union of both writes
 
 
 # ── Test 15: REE ESIOS (Spain) ──────────────────────────────────────────────
