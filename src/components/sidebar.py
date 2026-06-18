@@ -18,6 +18,9 @@ from src.data_ingestion import (
     DataSourceParseError,
     build_zone_query_window,
     fetch_prices,
+    generate_intraday_template_csv,
+    parse_intraday_csv,
+    persist_intraday_frame,
 )
 
 ANCILLARY_STATE_KEYS = (
@@ -45,6 +48,45 @@ def _clear_stale_price_state() -> None:
     """Remove fetched price data when the sidebar scope changes."""
     for key in ("zone_data", "selected_zones", "fetched_zone_date_scope", "refresh_token"):
         st.session_state.pop(key, None)
+
+
+def _parse_and_store_intraday_upload(
+    uploaded_file,
+    default_zone: str,
+    default_sequence: int,
+) -> None:
+    """Parse an uploaded IDA price CSV, persist it, and flag the manual source.
+
+    The parsed prices are written to the same ``ida_prices_{zone}_seq{n}``
+    SQLite tables the live fetch uses, so the Revenue and Simulation Cockpit
+    tabs pick them up through their existing cache-first read. The set of
+    (zone, sequence) pairs sourced from a manual upload is tracked in
+    ``intraday_manual_sources`` so Data Trust can label them ``manual_csv``.
+    """
+    try:
+        content = uploaded_file.getvalue().decode("utf-8-sig")
+        parsed = parse_intraday_csv(
+            content, default_zone=default_zone, default_sequence=default_sequence,
+        )
+    except UnicodeDecodeError:
+        st.error("Parse error: the uploaded file is not valid UTF-8/CSV text.")
+        return
+    except (ValueError, pd.errors.ParserError) as exc:
+        st.error(f"Parse error: {exc}")
+        return
+
+    summaries = persist_intraday_frame(parsed)
+    manual = dict(st.session_state.get("intraday_manual_sources", {}))
+    for s in summaries:
+        manual[(s["zone"], s["sequence"])] = int(s["rows"])
+    st.session_state["intraday_manual_sources"] = manual
+    # Drop any cached session frames so the next render rehydrates from the
+    # freshly written SQLite rows (cache key is zone/window scoped).
+    for key in [k for k in st.session_state if str(k).startswith("intraday_cache::")]:
+        st.session_state.pop(key, None)
+    total = sum(s["rows"] for s in summaries)
+    pairs = ", ".join(f"{s['zone']} IDA{s['sequence']}" for s in summaries)
+    st.success(f"Imported {total} IDA rows ({pairs}).")
 
 
 def _parse_and_store_ancillary_upload(
@@ -229,6 +271,39 @@ def render_sidebar() -> dict:
             file_name=f"{tmpl_key}_template.csv",
             mime="text/csv",
             key="tmpl_download",
+        )
+
+    # ── Intraday (IDA) price upload ──────────────────────────────────────
+    with st.sidebar.expander("Intraday (IDA) Prices"):
+        st.caption(
+            "Manual fallback for the IDA1 cockpit/uplift panels when ENTSO-E "
+            "returns no intraday-auction data. Rows write to the same cache "
+            "the live fetch uses."
+        )
+        ida_seq = st.selectbox(
+            "Default IDA round (for rows without a sequence column)",
+            options=[1, 2, 3],
+            format_func=lambda s: f"IDA{s}",
+            key="ida_default_seq",
+        )
+        ida_file = st.file_uploader("Upload IDA CSV", type=["csv"], key="ida_upload")
+        if ida_file is not None and st.button("Parse & Import IDA", key="ida_import"):
+            _parse_and_store_intraday_upload(
+                ida_file, primary_zone_for_fetch, int(ida_seq),
+            )
+        manual_sources = st.session_state.get("intraday_manual_sources", {})
+        if manual_sources:
+            loaded = ", ".join(
+                f"{zone} IDA{seq} ({rows})"
+                for (zone, seq), rows in sorted(manual_sources.items())
+            )
+            st.caption(f"Manual IDA loaded: {loaded}")
+        st.download_button(
+            label="\U0001f4e5 Download IDA CSV template",
+            data=generate_intraday_template_csv(),
+            file_name="intraday_ida_template.csv",
+            mime="text/csv",
+            key="ida_tmpl_download",
         )
 
     # ── Auto-fetch ancillary data ────────────────────────────────────────

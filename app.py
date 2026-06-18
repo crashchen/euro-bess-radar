@@ -28,6 +28,8 @@ from src.data_ingestion import (
     DataSourceAuthError,
     DataSourceNetworkError,
     DataSourceParseError,
+    build_zone_query_window,
+    read_intraday_cache,
 )
 from src.export import export_to_bytes, export_to_pdf_bytes
 from src.pages import (
@@ -181,6 +183,20 @@ if fetch_btn or "zone_data" in st.session_state:
     anc_df = build_ancillary_dataset(manual_anc_df, auto_fetch_results)
     intraday_cache_key = f"intraday_cache::{primary_zone}::{start_date}::{end_date}"
     intraday_df = st.session_state.get(intraday_cache_key)
+    if intraday_df is None:
+        # Cache-first read so the Simulation Cockpit sees IDA1 prices (live
+        # fetch OR manual CSV upload) without first visiting the Revenue tab.
+        try:
+            _ida_start, _ida_end = build_zone_query_window(
+                primary_zone, start_date, end_date,
+            )
+            intraday_df = read_intraday_cache(
+                primary_zone, _ida_start, _ida_end, sequence=1,
+            )
+            if intraday_df is not None and not intraday_df.empty:
+                st.session_state[intraday_cache_key] = intraday_df
+        except ValueError:
+            intraday_df = None
 
     export_revenue = revenue.copy()
     export_revenue["power_mw"] = power_mw
