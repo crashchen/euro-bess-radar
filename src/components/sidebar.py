@@ -78,7 +78,11 @@ def _parse_and_store_intraday_upload(
     summaries = persist_intraday_frame(parsed)
     manual = dict(st.session_state.get("intraday_manual_sources", {}))
     for s in summaries:
-        manual[(s["zone"], s["sequence"])] = int(s["rows"])
+        manual[(s["zone"], s["sequence"])] = {
+            "rows": int(s["rows"]),
+            "first": s["first"],
+            "last": s["last"],
+        }
     st.session_state["intraday_manual_sources"] = manual
     # Drop any cached session frames so the next render rehydrates from the
     # freshly written SQLite rows (cache key is zone/window scoped).
@@ -294,8 +298,8 @@ def render_sidebar() -> dict:
         manual_sources = st.session_state.get("intraday_manual_sources", {})
         if manual_sources:
             loaded = ", ".join(
-                f"{zone} IDA{seq} ({rows})"
-                for (zone, seq), rows in sorted(manual_sources.items())
+                f"{zone} IDA{seq} ({meta['rows']})"
+                for (zone, seq), meta in sorted(manual_sources.items())
             )
             st.caption(f"Manual IDA loaded: {loaded}")
         st.download_button(

@@ -5,13 +5,17 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from src.data_trust import build_zone_data_quality_table
+from src.data_trust import (
+    build_intraday_source_table,
+    build_zone_data_quality_table,
+)
 
 
 def render(
     *,
     zone_data: dict[str, pd.DataFrame],
     zone_timezones: dict[str, str] | None = None,
+    intraday_manual_sources: dict[tuple[str, int], dict] | None = None,
 ) -> None:
     """Render source and data-quality diagnostics for fetched zones."""
     st.subheader("Data Trust — Source Traceability")
@@ -79,6 +83,32 @@ def render(
             ),
         },
     )
+
+    intraday_sources = build_intraday_source_table(intraday_manual_sources)
+    if not intraday_sources.empty:
+        st.markdown("**Intraday (IDA) price sources**")
+        st.caption(
+            "IDA prices below were imported from a manual CSV (not the ENTSO-E "
+            "intraday-auction API). The cockpit and IDA1 uplift numbers that use "
+            "them are only as trustworthy as the uploaded file."
+        )
+        st.dataframe(
+            intraday_sources,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "zone": "Zone",
+                "sequence": "IDA Round",
+                "source": "Source",
+                "rows": st.column_config.NumberColumn("Rows", format="%d"),
+                "first_timestamp_utc": st.column_config.DatetimeColumn(
+                    "First UTC", format="YYYY-MM-DD HH:mm",
+                ),
+                "last_timestamp_utc": st.column_config.DatetimeColumn(
+                    "Last UTC", format="YYYY-MM-DD HH:mm",
+                ),
+            },
+        )
 
     st.caption(
         "Licensing note: this repository licenses code under Apache-2.0 only. "

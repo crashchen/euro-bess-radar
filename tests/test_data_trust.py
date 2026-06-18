@@ -5,12 +5,39 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from src.data_trust import build_zone_data_quality_table, source_label_for_zone
+from src.data_trust import (
+    build_intraday_source_table,
+    build_zone_data_quality_table,
+    source_label_for_zone,
+)
 
 
 def test_source_label_distinguishes_elexon_from_entsoe() -> None:
     assert "Elexon" in source_label_for_zone("GB")
     assert "ENTSO-E" in source_label_for_zone("DE_LU")
+
+
+def test_intraday_source_table_labels_manual_uploads() -> None:
+    manual = {
+        ("DE_LU", 1): {
+            "rows": 24,
+            "first": pd.Timestamp("2026-01-01", tz="UTC"),
+            "last": pd.Timestamp("2026-01-01 23:00", tz="UTC"),
+        },
+        ("NL", 2): {"rows": 5, "first": pd.NaT, "last": pd.NaT},
+    }
+    table = build_intraday_source_table(manual)
+    assert len(table) == 2
+    assert (table["source"] == "Manual CSV").all()
+    # Sorted by (zone, sequence): DE_LU/1 then NL/2.
+    assert table.iloc[0]["zone"] == "DE_LU"
+    assert table.iloc[0]["sequence"] == 1
+    assert table.iloc[0]["rows"] == 24
+
+
+def test_intraday_source_table_empty_when_no_manual_uploads() -> None:
+    assert build_intraday_source_table(None).empty
+    assert build_intraday_source_table({}).empty
 
 
 def test_quality_table_summarises_gaps_and_imputation() -> None:

@@ -14,6 +14,44 @@ QUALITY_COLUMNS = [
     "source_gap_pct", "imputed_pct", "missing_pct", "max_source_gap_hours",
 ]
 
+INTRADAY_SOURCE_COLUMNS = [
+    "zone", "sequence", "source", "rows",
+    "first_timestamp_utc", "last_timestamp_utc",
+]
+
+
+def build_intraday_source_table(
+    manual_sources: dict[tuple[str, int], dict] | None,
+) -> pd.DataFrame:
+    """Build an audit table of manually uploaded IDA price sources.
+
+    ENTSO-E currently returns no intraday-auction data for the tested SIDC
+    zones/windows, so IDA prices in the cockpit/uplift panels may come from
+    a manual CSV upload instead of the API. This surfaces those uploads with
+    ``source = "Manual CSV"`` so the IDA-driven numbers are traceable rather
+    than appearing to be API-sourced.
+
+    Args:
+        manual_sources: Session mapping ``(zone, sequence) -> {"rows",
+            "first", "last"}`` populated by the sidebar IDA upload handler.
+
+    Returns:
+        One row per uploaded (zone, sequence), sorted by zone then sequence.
+    """
+    rows: list[dict[str, object]] = []
+    for (zone, sequence), meta in sorted((manual_sources or {}).items()):
+        rows.append({
+            "zone": str(zone),
+            "sequence": int(sequence),
+            "source": "Manual CSV",
+            "rows": int(meta.get("rows", 0)),
+            "first_timestamp_utc": meta.get("first", pd.NaT),
+            "last_timestamp_utc": meta.get("last", pd.NaT),
+        })
+    if not rows:
+        return pd.DataFrame(columns=INTRADAY_SOURCE_COLUMNS)
+    return pd.DataFrame(rows, columns=INTRADAY_SOURCE_COLUMNS)
+
 
 def source_label_for_zone(zone: str) -> str:
     """Return the implemented day-ahead source label for a bidding zone."""

@@ -318,6 +318,7 @@ if fetch_btn or "zone_data" in st.session_state:
         data_trust.render(
             zone_data=zone_data,
             zone_timezones={zone: get_zone_timezone(zone) for zone in zone_data},
+            intraday_manual_sources=st.session_state.get("intraday_manual_sources", {}),
         )
 
     # ── Export button ────────────────────────────────────────────────────
