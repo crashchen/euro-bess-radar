@@ -38,13 +38,16 @@ from src.pages import (
     market_overview,
     renewable_correlation,
     revenue_estimation,
+    simulation_cockpit,
     zone_comparison,
 )
+from src.ui_theme import cockpit_chart_template, inject_global_cockpit_theme
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 st.set_page_config(page_title="BESS Pulse", layout="wide", page_icon="\u26a1")
+inject_global_cockpit_theme()
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
 params = render_sidebar()
@@ -59,7 +62,7 @@ capture_rate = params["capture_rate"]
 capex_eur_kwh = params["capex_eur_kwh"]
 use_lp_dispatch = params["use_lp_dispatch"]
 force_refresh = params["force_refresh"]
-chart_template = params["chart_template"]
+chart_template = cockpit_chart_template()
 fetch_btn = params["fetch_btn"]
 current_zone_date_scope = params["current_zone_date_scope"]
 
@@ -176,6 +179,8 @@ if fetch_btn or "zone_data" in st.session_state:
         else {}
     )
     anc_df = build_ancillary_dataset(manual_anc_df, auto_fetch_results)
+    intraday_cache_key = f"intraday_cache::{primary_zone}::{start_date}::{end_date}"
+    intraday_df = st.session_state.get(intraday_cache_key)
 
     export_revenue = revenue.copy()
     export_revenue["power_mw"] = power_mw
@@ -186,7 +191,7 @@ if fetch_btn or "zone_data" in st.session_state:
     tab_names = [
         "Market Overview", "Heatmaps", "Revenue Estimation",
         "Renewable Correlation", "Zone Comparison", "Ancillary Services",
-        "Forward Scenarios", "Data Trust",
+        "Simulation Cockpit", "Forward Scenarios", "Data Trust",
     ]
     tabs = st.tabs(tab_names)
 
@@ -269,6 +274,21 @@ if fetch_btn or "zone_data" in st.session_state:
         )
 
     with tabs[6]:
+        simulation_cockpit.render(
+            primary_zone=primary_zone,
+            primary_df=primary_df,
+            intraday_df=intraday_df,
+            anc_df=anc_df,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            capture_rate=capture_rate,
+            capex_eur_kwh=capex_eur_kwh,
+            zone_tz=zone_tz,
+            chart_template=chart_template,
+        )
+
+    with tabs[7]:
         forward_scenarios.render(
             zone_data=zone_data,
             power_mw=power_mw,
@@ -278,7 +298,7 @@ if fetch_btn or "zone_data" in st.session_state:
             chart_template=chart_template,
         )
 
-    with tabs[7]:
+    with tabs[8]:
         data_trust.render(
             zone_data=zone_data,
             zone_timezones={zone: get_zone_timezone(zone) for zone in zone_data},

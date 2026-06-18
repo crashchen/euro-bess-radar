@@ -8,6 +8,7 @@ import streamlit as st
 
 from src.config import is_elexon_zone
 from src.data_ingestion import summarize_price_data_quality
+from src.ui_theme import apply_cockpit_plot_theme
 
 
 def render(
@@ -63,16 +64,22 @@ def render(
         labels={"price_eur_mwh": "EUR/MWh", "timestamp": ""},
         template=chart_template,
     )
-    fig_price.update_traces(opacity=0.4, name="Hourly", showlegend=True)
+    fig_price.update_traces(
+        opacity=0.72,
+        name="Hourly",
+        showlegend=True,
+        line=dict(color="#ff2d95", width=1.7),
+    )
     ma_series = primary_df["price_eur_mwh"].rolling(
         window=24 * 30, min_periods=24,
     ).mean()
     fig_price.add_scatter(
         x=primary_df.index, y=ma_series,
         mode="lines", name="30-Day MA",
-        line=dict(color="#E74C3C", width=2),
+        line=dict(color="#d0d4dc", width=2.2),
     )
     fig_price.update_xaxes(rangeslider_visible=True)
+    apply_cockpit_plot_theme(fig_price)
     report_figures["price_ts"] = fig_price
     st.plotly_chart(fig_price, width="stretch")
 
@@ -85,9 +92,15 @@ def render(
         title=f"Daily Ordered Spread ({duration_hours}h windows)",
         labels={"spread": "EUR/MWh", "date": ""},
         color="spread",
-        color_continuous_scale="Viridis",
+        color_continuous_scale=[
+            [0.0, "#18233a"],
+            [0.42, "#0c6b9e"],
+            [0.72, "#00cfff"],
+            [1.0, "#ff2d95"],
+        ],
         template=chart_template,
     )
     fig_spread.update_xaxes(rangeslider_visible=True, type="date")
+    apply_cockpit_plot_theme(fig_spread)
     report_figures["spread_ts"] = fig_spread
     st.plotly_chart(fig_spread, width="stretch")

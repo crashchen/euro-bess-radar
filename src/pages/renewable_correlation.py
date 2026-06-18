@@ -18,6 +18,7 @@ from src.data_ingestion import (
     DataSourceNetworkError,
     DataSourceParseError,
 )
+from src.ui_theme import apply_cockpit_plot_theme
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,7 @@ def render(
             opacity=0.5,
             template=chart_template,
         )
+        apply_cockpit_plot_theme(fig_scatter)
         st.plotly_chart(fig_scatter, width="stretch")
     else:
         st.info("Not enough hourly overlap to show the renewable-vs-price scatter.")
@@ -154,6 +156,7 @@ def render(
                 color_continuous_scale="RdYlGn_r",
                 template=chart_template,
             )
+            apply_cockpit_plot_theme(fig_price_q)
             st.plotly_chart(fig_price_q, width="stretch")
         else:
             st.info("Not enough hourly renewable variation to build price quartiles.")
@@ -178,6 +181,7 @@ def render(
                 color_continuous_scale="Viridis",
                 template=chart_template,
             )
+            apply_cockpit_plot_theme(fig_spread_q)
             st.plotly_chart(fig_spread_q, width="stretch")
         else:
             st.info(

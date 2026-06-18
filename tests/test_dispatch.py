@@ -12,6 +12,7 @@ from src.dispatch import (
     solve_daily_lp,
     solve_dispatch_batch,
     solve_joint_capacity_batch,
+    solve_sequential_da_id_dispatch,
 )
 
 
@@ -423,6 +424,91 @@ class TestSolveDailyDaIdDispatch:
         assert r["total_cash_eur"] == pytest.approx(
             r["da_revenue_eur"] + r["rebid_uplift_eur"], abs=0.01,
         )
+
+
+class TestSolveSequentialDaIdDispatch:
+    """Sequential DA + IDA1 policy under an imperfect IDA forecast."""
+
+    # DA cheap AM / expensive PM; realised IDA is SHAPE-INVERTED so the
+    # DA-only schedule is wrong for IDA and a rebid genuinely matters.
+    _DA = np.array([20.0] * 8 + [90.0] * 8 + [25.0] * 8)
+    _REALISED = np.array([95.0] * 8 + [20.0] * 8 + [88.0] * 8)
+
+    def test_perfect_forecast_matches_ceiling(self) -> None:
+        r = solve_sequential_da_id_dispatch(
+            self._DA, self._REALISED, self._REALISED,
+            dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        assert r["realised_total_eur"] == pytest.approx(
+            r["ceiling_total_eur"], abs=1e-6,
+        )
+        assert r["forecast_error_cost_eur"] == pytest.approx(0.0, abs=1e-6)
+
+    def test_naive_forecast_loses_full_rebid_value(self) -> None:
+        # Forecasting IDA == DA gives no rebid signal: the desk just
+        # delivers DA, so realised collapses to the DA-only baseline and
+        # the entire ceiling uplift becomes forecast error.
+        r = solve_sequential_da_id_dispatch(
+            self._DA, self._DA, self._REALISED,
+            dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        assert r["realised_total_eur"] == pytest.approx(
+            r["da_only_revenue_eur"], abs=1e-6,
+        )
+        assert r["forecast_error_cost_eur"] == pytest.approx(
+            r["ceiling_total_eur"] - r["da_only_revenue_eur"], abs=1e-6,
+        )
+
+    def test_ordering_da_only_le_realised_le_ceiling(self) -> None:
+        forecast = 0.5 * self._DA + 0.5 * self._REALISED
+        r = solve_sequential_da_id_dispatch(
+            self._DA, forecast, self._REALISED,
+            dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        assert r["da_only_revenue_eur"] <= r["realised_total_eur"] + 1e-6
+        assert r["realised_total_eur"] <= r["ceiling_total_eur"] + 1e-6
+        assert r["forecast_error_cost_eur"] >= -1e-6
+
+    def test_captured_plus_error_equals_full_uplift(self) -> None:
+        forecast = 0.5 * self._DA + 0.5 * self._REALISED
+        r = solve_sequential_da_id_dispatch(
+            self._DA, forecast, self._REALISED,
+            dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        full_uplift = r["ceiling_total_eur"] - r["da_only_revenue_eur"]
+        assert r["captured_uplift_eur"] + r["forecast_error_cost_eur"] == pytest.approx(
+            full_uplift, abs=1e-6,
+        )
+
+    def test_wrong_direction_forecast_drives_negative_uplift(self) -> None:
+        # A forecast that inverts the DA shape makes the desk rebid the
+        # wrong way; settled against a realised print that prints like DA,
+        # the rebid destroys value and realised drops BELOW the DA-only
+        # baseline. captured_uplift must be allowed to go negative (the UI
+        # must not clamp it) — naive ID participation can genuinely lose.
+        forecast = np.array([90.0] * 8 + [20.0] * 8 + [88.0] * 8)
+        realised = self._DA.copy()
+        r = solve_sequential_da_id_dispatch(
+            self._DA, forecast, realised,
+            dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        assert r["captured_uplift_eur"] < 0.0
+        assert r["realised_total_eur"] < r["da_only_revenue_eur"]
+        # Ceiling is still a valid upper bound and the decomposition holds.
+        assert r["forecast_error_cost_eur"] >= -1e-6
+        full_uplift = r["ceiling_total_eur"] - r["da_only_revenue_eur"]
+        assert r["captured_uplift_eur"] + r["forecast_error_cost_eur"] == pytest.approx(
+            full_uplift, abs=1e-6,
+        )
+
+    def test_nan_or_length_mismatch_returns_zero(self) -> None:
+        bad = np.array([20.0, np.nan, 80.0])
+        r = solve_sequential_da_id_dispatch(bad, bad.copy(), bad.copy(), dt=1.0)
+        assert r["realised_total_eur"] == 0.0
+        short = solve_sequential_da_id_dispatch(
+            self._DA, self._DA, self._REALISED[:-1], dt=1.0,
+        )
+        assert short["ceiling_total_eur"] == 0.0
 
 
 class TestMixedResolutionDtInference:

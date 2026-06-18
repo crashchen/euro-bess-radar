@@ -55,6 +55,20 @@ ANCILLARY_ENERGY_ACTIVATION_SHARE = 0.10
 # from spread/dispatch/revenue analytics.
 MAX_SHORT_GAP_HOURS = 2.0
 
+# Maximum interval count for a single continuous-horizon replay MILP
+# (simulation.py). Contiguous clean runs longer than this are split into
+# chunks so the binary MILP stays small enough to solve interactively;
+# SoC carries across chunks via end-of-chunk seeding, but each chunk
+# boundary applies a soft terminal-neutral reset. Capping by interval
+# count (not days) auto-adapts to resolution: 576 ≈ 24 days hourly or
+# 6 days at 15-min. The 15-min market time unit is the binding case —
+# at equal variable count its binary MILP solves ~7x slower than hourly
+# (the finer grid yields more near-degenerate arbitrage choices), so the
+# cap is sized to keep a worst-case 15-min chunk solve near ~3s. Without
+# the cap a 90-day 15-min run (8640 intervals) effectively hangs the
+# dashboard, and even a 90-day hourly run takes ~40s.
+MAX_CONTINUOUS_REPLAY_INTERVALS = 576
+
 # --- Bidding Zones ---
 # Tier 1: EU member states (ENTSO-E API)
 # Tier 2: Non-EU ENTSO-E members (same API, same treatment)

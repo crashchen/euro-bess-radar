@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.analytics import build_price_heatmap, build_spread_heatmap
+from src.ui_theme import apply_cockpit_plot_theme
 
 
 def render(
@@ -26,11 +27,17 @@ def render(
         price_hm,
         title=f"Average Price by Hour & Month ({zone_tz})",
         labels=dict(x="Month", y="Hour (local)", color="EUR/MWh"),
-        color_continuous_scale="Viridis",
+        color_continuous_scale=[
+            [0.0, "#07111f"],
+            [0.35, "#0c4f7d"],
+            [0.72, "#00cfff"],
+            [1.0, "#ff2d95"],
+        ],
         aspect="auto",
         template=chart_template,
     )
     fig_phm.update_yaxes(dtick=1)
+    apply_cockpit_plot_theme(fig_phm)
     report_figures["price_heatmap"] = fig_phm
     st.plotly_chart(fig_phm, width="stretch")
 
@@ -41,12 +48,17 @@ def render(
         spread_hm,
         title=f"Selected-Window Spread Signal ({duration_hours}h windows, {zone_tz})",
         labels=dict(x="Month", y="Hour (local)", color="Signed signal (EUR/MWh)"),
-        color_continuous_scale="RdBu_r",
+        color_continuous_scale=[
+            [0.0, "#ff2d95"],
+            [0.5, "#111925"],
+            [1.0, "#00cfff"],
+        ],
         color_continuous_midpoint=0,
         aspect="auto",
         template=chart_template,
     )
     fig_shm.update_yaxes(dtick=1)
+    apply_cockpit_plot_theme(fig_shm)
     report_figures["spread_heatmap"] = fig_shm
     st.plotly_chart(fig_shm, width="stretch")
     st.caption(
@@ -67,11 +79,11 @@ def render(
     fig_freq = go.Figure()
     fig_freq.add_trace(go.Bar(
         x=freq_df["Hour"], y=freq_df["Charge %"],
-        name="Charge", marker_color="#3498DB",
+        name="Charge", marker_color="#ff2d95",
     ))
     fig_freq.add_trace(go.Bar(
         x=freq_df["Hour"], y=freq_df["Discharge %"],
-        name="Discharge", marker_color="#E74C3C",
+        name="Discharge", marker_color="#00a3ff",
     ))
     fig_freq.update_layout(
         title=f"Charge/Discharge Hour Selection Frequency ({duration_hours}h windows)",
@@ -80,4 +92,5 @@ def render(
         barmode="group",
         template=chart_template,
     )
+    apply_cockpit_plot_theme(fig_freq)
     st.plotly_chart(fig_freq, width="stretch")
