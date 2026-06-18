@@ -492,7 +492,7 @@ def solve_sequential_da_id_dispatch(
 
     Unlike ``solve_daily_da_id_dispatch`` (which re-dispatches with
     ex-post-perfect knowledge of the realised IDA print and is therefore
-    an upper bound), this models a realistic desk:
+    an upper bound), this models a screening forecast-following policy:
 
       Stage 1 — commit a DA position by solving the DA-only MILP on
                 ``da_prices`` (the position locked in before IDA clears).
@@ -511,7 +511,7 @@ def solve_sequential_da_id_dispatch(
     schedule cannot be beaten at realised prices).
 
     Returns keys:
-        da_only_revenue_eur     — Stage-1 DA-only revenue (baseline floor).
+        da_only_revenue_eur     — Stage-1 DA-only comparison baseline.
         realised_total_eur      — forecast-driven policy settled at realised.
         ceiling_total_eur       — ex-post perfect-foresight upper bound.
         forecast_error_cost_eur — ceiling - realised (>= 0).

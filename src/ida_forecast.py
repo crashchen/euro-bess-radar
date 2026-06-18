@@ -1,22 +1,23 @@
-"""Hour-of-week IDA price forecasting for the sequential DA+ID policy.
+"""Hourly IDA price forecasting for the sequential DA+ID policy.
 
 The sequential dispatch policy (`dispatch.solve_sequential_da_id_dispatch`)
 needs an IDA price *forecast* — what the desk believes IDA will print when
 it commits its rebid — separate from the realised IDA price used for
-settlement. This module builds a screening-grade forecast from a
-hour-of-week climatology of the loaded IDA history.
+settlement. This module builds a screening-grade forecast from an
+hourly climatology of the loaded IDA history.
 
-Anti-leakage: when forecasting a given local day, that day's own realised
-prices are excluded from the climatology (leave-one-day-out), so the
-forecast for day D never sees day D. This keeps the cockpit's
-forecast-error numbers honest as a backtest rather than an in-sample fit.
+Forecast information modes: the default leave-one-day-out mode excludes the
+target day's own realised prices but may use later days in the loaded sample;
+walk-forward mode uses only days strictly before the target; in-sample mode
+is diagnostic only. This keeps the cockpit explicit about whether it is
+showing forecast-skill backtesting or a stricter prior-information view.
 
 The forecast is intentionally simple: a climatology mean bucketed by
 hour only (hour-of-day or hour-of-week). It does NOT distinguish the
 minute-of-hour of 15-min data, and is NOT a trading-grade IDA price
-model — it exists only to demonstrate the *gap* between a realistic
-forecast-driven policy and the perfect-foresight ceiling. Surface it in
-the UI as "climatology forecast, hourly bucketed".
+model — it exists only to demonstrate the *gap* between a forecast-driven
+screening policy and the perfect-foresight ceiling. Surface it in the UI as
+"climatology forecast, hourly bucketed".
 """
 
 from __future__ import annotations
