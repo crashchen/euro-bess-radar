@@ -122,6 +122,7 @@ Fingrid / Regelleistung / Elexon all detect HTTP 401/403 via the shared `_raise_
 - API calls retry with exponential backoff, max 3 retries.
 - Keep functions under ~50 lines; split long pipelines at natural stage boundaries.
 - Logging via `logging`, Google-style docstrings, type hints on public functions.
+- Streamlit ≥1.49 API: use `width="stretch"` for `st.dataframe` / `st.plotly_chart`, NOT `use_container_width=True` (deprecated). The repo targets 1.55.0; automated reviewers trained on older Streamlit may flag `width="stretch"` as invalid — it is correct, do not "fix" it back.
 
 ## Key Domain Knowledge
 - **Ordered spreads**: Revenue estimation uses chronology-aware charge-before-discharge windows, not simple max-min. `_find_daily_ordered_trade()` finds best non-overlapping buy/sell pair using rolling averages and backward scan.
@@ -149,7 +150,7 @@ Fingrid / Regelleistung / Elexon all detect HTTP 401/403 via the shared `_raise_
 
 ## Commands
 - `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
-- `python -m pytest tests/ -v` — run all tests (403 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
+- `python -m pytest tests/ -v` — run all tests (435 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
 - `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
 - `streamlit run app.py` — launch the dashboard.
 - `python -c "from src.data_ingestion import test_elexon_connection; test_elexon_connection()"` — smoke-test Elexon (no API key needed).
