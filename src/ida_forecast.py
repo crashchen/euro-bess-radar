@@ -196,3 +196,98 @@ def _empty_forecast_frame() -> pd.DataFrame:
     out = pd.DataFrame(columns=[FORECAST_COL, "bucket", "n_samples"])
     out.index = pd.DatetimeIndex([], name="timestamp")
     return out
+
+
+SKILL_BY_HOUR_COLUMNS = ["hour", "mae", "n"]
+
+
+def compute_forecast_skill(
+    forecast_df: pd.DataFrame,
+    realised: pd.DataFrame,
+    *,
+    value_col: str = IDA_VALUE_COL,
+    da_prices: pd.DataFrame | None = None,
+    tz: str | None = None,
+) -> dict:
+    """Score a climatology IDA forecast against the realised IDA prints.
+
+    Aligns ``forecast_df[FORECAST_COL]`` with the realised IDA series on the
+    timestamp index and reports price-space error metrics, so a user can see
+    how trustworthy the forecast is *before* reading the revenue panel or
+    setting a rebid deadband. When ``da_prices`` is given, it also scores the
+    forecast against the DA-as-IDA naive baseline (the "no rebid signal"
+    null hypothesis): ``skill_vs_da = 1 - MAE_forecast / MAE_da`` (positive ⇒
+    the climatology beats just assuming IDA == DA).
+
+    Args:
+        forecast_df: Output of :func:`build_ida_forecast` (UTC-indexed).
+        realised: UTC-indexed realised IDA frame with ``value_col``.
+        value_col: Realised IDA price column.
+        da_prices: Optional UTC-indexed DA frame with ``price_eur_mwh`` for
+            the naive-baseline skill score.
+        tz: Local timezone for the hour-of-day error profile.
+
+    Returns:
+        Dict with ``n_points``, ``mae``, ``bias`` (mean signed
+        forecast - realised; >0 means the forecast prints high), ``rmse``,
+        ``realised_std`` (context for the MAE), ``naive_da_mae`` /
+        ``skill_vs_da`` (None without DA or when the naive MAE is ~0), and a
+        ``by_hour`` DataFrame (local hour-of-day MAE + sample count).
+    """
+    empty = {
+        "n_points": 0, "mae": float("nan"), "bias": float("nan"),
+        "rmse": float("nan"), "realised_std": float("nan"),
+        "naive_da_mae": None, "skill_vs_da": None,
+        "by_hour": pd.DataFrame(columns=SKILL_BY_HOUR_COLUMNS),
+    }
+    if (
+        forecast_df is None or forecast_df.empty
+        or realised is None or realised.empty
+        or FORECAST_COL not in forecast_df.columns
+        or value_col not in realised.columns
+    ):
+        return empty
+
+    aligned = forecast_df[[FORECAST_COL]].join(realised[[value_col]], how="inner")
+    if da_prices is not None and "price_eur_mwh" in getattr(da_prices, "columns", []):
+        aligned = aligned.join(
+            da_prices[["price_eur_mwh"]].rename(columns={"price_eur_mwh": "_da"}),
+            how="left",
+        )
+    aligned = aligned.dropna(subset=[FORECAST_COL, value_col])
+    if aligned.empty:
+        return empty
+
+    err = aligned[FORECAST_COL] - aligned[value_col]
+    abs_err = err.abs()
+    naive_da_mae = None
+    skill_vs_da = None
+    if "_da" in aligned.columns:
+        da_rows = aligned.dropna(subset=["_da"])
+        if not da_rows.empty:
+            naive_da_mae = float((da_rows["_da"] - da_rows[value_col]).abs().mean())
+            fc_mae_sub = float(
+                (da_rows[FORECAST_COL] - da_rows[value_col]).abs().mean()
+            )
+            if naive_da_mae > 1e-9:
+                skill_vs_da = 1.0 - fc_mae_sub / naive_da_mae
+
+    utc_index = pd.DatetimeIndex(aligned.index)
+    local_index = utc_index.tz_convert(tz) if tz else utc_index
+    by_hour = (
+        pd.DataFrame({"hour": local_index.hour, "abs_err": abs_err.to_numpy()})
+        .groupby("hour")["abs_err"]
+        .agg(["mean", "size"])
+        .reset_index()
+        .rename(columns={"mean": "mae", "size": "n"})
+    )
+    return {
+        "n_points": len(aligned),
+        "mae": float(abs_err.mean()),
+        "bias": float(err.mean()),
+        "rmse": float(np.sqrt((err**2).mean())),
+        "realised_std": float(aligned[value_col].std(ddof=0)),
+        "naive_da_mae": naive_da_mae,
+        "skill_vs_da": skill_vs_da,
+        "by_hour": by_hour[SKILL_BY_HOUR_COLUMNS],
+    }

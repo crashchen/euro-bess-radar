@@ -23,7 +23,11 @@ from src.dispatch import (
     solve_daily_lp,
     solve_sequential_da_id_dispatch,
 )
-from src.ida_forecast import FORECAST_COL, build_ida_forecast
+from src.ida_forecast import (
+    FORECAST_COL,
+    build_ida_forecast,
+    compute_forecast_skill,
+)
 
 DAYS_PER_YEAR = 365.25
 _SIM_COLUMNS = [
@@ -828,6 +832,12 @@ def simulate_sequential_da_id_batch(
         "n_rebid_days": n_rebid_days,
         "n_hold_days": n_hold_days,
         "forecast_meta": fc_meta,
+        # Price-space forecast accuracy vs realised IDA (+ skill vs the
+        # DA-as-IDA naive baseline), so the user can judge how trustworthy
+        # the forecast — and any deadband set on it — actually is.
+        "forecast_skill": compute_forecast_skill(
+            forecast_df, ida_prices, da_prices=da_prices, tz=tz,
+        ),
     }
     per_day.attrs["summary"] = summary
     return per_day, summary

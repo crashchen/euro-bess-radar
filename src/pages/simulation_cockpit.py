@@ -849,7 +849,40 @@ def _render_forecast_policy_section(
             "the primary signal, but level error still affects the cycling "
             "decision via round-trip efficiency loss and VOM."
         )
+        _render_forecast_skill(summary.get("forecast_skill", {}), chart_template)
         st.dataframe(per_day, width="stretch", hide_index=True)
+
+
+def _render_forecast_skill(skill: dict, chart_template: str) -> None:
+    """Price-space forecast accuracy panel (MAE/bias/RMSE + skill vs DA)."""
+    if not skill or skill.get("n_points", 0) == 0:
+        return
+    st.markdown("**Forecast skill (price-space, vs realised IDA)**")
+    cols = st.columns(4)
+    cols[0].metric("MAE", f"EUR {skill['mae']:.1f}/MWh")
+    cols[1].metric("Bias", f"EUR {skill['bias']:+.1f}/MWh")
+    cols[2].metric("RMSE", f"EUR {skill['rmse']:.1f}/MWh")
+    sk = skill.get("skill_vs_da")
+    cols[3].metric(
+        "Skill vs DA-as-IDA", "n/a" if sk is None else f"{sk:+.0%}",
+    )
+    st.caption(
+        f"Over {skill['n_points']:,} aligned intervals; realised IDA std "
+        f"EUR {skill['realised_std']:.1f}/MWh. Bias >0 = forecast prints high. "
+        "Skill vs DA-as-IDA >0 means the climatology beats just assuming "
+        "IDA == DA (the no-rebid-signal null); <=0 means it does not, so the "
+        "forecast-driven rebid rests on thin ice — widen the deadband."
+    )
+    by_hour = skill.get("by_hour")
+    if by_hour is not None and not by_hour.empty:
+        fig = go.Figure(
+            go.Bar(x=by_hour["hour"], y=by_hour["mae"], marker_color=_C_PRICE_IDA),
+        )
+        _apply_panel_layout(
+            fig, "Forecast MAE by hour-of-day", "EUR/MWh", chart_template, height=240,
+        )
+        fig.update_xaxes(title="Local hour")
+        st.plotly_chart(fig, width="stretch")
 
 
 def _render_forecast_policy_kpis(summary: dict) -> None:
