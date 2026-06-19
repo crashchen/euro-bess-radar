@@ -18,6 +18,7 @@ from src.analytics import (
     filter_to_complete_local_days,
 )
 from src.ancillary import build_ancillary_dataset
+from src.assumptions import build_assumptions_table
 from src.components.sidebar import (
     _format_data_error,
     load_zone_data,
@@ -203,6 +204,29 @@ if fetch_btn or "zone_data" in st.session_state:
     export_revenue["duration_hours"] = duration_hours
     export_revenue["roundtrip_efficiency"] = efficiency
 
+    # Model-assumption audit, shared by the Cockpit (export) and Data Trust
+    # (audit panel). Interactive panel knobs come from session state.
+    _forecast_mode = {
+        "Walk-forward": "walk_forward",
+        "LOO cross-validation": "loo",
+    }.get(st.session_state.get("forecast_policy_mode"))
+    _forecast_bucket = {
+        "Hour-of-week": "hour_of_week",
+        "Hour-of-day": "hour_of_day",
+    }.get(st.session_state.get("forecast_policy_bucket"))
+    assumptions = build_assumptions_table(
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        capture_rate=capture_rate,
+        capex_eur_kwh=capex_eur_kwh,
+        use_lp_dispatch=use_lp_dispatch,
+        rebid_share=st.session_state.get("revenue_rebid_share"),
+        deadband_eur_per_mw=st.session_state.get("forecast_policy_deadband"),
+        forecast_mode=_forecast_mode,
+        forecast_bucket=_forecast_bucket,
+    )
+
     # ── Tabs ─────────────────────────────────────────────────────────────
     tab_names = [
         "Market Overview", "Heatmaps", "Revenue Estimation",
@@ -302,6 +326,7 @@ if fetch_btn or "zone_data" in st.session_state:
             capex_eur_kwh=capex_eur_kwh,
             zone_tz=zone_tz,
             chart_template=chart_template,
+            assumptions=assumptions,
         )
 
     with tabs[7]:
@@ -318,6 +343,7 @@ if fetch_btn or "zone_data" in st.session_state:
         data_trust.render(
             zone_data=zone_data,
             zone_timezones={zone: get_zone_timezone(zone) for zone in zone_data},
+            assumptions=assumptions,
         )
 
     # ── Export button ────────────────────────────────────────────────────

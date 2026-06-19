@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
@@ -705,4 +706,43 @@ def export_comparison_to_bytes(comparison_df: pd.DataFrame) -> bytes:
 
         _auto_column_width(ws)
 
+    return buf.getvalue()
+
+
+def cockpit_tables_to_excel(
+    tables: dict[str, pd.DataFrame],
+    *,
+    assumptions: pd.DataFrame | None = None,
+) -> bytes:
+    """Bundle Simulation Cockpit result tables into a self-documenting xlsx.
+
+    Each ``{sheet_name: DataFrame}`` entry becomes a formatted sheet (reusing
+    the report's table formatter, so string cells are formula-safe); a
+    non-empty ``assumptions`` table is appended as an 'Assumptions' sheet so
+    the exported file records the haircuts behind the numbers. Empty / None
+    tables are skipped; returns empty bytes when there is nothing to write.
+
+    Args:
+        tables: Ordered mapping of Excel sheet name to result DataFrame.
+        assumptions: Optional model-assumption audit table.
+
+    Returns:
+        Workbook bytes for a Streamlit download button (b"" when empty).
+    """
+    sheets = [
+        (name, df) for name, df in tables.items()
+        if df is not None and not df.empty
+    ]
+    if assumptions is not None and not assumptions.empty:
+        sheets.append(("Assumptions", assumptions))
+    if not sheets:
+        return b""
+
+    wb = Workbook()
+    for i, (name, df) in enumerate(sheets):
+        ws = wb.active if i == 0 else wb.create_sheet()
+        # Excel caps sheet names at 31 chars.
+        _build_table_sheet(ws, name[:31], df)
+    buf = BytesIO()
+    wb.save(buf)
     return buf.getvalue()

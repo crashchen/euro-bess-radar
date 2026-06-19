@@ -20,10 +20,50 @@ from src.analytics import (
 from src.data_ingestion import clean_prices
 from src.export import (
     _render_figure_to_image,
+    cockpit_tables_to_excel,
     export_to_bytes,
     export_to_excel,
     export_to_pdf_bytes,
 )
+
+
+def test_cockpit_tables_to_excel_bundles_tables_and_assumptions() -> None:
+    batch = pd.DataFrame({"date": ["2026-01-01"], "total_revenue_eur": [123.4]})
+    per_day = pd.DataFrame({"date": ["2026-01-01"], "captured_eur": [5.0]})
+    assumptions = pd.DataFrame(
+        {"parameter": ["Power"], "value": ["10"], "unit": ["MW"],
+         "source": ["Sidebar"], "affects": ["scaling"]},
+    )
+    data = cockpit_tables_to_excel(
+        {"Multi-day Replay": batch, "Sequential DA+ID": per_day},
+        assumptions=assumptions,
+    )
+    wb = load_workbook(BytesIO(data))
+    assert wb.sheetnames == ["Multi-day Replay", "Sequential DA+ID", "Assumptions"]
+    # Header + one data row written on the first sheet.
+    ws = wb["Multi-day Replay"]
+    assert ws.cell(row=1, column=1).value == "date"
+    assert ws.cell(row=2, column=2).value == 123.4
+
+
+def test_cockpit_tables_to_excel_skips_empty_and_returns_bytes() -> None:
+    empty = pd.DataFrame()
+    good = pd.DataFrame({"a": [1]})
+    data = cockpit_tables_to_excel({"Skip": empty, "Keep": good})
+    wb = load_workbook(BytesIO(data))
+    assert wb.sheetnames == ["Keep"]
+
+
+def test_cockpit_tables_to_excel_empty_when_nothing_to_write() -> None:
+    assert cockpit_tables_to_excel({"Skip": pd.DataFrame()}) == b""
+    assert cockpit_tables_to_excel({}) == b""
+
+
+def test_cockpit_tables_to_excel_truncates_long_sheet_name() -> None:
+    long_name = "Sequential DA plus IDA forecast policy replay"  # > 31 chars
+    data = cockpit_tables_to_excel({long_name: pd.DataFrame({"a": [1]})})
+    wb = load_workbook(BytesIO(data))
+    assert wb.sheetnames == [long_name[:31]]
 
 
 def _render_or_skip(fig) -> bytes:

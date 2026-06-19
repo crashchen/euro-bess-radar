@@ -509,7 +509,8 @@ class TestSolveSequentialDaIdDispatch:
             self._DA, forecast, self._REALISED,
             dt=1.0, power_mw=1.0, duration_hours=2.0,
         )
-        assert r["forecast_uplift_eur"] >= -1e-9
+        # Floored at 0.0 — the >= 0 contract is strict, not within tolerance.
+        assert r["forecast_uplift_eur"] >= 0.0
         assert r["rebid"] is True
 
     def test_deadband_holds_da_schedule_and_neutralises_churn_loss(self) -> None:
