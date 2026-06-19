@@ -19,6 +19,7 @@ from src.simulation import (
     simulate_replay_batch,
     simulate_sequential_da_id_batch,
 )
+from src.strategy_compare import build_strategy_comparison
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -361,6 +362,13 @@ def _fmt_rebal(value: float) -> str:
     if not math.isfinite(value):
         return "Inf"
     return f"{value:.2f}"
+
+
+def _fmt_strategy_bar_label(value: float) -> str:
+    """Format strategy-comparison bar labels without surfacing NaN/inf."""
+    if not math.isfinite(value):
+        return "N/A"
+    return f"{value:,.0f}"
 
 
 def _render_cockpit_header(
@@ -916,6 +924,8 @@ def _render_forecast_policy_section(
             "decision via round-trip efficiency loss and VOM."
         )
         _render_forecast_skill(summary.get("forecast_skill", {}), chart_template)
+        comparison = build_strategy_comparison(summary, power_mw=power_mw)
+        _render_strategy_comparison(comparison, chart_template)
         st.dataframe(per_day, width="stretch", hide_index=True)
         # This panel reports raw solver values — no capture haircut applied.
         export_assumptions = _cockpit_export_assumptions(
@@ -928,9 +938,10 @@ def _render_forecast_policy_section(
             ),
         )
         _cockpit_download_button(
-            {"Sequential DA+ID": per_day}, export_assumptions,
+            {"Strategy comparison": comparison, "Sequential DA+ID": per_day},
+            export_assumptions,
             key="dl_forecast_policy",
-            label="\U0001f4e5 Download forecast policy (Excel)",
+            label="\U0001f4e5 Download forecast policy + comparison (Excel)",
             file_name="cockpit_forecast_policy.xlsx",
         )
 
@@ -997,6 +1008,51 @@ def _render_forecast_policy_kpis(summary: dict) -> None:
         f"{rate_txt}. Achievable uplift (ceiling - DA-only): "
         f"EUR {summary['total_ceiling_uplift_eur']:,.0f}. Captured can be "
         f"negative when the forecast misleads the rebid into churn losses.{gate_txt}"
+    )
+
+
+def _render_strategy_comparison(comparison: pd.DataFrame, chart_template: str) -> None:
+    """Investment-framed comparison of the three dispatch strategies."""
+    if comparison is None or comparison.empty:
+        return
+    st.markdown("**Strategy comparison (annualised)**")
+    st.caption(
+        "Same window, three strategies side by side. Annualised EUR/MW/yr = "
+        "window revenue x 365.25 / valid days / power; uplift is vs the "
+        "DA-only baseline. Raw solver values (no capture haircut). A reserve "
+        "(FCR/aFRR) co-optimisation strategy is a planned fourth row."
+    )
+    fig = go.Figure(go.Bar(
+        x=comparison["strategy"],
+        y=comparison["annualized_eur_per_mw"],
+        marker_color=[_C_REVENUE, _C_PRICE_IDA, _C_DISCHARGE],
+        text=[
+            _fmt_strategy_bar_label(v)
+            for v in comparison["annualized_eur_per_mw"]
+        ],
+        textposition="outside",
+    ))
+    _apply_panel_layout(
+        fig, "Annualised revenue by strategy", "EUR/MW/yr", chart_template,
+        height=280,
+    )
+    st.plotly_chart(fig, width="stretch")
+    st.dataframe(
+        comparison,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "strategy": "Strategy",
+            "window_revenue_eur": st.column_config.NumberColumn(
+                "Window EUR", format="%.0f",
+            ),
+            "annualized_eur_per_mw": st.column_config.NumberColumn(
+                "EUR/MW/yr", format="%.0f",
+            ),
+            "uplift_vs_da_pct": st.column_config.NumberColumn(
+                "Uplift vs DA", format="%.1f%%",
+            ),
+        },
     )
 
 

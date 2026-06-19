@@ -11,7 +11,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 - **Ancillary services integration** — manual CSV upload + auto-fetch for DE, FI, GB, RO, SE_3, and Italian zones with per-product reserve lines, manual-over-auto product overrides, and preserved directional/system price fields
 - **Intraday (IDA) price import** — manual CSV fallback for IDA1/2/3 prices when the ENTSO-E intraday-auction API returns no data, persisted to the same cache the live fetch uses and labelled `Manual CSV` in Data Trust
 - **Joint MILP co-optimization estimate** for DA arbitrage vs reserve-capacity power headroom
-- **Simulation Cockpit** for interval-level BESS dispatch replay, event tables, multi-day summaries with continuous-horizon SoC carry-over, and a forecast-driven sequential DA+ID policy (vs perfect-foresight ceiling) — plus SoC, revenue, throughput, and battery-health diagnostics
+- **Simulation Cockpit** for interval-level BESS dispatch replay, event tables, multi-day summaries with continuous-horizon SoC carry-over, a forecast-driven sequential DA+ID policy (vs perfect-foresight ceiling) with rebid deadband + forecast-skill report, an annualised strategy comparison, and Excel export — plus SoC, revenue, throughput, and battery-health diagnostics
 - **Multi-zone comparison** for market screening
 - **Data Trust diagnostics** showing source, timezone, coverage, source gaps, and imputation per fetched zone
 - **Excel export** with full analytics and sub-hourly negative-price normalization
@@ -66,7 +66,7 @@ euro-bess-radar/
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   └── export.py             # Excel report generation
-├── tests/                    # 473 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 479 passing tests, heavily mocked; 2 PDF tests may skip
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads
