@@ -364,6 +364,13 @@ def _fmt_rebal(value: float) -> str:
     return f"{value:.2f}"
 
 
+def _fmt_strategy_bar_label(value: float) -> str:
+    """Format strategy-comparison bar labels without surfacing NaN/inf."""
+    if not math.isfinite(value):
+        return "N/A"
+    return f"{value:,.0f}"
+
+
 def _render_cockpit_header(
     *,
     target,
@@ -1019,7 +1026,10 @@ def _render_strategy_comparison(comparison: pd.DataFrame, chart_template: str) -
         x=comparison["strategy"],
         y=comparison["annualized_eur_per_mw"],
         marker_color=[_C_REVENUE, _C_PRICE_IDA, _C_DISCHARGE],
-        text=[f"{v:,.0f}" for v in comparison["annualized_eur_per_mw"]],
+        text=[
+            _fmt_strategy_bar_label(v)
+            for v in comparison["annualized_eur_per_mw"]
+        ],
         textposition="outside",
     ))
     _apply_panel_layout(

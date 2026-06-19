@@ -6,6 +6,7 @@ import math
 
 import pytest
 
+from src.pages.simulation_cockpit import _fmt_strategy_bar_label
 from src.simulation import DAYS_PER_YEAR
 from src.strategy_compare import (
     STRATEGY_COMPARE_COLUMNS,
@@ -69,3 +70,9 @@ def test_uplift_nan_when_da_baseline_zero() -> None:
         _summary(0.0, 25.0, 40.0, valid_days=5), power_mw=1.0,
     )
     assert math.isnan(table.iloc[1]["uplift_vs_da_pct"])
+
+
+def test_strategy_bar_label_hides_non_finite_values() -> None:
+    assert _fmt_strategy_bar_label(1234.4) == "1,234"
+    assert _fmt_strategy_bar_label(float("nan")) == "N/A"
+    assert _fmt_strategy_bar_label(float("inf")) == "N/A"
