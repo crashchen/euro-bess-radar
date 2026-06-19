@@ -590,8 +590,13 @@ def solve_sequential_da_id_dispatch(
     ida_value_forecast = _schedule_value_at_prices(
         stage_2_fc["p_charge"], stage_2_fc["p_discharge"], ida_forecast, dt,
     )
-    forecast_uplift = (
-        da_gross - forecast_mtm + ida_value_forecast - stage_1["revenue_eur"]
+    # Floor at 0.0: the uplift is non-negative by construction, but a MILP
+    # solve can return a tiny negative (~-1e-13) from solver tolerance. Both
+    # the gate and the reported `forecast_uplift_eur` then honour the
+    # documented >= 0 contract.
+    forecast_uplift = max(
+        da_gross - forecast_mtm + ida_value_forecast - stage_1["revenue_eur"],
+        0.0,
     )
     # Floor the hurdle at a small epsilon so a zero/solver-noise forecast
     # uplift never registers as a rebid (it is revenue-neutral vs holding the
