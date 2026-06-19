@@ -13,6 +13,9 @@ from src.analytics import _infer_interval_hours, _to_local
 
 logger = logging.getLogger(__name__)
 DISPATCH_VOM_COST_EUR_MWH = 0.5
+# Below this forecast uplift a sequential-policy rebid is treated as noise
+# (no real opportunity), so the deadband flag stays deterministic.
+_REBID_UPLIFT_EPS_EUR = 1e-9
 
 
 def solve_daily_lp(
@@ -513,13 +516,14 @@ def solve_sequential_da_id_dispatch(
 
     ``min_rebid_uplift_eur`` is a risk gate / deadband: the policy only
     rebids when the FORECAST-predicted uplift of the rebid over holding the
-    committed DA schedule reaches this hurdle (in EUR for the horizon).
-    The forecast uplift is non-negative by construction, so the default
-    ``0.0`` reproduces the always-rebid policy; a positive value makes the
-    desk hold its DA schedule on marginal days (where a small forecast edge
-    can be flipped into a realised loss), avoiding churn. When the gate
-    holds, the executed schedule equals the DA schedule and settles to
-    exactly ``da_only``.
+    committed DA schedule exceeds this hurdle (in EUR for the horizon). The
+    forecast uplift is non-negative by construction, so the default ``0.0``
+    rebids on every day that has a real forecast edge (a sub-epsilon uplift
+    is treated as no opportunity and holds, which is revenue-neutral); a
+    positive value makes the desk also hold on marginal days where a small
+    forecast edge can be flipped into a realised loss, avoiding churn. When
+    the gate holds, the executed schedule equals the DA schedule and settles
+    to exactly ``da_only``.
 
     Returns keys:
         da_only_revenue_eur     — Stage-1 DA-only comparison baseline.
@@ -577,8 +581,8 @@ def solve_sequential_da_id_dispatch(
     # schedule when the FORECAST-predicted uplift of rebidding clears
     # `min_rebid_uplift_eur`. That uplift is non-negative by construction
     # (stage_2_fc is forecast-optimal and holding the DA schedule yields
-    # da_only under the forecast), so a 0.0 threshold reproduces the
-    # always-rebid policy, while a positive threshold suppresses churn on
+    # da_only under the forecast), so a 0.0 threshold rebids on every
+    # real-edge day, while a positive threshold suppresses churn on
     # marginal/no-opportunity days (a tiny forecast edge that realised prices
     # can flip into a loss). When the gate holds, the executed schedule IS
     # the DA schedule, which settles to exactly da_only.
@@ -589,7 +593,11 @@ def solve_sequential_da_id_dispatch(
     forecast_uplift = (
         da_gross - forecast_mtm + ida_value_forecast - stage_1["revenue_eur"]
     )
-    rebid = forecast_uplift >= min_rebid_uplift_eur
+    # Floor the hurdle at a small epsilon so a zero/solver-noise forecast
+    # uplift never registers as a rebid (it is revenue-neutral vs holding the
+    # DA schedule, but a noisy rebid flag would make n_rebid_days
+    # non-deterministic on no-opportunity days).
+    rebid = forecast_uplift > max(min_rebid_uplift_eur, _REBID_UPLIFT_EPS_EUR)
     executed = stage_2_fc if rebid else stage_1
 
     implicit_mtm = float((da_net * ida_realised * dt).sum())
