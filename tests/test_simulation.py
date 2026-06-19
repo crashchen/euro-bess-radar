@@ -609,3 +609,51 @@ def test_sequential_batch_missing_intraday_excludes_all_days() -> None:
     assert per_day.empty
     assert summary["excluded_days"] == len(dates)
     assert summary["capture_rate"] is None
+
+
+def _make_seq_edge_history(days: int = 4):
+    """DA and IDA with DIFFERENT shapes so a rebid has real value, and an IDA
+    history identical day-to-day so the climatology forecast matches the
+    realised print (accurate forecast -> clean positive uplift, no churn)."""
+    da_shape = np.array([20.0] * 8 + [90.0] * 8 + [25.0] * 8)
+    ida_shape = np.array([95.0] * 8 + [20.0] * 8 + [88.0] * 8)
+    idx = pd.date_range("2026-03-16", periods=24 * days, freq="h", tz="UTC")
+    da_df = pd.DataFrame({"price_eur_mwh": np.tile(da_shape, days)}, index=idx)
+    ida_df = pd.DataFrame(
+        {"intraday_price_eur_mwh": np.tile(ida_shape, days)}, index=idx,
+    )
+    da_df.index.name = "timestamp"
+    ida_df.index.name = "timestamp"
+    return da_df, ida_df
+
+
+def test_sequential_batch_default_threshold_rebids_when_edge_exists() -> None:
+    # With a real forecast edge (DA != IDA, forecast accurate), the default
+    # 0.0 deadband rebids every day and captures genuine uplift.
+    da_df, ida_df = _make_seq_edge_history(days=4)
+    dates = available_local_dates(da_df, tz="UTC")
+    per_day, summary = simulate_sequential_da_id_batch(
+        da_df, ida_df, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    assert summary["n_rebid_days"] == summary["valid_days"]
+    assert summary["n_hold_days"] == 0
+    assert per_day["rebid"].all()
+    assert summary["total_captured_eur"] > 0.0
+
+
+def test_sequential_batch_deadband_holds_all_days_at_high_threshold() -> None:
+    # A per-day hurdle no day can clear holds every day on the DA schedule:
+    # rebid counts collapse and realised falls back to the DA-only baseline.
+    da_df, ida_df = _make_seq_edge_history(days=4)
+    dates = available_local_dates(da_df, tz="UTC")
+    per_day, summary = simulate_sequential_da_id_batch(
+        da_df, ida_df, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+        min_rebid_uplift_eur=1e9,
+    )
+    assert summary["n_rebid_days"] == 0
+    assert summary["n_hold_days"] == summary["valid_days"]
+    assert (~per_day["rebid"]).all()
+    assert summary["total_realised_eur"] == pytest.approx(
+        summary["total_da_only_eur"], abs=1e-6,
+    )
+    assert summary["total_captured_eur"] == pytest.approx(0.0, abs=1e-6)

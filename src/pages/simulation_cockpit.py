@@ -786,13 +786,28 @@ def _render_forecast_policy_section(
                 "the target (drops the earliest day with no history)."
             ),
         )
-        run = c4.button("Run forecast policy", key="forecast_policy_run")
+        deadband_eur_per_mw = c4.number_input(
+            "Rebid deadband (EUR/MW/day)",
+            min_value=0.0, max_value=50.0, value=0.0, step=0.5,
+            key="forecast_policy_deadband",
+            help=(
+                "Risk gate: minimum FORECAST-predicted IDA uplift per MW per "
+                "day needed to rebid; below it the desk holds its committed DA "
+                "schedule. 0 = rebid on any forecast edge (screening "
+                "baseline). Raise it to suppress churn on marginal days where "
+                "a thin forecast edge can flip into a realised loss."
+            ),
+        )
+        run = st.button("Run forecast policy", key="forecast_policy_run")
         if not run:
             st.info("Choose a sample and click Run to compare against the ceiling.")
             return
 
         bucket = "hour_of_week" if bucket_label == "Hour-of-week" else "hour_of_day"
         forecast_mode = "walk_forward" if mode_label == "Walk-forward" else "loo"
+        # The solver gate is an absolute per-day EUR hurdle; the UI knob is
+        # power-normalised so it is comparable across system sizes.
+        min_rebid_uplift_eur = float(deadband_eur_per_mw) * power_mw
         limit = _sample_limit(sample)
         batch_dates = dates if limit is None else dates[-limit:]
         with st.spinner(f"Solving {len(batch_dates)} day(s) under forecast + ceiling..."):
@@ -806,6 +821,7 @@ def _render_forecast_policy_section(
                 efficiency=efficiency,
                 bucket=bucket,
                 forecast_mode=forecast_mode,
+                min_rebid_uplift_eur=min_rebid_uplift_eur,
             )
 
         if per_day.empty:
@@ -833,7 +849,40 @@ def _render_forecast_policy_section(
             "the primary signal, but level error still affects the cycling "
             "decision via round-trip efficiency loss and VOM."
         )
+        _render_forecast_skill(summary.get("forecast_skill", {}), chart_template)
         st.dataframe(per_day, width="stretch", hide_index=True)
+
+
+def _render_forecast_skill(skill: dict, chart_template: str) -> None:
+    """Price-space forecast accuracy panel (MAE/bias/RMSE + skill vs DA)."""
+    if not skill or skill.get("n_points", 0) == 0:
+        return
+    st.markdown("**Forecast skill (price-space, vs realised IDA)**")
+    cols = st.columns(4)
+    cols[0].metric("MAE", f"EUR {skill['mae']:.1f}/MWh")
+    cols[1].metric("Bias", f"EUR {skill['bias']:+.1f}/MWh")
+    cols[2].metric("RMSE", f"EUR {skill['rmse']:.1f}/MWh")
+    sk = skill.get("skill_vs_da")
+    cols[3].metric(
+        "Skill vs DA-as-IDA", "n/a" if sk is None else f"{sk:+.0%}",
+    )
+    st.caption(
+        f"Over {skill['n_points']:,} aligned intervals; realised IDA std "
+        f"EUR {skill['realised_std']:.1f}/MWh. Bias >0 = forecast prints high. "
+        "Skill vs DA-as-IDA >0 means the climatology beats just assuming "
+        "IDA == DA (the no-rebid-signal null); <=0 means it does not, so the "
+        "forecast-driven rebid rests on thin ice — widen the deadband."
+    )
+    by_hour = skill.get("by_hour")
+    if by_hour is not None and not by_hour.empty:
+        fig = go.Figure(
+            go.Bar(x=by_hour["hour"], y=by_hour["mae"], marker_color=_C_PRICE_IDA),
+        )
+        _apply_panel_layout(
+            fig, "Forecast MAE by hour-of-day", "EUR/MWh", chart_template, height=240,
+        )
+        fig.update_xaxes(title="Local hour")
+        st.plotly_chart(fig, width="stretch")
 
 
 def _render_forecast_policy_kpis(summary: dict) -> None:
@@ -854,10 +903,18 @@ def _render_forecast_policy_kpis(summary: dict) -> None:
         rate_txt = "n/a (no rebid opportunity in window)"
     else:
         rate_txt = f"{rate:.0%} of achievable IDA uplift captured"
+    n_rebid = summary.get("n_rebid_days", 0)
+    n_hold = summary.get("n_hold_days", 0)
+    gate_txt = ""
+    if summary.get("min_rebid_uplift_eur", 0.0) > 0.0:
+        gate_txt = (
+            f" Deadband: rebid on {n_rebid} day(s), held DA on {n_hold} "
+            "day(s) below the hurdle."
+        )
     st.caption(
         f"{rate_txt}. Achievable uplift (ceiling - DA-only): "
         f"EUR {summary['total_ceiling_uplift_eur']:,.0f}. Captured can be "
-        "negative when the forecast misleads the rebid into churn losses."
+        f"negative when the forecast misleads the rebid into churn losses.{gate_txt}"
     )
 
 

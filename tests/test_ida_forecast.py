@@ -6,7 +6,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.ida_forecast import FORECAST_COL, build_ida_forecast
+from src.ida_forecast import (
+    FORECAST_COL,
+    build_ida_forecast,
+    compute_forecast_skill,
+)
 from src.simulation import available_local_dates
 
 
@@ -147,3 +151,85 @@ def test_walk_forward_drops_first_day_and_uses_only_prior_days() -> None:
     forecast_dates = {ts.tz_convert("UTC").date() for ts in fc.index}
     assert dates[0] not in forecast_dates
     assert len(forecast_dates) == 3
+
+
+# ── Forecast skill scoring ──────────────────────────────────────────────────
+
+def _make_realised_and_da(days: int = 2):
+    """Realised IDA (one shape) + DA prices (a DIFFERENT shape) over `days`."""
+    ida_shape = np.array(
+        [10, 10, 10, 10, 10, 12, 20, 45, 60, 50, 30, 25,
+         22, 28, 45, 72, 92, 80, 55, 40, 30, 20, 15, 12],
+        dtype=float,
+    )
+    da_shape = ida_shape[::-1].copy()
+    idx = pd.date_range("2026-03-16", periods=24 * days, freq="h", tz="UTC")
+    realised = pd.DataFrame(
+        {"intraday_price_eur_mwh": np.tile(ida_shape, days)}, index=idx,
+    )
+    da = pd.DataFrame({"price_eur_mwh": np.tile(da_shape, days)}, index=idx)
+    realised.index.name = da.index.name = "timestamp"
+    return realised, da
+
+
+def test_skill_perfect_forecast_has_zero_error_and_full_skill() -> None:
+    realised, da = _make_realised_and_da(days=2)
+    forecast = realised.rename(columns={"intraday_price_eur_mwh": FORECAST_COL})
+    skill = compute_forecast_skill(forecast, realised, da_prices=da, tz="UTC")
+    assert skill["n_points"] == 48
+    assert skill["mae"] == pytest.approx(0.0, abs=1e-9)
+    assert skill["bias"] == pytest.approx(0.0, abs=1e-9)
+    assert skill["rmse"] == pytest.approx(0.0, abs=1e-9)
+    # A perfect forecast beats the (non-trivial) DA-as-IDA baseline fully.
+    assert skill["naive_da_mae"] > 0.0
+    assert skill["skill_vs_da"] == pytest.approx(1.0, abs=1e-9)
+
+
+def test_skill_detects_constant_bias() -> None:
+    realised, _ = _make_realised_and_da(days=1)
+    forecast = (realised + 5.0).rename(
+        columns={"intraday_price_eur_mwh": FORECAST_COL},
+    )
+    skill = compute_forecast_skill(forecast, realised, tz="UTC")
+    assert skill["mae"] == pytest.approx(5.0, abs=1e-9)
+    assert skill["bias"] == pytest.approx(5.0, abs=1e-9)  # forecast prints high
+    assert skill["naive_da_mae"] is None  # no DA passed
+    assert skill["skill_vs_da"] is None
+
+
+def test_skill_zero_when_forecast_equals_da_baseline() -> None:
+    realised, da = _make_realised_and_da(days=2)
+    # Forecast == DA -> same error as the naive baseline -> zero skill.
+    forecast = da.rename(columns={"price_eur_mwh": FORECAST_COL})
+    skill = compute_forecast_skill(forecast, realised, da_prices=da, tz="UTC")
+    assert skill["skill_vs_da"] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_skill_negative_when_forecast_worse_than_da() -> None:
+    realised, da = _make_realised_and_da(days=2)
+    # A forecast further from realised than DA is -> negative skill.
+    worse = (2.0 * da["price_eur_mwh"] - realised["intraday_price_eur_mwh"])
+    forecast = pd.DataFrame({FORECAST_COL: worse}, index=realised.index)
+    skill = compute_forecast_skill(forecast, realised, da_prices=da, tz="UTC")
+    assert skill["skill_vs_da"] < 0.0
+
+
+def test_skill_by_hour_profile_has_one_row_per_local_hour() -> None:
+    realised, _ = _make_realised_and_da(days=2)
+    forecast = (realised + 3.0).rename(
+        columns={"intraday_price_eur_mwh": FORECAST_COL},
+    )
+    skill = compute_forecast_skill(forecast, realised, tz="UTC")
+    by_hour = skill["by_hour"]
+    assert list(by_hour.columns) == ["hour", "mae", "n"]
+    assert len(by_hour) == 24
+    assert (by_hour["n"] == 2).all()  # 2 days -> 2 samples per hour
+    assert np.allclose(by_hour["mae"], 3.0)
+
+
+def test_skill_empty_inputs_return_empty_metrics() -> None:
+    realised, _ = _make_realised_and_da(days=1)
+    empty_fc = pd.DataFrame(columns=[FORECAST_COL])
+    skill = compute_forecast_skill(empty_fc, realised, tz="UTC")
+    assert skill["n_points"] == 0
+    assert skill["by_hour"].empty

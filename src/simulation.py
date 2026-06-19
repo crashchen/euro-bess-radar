@@ -23,7 +23,11 @@ from src.dispatch import (
     solve_daily_lp,
     solve_sequential_da_id_dispatch,
 )
-from src.ida_forecast import FORECAST_COL, build_ida_forecast
+from src.ida_forecast import (
+    FORECAST_COL,
+    build_ida_forecast,
+    compute_forecast_skill,
+)
 
 DAYS_PER_YEAR = 365.25
 _SIM_COLUMNS = [
@@ -715,6 +719,7 @@ _SEQ_COLUMNS = [
     "ceiling_eur",
     "forecast_error_eur",
     "captured_eur",
+    "rebid",
     "forecast_coverage",
 ]
 
@@ -730,6 +735,7 @@ def simulate_sequential_da_id_batch(
     efficiency: float = 0.88,
     bucket: str = "hour_of_day",
     forecast_mode: str = "loo",
+    min_rebid_uplift_eur: float = 0.0,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Per-day three-way DA+ID comparison under an imperfect IDA forecast.
 
@@ -740,6 +746,11 @@ def simulate_sequential_da_id_batch(
       - DA-only baseline (no IDA participation),
       - forecast-driven realised (rebid at forecast, settle at realised),
       - perfect-foresight ceiling (ex-post optimal rebid).
+
+    `min_rebid_uplift_eur` is the per-day risk gate / deadband passed to the
+    solver: a day only rebids when its forecast-predicted uplift clears the
+    hurdle, else it holds the DA schedule (`rebid=False`, captured 0). The
+    summary reports `n_rebid_days` / `n_hold_days`.
 
     Each day is solved standalone (per-day terminal-neutral) so the
     comparison isolates *forecast quality* from the multi-day SoC-carry
@@ -769,6 +780,7 @@ def simulate_sequential_da_id_batch(
                 da_prices, ida_prices, forecast_df, coverage_by_point,
                 local_date=local_date, tz=tz, power_mw=power_mw,
                 duration_hours=duration_hours, efficiency=efficiency,
+                min_rebid_uplift_eur=min_rebid_uplift_eur,
             )
             if row is None:
                 excluded += 1
@@ -796,6 +808,8 @@ def simulate_sequential_da_id_batch(
         total_error = float(per_day["forecast_error_eur"].sum())
         total_ceiling_uplift = total_ceiling - total_da_only
         total_captured = total_realised - total_da_only
+    n_rebid_days = 0 if per_day.empty else int(per_day["rebid"].sum())
+    n_hold_days = len(per_day) - n_rebid_days
     # capture_rate = captured / achievable uplift. Left None when there is
     # effectively no rebid opportunity in the window (achievable ~ 0), where
     # the ratio is meaningless; it can be negative when the forecast misleads
@@ -814,7 +828,16 @@ def simulate_sequential_da_id_batch(
         "total_ceiling_uplift_eur": total_ceiling_uplift,
         "total_captured_eur": total_captured,
         "capture_rate": capture_rate,
+        "min_rebid_uplift_eur": min_rebid_uplift_eur,
+        "n_rebid_days": n_rebid_days,
+        "n_hold_days": n_hold_days,
         "forecast_meta": fc_meta,
+        # Price-space forecast accuracy vs realised IDA (+ skill vs the
+        # DA-as-IDA naive baseline), so the user can judge how trustworthy
+        # the forecast — and any deadband set on it — actually is.
+        "forecast_skill": compute_forecast_skill(
+            forecast_df, ida_prices, da_prices=da_prices, tz=tz,
+        ),
     }
     per_day.attrs["summary"] = summary
     return per_day, summary
@@ -831,6 +854,7 @@ def _sequential_day_row(
     power_mw: float,
     duration_hours: float,
     efficiency: float,
+    min_rebid_uplift_eur: float = 0.0,
 ) -> dict[str, Any] | None:
     """Solve one day's three-way sequential comparison, or None if unusable."""
     da_day = _select_local_day(da_prices, local_date, tz)
@@ -852,7 +876,7 @@ def _sequential_day_row(
         merged[FORECAST_COL].to_numpy(dtype=float),
         merged["intraday_price_eur_mwh"].to_numpy(dtype=float),
         dt=dt, power_mw=power_mw, duration_hours=duration_hours,
-        efficiency=efficiency,
+        efficiency=efficiency, min_rebid_uplift_eur=min_rebid_uplift_eur,
     )
     day_coverage = float(coverage_by_point.reindex(merged.index).fillna(False).mean())
     return {
@@ -862,6 +886,7 @@ def _sequential_day_row(
         "ceiling_eur": result["ceiling_total_eur"],
         "forecast_error_eur": result["forecast_error_cost_eur"],
         "captured_eur": result["captured_uplift_eur"],
+        "rebid": bool(result["rebid"]),
         "forecast_coverage": day_coverage,
     }
 
