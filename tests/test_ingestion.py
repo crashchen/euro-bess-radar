@@ -39,7 +39,11 @@ from src.data_ingestion import (
     fetch_intraday_prices,
     fetch_prices,
     fetch_regelleistung_results,
+    generate_intraday_template_csv,
+    parse_intraday_csv,
+    persist_intraday_frame,
     read_cache,
+    read_intraday_cache,
     summarize_price_data_quality,
     write_cache,
 )
@@ -1739,6 +1743,216 @@ class TestFetchIntradayPrices:
         assert cached is not None
         assert len(cached) == 4
         assert cached["intraday_price_eur_mwh"].tolist() == [40.0, 42.0, 44.0, 46.0]
+
+
+# ── Test 14b: Manual IDA CSV import ─────────────────────────────────────────
+
+class TestParseIntradayCsv:
+    def test_template_round_trips(self) -> None:
+        df = parse_intraday_csv(generate_intraday_template_csv(), default_zone="DE_LU")
+        assert list(df.columns) == ["zone", "sequence", "intraday_price_eur_mwh"]
+        assert df.index.tz is not None and str(df.index.tz) == "UTC"
+        assert df["zone"].unique().tolist() == ["DE_LU"]
+        assert df["sequence"].unique().tolist() == [1]
+        assert len(df) == 3
+
+    def test_minimal_csv_uses_defaults_and_keeps_negative(self) -> None:
+        content = (
+            "timestamp,ida_price_eur_mwh\n"
+            "2026-02-01 00:00:00,50\n"
+            "2026-02-01 01:00:00,-5.5\n"
+        )
+        df = parse_intraday_csv(content, default_zone="NL", default_sequence=2)
+        assert df["zone"].unique().tolist() == ["NL"]
+        assert df["sequence"].unique().tolist() == [2]
+        assert (df["intraday_price_eur_mwh"] < 0).any()  # negative prices retained
+
+    def test_case_insensitive_headers_and_dedupe_keep_last(self) -> None:
+        content = (
+            "Timestamp,IDA_Price_EUR_MWh\n"
+            "2026-02-01T00:00:00+00:00,10\n"
+            "2026-02-01T00:00:00+00:00,99\n"
+        )
+        df = parse_intraday_csv(content, default_zone="FR")
+        assert len(df) == 1
+        assert df["intraday_price_eur_mwh"].iloc[0] == 99.0
+
+    def test_per_row_zone_and_sequence_override_defaults(self) -> None:
+        content = (
+            "timestamp,ida_price_eur_mwh,sequence,zone\n"
+            "2026-03-01T00:00:00+00:00,40,1,DE_LU\n"
+            "2026-03-01T00:00:00+00:00,41,2,NL\n"
+        )
+        df = parse_intraday_csv(content, default_zone="DE_LU")
+        assert set(zip(df["zone"], df["sequence"], strict=True)) == {
+            ("DE_LU", 1), ("NL", 2),
+        }
+
+    def test_missing_required_columns_raises(self) -> None:
+        with pytest.raises(ValueError, match="must have at least"):
+            parse_intraday_csv("foo,bar\n1,2\n", default_zone="DE_LU")
+
+    def test_missing_zone_without_default_raises(self) -> None:
+        with pytest.raises(ValueError, match="without a zone"):
+            parse_intraday_csv(
+                "timestamp,ida_price_eur_mwh\n2026-01-01,5\n", default_zone=None,
+            )
+
+    def test_invalid_sequence_raises(self) -> None:
+        with pytest.raises(ValueError, match="sequence"):
+            parse_intraday_csv(
+                "timestamp,ida_price_eur_mwh,sequence\n2026-01-01,5,7\n",
+                default_zone="DE_LU",
+            )
+
+    def test_fractional_sequence_raises_not_truncated(self) -> None:
+        # 1.5 must NOT be silently truncated to IDA1.
+        with pytest.raises(ValueError, match="whole number"):
+            parse_intraday_csv(
+                "timestamp,ida_price_eur_mwh,sequence\n2026-01-01,5,1.5\n",
+                default_zone="DE_LU",
+            )
+
+    def test_ida_label_sequence_is_parsed_not_dropped(self) -> None:
+        # 'IDA2' must map to round 2, not be coerced to the default round.
+        df = parse_intraday_csv(
+            "timestamp,ida_price_eur_mwh,sequence,zone\n"
+            "2026-01-01T00:00:00+00:00,5,IDA2,DE_LU\n"
+            "2026-01-01T01:00:00+00:00,6,ida_3,NL\n",
+            default_zone="DE_LU",
+        )
+        assert set(zip(df["zone"], df["sequence"], strict=True)) == {
+            ("DE_LU", 2), ("NL", 3),
+        }
+
+    def test_non_numeric_sequence_raises_not_coerced(self) -> None:
+        # Regression: 'IDA2'-style typos or garbage must not silently become
+        # the default round (which would file the rows under the wrong table).
+        with pytest.raises(ValueError, match="not understood"):
+            parse_intraday_csv(
+                "timestamp,ida_price_eur_mwh,sequence\n2026-01-01,5,bogus\n",
+                default_zone="DE_LU",
+            )
+
+    @pytest.mark.filterwarnings("ignore:Could not infer format")
+    def test_garbage_sequence_in_dropped_row_is_tolerated(self) -> None:
+        # A bad sequence on a row that is dropped for a bad timestamp must not
+        # fail the whole upload. ('notadate' triggers pandas per-element date
+        # parsing, which is the intended robust-coerce behaviour here.)
+        df = parse_intraday_csv(
+            "timestamp,ida_price_eur_mwh,sequence\n"
+            "notadate,5,bogus\n"
+            "2026-01-01T00:00:00+00:00,6,1\n",
+            default_zone="DE_LU",
+        )
+        assert len(df) == 1
+        assert df["sequence"].iloc[0] == 1
+
+    def test_unknown_zone_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown bidding zone"):
+            parse_intraday_csv(
+                "timestamp,ida_price_eur_mwh,zone\n2026-01-01,5,XX_FAKE\n",
+                default_zone="DE_LU",
+            )
+
+    def test_persist_writes_to_same_cache_the_fetch_reads(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        """Manual IDA rows must land in the same SQLite tables the live fetch
+        reads, so the cockpit/revenue cache-first path picks them up."""
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        content = (
+            "timestamp,ida_price_eur_mwh,sequence,zone\n"
+            "2026-01-01T00:00:00+00:00,40,1,DE_LU\n"
+            "2026-01-01T01:00:00+00:00,42,1,DE_LU\n"
+            "2026-01-01T00:00:00+00:00,30,1,NL\n"
+        )
+        parsed = parse_intraday_csv(content, default_zone="DE_LU")
+        summaries = persist_intraday_frame(parsed)
+        assert {(s["zone"], s["sequence"]): s["rows"] for s in summaries} == {
+            ("DE_LU", 1): 2, ("NL", 1): 1,
+        }
+        cached = read_intraday_cache(
+            "DE_LU",
+            pd.Timestamp("2026-01-01", tz="UTC"),
+            pd.Timestamp("2026-01-02", tz="UTC"),
+            sequence=1,
+        )
+        assert cached is not None
+        assert cached["intraday_price_eur_mwh"].tolist() == [40.0, 42.0]
+
+    def test_provenance_is_durable_and_relabelled_by_live_write(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        """Manual provenance survives in SQLite (not just session state), and a
+        later live write to the same (zone, sequence) relabels it."""
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+
+        parsed = di.parse_intraday_csv(
+            "timestamp,ida_price_eur_mwh,sequence,zone\n"
+            "2026-01-01T00:00:00+00:00,40,1,DE_LU\n"
+            "2026-01-01T01:00:00+00:00,42,1,DE_LU\n",
+            default_zone="DE_LU",
+        )
+        di.persist_intraday_frame(parsed)
+
+        sources = di.read_intraday_sources()
+        assert sources[("DE_LU", 1)]["source"] == di.IDA_SOURCE_MANUAL
+        assert sources[("DE_LU", 1)]["rows"] == 2
+        assert sources[("DE_LU", 1)]["imported_at"]  # timestamp recorded
+
+        # A live fetch writing the same table relabels provenance (no stale
+        # "Manual CSV" after a real fetch arrives).
+        live = pd.DataFrame(
+            {"intraday_price_eur_mwh": [50.0]},
+            index=pd.DatetimeIndex(
+                [pd.Timestamp("2026-01-01T02:00:00+00:00")], name="timestamp",
+            ),
+        )
+        di.write_intraday_cache(live, "DE_LU", 1)  # default source = ENTSO-E
+        relabelled = di.read_intraday_sources()
+        # Manual + live rows coexist in the table, so provenance is Mixed
+        # (not the last writer's source).
+        assert relabelled[("DE_LU", 1)]["source"] == di.IDA_SOURCE_MIXED
+        assert relabelled[("DE_LU", 1)]["rows"] == 3  # union of both writes
+
+    def test_legacy_table_without_source_column_is_migrated(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        """A pre-provenance IDA table (no source column, e.g. the synthetic
+        seed) is migrated and its legacy rows are labelled, not silently
+        attributed to a real source."""
+        from src import data_ingestion as di
+        db = tmp_path / "legacy.db"
+        monkeypatch.setattr(di, "DB_PATH", db)
+        with sqlite3.connect(db) as conn:
+            conn.execute(
+                'CREATE TABLE "ida_prices_de_lu_seq1" '
+                "(timestamp TEXT PRIMARY KEY, intraday_price_eur_mwh REAL NOT NULL)"
+            )
+            conn.execute(
+                'INSERT INTO "ida_prices_de_lu_seq1" VALUES '
+                '("2026-01-01T00:00:00+00:00", 45.0)'
+            )
+        # A manual upload onto the legacy table migrates it and marks Mixed
+        # (legacy sentinel + Manual CSV).
+        parsed = di.parse_intraday_csv(
+            "timestamp,ida_price_eur_mwh,sequence,zone\n"
+            "2026-01-01T01:00:00+00:00,40,1,DE_LU\n",
+            default_zone="DE_LU",
+        )
+        di.persist_intraday_frame(parsed)
+        assert di.read_intraday_sources()[("DE_LU", 1)]["source"] == di.IDA_SOURCE_MIXED
+        # The legacy price row is still readable (migration preserved data).
+        cached = di.read_intraday_cache(
+            "DE_LU",
+            pd.Timestamp("2026-01-01", tz="UTC"),
+            pd.Timestamp("2026-01-02", tz="UTC"),
+            sequence=1,
+        )
+        assert cached is not None and len(cached) == 2
 
 
 # ── Test 15: REE ESIOS (Spain) ──────────────────────────────────────────────

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import functools
+import io
 import itertools
 import logging
 import re
 import sqlite3
 import time
 from collections.abc import Callable
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 import numpy as np
@@ -1881,11 +1882,25 @@ def _ida_cache_table(zone: str, sequence: int) -> str:
     return f"ida_prices_{zone.lower()}_seq{sequence}"
 
 
+IDA_SOURCE_ENTSOE = "ENTSO-E intraday auction"
+IDA_SOURCE_MANUAL = "Manual CSV"
+IDA_SOURCE_MIXED = "Mixed"
+IDA_SOURCE_LEGACY = "Unknown (pre-provenance cache)"
+_IDA_SOURCE_TABLE = "ida_price_sources"
+
+
 def write_intraday_cache(
     df: pd.DataFrame, zone: str, sequence: int,
+    *, source: str = IDA_SOURCE_ENTSOE,
 ) -> None:
     """Persist IDA prices to SQLite. Auction prints are final once published,
     so we INSERT OR REPLACE on the timestamp key without freshness tracking.
+
+    ``source`` (``IDA_SOURCE_ENTSOE`` for the live fetch, ``IDA_SOURCE_MANUAL``
+    for an uploaded CSV) is stored PER ROW, so a table that mixes manually
+    uploaded and live-fetched intervals is labelled ``Mixed`` in the durable
+    ``ida_price_sources`` sidecar rather than inheriting only the last write's
+    source. Data Trust reads that sidecar so provenance survives a restart.
     """
     if df.empty:
         return
@@ -1894,17 +1909,100 @@ def write_intraday_cache(
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             f'CREATE TABLE IF NOT EXISTS "{table}" '
-            "(timestamp TEXT PRIMARY KEY, intraday_price_eur_mwh REAL NOT NULL)"
+            "(timestamp TEXT PRIMARY KEY, intraday_price_eur_mwh REAL NOT NULL, "
+            "source TEXT)"
         )
+        _ensure_intraday_source_column(conn, table)
         rows = [
-            (ts.isoformat() if hasattr(ts, "isoformat") else str(ts), float(price))
+            (ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+             float(price), source)
             for ts, price in df["intraday_price_eur_mwh"].items()
         ]
         conn.executemany(
             f'INSERT OR REPLACE INTO "{table}" '
-            "(timestamp, intraday_price_eur_mwh) VALUES (?, ?)",
+            "(timestamp, intraday_price_eur_mwh, source) VALUES (?, ?, ?)",
             rows,
         )
+        _record_intraday_source(conn, table, zone, sequence)
+
+
+def _ensure_intraday_source_column(conn: sqlite3.Connection, table: str) -> None:
+    """Add the per-row ``source`` column to a pre-provenance IDA price table.
+
+    Older caches (and the synthetic seed table) predate per-row provenance;
+    their rows are backfilled with a clearly-labelled legacy sentinel so they
+    are never silently attributed to a real source.
+    """
+    existing = {row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')}
+    if "source" not in existing:
+        conn.execute(f'ALTER TABLE "{table}" ADD COLUMN source TEXT')
+    conn.execute(
+        f'UPDATE "{table}" SET source = ? WHERE source IS NULL',
+        (IDA_SOURCE_LEGACY,),
+    )
+
+
+def _record_intraday_source(
+    conn: sqlite3.Connection, table: str, zone: str, sequence: int,
+) -> None:
+    """Upsert a provenance row reflecting the FULL cached extent of one
+    (zone, sequence) IDA table after a write. The label is derived from the
+    DISTINCT per-row sources: a single source when uniform, else ``Mixed``."""
+    n, first, last = conn.execute(
+        f'SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM "{table}"'
+    ).fetchone()
+    distinct = sorted(
+        row[0] for row in conn.execute(f'SELECT DISTINCT source FROM "{table}"')
+        if row[0] is not None
+    )
+    if not distinct:
+        label = IDA_SOURCE_LEGACY
+    elif len(distinct) == 1:
+        label = distinct[0]
+    else:
+        label = IDA_SOURCE_MIXED
+    conn.execute(
+        f'CREATE TABLE IF NOT EXISTS "{_IDA_SOURCE_TABLE}" '
+        "(zone TEXT, sequence INTEGER, source TEXT, rows INTEGER, "
+        "first_timestamp TEXT, last_timestamp TEXT, imported_at TEXT, "
+        "PRIMARY KEY (zone, sequence))"
+    )
+    conn.execute(
+        f'INSERT OR REPLACE INTO "{_IDA_SOURCE_TABLE}" '
+        "(zone, sequence, source, rows, first_timestamp, last_timestamp, imported_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (zone, int(sequence), label, int(n), first, last,
+         datetime.now(UTC).isoformat()),
+    )
+
+
+def read_intraday_sources() -> dict[tuple[str, int], dict[str, Any]]:
+    """Return durable IDA provenance keyed by (zone, sequence).
+
+    Each value has ``source``, ``rows``, ``first`` / ``last`` (UTC Timestamps),
+    and ``imported_at``. Empty when the sidecar table does not exist yet.
+    """
+    if not DB_PATH.exists():
+        return {}
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.execute(
+                f'SELECT zone, sequence, source, rows, first_timestamp, '
+                f'last_timestamp, imported_at FROM "{_IDA_SOURCE_TABLE}"'
+            )
+            recorded = cur.fetchall()
+    except sqlite3.DatabaseError:
+        return {}
+    out: dict[tuple[str, int], dict[str, Any]] = {}
+    for zone, sequence, source, rows, first, last, imported_at in recorded:
+        out[(str(zone), int(sequence))] = {
+            "source": source,
+            "rows": int(rows),
+            "first": pd.to_datetime(first, utc=True, errors="coerce"),
+            "last": pd.to_datetime(last, utc=True, errors="coerce"),
+            "imported_at": imported_at,
+        }
+    return out
 
 
 def read_intraday_cache(
@@ -1936,6 +2034,178 @@ def read_intraday_cache(
     df = df.dropna(subset=["timestamp"]).set_index("timestamp").sort_index()
     df.index.name = "timestamp"
     return df
+
+
+INTRADAY_CSV_COLUMNS = ("timestamp", "ida_price_eur_mwh", "sequence", "zone")
+
+
+def generate_intraday_template_csv() -> str:
+    """Return a sample IDA price upload CSV (header + a few rows).
+
+    Columns: ``timestamp`` (UTC ISO 8601 — include a ``+00:00`` offset, or a
+    naive value is interpreted as UTC), ``ida_price_eur_mwh``, and the
+    optional ``sequence`` (1/2/3, default 1) and ``zone`` (defaults to the
+    active bidding zone) columns. This is the manual fallback for zones or
+    windows where the ENTSO-E intraday-auction endpoint returns no data.
+    """
+    return (
+        "timestamp,ida_price_eur_mwh,sequence,zone\n"
+        "2026-01-01T00:00:00+00:00,72.5,1,DE_LU\n"
+        "2026-01-01T01:00:00+00:00,68.0,1,DE_LU\n"
+        "2026-01-01T02:00:00+00:00,65.4,1,DE_LU\n"
+    )
+
+
+def _coerce_intraday_sequence(
+    values: pd.Series, default_sequence: int,
+) -> pd.Series:
+    """Map a raw ``sequence`` column to numeric IDA rounds.
+
+    Blank / NA cells fall back to ``default_sequence``. Bare ``1/2/3`` and
+    ``IDA1/IDA2/IDA3`` labels (case-insensitive, optional separator) are
+    accepted. Any other non-blank value raises ``ValueError`` rather than
+    being silently coerced to the default round — a non-numeric ``sequence``
+    must never quietly send IDA2/IDA3 data into the IDA1 table.
+    """
+    text = values.astype("string").str.strip()
+    is_blank = text.isna() | (text.str.len() == 0)
+    cleaned = text.str.upper().str.replace(r"^IDA[\s_-]*", "", regex=True)
+    numeric = pd.to_numeric(cleaned, errors="coerce")
+    invalid = (~is_blank) & numeric.isna()
+    if invalid.any():
+        bad = sorted(set(text[invalid].dropna().tolist()))
+        raise ValueError(
+            f"IDA 'sequence' values not understood: {bad}. "
+            "Use 1/2/3 or IDA1/IDA2/IDA3."
+        )
+    return numeric.where(~is_blank, other=float(default_sequence))
+
+
+def parse_intraday_csv(
+    content: str,
+    *,
+    default_zone: str | None = None,
+    default_sequence: int = 1,
+) -> pd.DataFrame:
+    """Parse a manual IDA price CSV into a normalised long frame.
+
+    Required columns: ``timestamp`` and ``ida_price_eur_mwh`` (header match
+    is case-insensitive). Optional ``sequence`` (``1/2/3`` or ``IDA1/2/3``)
+    and ``zone`` columns fall back to ``default_sequence`` / ``default_zone``
+    when absent or blank. Timestamps are coerced to UTC (a naive value is
+    assumed UTC). Negative prices are retained; only unparseable
+    timestamp/price rows are dropped.
+
+    Args:
+        content: Raw CSV text.
+        default_zone: Zone for rows without a ``zone`` value. Usually the
+            active dashboard zone.
+        default_sequence: IDA round for rows without a ``sequence`` value.
+
+    Returns:
+        UTC-indexed frame with columns ``[zone, sequence,
+        intraday_price_eur_mwh]``, deduplicated on (zone, sequence,
+        timestamp) keeping the last row, sorted by timestamp.
+
+    Raises:
+        ValueError: missing required columns, an unknown zone, a sequence
+            outside {1, 2, 3}, or no parseable rows.
+    """
+    try:
+        raw = pd.read_csv(io.StringIO(content))
+    except (pd.errors.ParserError, pd.errors.EmptyDataError, ValueError) as exc:
+        raise ValueError(f"Could not parse IDA CSV: {exc}") from exc
+
+    cols = {str(c).strip().lower(): c for c in raw.columns}
+    if "timestamp" not in cols or "ida_price_eur_mwh" not in cols:
+        raise ValueError(
+            "IDA CSV must have at least 'timestamp' and 'ida_price_eur_mwh' columns."
+        )
+
+    out = pd.DataFrame({
+        "timestamp": pd.to_datetime(raw[cols["timestamp"]], utc=True, errors="coerce"),
+        "intraday_price_eur_mwh": pd.to_numeric(
+            raw[cols["ida_price_eur_mwh"]], errors="coerce",
+        ),
+    })
+    # Carry raw sequence/zone so validation runs only on rows that survive the
+    # timestamp/price dropna (garbage in an already-dropped row must not fail
+    # the whole upload).
+    if "sequence" in cols:
+        out["_seq_raw"] = raw[cols["sequence"]]
+    if "zone" in cols:
+        zone_ser = raw[cols["zone"]].astype("string").str.strip()
+        out["zone"] = zone_ser.where(zone_ser.str.len() > 0, other=default_zone)
+    else:
+        out["zone"] = default_zone
+
+    out = out.dropna(subset=["timestamp", "intraday_price_eur_mwh"])
+    if out.empty:
+        raise ValueError(
+            "No valid IDA rows after parsing — check the timestamp and "
+            "ida_price_eur_mwh columns."
+        )
+    if out["zone"].isna().any():
+        raise ValueError(
+            "IDA CSV has rows without a zone and no default zone was provided."
+        )
+    out["zone"] = out["zone"].astype(str)
+
+    if "_seq_raw" in out.columns:
+        seq = _coerce_intraday_sequence(out.pop("_seq_raw"), default_sequence)
+    else:
+        seq = pd.Series(float(default_sequence), index=out.index)
+    # Reject fractional sequences (e.g. 1.5) BEFORE the int cast, which would
+    # otherwise silently truncate them to a valid round (1.5 -> IDA1).
+    if not (seq.dropna() % 1 == 0).all():
+        raise ValueError("IDA 'sequence' must be a whole number (1, 2 or 3).")
+    out["sequence"] = seq.astype(int)
+    bad_seq = sorted(int(s) for s in set(out["sequence"].unique()) - {1, 2, 3})
+    if bad_seq:
+        raise ValueError(f"IDA 'sequence' must be 1, 2 or 3; got {bad_seq}.")
+    for zone in out["zone"].unique():
+        _validate_zone(zone)
+
+    out = (
+        out.drop_duplicates(subset=["zone", "sequence", "timestamp"], keep="last")
+        .set_index("timestamp")
+        .sort_index()
+    )
+    out.index.name = "timestamp"
+    return out[["zone", "sequence", "intraday_price_eur_mwh"]]
+
+
+def persist_intraday_frame(long_df: pd.DataFrame) -> list[dict[str, Any]]:
+    """Write a parsed IDA long frame to SQLite, one table per (zone, sequence).
+
+    Reuses ``write_intraday_cache`` so manually uploaded prices land in the
+    same ``ida_prices_{zone}_seq{n}`` tables the live fetch and the cockpit
+    already read, with no separate code path downstream.
+
+    Args:
+        long_df: Output of :func:`parse_intraday_csv`.
+
+    Returns:
+        One summary dict per (zone, sequence) group with keys ``zone``,
+        ``sequence``, ``rows``, ``first``, ``last``.
+    """
+    summaries: list[dict[str, Any]] = []
+    if long_df is None or long_df.empty:
+        return summaries
+    for (zone, sequence), grp in long_df.groupby(["zone", "sequence"], sort=True):
+        frame = grp[["intraday_price_eur_mwh"]]
+        write_intraday_cache(
+            frame, str(zone), int(sequence), source=IDA_SOURCE_MANUAL,
+        )
+        idx = pd.DatetimeIndex(frame.index)
+        summaries.append({
+            "zone": str(zone),
+            "sequence": int(sequence),
+            "rows": len(frame),
+            "first": idx.min(),
+            "last": idx.max(),
+        })
+    return summaries
 
 
 def fetch_intraday_prices(

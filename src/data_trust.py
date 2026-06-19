@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from src.config import get_zone_timezone, is_elexon_zone
-from src.data_ingestion import summarize_price_data_quality
+from src.data_ingestion import read_intraday_sources, summarize_price_data_quality
 
 QUALITY_COLUMNS = [
     "zone", "source", "timezone", "first_timestamp_utc", "last_timestamp_utc",
@@ -13,6 +13,49 @@ QUALITY_COLUMNS = [
     "source_gap_intervals", "imputed_intervals", "missing_intervals",
     "source_gap_pct", "imputed_pct", "missing_pct", "max_source_gap_hours",
 ]
+
+INTRADAY_SOURCE_COLUMNS = [
+    "zone", "sequence", "source", "rows",
+    "first_timestamp_utc", "last_timestamp_utc", "imported_at",
+]
+
+
+def build_intraday_source_table(
+    sources: dict[tuple[str, int], dict] | None = None,
+) -> pd.DataFrame:
+    """Build an audit table of cached IDA price provenance.
+
+    Provenance is read from the durable ``ida_price_sources`` SQLite sidecar
+    (written by ``write_intraday_cache``) so it survives a session/server
+    restart — manually uploaded IDA prices stay labelled ``Manual CSV`` even
+    after the uploading session is gone, and a later live fetch relabels the
+    same (zone, sequence) instead of leaving a stale manual label.
+
+    Args:
+        sources: Optional pre-built provenance mapping ``(zone, sequence) ->
+            {"source", "rows", "first", "last", "imported_at"}``. When None,
+            it is read from the database (the normal path; the argument exists
+            for testing).
+
+    Returns:
+        One row per (zone, sequence), sorted by zone then sequence.
+    """
+    if sources is None:
+        sources = read_intraday_sources()
+    rows: list[dict[str, object]] = []
+    for (zone, sequence), meta in sorted((sources or {}).items()):
+        rows.append({
+            "zone": str(zone),
+            "sequence": int(sequence),
+            "source": meta.get("source", "Manual CSV"),
+            "rows": int(meta.get("rows", 0)),
+            "first_timestamp_utc": meta.get("first", pd.NaT),
+            "last_timestamp_utc": meta.get("last", pd.NaT),
+            "imported_at": meta.get("imported_at"),
+        })
+    if not rows:
+        return pd.DataFrame(columns=INTRADAY_SOURCE_COLUMNS)
+    return pd.DataFrame(rows, columns=INTRADAY_SOURCE_COLUMNS)
 
 
 def source_label_for_zone(zone: str) -> str:

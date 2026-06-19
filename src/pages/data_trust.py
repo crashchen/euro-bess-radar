@@ -5,7 +5,10 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from src.data_trust import build_zone_data_quality_table
+from src.data_trust import (
+    build_intraday_source_table,
+    build_zone_data_quality_table,
+)
 
 
 def render(
@@ -79,6 +82,39 @@ def render(
             ),
         },
     )
+
+    intraday_sources = build_intraday_source_table()
+    if not intraday_sources.empty:
+        st.markdown("**Intraday (IDA) price sources**")
+        if (intraday_sources["source"] == "Manual CSV").any():
+            st.caption(
+                "Provenance of cached intraday (IDA) prices. Rows marked "
+                "'Manual CSV' were imported from an upload, not the ENTSO-E "
+                "intraday-auction API — the cockpit/uplift numbers that use them "
+                "are only as trustworthy as the uploaded file."
+            )
+        else:
+            st.caption("Provenance of cached intraday (IDA) prices.")
+        st.dataframe(
+            intraday_sources,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "zone": "Zone",
+                "sequence": "IDA Round",
+                "source": "Source",
+                "rows": st.column_config.NumberColumn("Rows", format="%d"),
+                "first_timestamp_utc": st.column_config.DatetimeColumn(
+                    "First UTC", format="YYYY-MM-DD HH:mm",
+                ),
+                "last_timestamp_utc": st.column_config.DatetimeColumn(
+                    "Last UTC", format="YYYY-MM-DD HH:mm",
+                ),
+                "imported_at": st.column_config.DatetimeColumn(
+                    "Imported (UTC)", format="YYYY-MM-DD HH:mm",
+                ),
+            },
+        )
 
     st.caption(
         "Licensing note: this repository licenses code under Apache-2.0 only. "
