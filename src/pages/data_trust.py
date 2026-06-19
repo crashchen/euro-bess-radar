@@ -15,6 +15,7 @@ def render(
     *,
     zone_data: dict[str, pd.DataFrame],
     zone_timezones: dict[str, str] | None = None,
+    assumptions: pd.DataFrame | None = None,
 ) -> None:
     """Render source and data-quality diagnostics for fetched zones."""
     st.subheader("Data Trust — Source Traceability")
@@ -113,6 +114,26 @@ def render(
                 "imported_at": st.column_config.DatetimeColumn(
                     "Imported (UTC)", format="YYYY-MM-DD HH:mm",
                 ),
+            },
+        )
+
+    if assumptions is not None and not assumptions.empty:
+        st.markdown("**Model assumptions & haircuts**")
+        st.caption(
+            "Every screening number rests on these. Sidebar values are the "
+            "user's inputs; config values are fixed math/data constants. This "
+            "is the one place to answer \"where did this number come from?\"."
+        )
+        st.dataframe(
+            assumptions,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "parameter": "Assumption",
+                "value": "Value",
+                "unit": "Unit",
+                "source": "Source",
+                "affects": "What it affects",
             },
         )
 

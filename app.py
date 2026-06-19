@@ -18,6 +18,7 @@ from src.analytics import (
     filter_to_complete_local_days,
 )
 from src.ancillary import build_ancillary_dataset
+from src.assumptions import build_assumptions_table
 from src.components.sidebar import (
     _format_data_error,
     load_zone_data,
@@ -315,9 +316,31 @@ if fetch_btn or "zone_data" in st.session_state:
         )
 
     with tabs[8]:
+        _fmode_label = st.session_state.get("forecast_policy_mode")
+        _forecast_mode = {
+            "Walk-forward": "walk_forward",
+            "LOO cross-validation": "loo",
+        }.get(_fmode_label)
+        _fbucket_label = st.session_state.get("forecast_policy_bucket")
+        _forecast_bucket = {
+            "Hour-of-week": "hour_of_week",
+            "Hour-of-day": "hour_of_day",
+        }.get(_fbucket_label)
+        assumptions = build_assumptions_table(
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            capture_rate=capture_rate,
+            capex_eur_kwh=capex_eur_kwh,
+            use_lp_dispatch=use_lp_dispatch,
+            deadband_eur_per_mw=st.session_state.get("forecast_policy_deadband"),
+            forecast_mode=_forecast_mode,
+            forecast_bucket=_forecast_bucket,
+        )
         data_trust.render(
             zone_data=zone_data,
             zone_timezones={zone: get_zone_timezone(zone) for zone in zone_data},
+            assumptions=assumptions,
         )
 
     # ── Export button ────────────────────────────────────────────────────
