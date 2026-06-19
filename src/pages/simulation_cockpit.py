@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.assumptions import CAPTURE_PARAM_LABEL
 from src.export import cockpit_tables_to_excel
 from src.simulation import (
     available_local_dates,
@@ -20,6 +21,36 @@ from src.simulation import (
 )
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _cockpit_export_assumptions(
+    assumptions: pd.DataFrame | None,
+    *,
+    capture_value: str,
+    capture_affects: str,
+    capture_label: str = "Cockpit capture haircut",
+) -> pd.DataFrame | None:
+    """Adapt the global assumptions for a cockpit export.
+
+    The cockpit ignores the sidebar DA-slippage capture rate (it uses its own
+    haircut, or none for the forecast panel), so the exported Assumptions
+    sheet must override that row instead of inheriting the sidebar value and
+    contradicting the numbers. Falls back to appending if the sidebar capture
+    label has drifted, so the cockpit context is never silently dropped.
+    """
+    if assumptions is None or assumptions.empty:
+        return assumptions
+    out = assumptions.copy()
+    mask = out["parameter"] == CAPTURE_PARAM_LABEL
+    new_row = {
+        "parameter": capture_label, "value": capture_value, "unit": "",
+        "source": "Cockpit panel", "affects": capture_affects,
+    }
+    if mask.any():
+        for col, val in new_row.items():
+            out.loc[mask, col] = val
+        return out
+    return pd.concat([out, pd.DataFrame([new_row])], ignore_index=True)
 
 
 def _cockpit_download_button(
@@ -750,8 +781,17 @@ def _render_multi_day_summary(
         if len(batch) >= 7:
             _plot_weekday_heatmap(batch, chart_template)
         st.dataframe(batch, width="stretch", hide_index=True)
+        # `capture_rate` here is the cockpit's own haircut, not the sidebar's.
+        export_assumptions = _cockpit_export_assumptions(
+            assumptions,
+            capture_value=f"{capture_rate:.0%}",
+            capture_affects=(
+                "Haircut on cockpit replay revenue (the sidebar capture rate "
+                "is intentionally ignored in the cockpit)"
+            ),
+        )
         _cockpit_download_button(
-            {"Multi-day Replay": batch}, assumptions,
+            {"Multi-day Replay": batch}, export_assumptions,
             key="dl_multi_day_replay",
             label="\U0001f4e5 Download multi-day replay (Excel)",
             file_name="cockpit_multiday_replay.xlsx",
@@ -877,8 +917,18 @@ def _render_forecast_policy_section(
         )
         _render_forecast_skill(summary.get("forecast_skill", {}), chart_template)
         st.dataframe(per_day, width="stretch", hide_index=True)
+        # This panel reports raw solver values — no capture haircut applied.
+        export_assumptions = _cockpit_export_assumptions(
+            assumptions,
+            capture_label="Capture haircut",
+            capture_value="not applied",
+            capture_affects=(
+                "The forecast-policy panel reports raw solver values; no "
+                "capture haircut is applied"
+            ),
+        )
         _cockpit_download_button(
-            {"Sequential DA+ID": per_day}, assumptions,
+            {"Sequential DA+ID": per_day}, export_assumptions,
             key="dl_forecast_policy",
             label="\U0001f4e5 Download forecast policy (Excel)",
             file_name="cockpit_forecast_policy.xlsx",

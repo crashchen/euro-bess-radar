@@ -908,6 +908,7 @@ def _render_intraday_uplift_section(
         rebid_share = c2.slider(
             "Rebid share",
             min_value=0.0, max_value=0.5, value=0.25, step=0.05,
+            key="revenue_rebid_share",
             help=(
                 "Fraction of BESS capacity assumed available for ID rebid "
                 "after the DA position is committed. 0.25 = conservative "

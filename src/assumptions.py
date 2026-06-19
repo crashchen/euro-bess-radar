@@ -17,6 +17,9 @@ from src.dispatch import DISPATCH_VOM_COST_EUR_MWH
 from src.simulation import DAYS_PER_YEAR
 
 ASSUMPTION_COLUMNS = ["parameter", "value", "unit", "source", "affects"]
+# The sidebar DA-slippage capture row; the cockpit export overrides it because
+# the cockpit uses its own capture haircut (or none, for the forecast panel).
+CAPTURE_PARAM_LABEL = "Capture rate (DA slippage)"
 
 
 def build_assumptions_table(
@@ -51,7 +54,7 @@ def build_assumptions_table(
          "Rolling spread window + SoC capacity (MWh = power x duration)"),
         ("Round-trip efficiency", f"{efficiency:.0%}", "", "Sidebar",
          "Charge/discharge losses in every MILP solve"),
-        ("Capture rate (DA slippage)", f"{capture_rate:.0%}", "", "Sidebar",
+        (CAPTURE_PARAM_LABEL, f"{capture_rate:.0%}", "", "Sidebar",
          "Haircut on realised DA arbitrage; NOT applied to the "
          "forecast-policy panel"),
         ("CapEx", f"{capex_eur_kwh:g}", "EUR/kWh", "Sidebar",

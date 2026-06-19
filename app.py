@@ -221,6 +221,7 @@ if fetch_btn or "zone_data" in st.session_state:
         capture_rate=capture_rate,
         capex_eur_kwh=capex_eur_kwh,
         use_lp_dispatch=use_lp_dispatch,
+        rebid_share=st.session_state.get("revenue_rebid_share"),
         deadband_eur_per_mw=st.session_state.get("forecast_policy_deadband"),
         forecast_mode=_forecast_mode,
         forecast_bucket=_forecast_bucket,

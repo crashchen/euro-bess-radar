@@ -68,3 +68,48 @@ def test_panel_knobs_appended_only_when_provided() -> None:
     ))
     assert knob_val["Rebid deadband"] == "2.5"
     assert knob_val["IDA rebid share (screening)"] == "25%"
+
+
+# ── Cockpit export capture-row override ─────────────────────────────────────
+
+def test_cockpit_export_overrides_sidebar_capture_row() -> None:
+    from src.pages.simulation_cockpit import _cockpit_export_assumptions
+
+    table = build_assumptions_table(**_base())  # capture_rate=0.70 -> "70%"
+    out = _cockpit_export_assumptions(
+        table, capture_value="100%",
+        capture_affects="Cockpit haircut",
+    )
+    # The sidebar capture row is gone; a cockpit capture row replaces it.
+    params = set(out["parameter"])
+    assert "Capture rate (DA slippage)" not in params
+    assert "Cockpit capture haircut" in params
+    row = out[out["parameter"] == "Cockpit capture haircut"].iloc[0]
+    assert row["value"] == "100%"
+    assert row["source"] == "Cockpit panel"
+    # No new row count drift (replaced in place, not appended).
+    assert len(out) == len(table)
+
+
+def test_cockpit_export_appends_when_capture_row_missing() -> None:
+    import pandas as pd
+
+    from src.assumptions import ASSUMPTION_COLUMNS
+    from src.pages.simulation_cockpit import _cockpit_export_assumptions
+
+    no_capture = pd.DataFrame(
+        [["Power", "10", "MW", "Sidebar", "scaling"]],
+        columns=ASSUMPTION_COLUMNS,
+    )
+    out = _cockpit_export_assumptions(
+        no_capture, capture_value="not applied", capture_affects="raw",
+        capture_label="Capture haircut",
+    )
+    assert "Capture haircut" in set(out["parameter"])
+    assert len(out) == 2  # appended, nothing dropped
+
+
+def test_cockpit_export_assumptions_none_passthrough() -> None:
+    from src.pages.simulation_cockpit import _cockpit_export_assumptions
+
+    assert _cockpit_export_assumptions(None, capture_value="x", capture_affects="y") is None
