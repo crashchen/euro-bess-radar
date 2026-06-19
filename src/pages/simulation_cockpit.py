@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.export import cockpit_tables_to_excel
 from src.simulation import (
     available_local_dates,
     build_dispatch_event_table,
@@ -17,6 +18,20 @@ from src.simulation import (
     simulate_replay_batch,
     simulate_sequential_da_id_batch,
 )
+
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def _cockpit_download_button(
+    tables: dict, assumptions, *, key: str, label: str, file_name: str,
+) -> None:
+    """Offer an xlsx download of cockpit result tables (+ assumptions), or
+    nothing when there is no data to export."""
+    data = cockpit_tables_to_excel(tables, assumptions=assumptions)
+    if data:
+        st.download_button(
+            label, data=data, file_name=file_name, mime=_XLSX_MIME, key=key,
+        )
 
 # Color semantics — assign concepts to hues so a reader can decode by color.
 _C_PRICE = "#FF2D95"      # markets / DA price / interval revenue (magenta)
@@ -45,6 +60,7 @@ def render(
     capex_eur_kwh: float,
     zone_tz: str,
     chart_template: str,
+    assumptions: pd.DataFrame | None = None,
 ) -> None:
     """Render an enspired-like historical simulation cockpit."""
     _inject_cockpit_css()
@@ -155,6 +171,7 @@ def render(
         capture_rate=cockpit_capture_rate,
         capex_eur_kwh=capex_eur_kwh,
         chart_template=chart_template,
+        assumptions=assumptions,
     )
     _render_forecast_policy_section(
         primary_df=primary_df,
@@ -165,6 +182,7 @@ def render(
         duration_hours=duration_hours,
         efficiency=efficiency,
         chart_template=chart_template,
+        assumptions=assumptions,
     )
 
     with st.expander("Simulation interval data", expanded=False):
@@ -667,6 +685,7 @@ def _render_multi_day_summary(
     capture_rate: float,
     capex_eur_kwh: float,
     chart_template: str,
+    assumptions: pd.DataFrame | None = None,
 ) -> None:
     with st.expander("Multi-day replay summary", expanded=False):
         st.caption(
@@ -731,6 +750,12 @@ def _render_multi_day_summary(
         if len(batch) >= 7:
             _plot_weekday_heatmap(batch, chart_template)
         st.dataframe(batch, width="stretch", hide_index=True)
+        _cockpit_download_button(
+            {"Multi-day Replay": batch}, assumptions,
+            key="dl_multi_day_replay",
+            label="\U0001f4e5 Download multi-day replay (Excel)",
+            file_name="cockpit_multiday_replay.xlsx",
+        )
 
 
 def _render_forecast_policy_section(
@@ -743,6 +768,7 @@ def _render_forecast_policy_section(
     duration_hours: int,
     efficiency: float,
     chart_template: str,
+    assumptions: pd.DataFrame | None = None,
 ) -> None:
     """Three-way DA-only / forecast-realised / perfect-foresight panel."""
     with st.expander("Forecast-driven IDA policy (vs perfect-foresight ceiling)", expanded=False):
@@ -851,6 +877,12 @@ def _render_forecast_policy_section(
         )
         _render_forecast_skill(summary.get("forecast_skill", {}), chart_template)
         st.dataframe(per_day, width="stretch", hide_index=True)
+        _cockpit_download_button(
+            {"Sequential DA+ID": per_day}, assumptions,
+            key="dl_forecast_policy",
+            label="\U0001f4e5 Download forecast policy (Excel)",
+            file_name="cockpit_forecast_policy.xlsx",
+        )
 
 
 def _render_forecast_skill(skill: dict, chart_template: str) -> None:
