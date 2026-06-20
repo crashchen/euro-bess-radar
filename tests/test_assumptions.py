@@ -113,3 +113,34 @@ def test_cockpit_export_assumptions_none_passthrough() -> None:
     from src.pages.simulation_cockpit import _cockpit_export_assumptions
 
     assert _cockpit_export_assumptions(None, capture_value="x", capture_affects="y") is None
+
+
+def test_reserve_assumptions_appended_with_provenance() -> None:
+    import pandas as pd
+
+    from src.config import ANCILLARY_CAPACITY_AVAILABILITY
+    from src.pages.simulation_cockpit import _append_reserve_assumptions
+
+    base = pd.DataFrame(
+        [["Power", "10", "MW", "Sidebar", "scaling"]], columns=ASSUMPTION_COLUMNS,
+    )
+    out = _append_reserve_assumptions(
+        base, product="FCR", capacity_price_eur_mw_h=13.0,
+    )
+    params = set(out["parameter"])
+    assert {"Reserve co-opt product", "Reserve capacity price",
+            "Reserve availability haircut", "Reserve activation energy",
+            "Reserve additivity with DA"} <= params
+    # Audit red-line is spelled out, not implied.
+    avail_row = out[out["parameter"] == "Reserve availability haircut"].iloc[0]
+    assert avail_row["value"] == f"{ANCILLARY_CAPACITY_AVAILABILITY:.2f}"
+    energy_row = out[out["parameter"] == "Reserve activation energy"].iloc[0]
+    assert energy_row["value"] == "not modelled"
+
+
+def test_reserve_assumptions_none_passthrough() -> None:
+    from src.pages.simulation_cockpit import _append_reserve_assumptions
+
+    assert _append_reserve_assumptions(
+        None, product="FCR", capacity_price_eur_mw_h=1.0,
+    ) is None

@@ -11,8 +11,10 @@ from src.ancillary import (
     ANCILLARY_TEMPLATES,
     build_ancillary_dataset,
     calculate_ancillary_revenue,
+    capacity_price_for_product,
     co_optimize_revenue_split,
     generate_template_csv,
+    list_capacity_products,
     merge_revenue_stack,
     normalize_auto_fetch_dataset,
     parse_ancillary_csv,
@@ -776,3 +778,40 @@ class TestCoOptimizeRevenueSplit:
         assert result["capacity_revenue"] == pytest.approx(
             HOURS_PER_YEAR * ANCILLARY_CAPACITY_AVAILABILITY * 2.0 * 3.0,
         )
+
+
+class TestCapacityProductHelpers:
+    """list_capacity_products / capacity_price_for_product feed the cockpit's
+    reserve co-opt strategy row."""
+
+    def _df(self) -> pd.DataFrame:
+        idx = pd.to_datetime(
+            ["2025-01-01T00:00:00Z", "2025-01-01T01:00:00Z", "2025-01-01T02:00:00Z"],
+            utc=True,
+        )
+        return pd.DataFrame({
+            "capacity_price_eur_mw": [10.0, 20.0, float("nan")],
+            "energy_price_eur_mwh": [float("nan"), float("nan"), 5.0],
+            "product_type": ["FCR", "FCR", "aFRR Up"],
+            "direction": ["", "", "Up"],
+            "zone": ["DE_LU", "DE_LU", "DE_LU"],
+        }, index=idx)
+
+    def test_lists_only_capacity_priced_products(self) -> None:
+        products = list_capacity_products(self._df())
+        # aFRR Up has only an energy price -> excluded; FCR has capacity rows.
+        assert products == ["FCR"]
+
+    def test_empty_and_none_inputs_return_empty_list(self) -> None:
+        assert list_capacity_products(None) == []
+        assert list_capacity_products(pd.DataFrame()) == []
+
+    def test_price_is_duration_weighted_mean(self) -> None:
+        # Two consecutive 1h FCR rows (10, 20) -> duration-weighted mean 15.
+        price = capacity_price_for_product(self._df(), "FCR")
+        assert price == pytest.approx(15.0)
+
+    def test_price_none_when_product_has_no_capacity(self) -> None:
+        assert capacity_price_for_product(self._df(), "aFRR Up") is None
+        assert capacity_price_for_product(self._df(), "missing") is None
+        assert capacity_price_for_product(None, "FCR") is None

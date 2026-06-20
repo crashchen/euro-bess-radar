@@ -9,7 +9,10 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.ancillary import capacity_price_for_product, list_capacity_products
 from src.assumptions import CAPTURE_PARAM_LABEL
+from src.config import ANCILLARY_CAPACITY_AVAILABILITY
+from src.dispatch import solve_joint_capacity_batch
 from src.export import cockpit_tables_to_excel
 from src.simulation import (
     available_local_dates,
@@ -208,6 +211,7 @@ def render(
     _render_forecast_policy_section(
         primary_df=primary_df,
         intraday_df=intraday_df,
+        anc_df=anc_df,
         dates=dates,
         zone_tz=zone_tz,
         power_mw=power_mw,
@@ -806,10 +810,140 @@ def _render_multi_day_summary(
         )
 
 
+def _slice_to_local_dates(
+    df: pd.DataFrame, keep_dates: set, tz: str,
+) -> pd.DataFrame:
+    """Filter a UTC-indexed frame to rows whose local date is kept.
+
+    Returns an empty frame for a non-datetime index so a caller windowing
+    capacity prices omits the row rather than silently pricing off the full
+    sample.
+    """
+    if df is None or df.empty:
+        return df
+    idx = df.index
+    if not isinstance(idx, pd.DatetimeIndex):
+        return df.iloc[0:0]
+    if idx.tz is None:
+        idx = idx.tz_localize("UTC")
+    local_dates = pd.Index(idx.tz_convert(tz).date)
+    return df[local_dates.isin(set(keep_dates))]
+
+
+def _reserve_coopt_total(
+    primary_df: pd.DataFrame,
+    reserve_product: str | None,
+    anc_df: pd.DataFrame | None,
+    *,
+    valid_dates: set,
+    tz: str,
+    power_mw: float,
+    duration_hours: int,
+    efficiency: float,
+) -> tuple[float | None, str | None, float | None]:
+    """DA + reserve-capacity co-opt window total for the strategy comparison.
+
+    Returns ``(total_eur, label, capacity_price_eur_mw_h)``, or
+    ``(None, None, None)`` when no reserve product / in-window capacity price /
+    solvable day is available. The total sums ``solve_joint_capacity_batch``'s
+    ``joint_total_revenue`` over EXACTLY the DA+ID rows' valid local days
+    (``per_day["date"]``), so every strategy shares one annualisation
+    denominator (``valid_days``). The capacity price is taken from ancillary
+    rows INSIDE the same valid-date window, so an out-of-window capacity print
+    cannot skew the fourth row — when no capacity rows overlap the window the
+    row is omitted rather than priced off the full sample. The joint MILP makes
+    reserve headroom compete with DA for power (not additive) and excludes
+    activation energy, so the red-line is enforced by the solver, not labelling.
+    """
+    if not reserve_product or not valid_dates:
+        return None, None, None
+    # Price the reserve from capacity rows in the SAME window as the DA+ID rows
+    # so an out-of-window capacity print cannot skew the fourth row.
+    window_anc = _slice_to_local_dates(anc_df, valid_dates, tz)
+    price = capacity_price_for_product(window_anc, reserve_product)
+    if price is None:
+        return None, None, None
+    window_df = _slice_to_local_dates(primary_df, valid_dates, tz)
+    if window_df is None or window_df.empty:
+        return None, None, None
+    joint = solve_joint_capacity_batch(
+        window_df,
+        capacity_price_eur_mw_h=price,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        tz=tz,
+    )
+    if joint.empty:
+        return None, None, None
+    # Restrict to the DA+ID valid day set so the reserve row shares the exact
+    # annualisation denominator (the joint batch can solve DA-only days the
+    # sequential DA+ID batch excluded for want of IDA data).
+    joint = joint[joint["date"].isin(valid_dates)]
+    if joint.empty:
+        return None, None, None
+    total = float(joint["joint_total_revenue"].sum())
+    return total, f"DA + {reserve_product} co-opt (headroom)", float(price)
+
+
+def _append_reserve_assumptions(
+    assumptions: pd.DataFrame | None,
+    *,
+    product: str,
+    capacity_price_eur_mw_h: float | None,
+) -> pd.DataFrame | None:
+    """Append reserve co-opt provenance rows to the export assumptions table."""
+    if assumptions is None:
+        return None
+    price_txt = (
+        f"{capacity_price_eur_mw_h:.2f}"
+        if capacity_price_eur_mw_h is not None else "n/a"
+    )
+    rows = pd.DataFrame([
+        {
+            "parameter": "Reserve co-opt product",
+            "value": str(product),
+            "unit": "",
+            "source": "Loaded ancillary capacity data",
+            "affects": "Strategy comparison reserve (4th) row",
+        },
+        {
+            "parameter": "Reserve capacity price",
+            "value": price_txt,
+            "unit": "EUR/MW/h",
+            "source": "Duration-weighted mean of loaded capacity prices",
+            "affects": "Reserve co-opt headroom payment",
+        },
+        {
+            "parameter": "Reserve availability haircut",
+            "value": f"{ANCILLARY_CAPACITY_AVAILABILITY:.2f}",
+            "unit": "fraction",
+            "source": "config.ANCILLARY_CAPACITY_AVAILABILITY",
+            "affects": "Reserve capacity payment",
+        },
+        {
+            "parameter": "Reserve activation energy",
+            "value": "not modelled",
+            "unit": "",
+            "source": "solve_joint_capacity_batch scope",
+            "affects": "Reserve co-opt is capacity headroom only",
+        },
+        {
+            "parameter": "Reserve additivity with DA",
+            "value": "co-opt headroom (not additive)",
+            "unit": "",
+            "source": "Joint MILP power-balance",
+            "affects": "Reserve competes with DA for power; total is a joint optimum",
+        },
+    ])
+    return pd.concat([assumptions, rows], ignore_index=True)
+
+
 def _render_forecast_policy_section(
     *,
     primary_df: pd.DataFrame,
     intraday_df: pd.DataFrame | None,
+    anc_df: pd.DataFrame | None,
     dates: list,
     zone_tz: str,
     power_mw: float,
@@ -830,6 +964,8 @@ def _render_forecast_policy_section(
         if intraday_df is None or intraday_df.empty:
             st.info("Load IDA1 data to run the forecast-driven policy comparison.")
             return
+
+        capacity_products = list_capacity_products(anc_df)
 
         c1, c2, c3, c4 = st.columns([1.2, 1.0, 1.1, 1.0])
         sample = c1.selectbox(
@@ -872,6 +1008,24 @@ def _render_forecast_policy_section(
                 "a thin forecast edge can flip into a realised loss."
             ),
         )
+        reserve_product = None
+        if capacity_products:
+            reserve_product = st.selectbox(
+                "Reserve co-opt product (adds a 4th strategy row)",
+                options=capacity_products,
+                index=0,
+                key="forecast_policy_reserve_product",
+                help=(
+                    "Adds a DA + reserve-capacity co-optimisation row to the "
+                    "strategy comparison, priced from the loaded ancillary "
+                    "capacity data. Headroom-aware capacity estimate: reserve "
+                    "competes with DA for power (so it is NOT additive with "
+                    "DA), and activation energy is NOT modelled. A different "
+                    "revenue stream from the DA+IDA rows, not a cumulative "
+                    "DA+IDA+reserve ladder."
+                ),
+            )
+
         run = st.button("Run forecast policy", key="forecast_policy_run")
         if not run:
             st.info("Choose a sample and click Run to compare against the ceiling.")
@@ -924,8 +1078,32 @@ def _render_forecast_policy_section(
             "decision via round-trip efficiency loss and VOM."
         )
         _render_forecast_skill(summary.get("forecast_skill", {}), chart_template)
-        comparison = build_strategy_comparison(summary, power_mw=power_mw)
-        _render_strategy_comparison(comparison, chart_template)
+
+        reserve_total, reserve_label, reserve_price = _reserve_coopt_total(
+            primary_df,
+            reserve_product,
+            anc_df,
+            valid_dates=set(per_day["date"]),
+            tz=zone_tz,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+        )
+        comparison = build_strategy_comparison(
+            summary,
+            power_mw=power_mw,
+            reserve_coopt_total=reserve_total,
+            reserve_label=reserve_label,
+        )
+        _render_strategy_comparison(
+            comparison, chart_template, has_reserve=reserve_total is not None,
+        )
+        if reserve_product and reserve_total is None:
+            st.caption(
+                f"Reserve row omitted: no {reserve_product} capacity price "
+                "overlaps this comparison window, so it cannot be priced "
+                "co-temporally with the DA+ID rows."
+            )
         st.dataframe(per_day, width="stretch", hide_index=True)
         # This panel reports raw solver values — no capture haircut applied.
         export_assumptions = _cockpit_export_assumptions(
@@ -937,6 +1115,12 @@ def _render_forecast_policy_section(
                 "capture haircut is applied"
             ),
         )
+        if reserve_total is not None:
+            export_assumptions = _append_reserve_assumptions(
+                export_assumptions,
+                product=reserve_product,
+                capacity_price_eur_mw_h=reserve_price,
+            )
         _cockpit_download_button(
             {"Strategy comparison": comparison, "Sequential DA+ID": per_day},
             export_assumptions,
@@ -1011,21 +1195,36 @@ def _render_forecast_policy_kpis(summary: dict) -> None:
     )
 
 
-def _render_strategy_comparison(comparison: pd.DataFrame, chart_template: str) -> None:
-    """Investment-framed comparison of the three dispatch strategies."""
+def _render_strategy_comparison(
+    comparison: pd.DataFrame, chart_template: str, *, has_reserve: bool = False,
+) -> None:
+    """Investment-framed comparison of the dispatch strategies."""
     if comparison is None or comparison.empty:
         return
     st.markdown("**Strategy comparison (annualised)**")
+    if has_reserve:
+        reserve_note = (
+            "The reserve co-opt row is a DIFFERENT stream (capacity headroom, "
+            "no IDA): a headroom-aware estimate that competes with DA for power "
+            "(so it is NOT additive with DA) and excludes activation energy — "
+            "not a cumulative DA+IDA+reserve total."
+        )
+    else:
+        reserve_note = (
+            "A reserve (FCR/aFRR) co-optimisation strategy adds a fourth row "
+            "when ancillary capacity prices are loaded."
+        )
     st.caption(
-        "Same window, three strategies side by side. Annualised EUR/MW/yr = "
-        "window revenue x 365.25 / valid days / power; uplift is vs the "
-        "DA-only baseline. Raw solver values (no capture haircut). A reserve "
-        "(FCR/aFRR) co-optimisation strategy is a planned fourth row."
+        "Same window, strategies side by side. Annualised EUR/MW/yr = window "
+        "revenue x 365.25 / valid days / power; uplift is vs the DA-only "
+        f"baseline. Raw solver values (no capture haircut). {reserve_note}"
     )
+    palette = [_C_REVENUE, _C_PRICE_IDA, _C_DISCHARGE, _C_AVAIL]
+    colors = [palette[i % len(palette)] for i in range(len(comparison))]
     fig = go.Figure(go.Bar(
         x=comparison["strategy"],
         y=comparison["annualized_eur_per_mw"],
-        marker_color=[_C_REVENUE, _C_PRICE_IDA, _C_DISCHARGE],
+        marker_color=colors,
         text=[
             _fmt_strategy_bar_label(v)
             for v in comparison["annualized_eur_per_mw"]
