@@ -103,23 +103,63 @@ def compute_reserve_forecast_skill(
     idx = pd.DatetimeIndex(local.index)
     local = local.assign(_block=_block_of_day(idx), _date=idx.date)
 
-    frames: list[pd.DataFrame] = []
-    for target in sorted(set(local["_date"])):
-        day = local[local["_date"] == target]
-        if forecast_mode == "walk_forward":
-            clim = local[local["_date"] < target]
-        elif forecast_mode == "in_sample":
-            clim = local
-        else:  # "loo"
-            clim = local[local["_date"] != target]
-        if clim.empty:
-            continue
-        block_mean = clim.groupby("_block")[value_col].mean()
-        block_count = clim.groupby("_block")[value_col].size()
-        global_mean = float(clim[value_col].mean())
+    # Pre-aggregate once. The original implementation re-filtered and
+    # regrouped the full history for every target day; this keeps the same
+    # LOO / walk-forward semantics while scaling with days x 6 native blocks.
+    day_block = local.groupby(["_date", "_block"])[value_col].agg(["sum", "count"])
+    dates = sorted(local["_date"].unique())
+    block_index = pd.Index(range(N_BLOCKS_PER_DAY), name="_block")
+    day_block_sum = (
+        day_block["sum"]
+        .unstack("_block")
+        .reindex(index=dates, columns=block_index, fill_value=0.0)
+    )
+    day_block_count = (
+        day_block["count"]
+        .unstack("_block")
+        .reindex(index=dates, columns=block_index, fill_value=0)
+        .astype(int)
+    )
+    total_block_sum = day_block_sum.sum(axis=0)
+    total_block_count = day_block_count.sum(axis=0)
+    total_sum = float(total_block_sum.sum())
+    total_count = int(total_block_count.sum())
+    cumulative_sum = pd.Series(0.0, index=block_index)
+    cumulative_count = pd.Series(0, index=block_index, dtype=int)
+    cumulative_total_sum = 0.0
+    cumulative_total_count = 0
 
+    frames: list[pd.DataFrame] = []
+    for target, day in local.groupby("_date", sort=True):
+        target_block_sum = day_block_sum.loc[target]
+        target_block_count = day_block_count.loc[target]
+        if forecast_mode == "walk_forward":
+            block_sum = cumulative_sum
+            block_count = cumulative_count
+            global_sum = cumulative_total_sum
+            global_count = cumulative_total_count
+        elif forecast_mode == "in_sample":
+            block_sum = total_block_sum
+            block_count = total_block_count
+            global_sum = total_sum
+            global_count = total_count
+        else:  # "loo"
+            block_sum = total_block_sum - target_block_sum
+            block_count = total_block_count - target_block_count
+            global_sum = total_sum - float(target_block_sum.sum())
+            global_count = total_count - int(target_block_count.sum())
+
+        if global_count <= 0:
+            if forecast_mode == "walk_forward":
+                cumulative_sum = cumulative_sum + target_block_sum
+                cumulative_count = cumulative_count + target_block_count
+                cumulative_total_sum += float(target_block_sum.sum())
+                cumulative_total_count += int(target_block_count.sum())
+            continue
+        global_mean = global_sum / global_count
+        block_mean = block_sum / block_count.replace(0, np.nan)
         blocks = day["_block"].to_numpy()
-        forecast = block_mean.reindex(blocks).to_numpy()
+        forecast = block_mean.reindex(blocks).to_numpy(dtype=float)
         counts = block_count.reindex(blocks).fillna(0).to_numpy(dtype=int)
         forecast = np.where(np.isnan(forecast), global_mean, forecast)
         frames.append(pd.DataFrame(
@@ -132,6 +172,11 @@ def compute_reserve_forecast_skill(
             },
             index=pd.DatetimeIndex(day.index),
         ))
+        if forecast_mode == "walk_forward":
+            cumulative_sum = cumulative_sum + target_block_sum
+            cumulative_count = cumulative_count + target_block_count
+            cumulative_total_sum += float(target_block_sum.sum())
+            cumulative_total_count += int(target_block_count.sum())
 
     if not frames:
         return empty
