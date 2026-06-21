@@ -463,6 +463,107 @@ def solve_daily_da_id_dispatch(
     }
 
 
+def solve_daily_da_id_reserve_dispatch(
+    da_prices: np.ndarray,
+    ida_prices: np.ndarray,
+    dt: float,
+    capacity_price_eur_mw_h: float,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    soc_init_frac: float = 0.5,
+    availability: float = 0.95,
+) -> dict:
+    """Perfect-foresight DA + IDA + reserve-capacity co-optimisation ceiling.
+
+    Extends ``solve_daily_da_id_dispatch`` with a reserve-capacity leg. The DA
+    position stays purely *financial* (committed volumes settled at DA, marked
+    to market at IDA); the *physical* battery runs the Stage-2 schedule, now
+    jointly optimised with reserve headroom via ``solve_daily_joint_capacity_lp``
+    at IDA prices. Reserve competes only with the physical Stage-2 power
+    (``stage2_charge + stage2_discharge + reserve <= power_mw``) — the DA
+    financial commitment does NOT occupy physical headroom, and IDA "rebid" is
+    just the cash settlement of the DA-vs-physical difference, not an extra
+    physical power variable.
+
+    Cash accounting (per interval, then summed)::
+
+        da_gross      = (da_discharge - da_charge) * DA  * dt   (Stage-1, pre-VOM)
+        implicit_mtm  = (da_discharge - da_charge) * IDA * dt   (holding DA at IDA)
+        stage_2_total = solve_daily_joint_capacity_lp(IDA, cap_price).total
+                        (IDA physical arbitrage net of VOM + reserve capacity pay)
+        total_cash    = da_gross - implicit_mtm + stage_2_total
+
+    This is a perfect-foresight UPPER BOUND (full DA / IDA / capacity knowledge),
+    NOT a forecast-driven policy. Reserve is modelled as capacity headroom only:
+    no activation energy, bid acceptance, or reserve-specific SoC duration. With
+    ``capacity_price_eur_mw_h == 0`` it collapses to the DA+IDA ceiling
+    (``solve_daily_da_id_dispatch``); with ``ida_prices == da_prices`` it
+    collapses to the DA+reserve co-opt (``solve_daily_joint_capacity_lp``).
+
+    Returns:
+        Dict with total_cash_eur, da_gross_eur, implicit_mtm_eur,
+        stage2_total_eur, capacity_revenue_eur, ida_energy_revenue_eur, and
+        Stage-1 / Stage-2 dispatch arrays (incl. reserve_mw).
+    """
+    n = len(da_prices)
+    try:
+        capacity_price = float(capacity_price_eur_mw_h)
+    except (TypeError, ValueError):
+        capacity_price = float("nan")
+    if (
+        n == 0 or n != len(ida_prices)
+        or np.isnan(da_prices).any() or np.isnan(ida_prices).any()
+        or not math.isfinite(capacity_price)
+    ):
+        zeros = np.zeros(max(n, 0))
+        return {
+            "total_cash_eur": 0.0,
+            "da_gross_eur": 0.0,
+            "implicit_mtm_eur": 0.0,
+            "stage2_total_eur": 0.0,
+            "capacity_revenue_eur": 0.0,
+            "ida_energy_revenue_eur": 0.0,
+            "da_p_charge": zeros, "da_p_discharge": zeros,
+            "ida_p_charge": zeros, "ida_p_discharge": zeros,
+            "reserve_mw": zeros,
+            "da_soc": np.zeros(max(n, 0) + 1),
+            "ida_soc": np.zeros(max(n, 0) + 1),
+        }
+
+    stage_1 = solve_daily_lp(
+        da_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency, soc_init_frac=soc_init_frac,
+    )
+    stage_2 = solve_daily_joint_capacity_lp(
+        ida_prices, dt=dt, capacity_price_eur_mw_h=capacity_price,
+        power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
+        soc_init_frac=soc_init_frac, availability=availability,
+    )
+
+    da_net = stage_1["p_discharge"] - stage_1["p_charge"]
+    da_gross = float((da_net * da_prices * dt).sum())
+    implicit_mtm = float((da_net * ida_prices * dt).sum())
+    stage2_total = float(stage_2["total_revenue_eur"])
+    total_cash = da_gross - implicit_mtm + stage2_total
+
+    return {
+        "total_cash_eur": round(total_cash, 6),
+        "da_gross_eur": round(da_gross, 6),
+        "implicit_mtm_eur": round(implicit_mtm, 6),
+        "stage2_total_eur": round(stage2_total, 6),
+        "capacity_revenue_eur": round(float(stage_2["capacity_revenue_eur"]), 6),
+        "ida_energy_revenue_eur": round(float(stage_2["da_revenue_eur"]), 6),
+        "da_p_charge": stage_1["p_charge"],
+        "da_p_discharge": stage_1["p_discharge"],
+        "ida_p_charge": stage_2["p_charge"],
+        "ida_p_discharge": stage_2["p_discharge"],
+        "reserve_mw": stage_2["reserve_mw"],
+        "da_soc": stage_1["soc"],
+        "ida_soc": stage_2["soc"],
+    }
+
+
 def _schedule_value_at_prices(
     p_charge: np.ndarray,
     p_discharge: np.ndarray,

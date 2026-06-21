@@ -8,6 +8,7 @@ import pytest
 
 from src.dispatch import (
     solve_daily_da_id_dispatch,
+    solve_daily_da_id_reserve_dispatch,
     solve_daily_joint_capacity_lp,
     solve_daily_lp,
     solve_dispatch_batch,
@@ -424,6 +425,80 @@ class TestSolveDailyDaIdDispatch:
         assert r["total_cash_eur"] == pytest.approx(
             r["da_revenue_eur"] + r["rebid_uplift_eur"], abs=0.01,
         )
+
+
+_RESERVE_KW = {"dt": 1.0, "power_mw": 1.0, "duration_hours": 2.0, "efficiency": 0.88}
+
+
+def _da_id_reserve_prices() -> tuple[np.ndarray, np.ndarray]:
+    da = np.array([10.0] * 8 + [60.0] * 8 + [10.0] * 8)
+    ida = np.array([15.0] * 8 + [55.0] * 8 + [12.0] * 8)
+    return da, ida
+
+
+class TestSolveDailyDaIdReserveDispatch:
+    """Perfect-foresight DA + IDA + reserve co-optimisation ceiling."""
+
+    def test_collapses_to_da_id_ceiling_at_zero_capacity(self) -> None:
+        # cap_price=0 removes the reserve incentive -> exactly the DA+ID ceiling.
+        da, ida = _da_id_reserve_prices()
+        triple = solve_daily_da_id_reserve_dispatch(
+            da, ida, capacity_price_eur_mw_h=0.0, **_RESERVE_KW,
+        )["total_cash_eur"]
+        ceiling = solve_daily_da_id_dispatch(da, ida, **_RESERVE_KW)["total_cash_eur"]
+        assert triple == pytest.approx(ceiling, abs=1e-6)
+
+    def test_collapses_to_da_reserve_when_ida_equals_da(self) -> None:
+        # IDA==DA cancels the MtM legs -> exactly the DA+reserve joint at DA.
+        da, _ = _da_id_reserve_prices()
+        triple = solve_daily_da_id_reserve_dispatch(
+            da, da.copy(), capacity_price_eur_mw_h=8.0, **_RESERVE_KW,
+        )["total_cash_eur"]
+        joint = solve_daily_joint_capacity_lp(
+            da, capacity_price_eur_mw_h=8.0, **_RESERVE_KW,
+        )["total_revenue_eur"]
+        assert triple == pytest.approx(joint, abs=1e-6)
+
+    def test_dominates_da_id_ceiling_and_da_only(self) -> None:
+        # Cumulative ladder: triple >= DA+IDA ceiling >= DA-only.
+        da, ida = _da_id_reserve_prices()
+        triple = solve_daily_da_id_reserve_dispatch(
+            da, ida, capacity_price_eur_mw_h=8.0, **_RESERVE_KW,
+        )["total_cash_eur"]
+        ceiling = solve_daily_da_id_dispatch(da, ida, **_RESERVE_KW)["total_cash_eur"]
+        da_only = solve_daily_lp(da, **_RESERVE_KW)["revenue_eur"]
+        assert triple >= ceiling - 1e-6
+        assert ceiling >= da_only - 1e-6
+
+    def test_decomposition_identity(self) -> None:
+        da, ida = _da_id_reserve_prices()
+        r = solve_daily_da_id_reserve_dispatch(
+            da, ida, capacity_price_eur_mw_h=8.0, **_RESERVE_KW,
+        )
+        # total = da_gross - implicit_mtm + stage2_total
+        assert r["total_cash_eur"] == pytest.approx(
+            r["da_gross_eur"] - r["implicit_mtm_eur"] + r["stage2_total_eur"],
+            abs=1e-6,
+        )
+        # stage2_total = ida energy revenue + reserve capacity payment
+        assert r["stage2_total_eur"] == pytest.approx(
+            r["ida_energy_revenue_eur"] + r["capacity_revenue_eur"], abs=1e-6,
+        )
+
+    def test_nan_and_length_mismatch_return_zero(self) -> None:
+        da, ida = _da_id_reserve_prices()
+        bad = da.copy()
+        bad[0] = np.nan
+        assert solve_daily_da_id_reserve_dispatch(
+            bad, ida, capacity_price_eur_mw_h=8.0, **_RESERVE_KW,
+        )["total_cash_eur"] == 0.0
+        assert solve_daily_da_id_reserve_dispatch(
+            da, ida[:-1], capacity_price_eur_mw_h=8.0, **_RESERVE_KW,
+        )["total_cash_eur"] == 0.0
+        for bad_capacity_price in (float("nan"), float("inf")):
+            assert solve_daily_da_id_reserve_dispatch(
+                da, ida, capacity_price_eur_mw_h=bad_capacity_price, **_RESERVE_KW,
+            )["total_cash_eur"] == 0.0
 
 
 class TestSolveSequentialDaIdDispatch:

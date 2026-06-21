@@ -31,12 +31,15 @@ _DA_ONLY = "DA-only"
 _FORECAST = "DA + IDA1 (forecast-driven)"
 _CEILING = "DA + IDA1 (perfect-foresight ceiling)"
 _RESERVE_DEFAULT = "DA + reserve co-opt (headroom)"
+_TRIPLE_DEFAULT = "DA + IDA1 + reserve (co-opt ceiling)"
 
 
 def build_strategy_comparison(
     summary: dict, *, power_mw: float,
     reserve_coopt_total: float | None = None,
     reserve_label: str | None = None,
+    triple_joint_total: float | None = None,
+    triple_joint_label: str | None = None,
 ) -> pd.DataFrame:
     """Reframe a sequential DA+ID batch summary as a strategy comparison.
 
@@ -54,6 +57,15 @@ def build_strategy_comparison(
             headroom against DA dispatch), and a *different stream* from the
             DA+IDA rows, not a cumulative ladder.
         reserve_label: Display label for the reserve row.
+        triple_joint_total: Optional window total (EUR) for the cumulative
+            DA + IDA + reserve perfect-foresight ceiling
+            (``simulation.simulate_da_id_reserve_ceiling_batch``). When provided
+            and finite, adds a fifth row on the same window basis. Unlike the
+            reserve row this IS a cumulative ladder step (it stacks IDA rebid
+            and reserve headroom on DA in one co-optimised solve); same red-line
+            — capacity headroom, no activation energy. A perfect-foresight upper
+            bound, not a forecast-driven policy.
+        triple_joint_label: Display label for the triple-joint ceiling row.
 
     Returns:
         One row per strategy with columns ``[strategy, window_revenue_eur,
@@ -90,5 +102,11 @@ def build_strategy_comparison(
         rows.append(
             (reserve_label or _RESERVE_DEFAULT, rc,
              annualized_per_mw(rc), uplift_pct(rc)),
+        )
+    if triple_joint_total is not None and math.isfinite(float(triple_joint_total)):
+        tj = float(triple_joint_total)
+        rows.append(
+            (triple_joint_label or _TRIPLE_DEFAULT, tj,
+             annualized_per_mw(tj), uplift_pct(tj)),
         )
     return pd.DataFrame(rows, columns=STRATEGY_COMPARE_COLUMNS)

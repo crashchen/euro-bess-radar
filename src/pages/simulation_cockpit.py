@@ -18,6 +18,7 @@ from src.simulation import (
     available_local_dates,
     build_dispatch_event_table,
     simulate_da_id_replay,
+    simulate_da_id_reserve_ceiling_batch,
     simulate_da_milp_replay,
     simulate_replay_batch,
     simulate_sequential_da_id_batch,
@@ -939,6 +940,25 @@ def _append_reserve_assumptions(
     return pd.concat([assumptions, rows], ignore_index=True)
 
 
+def _append_triple_assumptions(
+    assumptions: pd.DataFrame | None,
+) -> pd.DataFrame | None:
+    """Append DA+IDA+reserve ceiling provenance to the export assumptions."""
+    if assumptions is None:
+        return None
+    rows = pd.DataFrame([{
+        "parameter": "DA+IDA1+reserve row type",
+        "value": "perfect-foresight ceiling",
+        "unit": "",
+        "source": "solve_daily_da_id_reserve_dispatch",
+        "affects": (
+            "Cumulative ceiling: full DA/IDA/capacity knowledge, capacity "
+            "headroom only, no activation energy, NOT forecast-driven"
+        ),
+    }])
+    return pd.concat([assumptions, rows], ignore_index=True)
+
+
 def _render_forecast_policy_section(
     *,
     primary_df: pd.DataFrame,
@@ -1079,24 +1099,48 @@ def _render_forecast_policy_section(
         )
         _render_forecast_skill(summary.get("forecast_skill", {}), chart_template)
 
+        valid_dates = set(per_day["date"])
         reserve_total, reserve_label, reserve_price = _reserve_coopt_total(
             primary_df,
             reserve_product,
             anc_df,
-            valid_dates=set(per_day["date"]),
+            valid_dates=valid_dates,
             tz=zone_tz,
             power_mw=power_mw,
             duration_hours=duration_hours,
             efficiency=efficiency,
         )
+        # Cumulative DA+IDA+reserve perfect-foresight ceiling. Gated on
+        # reserve_price (already in-window) so it shares the same capacity
+        # price and window as the reserve row; IDA is guaranteed present here.
+        triple_total = None
+        triple_label = None
+        if reserve_price is not None:
+            triple = simulate_da_id_reserve_ceiling_batch(
+                primary_df,
+                intraday_df,
+                reserve_price,
+                dates=sorted(valid_dates),
+                tz=zone_tz,
+                power_mw=power_mw,
+                duration_hours=duration_hours,
+                efficiency=efficiency,
+            )
+            if triple["solved_days"] > 0:
+                triple_total = triple["total_eur"]
+                triple_label = f"DA + IDA1 + {reserve_product} (co-opt ceiling)"
         comparison = build_strategy_comparison(
             summary,
             power_mw=power_mw,
             reserve_coopt_total=reserve_total,
             reserve_label=reserve_label,
+            triple_joint_total=triple_total,
+            triple_joint_label=triple_label,
         )
         _render_strategy_comparison(
-            comparison, chart_template, has_reserve=reserve_total is not None,
+            comparison, chart_template,
+            has_reserve=reserve_total is not None,
+            has_triple=triple_total is not None,
         )
         if reserve_product and reserve_total is None:
             st.caption(
@@ -1121,6 +1165,8 @@ def _render_forecast_policy_section(
                 product=reserve_product,
                 capacity_price_eur_mw_h=reserve_price,
             )
+        if triple_total is not None:
+            export_assumptions = _append_triple_assumptions(export_assumptions)
         _cockpit_download_button(
             {"Strategy comparison": comparison, "Sequential DA+ID": per_day},
             export_assumptions,
@@ -1196,30 +1242,37 @@ def _render_forecast_policy_kpis(summary: dict) -> None:
 
 
 def _render_strategy_comparison(
-    comparison: pd.DataFrame, chart_template: str, *, has_reserve: bool = False,
+    comparison: pd.DataFrame, chart_template: str, *,
+    has_reserve: bool = False, has_triple: bool = False,
 ) -> None:
     """Investment-framed comparison of the dispatch strategies."""
     if comparison is None or comparison.empty:
         return
     st.markdown("**Strategy comparison (annualised)**")
+    notes = []
     if has_reserve:
-        reserve_note = (
+        notes.append(
             "The reserve co-opt row is a DIFFERENT stream (capacity headroom, "
             "no IDA): a headroom-aware estimate that competes with DA for power "
-            "(so it is NOT additive with DA) and excludes activation energy — "
-            "not a cumulative DA+IDA+reserve total."
+            "(so it is NOT additive with DA) and excludes activation energy."
         )
-    else:
-        reserve_note = (
-            "A reserve (FCR/aFRR) co-optimisation strategy adds a fourth row "
+    if has_triple:
+        notes.append(
+            "The DA+IDA1+reserve row IS the cumulative ladder: a "
+            "perfect-foresight ceiling (full DA/IDA/capacity knowledge, "
+            "capacity headroom only, no activation energy, not forecast-driven)."
+        )
+    if not has_reserve and not has_triple:
+        notes.append(
+            "A reserve (FCR/aFRR) co-optimisation strategy adds further rows "
             "when ancillary capacity prices are loaded."
         )
     st.caption(
         "Same window, strategies side by side. Annualised EUR/MW/yr = window "
         "revenue x 365.25 / valid days / power; uplift is vs the DA-only "
-        f"baseline. Raw solver values (no capture haircut). {reserve_note}"
+        f"baseline. Raw solver values (no capture haircut). {' '.join(notes)}"
     )
-    palette = [_C_REVENUE, _C_PRICE_IDA, _C_DISCHARGE, _C_AVAIL]
+    palette = [_C_REVENUE, _C_PRICE_IDA, _C_DISCHARGE, _C_AVAIL, _C_SOC]
     colors = [palette[i % len(palette)] for i in range(len(comparison))]
     fig = go.Figure(go.Bar(
         x=comparison["strategy"],
