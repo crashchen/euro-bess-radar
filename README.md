@@ -66,7 +66,7 @@ euro-bess-radar/
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   └── export.py             # Excel report generation
-├── tests/                    # 507 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 509 passing tests, heavily mocked; 2 PDF tests may skip
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads

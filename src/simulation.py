@@ -868,6 +868,13 @@ def simulate_da_id_reserve_ceiling_batch(
     standalone terminal-neutral (no multi-day SoC carry), matching the
     standalone basis of ``simulate_sequential_da_id_batch``.
     """
+    try:
+        capacity_price = float(capacity_price_eur_mw_h)
+    except (TypeError, ValueError):
+        return {"total_eur": 0.0, "solved_days": 0}
+    if not math.isfinite(capacity_price):
+        return {"total_eur": 0.0, "solved_days": 0}
+
     total = 0.0
     solved_days = 0
     for local_date in dates:
@@ -878,14 +885,14 @@ def simulate_da_id_reserve_ceiling_batch(
         merged = da_day[["price_eur_mwh"]].join(
             ida_day[["intraday_price_eur_mwh"]], how="inner",
         ).dropna()
-        if merged.empty:
+        if merged.empty or not _is_regular_utc_day(merged):
             continue
         dt = _infer_interval_hours(pd.DatetimeIndex(merged.index))
         result = solve_daily_da_id_reserve_dispatch(
             merged["price_eur_mwh"].to_numpy(dtype=float),
             merged["intraday_price_eur_mwh"].to_numpy(dtype=float),
             dt=dt,
-            capacity_price_eur_mw_h=capacity_price_eur_mw_h,
+            capacity_price_eur_mw_h=capacity_price,
             power_mw=power_mw,
             duration_hours=duration_hours,
             efficiency=efficiency,

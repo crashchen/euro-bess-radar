@@ -625,6 +625,30 @@ def test_da_id_reserve_ceiling_batch_skips_days_without_overlap() -> None:
     assert triple["solved_days"] == 1
 
 
+def test_da_id_reserve_ceiling_batch_invalid_capacity_price_returns_empty() -> None:
+    da_df, ida_df = _make_seq_history(days=2, anomaly_day=None)
+    dates = available_local_dates(da_df, tz="UTC")
+    for bad_capacity_price in (float("nan"), float("inf")):
+        triple = simulate_da_id_reserve_ceiling_batch(
+            da_df, ida_df, bad_capacity_price, dates=dates, tz="UTC",
+            power_mw=1.0, duration_hours=2.0,
+        )
+        assert triple == {"total_eur": 0.0, "solved_days": 0}
+
+
+def test_da_id_reserve_ceiling_batch_skips_irregular_merged_day() -> None:
+    da_df, ida_df = _make_seq_history(days=2, anomaly_day=None)
+    # Dropping one IDA timestamp creates a non-uniform merged UTC index for
+    # day 1. The batch must skip it rather than compressing the time axis.
+    ida_sparse = ida_df.drop(ida_df.index[5])
+    dates = available_local_dates(da_df, tz="UTC")
+    triple = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_sparse, 8.0, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0,
+    )
+    assert triple["solved_days"] == 1
+
+
 def test_sequential_batch_missing_intraday_excludes_all_days() -> None:
     da_df, _ = _make_seq_history(days=3)
     empty_ida = pd.DataFrame(columns=["intraday_price_eur_mwh"])

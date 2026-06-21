@@ -495,6 +495,10 @@ class TestSolveDailyDaIdReserveDispatch:
         assert solve_daily_da_id_reserve_dispatch(
             da, ida[:-1], capacity_price_eur_mw_h=8.0, **_RESERVE_KW,
         )["total_cash_eur"] == 0.0
+        for bad_capacity_price in (float("nan"), float("inf")):
+            assert solve_daily_da_id_reserve_dispatch(
+                da, ida, capacity_price_eur_mw_h=bad_capacity_price, **_RESERVE_KW,
+            )["total_cash_eur"] == 0.0
 
 
 class TestSolveSequentialDaIdDispatch:

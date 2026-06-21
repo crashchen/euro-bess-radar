@@ -507,9 +507,14 @@ def solve_daily_da_id_reserve_dispatch(
         Stage-1 / Stage-2 dispatch arrays (incl. reserve_mw).
     """
     n = len(da_prices)
+    try:
+        capacity_price = float(capacity_price_eur_mw_h)
+    except (TypeError, ValueError):
+        capacity_price = float("nan")
     if (
         n == 0 or n != len(ida_prices)
         or np.isnan(da_prices).any() or np.isnan(ida_prices).any()
+        or not math.isfinite(capacity_price)
     ):
         zeros = np.zeros(max(n, 0))
         return {
@@ -531,7 +536,7 @@ def solve_daily_da_id_reserve_dispatch(
         efficiency=efficiency, soc_init_frac=soc_init_frac,
     )
     stage_2 = solve_daily_joint_capacity_lp(
-        ida_prices, dt=dt, capacity_price_eur_mw_h=capacity_price_eur_mw_h,
+        ida_prices, dt=dt, capacity_price_eur_mw_h=capacity_price,
         power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
         soc_init_frac=soc_init_frac, availability=availability,
     )
