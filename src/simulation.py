@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 
 from src.analytics import _infer_interval_hours, _to_local
-from src.config import MAX_CONTINUOUS_REPLAY_INTERVALS
+from src.config import ANCILLARY_CAPACITY_AVAILABILITY, MAX_CONTINUOUS_REPLAY_INTERVALS
 from src.degradation import (
     DEFAULT_CYCLE_LIFE,
     DEFAULT_EOL_CAPACITY_PCT,
@@ -20,6 +20,7 @@ from src.degradation import (
 from src.dispatch import (
     DISPATCH_VOM_COST_EUR_MWH,
     solve_daily_da_id_dispatch,
+    solve_daily_da_id_reserve_dispatch,
     solve_daily_lp,
     solve_sequential_da_id_dispatch,
 )
@@ -841,6 +842,58 @@ def simulate_sequential_da_id_batch(
     }
     per_day.attrs["summary"] = summary
     return per_day, summary
+
+
+def simulate_da_id_reserve_ceiling_batch(
+    da_prices: pd.DataFrame,
+    ida_prices: pd.DataFrame,
+    capacity_price_eur_mw_h: float,
+    *,
+    dates: list[date],
+    tz: str | None = None,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
+) -> dict[str, Any]:
+    """Sum the DA + IDA + reserve perfect-foresight ceiling over local days.
+
+    Each day's DA and IDA prices are inner-joined on the delivery timestamp
+    (the same merge as the sequential DA+ID batch) and solved with
+    ``dispatch.solve_daily_da_id_reserve_dispatch``. Days without overlapping
+    DA/IDA intervals are skipped. Returns ``{"total_eur", "solved_days"}``.
+
+    This is a perfect-foresight UPPER BOUND, reserve = capacity headroom only
+    (no activation energy), and NOT a forecast-driven policy. Each day is solved
+    standalone terminal-neutral (no multi-day SoC carry), matching the
+    standalone basis of ``simulate_sequential_da_id_batch``.
+    """
+    total = 0.0
+    solved_days = 0
+    for local_date in dates:
+        da_day = _select_local_day(da_prices, local_date, tz)
+        ida_day = _select_local_day(ida_prices, local_date, tz)
+        if da_day.empty or ida_day.empty or "intraday_price_eur_mwh" not in ida_day.columns:
+            continue
+        merged = da_day[["price_eur_mwh"]].join(
+            ida_day[["intraday_price_eur_mwh"]], how="inner",
+        ).dropna()
+        if merged.empty:
+            continue
+        dt = _infer_interval_hours(pd.DatetimeIndex(merged.index))
+        result = solve_daily_da_id_reserve_dispatch(
+            merged["price_eur_mwh"].to_numpy(dtype=float),
+            merged["intraday_price_eur_mwh"].to_numpy(dtype=float),
+            dt=dt,
+            capacity_price_eur_mw_h=capacity_price_eur_mw_h,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            availability=availability,
+        )
+        total += result["total_cash_eur"]
+        solved_days += 1
+    return {"total_eur": round(total, 6), "solved_days": solved_days}
 
 
 def _sequential_day_row(

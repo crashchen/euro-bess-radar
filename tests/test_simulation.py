@@ -17,6 +17,7 @@ from src.simulation import (
     build_dispatch_event_table,
     empty_simulation_result,
     simulate_da_id_replay,
+    simulate_da_id_reserve_ceiling_batch,
     simulate_da_milp_replay,
     simulate_replay_batch,
     simulate_sequential_da_id_batch,
@@ -596,6 +597,32 @@ def test_sequential_batch_capture_rate_none_when_no_opportunity() -> None:
     )
     assert summary["total_ceiling_uplift_eur"] == pytest.approx(0.0, abs=1e-6)
     assert summary["capture_rate"] is None
+
+
+def test_da_id_reserve_ceiling_batch_sums_and_dominates() -> None:
+    da_df, ida_df = _make_seq_history(days=5, anomaly_day=2)
+    dates = available_local_dates(da_df, tz="UTC")
+    triple = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_df, 8.0, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    assert triple["solved_days"] == 5
+    # Triple ceiling >= DA+IDA ceiling over the same window (reserve is optional).
+    _, seq = simulate_sequential_da_id_batch(
+        da_df, ida_df, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    assert triple["total_eur"] >= seq["total_ceiling_eur"] - 1e-6
+
+
+def test_da_id_reserve_ceiling_batch_skips_days_without_overlap() -> None:
+    da_df, ida_df = _make_seq_history(days=3, anomaly_day=None)
+    # IDA only covers the first local day; the other two have no overlap.
+    ida_partial = ida_df.iloc[:24]
+    dates = available_local_dates(da_df, tz="UTC")
+    triple = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_partial, 8.0, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0,
+    )
+    assert triple["solved_days"] == 1
 
 
 def test_sequential_batch_missing_intraday_excludes_all_days() -> None:

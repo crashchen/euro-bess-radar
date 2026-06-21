@@ -127,6 +127,45 @@ def test_reserve_row_dropped_when_total_non_finite() -> None:
         assert len(table) == 3
 
 
+def test_triple_joint_row_appended_with_default_label() -> None:
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        triple_joint_total=175.0,
+    )
+    assert len(table) == 4  # 3 base + triple (no reserve here)
+    assert table.iloc[3]["strategy"] == "DA + IDA1 + reserve (co-opt ceiling)"
+    assert table.iloc[3]["uplift_vs_da_pct"] == pytest.approx(75.0)
+
+
+def test_five_row_layout_with_reserve_and_triple() -> None:
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        reserve_coopt_total=120.0,
+        reserve_label="DA + FCR co-opt (headroom)",
+        triple_joint_total=175.0,
+        triple_joint_label="DA + IDA1 + FCR (co-opt ceiling)",
+    )
+    assert list(table["strategy"]) == [
+        "DA-only",
+        "DA + IDA1 (forecast-driven)",
+        "DA + IDA1 (perfect-foresight ceiling)",
+        "DA + FCR co-opt (headroom)",
+        "DA + IDA1 + FCR (co-opt ceiling)",
+    ]
+
+
+def test_triple_joint_row_dropped_when_non_finite() -> None:
+    for bad in (float("nan"), float("inf")):
+        table = build_strategy_comparison(
+            _summary(100.0, 130.0, 160.0, valid_days=10),
+            power_mw=2.0,
+            triple_joint_total=bad,
+        )
+        assert len(table) == 3
+
+
 def _price_frame(days: int = 4) -> pd.DataFrame:
     idx = pd.date_range("2025-06-01 00:00", periods=24 * days, freq="h", tz="UTC")
     prices = 50 + 40 * np.sin(np.arange(24 * days) / 24 * 2 * np.pi)

@@ -144,3 +144,25 @@ def test_reserve_assumptions_none_passthrough() -> None:
     assert _append_reserve_assumptions(
         None, product="FCR", capacity_price_eur_mw_h=1.0,
     ) is None
+
+
+def test_triple_assumptions_state_ceiling_and_not_forecast_driven() -> None:
+    import pandas as pd
+
+    from src.pages.simulation_cockpit import _append_triple_assumptions
+
+    base = pd.DataFrame(
+        [["Power", "10", "MW", "Sidebar", "scaling"]], columns=ASSUMPTION_COLUMNS,
+    )
+    out = _append_triple_assumptions(base)
+    row = out[out["parameter"] == "DA+IDA1+reserve row type"].iloc[0]
+    assert row["value"] == "perfect-foresight ceiling"
+    # Codex's audit requirement: no-activation / not-forecast-driven spelled out.
+    assert "no activation energy" in row["affects"]
+    assert "NOT forecast-driven" in row["affects"]
+
+
+def test_triple_assumptions_none_passthrough() -> None:
+    from src.pages.simulation_cockpit import _append_triple_assumptions
+
+    assert _append_triple_assumptions(None) is None
