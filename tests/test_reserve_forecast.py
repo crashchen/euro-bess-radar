@@ -68,6 +68,23 @@ def test_walk_forward_drops_first_day() -> None:
     assert wf["n_points"] == loo["n_points"] - 24
 
 
+def test_day_missing_entire_block_does_not_crash() -> None:
+    # Sparse reserve data: one day missing all of one 4h block. The
+    # pre-aggregated unstack path leaves NaN for that (date, block) cell, which
+    # must be filled (not crash on the int cast) and still score other blocks.
+    df = _history(_BLOCK_SHAPE, 4)  # 2025-02-03 .. 02-06, tz=None -> UTC blocks
+    day2 = pd.DatetimeIndex(df.index).normalize() == pd.Timestamp(
+        "2025-02-04", tz="UTC",
+    )
+    drop = day2 & pd.DatetimeIndex(df.index).hour.isin([8, 9, 10, 11])  # block 2
+    df = df[~np.asarray(drop)]
+    skill = compute_reserve_forecast_skill(df, tz=None)
+    assert skill["n_points"] > 0
+    assert skill["skill_vs_mean"] is not None
+    # Block 2 is still backed by the other three days.
+    assert skill["n_blocks_filled"] == 6
+
+
 def test_coverage_and_block_count_reported() -> None:
     skill = compute_reserve_forecast_skill(_history(_BLOCK_SHAPE, 3), tz=None)
     assert skill["coverage"] == pytest.approx(1.0)

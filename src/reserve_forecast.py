@@ -109,15 +109,20 @@ def compute_reserve_forecast_skill(
     day_block = local.groupby(["_date", "_block"])[value_col].agg(["sum", "count"])
     dates = sorted(local["_date"].unique())
     block_index = pd.Index(range(N_BLOCKS_PER_DAY), name="_block")
+    # fillna AFTER reindex: unstack leaves NaN for (date, block) pairs absent
+    # from the history (a day missing an entire 4h block), and reindex's
+    # fill_value only fills newly-added labels, not those pre-existing NaNs.
     day_block_sum = (
         day_block["sum"]
         .unstack("_block")
-        .reindex(index=dates, columns=block_index, fill_value=0.0)
+        .reindex(index=dates, columns=block_index)
+        .fillna(0.0)
     )
     day_block_count = (
         day_block["count"]
         .unstack("_block")
-        .reindex(index=dates, columns=block_index, fill_value=0)
+        .reindex(index=dates, columns=block_index)
+        .fillna(0)
         .astype(int)
     )
     total_block_sum = day_block_sum.sum(axis=0)
