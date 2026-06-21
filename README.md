@@ -62,11 +62,12 @@ euro-bess-radar/
 │   ├── dispatch.py           # MILP dispatch for multi-cycle daily arbitrage
 │   ├── simulation.py         # Interval-level dispatch replay + multi-day continuous-horizon carry-over
 │   ├── ida_forecast.py       # Hourly climatology IDA forecast for the sequential DA+ID policy
+│   ├── reserve_forecast.py   # Block-of-day capacity-price forecast skill (Phase 9.2b prep)
 │   ├── degradation.py        # Throughput-based degradation and lifetime metrics
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   └── export.py             # Excel report generation
-├── tests/                    # 509 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 518 passing tests, heavily mocked; 2 PDF tests may skip
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads

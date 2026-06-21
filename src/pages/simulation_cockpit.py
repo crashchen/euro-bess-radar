@@ -14,6 +14,7 @@ from src.assumptions import CAPTURE_PARAM_LABEL
 from src.config import ANCILLARY_CAPACITY_AVAILABILITY
 from src.dispatch import solve_joint_capacity_batch
 from src.export import cockpit_tables_to_excel
+from src.reserve_forecast import RESERVE_VALUE_COL, compute_reserve_forecast_skill
 from src.simulation import (
     available_local_dates,
     build_dispatch_event_table,
@@ -220,6 +221,9 @@ def render(
         efficiency=efficiency,
         chart_template=chart_template,
         assumptions=assumptions,
+    )
+    _render_reserve_forecast_skill_section(
+        anc_df=anc_df, zone_tz=zone_tz, chart_template=chart_template,
     )
 
     with st.expander("Simulation interval data", expanded=False):
@@ -957,6 +961,91 @@ def _append_triple_assumptions(
         ),
     }])
     return pd.concat([assumptions, rows], ignore_index=True)
+
+
+def _reserve_history_for_product(
+    anc_df: pd.DataFrame | None, product: str,
+) -> pd.DataFrame:
+    """One reserve product's capacity-price series for the skill report."""
+    if anc_df is None or anc_df.empty or "product_type" not in anc_df:
+        return pd.DataFrame()
+    if RESERVE_VALUE_COL not in anc_df:
+        return pd.DataFrame()
+    labels = anc_df["product_type"].fillna("UNKNOWN").astype(str).str.strip()
+    return anc_df[labels == str(product).strip()][[RESERVE_VALUE_COL]]
+
+
+def _render_reserve_forecast_skill_section(
+    *, anc_df: pd.DataFrame | None, zone_tz: str, chart_template: str,
+) -> None:
+    """Reserve capacity-price forecastability diagnostic (Phase 9.2b prep)."""
+    products = list_capacity_products(anc_df)
+    if not products:
+        return
+    with st.expander("Reserve price forecast skill (Phase 9.2b prep)", expanded=False):
+        st.caption(
+            "Can reserve capacity prices be forecast? Block-of-day climatology "
+            "(6x 4h FCR/aFRR product blocks) scored against a flat sample-mean "
+            "baseline. A skill diagnostic for the planned forecast-driven reserve "
+            "commitment (9.2b commits reserve BEFORE DA, under a price forecast) "
+            "— not a dispatch model; capacity headroom only, no activation energy."
+        )
+        c1, c2 = st.columns([1.4, 1.0])
+        product = c1.selectbox(
+            "Reserve product", options=products, index=0, key="reserve_skill_product",
+        )
+        mode_label = c2.selectbox(
+            "Forecast information",
+            options=["LOO cross-validation", "Walk-forward"],
+            index=0,
+            key="reserve_skill_mode",
+            help=(
+                "LOO uses every loaded day except the target (unbiased skill, "
+                "may use future days). Walk-forward uses only prior days."
+            ),
+        )
+        forecast_mode = "walk_forward" if mode_label == "Walk-forward" else "loo"
+        history = _reserve_history_for_product(anc_df, product)
+        skill = compute_reserve_forecast_skill(
+            history, tz=zone_tz, forecast_mode=forecast_mode,
+        )
+        if skill["n_points"] == 0:
+            st.info(
+                "Not enough capacity-price history for this product to score a "
+                "forecast (need at least two local days for leave-one-out)."
+            )
+            return
+        cols = st.columns(4)
+        cols[0].metric("MAE", f"EUR {skill['mae']:.2f}/MW/h")
+        cols[1].metric("Bias", f"EUR {skill['bias']:+.2f}/MW/h")
+        cols[2].metric("RMSE", f"EUR {skill['rmse']:.2f}/MW/h")
+        sk = skill["skill_vs_mean"]
+        cols[3].metric(
+            "Skill vs flat mean", "n/a" if sk is None else f"{sk:+.0%}",
+        )
+        st.caption(
+            f"Over {skill['n_points']:,} intervals; realised std EUR "
+            f"{skill['realised_std']:.2f}/MW/h; {skill['n_blocks_filled']}/"
+            f"{skill['n_blocks_requested']} blocks history-backed (coverage "
+            f"{skill['coverage']:.0%}). Skill vs flat mean >0 means block-of-day "
+            "climatology beats a flat average — reserve prices carry forecastable "
+            "structure worth a forecast-driven commitment; <=0 means it does not, "
+            "so 9.2b's reserve forecast would rest on thin ice."
+        )
+        by_block = skill["by_block"]
+        if not by_block.empty:
+            labels = [
+                f"{int(b) * 4:02d}-{int(b) * 4 + 4:02d}" for b in by_block["block"]
+            ]
+            fig = go.Figure(go.Bar(
+                x=labels, y=by_block["mae"], marker_color=_C_AVAIL,
+            ))
+            _apply_panel_layout(
+                fig, "Forecast MAE by 4h block", "EUR/MW/h", chart_template,
+                height=240,
+            )
+            fig.update_xaxes(title="Local 4h block")
+            st.plotly_chart(fig, width="stretch")
 
 
 def _render_forecast_policy_section(
