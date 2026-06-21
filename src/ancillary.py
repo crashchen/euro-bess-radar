@@ -724,6 +724,60 @@ def _capacity_price_mean(cap_prices: pd.Series, product: str) -> float:
     return weighted_total / total_duration
 
 
+def list_capacity_products(ancillary_df: pd.DataFrame | None) -> list[str]:
+    """Return reserve product labels that carry a capacity price.
+
+    Args:
+        ancillary_df: Merged ancillary dataset (``build_ancillary_dataset``
+            output) or ``None``.
+
+    Returns:
+        Sorted, de-duplicated ``product_type`` labels with at least one
+        non-null ``capacity_price_eur_mw`` (EUR/MW/h) row. These are the
+        products eligible for the joint DA + reserve-capacity co-optimisation.
+        Empty when no capacity-priced product is loaded.
+    """
+    if ancillary_df is None or ancillary_df.empty:
+        return []
+    if "capacity_price_eur_mw" not in ancillary_df or "product_type" not in ancillary_df:
+        return []
+    priced = ancillary_df[ancillary_df["capacity_price_eur_mw"].notna()]
+    if priced.empty:
+        return []
+    products = priced["product_type"].fillna("UNKNOWN").astype(str).str.strip()
+    return sorted({p for p in products if p})
+
+
+def capacity_price_for_product(
+    ancillary_df: pd.DataFrame | None, product: str | None,
+) -> float | None:
+    """Duration-weighted mean capacity price (EUR/MW/h) for one product.
+
+    Args:
+        ancillary_df: Merged ancillary dataset or ``None``.
+        product: ``product_type`` label to price.
+
+    Returns:
+        The duration-weighted mean capacity price in EUR/MW/h (the unit
+        ``dispatch.solve_joint_capacity_batch`` expects), or ``None`` when the
+        product is blank or carries no capacity price.
+    """
+    # Defensive: the helper is independently callable, so guard a blank product
+    # (including whitespace-only) rather than relying on every caller.
+    if product is None or not str(product).strip():
+        return None
+    if ancillary_df is None or ancillary_df.empty:
+        return None
+    if "capacity_price_eur_mw" not in ancillary_df or "product_type" not in ancillary_df:
+        return None
+    labels = ancillary_df["product_type"].fillna("UNKNOWN").astype(str).str.strip()
+    group = ancillary_df[labels == str(product).strip()]
+    cap_prices = group["capacity_price_eur_mw"].dropna()
+    if cap_prices.empty:
+        return None
+    return _capacity_price_mean(cap_prices, product)
+
+
 def calculate_ancillary_revenue(
     ancillary_df: pd.DataFrame,
     power_mw: float = 1.0,
