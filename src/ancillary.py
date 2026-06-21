@@ -749,7 +749,7 @@ def list_capacity_products(ancillary_df: pd.DataFrame | None) -> list[str]:
 
 
 def capacity_price_for_product(
-    ancillary_df: pd.DataFrame | None, product: str,
+    ancillary_df: pd.DataFrame | None, product: str | None,
 ) -> float | None:
     """Duration-weighted mean capacity price (EUR/MW/h) for one product.
 
@@ -760,8 +760,12 @@ def capacity_price_for_product(
     Returns:
         The duration-weighted mean capacity price in EUR/MW/h (the unit
         ``dispatch.solve_joint_capacity_batch`` expects), or ``None`` when the
-        product carries no capacity price.
+        product is blank or carries no capacity price.
     """
+    # Defensive: the helper is independently callable, so guard a blank product
+    # (including whitespace-only) rather than relying on every caller.
+    if product is None or not str(product).strip():
+        return None
     if ancillary_df is None or ancillary_df.empty:
         return None
     if "capacity_price_eur_mw" not in ancillary_df or "product_type" not in ancillary_df:

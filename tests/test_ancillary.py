@@ -815,3 +815,10 @@ class TestCapacityProductHelpers:
         assert capacity_price_for_product(self._df(), "aFRR Up") is None
         assert capacity_price_for_product(self._df(), "missing") is None
         assert capacity_price_for_product(None, "FCR") is None
+
+    def test_price_none_for_blank_or_none_product(self) -> None:
+        # Defensive guard: the helper is independently callable.
+        df = self._df()
+        assert capacity_price_for_product(df, None) is None
+        assert capacity_price_for_product(df, "") is None
+        assert capacity_price_for_product(df, "   ") is None
