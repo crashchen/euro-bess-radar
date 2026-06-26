@@ -694,6 +694,35 @@ class TestSolveSequentialDaIdReserveDispatch:
             np.ones(5), self._RESERVE, **_RESERVE_KW,
         )["realised_total_eur"] == 0.0
 
+    def test_gap_attribution_identity_and_signed_forecast_cost(self) -> None:
+        # full_gap == forecast_cost + timing_cost EXACTLY, across many random
+        # paths. forecast_cost is signed: the reserve-first sequential policy is
+        # not globally optimal even with perfect inputs, so a lucky imperfect
+        # forecast can beat its perfect-input benchmark (realised >
+        # reserve_first). The previous max(.,0) clamp broke this identity (it
+        # could print timing_cost > full_gap).
+        rng = np.random.default_rng(0)
+        t = np.arange(24)
+        saw_negative_forecast_cost = False
+        for _ in range(30):
+            da_r = 40 + 30 * np.sin(t / 24 * 2 * np.pi) + rng.normal(0, 8, 24)
+            ida_r = 40 + 30 * np.sin(t / 24 * 2 * np.pi + 0.6) + rng.normal(0, 12, 24)
+            res_r = np.clip(np.tile(rng.uniform(0, 25, 6), 4)[:24], 0, None)
+            da_f = da_r + rng.normal(0, 6, 24)
+            ida_f = ida_r + rng.normal(0, 10, 24)
+            res_f = np.clip(res_r + rng.normal(0, 4, 24), 0, None)
+            r = solve_sequential_da_id_reserve_dispatch(
+                da_f, da_r, ida_f, ida_r, res_f, res_r, **_RESERVE_KW,
+            )
+            assert r["full_gap_eur"] == pytest.approx(
+                r["forecast_cost_eur"] + r["timing_cost_eur"], abs=1e-4,
+            )
+            assert r["timing_cost_eur"] >= -1e-6
+            assert r["realised_total_eur"] <= r["global_ceiling_eur"] + 1e-6
+            if r["forecast_cost_eur"] < -1e-6:
+                saw_negative_forecast_cost = True
+        assert saw_negative_forecast_cost
+
 
 class TestSolveSequentialDaIdDispatch:
     """Sequential DA + IDA1 policy under an imperfect IDA forecast."""

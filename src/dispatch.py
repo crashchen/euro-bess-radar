@@ -656,10 +656,24 @@ def solve_sequential_da_id_reserve_dispatch(
         realised = da_gross - implicit_mtm + ida_physical_realised
                    + reserve_capacity_pay
 
-    ``reserve_first_ceiling_eur`` repeats the same reserve-first structure
-    with perfect DA/IDA/reserve forecasts. It isolates forecast error from the
-    broader 9.2a global perfect-foresight ceiling, which is also returned as
-    ``global_ceiling_eur`` for row-level gap attribution.
+    ``reserve_first_ceiling_eur`` repeats the same reserve-first SEQUENTIAL
+    structure with perfect DA/IDA/reserve forecasts; ``global_ceiling_eur`` is
+    the 9.2a global perfect-foresight optimum. The gap to the global ceiling is
+    attributed exactly:
+
+        full_gap_eur     = global_ceiling_eur - realised_total_eur  (>= 0)
+        forecast_cost_eur = reserve_first_ceiling_eur - realised_total_eur
+        timing_cost_eur   = global_ceiling_eur - reserve_first_ceiling_eur (>= 0)
+        full_gap_eur == forecast_cost_eur + timing_cost_eur  (exact)
+
+    ``forecast_cost_eur`` is SIGNED and may be negative: the reserve-first
+    sequential policy is not globally optimal even with perfect inputs (Stage 0
+    sizes reserve on DA arbitrage, ignoring the IDA rebid value left on the
+    remaining headroom), so a lucky imperfect forecast can beat its own
+    perfect-input benchmark. A negative value means the forecast helped,
+    analogous to a negative captured uplift in the Phase-7 sequential policy.
+    ``timing_cost_eur`` is >= 0 by construction (perfect-input sequential is a
+    feasible policy bounded by the global optimum).
     """
     n = len(da_realised)
     try:
@@ -718,11 +732,24 @@ def solve_sequential_da_id_reserve_dispatch(
         efficiency=efficiency, soc_init_frac=soc_init_frac,
         availability=availability,
     )
-    forecast_cost = max(reserve_first["total_cash_eur"] - realised_total, 0.0)
+    # forecast_cost is SIGNED, not clamped: the reserve-first SEQUENTIAL policy
+    # is not globally optimal even with perfect inputs (Stage 0 sizes reserve on
+    # DA arbitrage, ignoring the IDA rebid value on the remaining headroom), so a
+    # lucky imperfect forecast can beat its own perfect-input benchmark and make
+    # realised_total > reserve_first. Clamping it to >=0 would break the exact
+    # attribution identity below (and could print timing_cost > full_gap). A
+    # negative forecast_cost means the forecast helped, analogous to a negative
+    # captured uplift in the Phase-7 sequential policy.
+    forecast_cost = reserve_first["total_cash_eur"] - realised_total
+    # timing_cost is >=0 by construction (the perfect-input reserve-first
+    # sequential is a feasible policy <= the 9.2a global optimum); the clamp only
+    # absorbs solver tolerance.
     timing_cost = max(
         global_ceiling["total_cash_eur"] - reserve_first["total_cash_eur"], 0.0,
     )
-    full_gap = max(global_ceiling["total_cash_eur"] - realised_total, 0.0)
+    # Identity: full_gap == forecast_cost + timing_cost (exact, no clamp on the
+    # sum). realised_total <= global_ceiling by construction, so it is >= 0.
+    full_gap = global_ceiling["total_cash_eur"] - realised_total
 
     return {
         "da_only_revenue_eur": round(stage_1["revenue_eur"], 6),
