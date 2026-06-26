@@ -425,6 +425,20 @@ class TestAncillaryRevenue:
         out2 = normalize_auto_fetch_dataset(df2, "AUC")
         assert set(out2["product_type"]) == {"aFRR Up", "aFRR Down"}
 
+    def test_explicit_product_wins_over_mixed_dataset_title(self) -> None:
+        """A combined fetcher title must not relabel explicit FCR rows as aFRR."""
+        idx = pd.date_range("2026-06-20", periods=2, freq="4h", tz="UTC")
+        df = pd.DataFrame({
+            "timestamp": idx,
+            "product": ["FCR", "FCR"],
+            "direction": ["Symmetric", "Symmetric"],
+            "capacity_price_eur_mw": [10.0, 12.0],
+        })
+
+        out = normalize_auto_fetch_dataset(df, "FCR/aFRR auctions_FCR")
+
+        assert set(out["product_type"]) == {"FCR"}
+
     def test_normalize_product_key_collapses_format_variants(self) -> None:
         """Defense-in-depth: if upstream ever sends a label that bypasses
         canonical-label mapping (e.g. a new product not in the keyword list),

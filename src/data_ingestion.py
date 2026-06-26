@@ -1589,31 +1589,58 @@ def _parse_regelleistung_xlsx(
     for row in rows[1:]:
         row_dict = dict(zip(headers, row, strict=False))
         price = None
-        for key in ("capacity price [eur/mw]", "capacity_price", "price", "ergebnispreis"):
+        price_is_block_total = False
+        price_keys = (
+            "germany_settlementcapacity_price_[eur/mw]",
+            "germany_average_capacity_price_[(eur/mw)/h]",
+            "capacity price [eur/mw]",
+            "capacity_price",
+            "price",
+            "ergebnispreis",
+        )
+        for key in price_keys:
             if key in row_dict and row_dict[key] is not None:
                 try:
                     price = float(row_dict[key])
                 except (ValueError, TypeError):
                     continue
+                price_is_block_total = key.endswith("settlementcapacity_price_[eur/mw]")
                 break
         if price is None:
             continue
 
         direction = "Symmetric"
-        for key in ("direction", "richtung", "product_name"):
+        product_label = ""
+        for key in ("productname", "product", "product_name"):
+            if row_dict.get(key):
+                product_label = str(row_dict[key]).strip()
+                break
+        for key in ("direction", "richtung", "productname", "product", "product_name"):
             if row_dict.get(key):
                 val = str(row_dict[key]).strip().upper()
-                if "UP" in val or "POS" in val:
+                tokens = {token for token in re.split(r"[^A-Z]+", val) if token}
+                if "UP" in tokens or "POS" in tokens:
                     direction = "Up"
-                elif "DOWN" in val or "NEG" in val:
+                elif "DOWN" in tokens or "NEG" in tokens:
                     direction = "Down"
                 break
 
         time_block = ""
-        for key in ("time_block", "von", "from", "delivery_date"):
+        for key in (
+            "time_block", "von", "from", "delivery_date", "productname", "product",
+        ):
             if row_dict.get(key):
                 time_block = row_dict[key]
                 break
+        current_block = re.search(
+            r"(?:^|_)(\d{2})_(\d{2})(?:$|_)", str(time_block).strip(),
+        )
+        block_hours = None
+        if current_block:
+            start_hour = int(current_block.group(1))
+            end_hour = int(current_block.group(2))
+            block_hours = (end_hour - start_hour) % 24 or 24
+            time_block = f"{start_hour:02d}:00-{end_hour:02d}:00"
 
         try:
             timestamp = _parse_regelleistung_time_block_start(target_date, time_block)
@@ -1628,6 +1655,17 @@ def _parse_regelleistung_xlsx(
                     exc,
                 )
             continue
+
+        if price_is_block_total:
+            if block_hours is None or block_hours <= 0:
+                logger.warning(
+                    "Skipping Regelleistung %s row with EUR/MW block price but "
+                    "unknown duration: %r",
+                    product,
+                    product_label or time_block,
+                )
+                continue
+            price /= block_hours
 
         records.append({
             "timestamp": timestamp,

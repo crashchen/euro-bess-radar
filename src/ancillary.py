@@ -412,8 +412,9 @@ def normalize_auto_fetch_dataset(
     frames: list[pd.DataFrame] = []
 
     if "capacity_price_eur_mw" in raw.columns:
+        has_explicit_product = "product" in raw.columns
         labels = _coerce_text_array(
-            raw["product"] if "product" in raw.columns else dataset_name,
+            raw["product"] if has_explicit_product else dataset_name,
             idx,
             default=dataset_name,
         )
@@ -423,7 +424,11 @@ def normalize_auto_fetch_dataset(
             default="",
         )
         canonical = [
-            _canonical_product_label(label, direction, dataset_name)
+            _canonical_product_label(
+                label,
+                direction,
+                None if has_explicit_product else dataset_name,
+            )
             for label, direction in zip(labels, directions, strict=True)
         ]
         frames.append(_build_standard_frame(

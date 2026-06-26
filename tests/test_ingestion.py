@@ -1279,6 +1279,72 @@ class TestFetchRegelleistungResults:
         assert result["direction"].iloc[0] == "Down"
 
     @patch("src.data_ingestion._call_regelleistung_api")
+    def test_parses_current_fcr_export_and_normalises_block_price(
+        self, mock_api: MagicMock,
+    ) -> None:
+        from io import BytesIO
+
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append([
+            "DATE_FROM",
+            "PRODUCT_TYPE",
+            "PRODUCTNAME",
+            "GERMANY_SETTLEMENTCAPACITY_PRICE_[EUR/MW]",
+        ])
+        ws.append(["2026-06-20", "FCR", "NEGPOS_04_08", 80.0])
+        buf = BytesIO()
+        wb.save(buf)
+        mock_api.return_value = buf.getvalue()
+
+        result = fetch_regelleistung_results(
+            "FCR",
+            pd.Timestamp("2026-06-19T22:00:00Z"),
+            pd.Timestamp("2026-06-20T22:00:00Z"),
+        )
+
+        assert result is not None
+        assert len(result) == 1
+        assert str(result["timestamp"].iloc[0]) == "2026-06-20 02:00:00+00:00"
+        assert result["capacity_price_eur_mw"].iloc[0] == 20.0
+        assert result["direction"].iloc[0] == "Symmetric"
+
+    @patch("src.data_ingestion._call_regelleistung_api")
+    def test_parses_current_afrr_export_with_direction(
+        self, mock_api: MagicMock,
+    ) -> None:
+        from io import BytesIO
+
+        import openpyxl
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.append([
+            "DATE_FROM",
+            "TYPE_OF_RESERVES",
+            "PRODUCT",
+            "GERMANY_AVERAGE_CAPACITY_PRICE_[(EUR/MW)/h]",
+        ])
+        ws.append(["2026-06-20", "aFRR", "NEG_20_24", 34.5])
+        buf = BytesIO()
+        wb.save(buf)
+        mock_api.return_value = buf.getvalue()
+
+        result = fetch_regelleistung_results(
+            "aFRR",
+            pd.Timestamp("2026-06-19T22:00:00Z"),
+            pd.Timestamp("2026-06-20T22:00:00Z"),
+        )
+
+        assert result is not None
+        assert len(result) == 1
+        assert str(result["timestamp"].iloc[0]) == "2026-06-20 18:00:00+00:00"
+        assert result["capacity_price_eur_mw"].iloc[0] == 34.5
+        assert result["direction"].iloc[0] == "Down"
+
+    @patch("src.data_ingestion._call_regelleistung_api")
     def test_returns_none_on_network_error(
         self, mock_api: MagicMock, caplog: pytest.LogCaptureFixture,
     ) -> None:
