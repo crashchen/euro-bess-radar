@@ -14,6 +14,7 @@ from src.dispatch import (
     solve_dispatch_batch,
     solve_joint_capacity_batch,
     solve_sequential_da_id_dispatch,
+    solve_sequential_da_id_reserve_dispatch,
 )
 
 
@@ -152,6 +153,50 @@ class TestSolveDailyLp:
         r = solve_daily_lp(prices, dt=0.25, power_mw=1.0, duration_hours=2.0, efficiency=0.88)
         assert r["revenue_eur"] > 0
         assert len(r["soc"]) == 97  # N+1 SoC points
+
+    def test_power_cap_none_and_full_scalar_preserve_old_result(self) -> None:
+        prices = np.array([20.0] * 12 + [80.0] * 12)
+        kw = dict(dt=1.0, power_mw=1.0, duration_hours=2.0, efficiency=0.88)
+
+        base = solve_daily_lp(prices, **kw)
+        full_cap = solve_daily_lp(prices, power_cap_mw=1.0, **kw)
+
+        assert full_cap["revenue_eur"] == pytest.approx(base["revenue_eur"], abs=1e-6)
+        assert np.allclose(full_cap["p_charge"], base["p_charge"])
+        assert np.allclose(full_cap["p_discharge"], base["p_discharge"])
+
+    def test_power_cap_vector_limits_physical_dispatch(self) -> None:
+        prices = np.array([20.0] * 12 + [90.0] * 12)
+        cap = np.array([0.25] * 12 + [1.0] * 12)
+
+        r = solve_daily_lp(
+            prices, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            efficiency=0.88, power_cap_mw=cap,
+        )
+
+        assert r["p_charge"][:12].max() <= 0.25 + 1e-6
+        assert r["p_discharge"].max() <= 1.0 + 1e-6
+
+    def test_power_cap_length_mismatch_raises(self) -> None:
+        prices = np.array([50.0] * 24)
+        with pytest.raises(ValueError, match="power_cap_mw"):
+            solve_daily_lp(prices, dt=1.0, power_cap_mw=np.ones(10))
+
+    def test_non_finite_or_negative_power_cap_entries_clip_to_zero(self) -> None:
+        prices = np.array([20.0] * 12 + [90.0] * 12)
+        cap = np.ones(24)
+        cap[0] = np.nan
+        cap[1] = -5.0
+
+        r = solve_daily_lp(
+            prices, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            efficiency=0.88, power_cap_mw=cap,
+        )
+
+        assert r["p_charge"][0] == pytest.approx(0.0, abs=1e-9)
+        assert r["p_discharge"][0] == pytest.approx(0.0, abs=1e-9)
+        assert r["p_charge"][1] == pytest.approx(0.0, abs=1e-9)
+        assert r["p_discharge"][1] == pytest.approx(0.0, abs=1e-9)
 
 
 class TestSolveDispatchBatch:
@@ -541,6 +586,113 @@ class TestSolveDailyDaIdReserveDispatch:
             assert solve_daily_da_id_reserve_dispatch(
                 da, ida, capacity_price_eur_mw_h=bad_capacity_price, **_RESERVE_KW,
             )["total_cash_eur"] == 0.0
+
+
+class TestSolveSequentialDaIdReserveDispatch:
+    """Forecast-driven reserve-first DA + IDA + reserve policy."""
+
+    _DA = np.array([20.0] * 8 + [90.0] * 8 + [25.0] * 8)
+    _IDA = np.array([95.0] * 8 + [20.0] * 8 + [88.0] * 8)
+    _RESERVE = np.array([4.0] * 8 + [20.0] * 8 + [8.0] * 8)
+
+    def test_stage0_reserve_lock_does_not_peek_at_realised_prices(self) -> None:
+        da_forecast = self._DA + 3.0
+        ida_forecast = self._IDA - 5.0
+        reserve_forecast = self._RESERVE + 2.0
+
+        base = solve_sequential_da_id_reserve_dispatch(
+            da_forecast, self._DA, ida_forecast, self._IDA,
+            reserve_forecast, self._RESERVE, **_RESERVE_KW,
+        )
+        perturbed = solve_sequential_da_id_reserve_dispatch(
+            da_forecast,
+            self._DA[::-1] + 500.0,
+            ida_forecast,
+            self._IDA[::-1] - 300.0,
+            reserve_forecast,
+            self._RESERVE[::-1] * 10.0,
+            **_RESERVE_KW,
+        )
+
+        assert np.allclose(base["reserve_mw"], perturbed["reserve_mw"])
+
+    def test_perfect_forecasts_match_reserve_first_ceiling(self) -> None:
+        r = solve_sequential_da_id_reserve_dispatch(
+            self._DA, self._DA, self._IDA, self._IDA,
+            self._RESERVE, self._RESERVE, **_RESERVE_KW,
+        )
+
+        assert r["realised_total_eur"] == pytest.approx(
+            r["reserve_first_ceiling_eur"], abs=1e-6,
+        )
+        assert r["forecast_cost_eur"] == pytest.approx(0.0, abs=1e-6)
+
+    def test_realistic_is_bounded_by_global_ceiling(self) -> None:
+        r = solve_sequential_da_id_reserve_dispatch(
+            self._DA + 5.0,
+            self._DA,
+            self._DA,  # deliberately weak IDA forecast
+            self._IDA,
+            np.array([30.0] * 8 + [1.0] * 16),
+            self._RESERVE,
+            **_RESERVE_KW,
+        )
+
+        assert r["realised_total_eur"] <= r["global_ceiling_eur"] + 1e-6
+        assert r["full_gap_eur"] == pytest.approx(
+            r["global_ceiling_eur"] - r["realised_total_eur"], abs=1e-6,
+        )
+        assert r["timing_cost_eur"] >= -1e-6
+
+    def test_zero_reserve_price_collapses_to_phase7_sequential(self) -> None:
+        zero = np.zeros_like(self._DA)
+        triple = solve_sequential_da_id_reserve_dispatch(
+            self._DA, self._DA, self._IDA, self._IDA,
+            zero, zero, **_RESERVE_KW,
+        )
+        phase7 = solve_sequential_da_id_dispatch(
+            self._DA, self._IDA, self._IDA, **_RESERVE_KW,
+        )
+
+        assert np.allclose(triple["reserve_mw"], 0.0)
+        assert triple["capacity_revenue_eur"] == pytest.approx(0.0, abs=1e-6)
+        assert triple["realised_total_eur"] == pytest.approx(
+            phase7["realised_total_eur"], abs=1e-6,
+        )
+        assert triple["reserve_first_ceiling_eur"] == pytest.approx(
+            phase7["ceiling_total_eur"], abs=1e-6,
+        )
+
+    def test_missing_reserve_forecast_safely_skips_reserve_commitment(self) -> None:
+        missing = np.full_like(self._DA, np.nan)
+        triple = solve_sequential_da_id_reserve_dispatch(
+            self._DA, self._DA, self._IDA, self._IDA,
+            missing, self._RESERVE, **_RESERVE_KW,
+        )
+        phase7 = solve_sequential_da_id_dispatch(
+            self._DA, self._IDA, self._IDA, **_RESERVE_KW,
+        )
+
+        assert np.allclose(triple["reserve_mw"], 0.0)
+        assert triple["realised_total_eur"] == pytest.approx(
+            phase7["realised_total_eur"], abs=1e-6,
+        )
+
+    def test_nan_or_length_mismatch_returns_zero(self) -> None:
+        bad = self._DA.copy()
+        bad[0] = np.nan
+        assert solve_sequential_da_id_reserve_dispatch(
+            bad, self._DA, self._IDA, self._IDA,
+            self._RESERVE, self._RESERVE, **_RESERVE_KW,
+        )["realised_total_eur"] == 0.0
+        assert solve_sequential_da_id_reserve_dispatch(
+            self._DA, self._DA[:-1], self._IDA, self._IDA,
+            self._RESERVE, self._RESERVE, **_RESERVE_KW,
+        )["realised_total_eur"] == 0.0
+        assert solve_sequential_da_id_reserve_dispatch(
+            self._DA, self._DA, self._IDA, self._IDA,
+            np.ones(5), self._RESERVE, **_RESERVE_KW,
+        )["realised_total_eur"] == 0.0
 
 
 class TestSolveSequentialDaIdDispatch:

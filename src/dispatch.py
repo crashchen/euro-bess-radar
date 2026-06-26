@@ -25,6 +25,7 @@ def solve_daily_lp(
     duration_hours: float = 1.0,
     efficiency: float = 0.88,
     soc_init_frac: float = 0.5,
+    power_cap_mw: float | np.ndarray | None = None,
 ) -> dict:
     """Solve optimal charge/discharge schedule for one day via MILP.
 
@@ -35,6 +36,10 @@ def solve_daily_lp(
         duration_hours: BESS energy duration in hours.
         efficiency: Round-trip efficiency (0-1).
         soc_init_frac: Initial SoC as fraction of capacity (0-1).
+        power_cap_mw: Optional scalar or per-interval physical power cap.
+            ``None`` preserves the historical full-power behaviour. When
+            provided, charge/discharge bounds are clipped to ``[0, power_mw]``;
+            non-finite entries become 0.
 
     Returns:
         Dict with keys: revenue_eur, p_charge, p_discharge, soc, n_cycles.
@@ -63,7 +68,17 @@ def solve_daily_lp(
     c[:n] = (prices + DISPATCH_VOM_COST_EUR_MWH) * dt
     c[n:2 * n] = -(prices - DISPATCH_VOM_COST_EUR_MWH) * dt
 
-    bounds = [(0.0, power_mw)] * (2 * n) + [(0.0, 1.0)] * n
+    cap_arr = _coerce_power_cap(power_cap_mw, n=n, power_mw=power_mw)
+    if cap_arr is None:
+        # Keep the original None path byte-for-byte simple: callers that do
+        # not reserve headroom get the exact historical bounds.
+        bounds = [(0.0, power_mw)] * (2 * n) + [(0.0, 1.0)] * n
+    else:
+        bounds = (
+            [(0.0, float(cap)) for cap in cap_arr]
+            + [(0.0, float(cap)) for cap in cap_arr]
+            + [(0.0, 1.0)] * n
+        )
     integrality = np.zeros(3 * n)
     integrality[2 * n:] = 1  # binary b[t]
 
@@ -144,6 +159,37 @@ def solve_daily_lp(
     }
 
 
+def _coerce_power_cap(
+    power_cap_mw: float | np.ndarray | None,
+    *,
+    n: int,
+    power_mw: float,
+) -> np.ndarray | None:
+    """Return a sanitized per-interval power cap, or None for historical mode."""
+    if power_cap_mw is None:
+        return None
+    cap = np.asarray(power_cap_mw, dtype=float).ravel()
+    if cap.size == 1:
+        cap = np.full(n, float(cap[0]))
+    elif cap.size != n:
+        raise ValueError(f"power_cap_mw must be scalar or length {n}, got {cap.size}")
+    return np.clip(np.where(np.isfinite(cap), cap, 0.0), 0.0, power_mw)
+
+
+def _coerce_nonnegative_interval_vector(
+    value: float | np.ndarray,
+    *,
+    n: int,
+) -> np.ndarray:
+    """Broadcast/sanitize a scalar or interval vector of non-negative prices."""
+    arr = np.asarray(value, dtype=float).ravel()
+    if arr.size == 1:
+        arr = np.full(n, float(arr[0]))
+    elif arr.size != n:
+        raise ValueError(f"value must be scalar or length {n}, got {arr.size}")
+    return np.where(np.isfinite(arr), np.maximum(arr, 0.0), 0.0)
+
+
 def solve_daily_joint_capacity_lp(
     prices: np.ndarray,
     dt: float,
@@ -181,18 +227,14 @@ def solve_daily_joint_capacity_lp(
     capacity_mwh = power_mw * duration_hours
     soc_init = soc_init_frac * capacity_mwh
     sqrt_eff = math.sqrt(efficiency)
-    # Capacity price may be a scalar (one cleared price) or a per-interval
-    # vector (e.g. a 9.2b block-of-day forecast). Broadcast a scalar to n;
-    # map non-finite entries to 0 (no reserve incentive) and clip negatives.
-    cap_arr = np.asarray(capacity_price_eur_mw_h, dtype=float).ravel()
-    if cap_arr.size == 1:
-        cap_arr = np.full(n, float(cap_arr[0]))
-    elif cap_arr.size != n:
-        raise ValueError(
-            f"capacity_price_eur_mw_h must be scalar or length {n}, "
-            f"got {cap_arr.size}"
+    try:
+        capacity_price = _coerce_nonnegative_interval_vector(
+            capacity_price_eur_mw_h, n=n,
         )
-    capacity_price = np.where(np.isfinite(cap_arr), np.maximum(cap_arr, 0.0), 0.0)
+    except ValueError as exc:
+        raise ValueError(
+            f"capacity_price_eur_mw_h must be scalar or length {n}"
+        ) from exc
 
     # Decision variables: [charge, discharge, reserve, b]  (4N total)
     # b[t] is binary: 1 = charging mode, 0 = discharging mode. Same MILP-based
@@ -480,7 +522,7 @@ def solve_daily_da_id_reserve_dispatch(
     da_prices: np.ndarray,
     ida_prices: np.ndarray,
     dt: float,
-    capacity_price_eur_mw_h: float,
+    capacity_price_eur_mw_h: float | np.ndarray,
     power_mw: float = 1.0,
     duration_hours: float = 1.0,
     efficiency: float = 0.88,
@@ -520,14 +562,22 @@ def solve_daily_da_id_reserve_dispatch(
         Stage-1 / Stage-2 dispatch arrays (incl. reserve_mw).
     """
     n = len(da_prices)
-    try:
-        capacity_price = float(capacity_price_eur_mw_h)
-    except (TypeError, ValueError):
-        capacity_price = float("nan")
+    capacity_price = None
+    if n > 0:
+        try:
+            raw_capacity_price = np.asarray(capacity_price_eur_mw_h, dtype=float).ravel()
+            if raw_capacity_price.size == 1 and not np.isfinite(raw_capacity_price[0]):
+                capacity_price = None
+            else:
+                capacity_price = _coerce_nonnegative_interval_vector(
+                    raw_capacity_price, n=n,
+                )
+        except (TypeError, ValueError):
+            capacity_price = None
     if (
         n == 0 or n != len(ida_prices)
         or np.isnan(da_prices).any() or np.isnan(ida_prices).any()
-        or not math.isfinite(capacity_price)
+        or capacity_price is None
     ):
         zeros = np.zeros(max(n, 0))
         return {
@@ -574,6 +624,196 @@ def solve_daily_da_id_reserve_dispatch(
         "reserve_mw": stage_2["reserve_mw"],
         "da_soc": stage_1["soc"],
         "ida_soc": stage_2["soc"],
+    }
+
+
+def solve_sequential_da_id_reserve_dispatch(
+    da_forecast: np.ndarray,
+    da_realised: np.ndarray,
+    ida_forecast: np.ndarray,
+    ida_realised: np.ndarray,
+    reserve_forecast: float | np.ndarray,
+    reserve_realised: float | np.ndarray,
+    dt: float,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    soc_init_frac: float = 0.5,
+    availability: float = 0.95,
+) -> dict:
+    """Forecast-driven reserve-first DA + IDA + reserve policy.
+
+    This is the realistic counterpart to
+    ``solve_daily_da_id_reserve_dispatch``. Reserve capacity is committed
+    first under DA/reserve forecasts, before the DA and IDA prints are known.
+    The committed reserve headroom then caps only the *physical* Stage-2 IDA
+    dispatch. The DA position remains financial, consistent with the Phase-7
+    and 9.2a accounting: it can be larger than the remaining physical
+    headroom and is reconciled through the implicit IDA mark-to-market leg.
+
+    Settlement uses realised DA, IDA, and reserve prices:
+
+        realised = da_gross - implicit_mtm + ida_physical_realised
+                   + reserve_capacity_pay
+
+    ``reserve_first_ceiling_eur`` repeats the same reserve-first structure
+    with perfect DA/IDA/reserve forecasts. It isolates forecast error from the
+    broader 9.2a global perfect-foresight ceiling, which is also returned as
+    ``global_ceiling_eur`` for row-level gap attribution.
+    """
+    n = len(da_realised)
+    try:
+        da_fc = np.asarray(da_forecast, dtype=float).ravel()
+        da = np.asarray(da_realised, dtype=float).ravel()
+        ida_fc = np.asarray(ida_forecast, dtype=float).ravel()
+        ida = np.asarray(ida_realised, dtype=float).ravel()
+    except (TypeError, ValueError):
+        return _zero_sequential_reserve_result(max(n, 0))
+
+    lengths_ok = n > 0 and all(len(arr) == n for arr in (da_fc, da, ida_fc, ida))
+    has_nan = any(np.isnan(arr).any() for arr in (da_fc, da, ida_fc, ida))
+    if not lengths_ok or has_nan:
+        return _zero_sequential_reserve_result(max(n, 0))
+
+    try:
+        reserve_fc = _coerce_nonnegative_interval_vector(reserve_forecast, n=n)
+        reserve_real = _coerce_nonnegative_interval_vector(reserve_realised, n=n)
+    except (TypeError, ValueError):
+        return _zero_sequential_reserve_result(max(n, 0))
+
+    stage_0 = solve_daily_joint_capacity_lp(
+        da_fc, dt=dt, capacity_price_eur_mw_h=reserve_fc,
+        power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
+        soc_init_frac=soc_init_frac, availability=availability,
+    )
+    reserve_mw = np.asarray(stage_0["reserve_mw"], dtype=float)
+    power_cap = np.maximum(power_mw - reserve_mw, 0.0)
+
+    stage_1 = solve_daily_lp(
+        da, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency, soc_init_frac=soc_init_frac,
+    )
+    stage_2_fc = solve_daily_lp(
+        ida_fc, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency, soc_init_frac=soc_init_frac, power_cap_mw=power_cap,
+    )
+
+    da_net = stage_1["p_discharge"] - stage_1["p_charge"]
+    da_gross = float((da_net * da * dt).sum())
+    implicit_mtm = float((da_net * ida * dt).sum())
+    ida_value_realised = _schedule_value_at_prices(
+        stage_2_fc["p_charge"], stage_2_fc["p_discharge"], ida, dt,
+    )
+    capacity_revenue = float((reserve_mw * reserve_real * availability * dt).sum())
+    realised_total = da_gross - implicit_mtm + ida_value_realised + capacity_revenue
+
+    reserve_first = _solve_reserve_first_perfect(
+        da, ida, reserve_real, dt=dt, power_mw=power_mw,
+        duration_hours=duration_hours, efficiency=efficiency,
+        soc_init_frac=soc_init_frac, availability=availability,
+    )
+    global_ceiling = solve_daily_da_id_reserve_dispatch(
+        da, ida, dt=dt, capacity_price_eur_mw_h=reserve_real,
+        power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency, soc_init_frac=soc_init_frac,
+        availability=availability,
+    )
+    forecast_cost = max(reserve_first["total_cash_eur"] - realised_total, 0.0)
+    timing_cost = max(
+        global_ceiling["total_cash_eur"] - reserve_first["total_cash_eur"], 0.0,
+    )
+    full_gap = max(global_ceiling["total_cash_eur"] - realised_total, 0.0)
+
+    return {
+        "da_only_revenue_eur": round(stage_1["revenue_eur"], 6),
+        "realised_total_eur": round(realised_total, 6),
+        "reserve_first_ceiling_eur": round(reserve_first["total_cash_eur"], 6),
+        "global_ceiling_eur": round(global_ceiling["total_cash_eur"], 6),
+        "forecast_cost_eur": round(forecast_cost, 6),
+        "timing_cost_eur": round(timing_cost, 6),
+        "full_gap_eur": round(full_gap, 6),
+        "captured_uplift_eur": round(realised_total - stage_1["revenue_eur"], 6),
+        "da_gross_eur": round(da_gross, 6),
+        "implicit_mtm_eur": round(implicit_mtm, 6),
+        "ida_physical_revenue_eur": round(ida_value_realised, 6),
+        "capacity_revenue_eur": round(capacity_revenue, 6),
+        "reserve_mw": reserve_mw,
+        "reserve_first_reserve_mw": reserve_first["reserve_mw"],
+        "da_p_charge": stage_1["p_charge"],
+        "da_p_discharge": stage_1["p_discharge"],
+        "ida_p_charge": stage_2_fc["p_charge"],
+        "ida_p_discharge": stage_2_fc["p_discharge"],
+        "da_soc": stage_1["soc"],
+        "ida_soc": stage_2_fc["soc"],
+    }
+
+
+def _solve_reserve_first_perfect(
+    da_prices: np.ndarray,
+    ida_prices: np.ndarray,
+    reserve_prices: np.ndarray,
+    *,
+    dt: float,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    soc_init_frac: float,
+    availability: float,
+) -> dict:
+    """Same reserve-first structure as 9.2b, with perfect forecasts."""
+    stage_0 = solve_daily_joint_capacity_lp(
+        da_prices, dt=dt, capacity_price_eur_mw_h=reserve_prices,
+        power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
+        soc_init_frac=soc_init_frac, availability=availability,
+    )
+    reserve_mw = np.asarray(stage_0["reserve_mw"], dtype=float)
+    power_cap = np.maximum(power_mw - reserve_mw, 0.0)
+    stage_1 = solve_daily_lp(
+        da_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency, soc_init_frac=soc_init_frac,
+    )
+    stage_2 = solve_daily_lp(
+        ida_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency, soc_init_frac=soc_init_frac, power_cap_mw=power_cap,
+    )
+    da_net = stage_1["p_discharge"] - stage_1["p_charge"]
+    da_gross = float((da_net * da_prices * dt).sum())
+    implicit_mtm = float((da_net * ida_prices * dt).sum())
+    ida_value = _schedule_value_at_prices(
+        stage_2["p_charge"], stage_2["p_discharge"], ida_prices, dt,
+    )
+    capacity_revenue = float((reserve_mw * reserve_prices * availability * dt).sum())
+    total = da_gross - implicit_mtm + ida_value + capacity_revenue
+    return {
+        "total_cash_eur": round(total, 6),
+        "capacity_revenue_eur": round(capacity_revenue, 6),
+        "reserve_mw": reserve_mw,
+    }
+
+
+def _zero_sequential_reserve_result(n: int) -> dict:
+    zeros = np.zeros(max(n, 0))
+    return {
+        "da_only_revenue_eur": 0.0,
+        "realised_total_eur": 0.0,
+        "reserve_first_ceiling_eur": 0.0,
+        "global_ceiling_eur": 0.0,
+        "forecast_cost_eur": 0.0,
+        "timing_cost_eur": 0.0,
+        "full_gap_eur": 0.0,
+        "captured_uplift_eur": 0.0,
+        "da_gross_eur": 0.0,
+        "implicit_mtm_eur": 0.0,
+        "ida_physical_revenue_eur": 0.0,
+        "capacity_revenue_eur": 0.0,
+        "reserve_mw": zeros,
+        "reserve_first_reserve_mw": zeros,
+        "da_p_charge": zeros,
+        "da_p_discharge": zeros,
+        "ida_p_charge": zeros,
+        "ida_p_discharge": zeros,
+        "da_soc": np.zeros(max(n, 0) + 1),
+        "ida_soc": np.zeros(max(n, 0) + 1),
     }
 
 
