@@ -292,6 +292,48 @@ class TestSolveDailyJointCapacityLp:
         both = (r["p_charge"] > 1e-6) & (r["p_discharge"] > 1e-6)
         assert int(both.sum()) == 0
 
+    def test_uniform_vector_capacity_price_equals_scalar(self) -> None:
+        # Backward compat for the 9.2b per-interval extension: a constant vector
+        # must reproduce the scalar result exactly.
+        prices = np.array([20.0] * 12 + [120.0] * 12)
+        kw = dict(dt=1.0, power_mw=1.0, duration_hours=2.0, efficiency=0.88)
+        scalar = solve_daily_joint_capacity_lp(
+            prices, capacity_price_eur_mw_h=8.0, **kw,
+        )["total_revenue_eur"]
+        vector = solve_daily_joint_capacity_lp(
+            prices, capacity_price_eur_mw_h=np.full(24, 8.0), **kw,
+        )["total_revenue_eur"]
+        assert scalar == pytest.approx(vector, abs=1e-6)
+
+    def test_per_interval_capacity_price_concentrates_reserve(self) -> None:
+        # Reserve headroom follows the per-interval capacity price.
+        prices = np.array([10.0] * 8 + [60.0] * 8 + [10.0] * 8)
+        cap = np.array([20.0] * 12 + [0.0] * 12)  # paid only in the first half
+        r = solve_daily_joint_capacity_lp(
+            prices, dt=1.0, capacity_price_eur_mw_h=cap,
+            power_mw=1.0, duration_hours=2.0, efficiency=0.88,
+        )
+        assert r["reserve_mw"][:12].mean() > r["reserve_mw"][12:].mean()
+        assert r["reserve_mw"][12:].mean() == pytest.approx(0.0, abs=1e-6)
+
+    def test_capacity_price_length_mismatch_raises(self) -> None:
+        prices = np.array([50.0] * 24)
+        with pytest.raises(ValueError, match="scalar or length"):
+            solve_daily_joint_capacity_lp(
+                prices, dt=1.0, capacity_price_eur_mw_h=np.ones(10),
+            )
+
+    def test_non_finite_capacity_price_element_treated_as_zero(self) -> None:
+        prices = np.array([10.0] * 8 + [60.0] * 8 + [10.0] * 8)
+        cap = np.array([20.0] * 12 + [0.0] * 12, dtype=float)
+        cap[0] = np.nan
+        r = solve_daily_joint_capacity_lp(
+            prices, dt=1.0, capacity_price_eur_mw_h=cap,
+            power_mw=1.0, duration_hours=2.0, efficiency=0.88,
+        )
+        # No crash; the NaN interval simply carries no reserve incentive.
+        assert np.isfinite(r["total_revenue_eur"])
+
 
 class TestSolveJointCapacityBatch:
     def test_batch_returns_expected_columns(self) -> None:

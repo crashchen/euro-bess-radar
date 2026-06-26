@@ -21,6 +21,7 @@ import pandas as pd
 from src.analytics import _to_local
 
 RESERVE_VALUE_COL = "capacity_price_eur_mw"
+RESERVE_FORECAST_COL = "forecast_capacity_eur_mw"
 RESERVE_BLOCK_HOURS = 4
 N_BLOCKS_PER_DAY = 24 // RESERVE_BLOCK_HOURS  # 6
 SKILL_BY_BLOCK_COLUMNS = ["block", "mae", "n"]
@@ -214,3 +215,102 @@ def compute_reserve_forecast_skill(
         "forecast_mode": forecast_mode,
         "by_block": by_block[SKILL_BY_BLOCK_COLUMNS],
     }
+
+
+def _empty_reserve_forecast_frame() -> pd.DataFrame:
+    out = pd.DataFrame(columns=[RESERVE_FORECAST_COL, "block", "n_samples"])
+    out.index = pd.DatetimeIndex([], name="timestamp")
+    return out
+
+
+def build_reserve_price_forecast(
+    history: pd.DataFrame,
+    *,
+    target_dates: list,
+    tz: str | None = None,
+    value_col: str = RESERVE_VALUE_COL,
+    forecast_mode: str = "walk_forward",
+) -> tuple[pd.DataFrame, dict]:
+    """Block-of-day climatology forecast of reserve prices at target intervals.
+
+    For each local date in ``target_dates`` the forecast at each interval is the
+    mean realised capacity price of the history rows sharing that interval's 4h
+    block. Feeds the 9.2b Stage-0 reserve commitment, so it defaults to
+    ``forecast_mode="walk_forward"`` (prior days only) — the commitment must not
+    see the target day's NOR any later day's realised price. ``"loo"`` (may use
+    future days) and ``"in_sample"`` are for diagnostics only. Empty blocks fall
+    back to the climatology global mean, flagged ``n_samples == 0``.
+
+    Returns ``(forecast_df, metadata)``. ``forecast_df`` is UTC-indexed with
+    ``[RESERVE_FORECAST_COL, "block", "n_samples"]`` over the target dates'
+    timestamps; ``metadata`` carries ``coverage`` / ``n_blocks_filled`` /
+    ``n_blocks_requested`` / ``fallback_points`` / ``forecast_mode`` /
+    ``global_mean`` / ``n_target_points``. Walk-forward's first day (no prior
+    history) is simply absent from the frame — never silently in-sampled.
+    """
+    if forecast_mode not in _VALID_FORECAST_MODES:
+        raise ValueError(
+            f"forecast_mode must be one of {_VALID_FORECAST_MODES}, got {forecast_mode!r}"
+        )
+    empty_meta = {
+        "coverage": 0.0, "n_target_points": 0, "n_blocks_requested": 0,
+        "n_blocks_filled": 0, "global_mean": float("nan"),
+        "forecast_mode": forecast_mode, "fallback_points": 0,
+    }
+    if history is None or history.empty or value_col not in history.columns:
+        return _empty_reserve_forecast_frame(), empty_meta
+    if not target_dates:
+        return _empty_reserve_forecast_frame(), empty_meta
+
+    local = _to_local(history[[value_col]].dropna(), tz).sort_index()
+    if local.empty:
+        return _empty_reserve_forecast_frame(), empty_meta
+    idx = pd.DatetimeIndex(local.index)
+    local = local.assign(_block=_block_of_day(idx), _date=idx.date)
+    target_set = set(target_dates)
+
+    frames: list[pd.DataFrame] = []
+    for target in sorted(target_set):
+        day_rows = local[local["_date"] == target]
+        if day_rows.empty:
+            continue
+        if forecast_mode == "walk_forward":
+            clim = local[local["_date"] < target]
+        elif forecast_mode == "in_sample":
+            clim = local
+        else:  # "loo"
+            clim = local[local["_date"] != target]
+        if clim.empty:
+            # walk-forward first day (no prior history) — dropped, not in-sampled.
+            continue
+        block_mean = clim.groupby("_block")[value_col].mean()
+        block_count = clim.groupby("_block")[value_col].size()
+        global_mean = float(clim[value_col].mean())
+
+        blocks = day_rows["_block"].to_numpy()
+        forecast = block_mean.reindex(blocks).to_numpy(dtype=float)
+        counts = block_count.reindex(blocks).fillna(0).to_numpy(dtype=int)
+        forecast = np.where(np.isnan(forecast), global_mean, forecast)
+        frames.append(pd.DataFrame(
+            {RESERVE_FORECAST_COL: forecast, "block": blocks, "n_samples": counts},
+            index=pd.DatetimeIndex(day_rows.index).tz_convert("UTC"),
+        ))
+
+    if not frames:
+        return _empty_reserve_forecast_frame(), empty_meta
+
+    forecast_df = pd.concat(frames).sort_index()
+    forecast_df.index.name = "timestamp"
+    fallback_points = int((forecast_df["n_samples"] == 0).sum())
+    metadata = {
+        "coverage": float((forecast_df["n_samples"] > 0).mean()),
+        "n_target_points": len(forecast_df),
+        "n_blocks_requested": int(forecast_df["block"].nunique()),
+        "n_blocks_filled": int(
+            forecast_df.loc[forecast_df["n_samples"] > 0, "block"].nunique()
+        ),
+        "global_mean": float(forecast_df[RESERVE_FORECAST_COL].mean()),
+        "forecast_mode": forecast_mode,
+        "fallback_points": fallback_points,
+    }
+    return forecast_df, metadata

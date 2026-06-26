@@ -147,7 +147,7 @@ def solve_daily_lp(
 def solve_daily_joint_capacity_lp(
     prices: np.ndarray,
     dt: float,
-    capacity_price_eur_mw_h: float,
+    capacity_price_eur_mw_h: float | np.ndarray,
     power_mw: float = 1.0,
     duration_hours: float = 1.0,
     efficiency: float = 0.88,
@@ -159,7 +159,9 @@ def solve_daily_joint_capacity_lp(
     The reserve variable consumes power headroom in each interval but does not
     model activation energy, bid acceptance, or product-specific SoC duration.
     This keeps the estimate screening-grade while improving on a pure time-split
-    heuristic.
+    heuristic. ``capacity_price_eur_mw_h`` is a scalar cleared price or a
+    per-interval vector (length ``len(prices)``) — the latter lets a 9.2b
+    block-of-day reserve-price forecast drive the headroom sizing.
     """
     n = len(prices)
     if n == 0 or np.isnan(prices).any():
@@ -179,7 +181,18 @@ def solve_daily_joint_capacity_lp(
     capacity_mwh = power_mw * duration_hours
     soc_init = soc_init_frac * capacity_mwh
     sqrt_eff = math.sqrt(efficiency)
-    capacity_price = max(float(capacity_price_eur_mw_h), 0.0)
+    # Capacity price may be a scalar (one cleared price) or a per-interval
+    # vector (e.g. a 9.2b block-of-day forecast). Broadcast a scalar to n;
+    # map non-finite entries to 0 (no reserve incentive) and clip negatives.
+    cap_arr = np.asarray(capacity_price_eur_mw_h, dtype=float).ravel()
+    if cap_arr.size == 1:
+        cap_arr = np.full(n, float(cap_arr[0]))
+    elif cap_arr.size != n:
+        raise ValueError(
+            f"capacity_price_eur_mw_h must be scalar or length {n}, "
+            f"got {cap_arr.size}"
+        )
+    capacity_price = np.where(np.isfinite(cap_arr), np.maximum(cap_arr, 0.0), 0.0)
 
     # Decision variables: [charge, discharge, reserve, b]  (4N total)
     # b[t] is binary: 1 = charging mode, 0 = discharging mode. Same MILP-based
