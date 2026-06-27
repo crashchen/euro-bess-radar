@@ -182,6 +182,8 @@ def _coerce_nonnegative_interval_vector(
     n: int,
 ) -> np.ndarray:
     """Broadcast/sanitize a scalar or interval vector of non-negative prices."""
+    if value is None:
+        raise TypeError("value must be scalar or interval vector")
     arr = np.asarray(value, dtype=float).ravel()
     if arr.size == 1:
         arr = np.full(n, float(arr[0]))
@@ -231,7 +233,7 @@ def solve_daily_joint_capacity_lp(
         capacity_price = _coerce_nonnegative_interval_vector(
             capacity_price_eur_mw_h, n=n,
         )
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         raise ValueError(
             f"capacity_price_eur_mw_h must be scalar or length {n}"
         ) from exc
@@ -675,10 +677,17 @@ def solve_sequential_da_id_reserve_dispatch(
     ``timing_cost_eur`` is >= 0 by construction (perfect-input sequential is a
     feasible policy bounded by the global optimum).
     """
-    n = len(da_realised)
+    if da_realised is None:
+        return _zero_sequential_reserve_result(0)
+
+    try:
+        da = np.asarray(da_realised, dtype=float).ravel()
+        n = len(da)
+    except (TypeError, ValueError):
+        return _zero_sequential_reserve_result(0)
+
     try:
         da_fc = np.asarray(da_forecast, dtype=float).ravel()
-        da = np.asarray(da_realised, dtype=float).ravel()
         ida_fc = np.asarray(ida_forecast, dtype=float).ravel()
         ida = np.asarray(ida_realised, dtype=float).ravel()
     except (TypeError, ValueError):

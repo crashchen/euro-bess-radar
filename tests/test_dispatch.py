@@ -368,6 +368,14 @@ class TestSolveDailyJointCapacityLp:
                 prices, dt=1.0, capacity_price_eur_mw_h=np.ones(10),
             )
 
+    @pytest.mark.parametrize("bad_price", [None, object()])
+    def test_invalid_capacity_price_type_raises_value_error(self, bad_price) -> None:
+        prices = np.array([50.0] * 24)
+        with pytest.raises(ValueError, match="capacity_price_eur_mw_h"):
+            solve_daily_joint_capacity_lp(
+                prices, dt=1.0, capacity_price_eur_mw_h=bad_price,
+            )
+
     def test_non_finite_capacity_price_element_treated_as_zero(self) -> None:
         prices = np.array([10.0] * 8 + [60.0] * 8 + [10.0] * 8)
         cap = np.array([20.0] * 12 + [0.0] * 12, dtype=float)
@@ -693,6 +701,14 @@ class TestSolveSequentialDaIdReserveDispatch:
             self._DA, self._DA, self._IDA, self._IDA,
             np.ones(5), self._RESERVE, **_RESERVE_KW,
         )["realised_total_eur"] == 0.0
+
+    def test_none_da_realised_returns_zero_without_len_crash(self) -> None:
+        r = solve_sequential_da_id_reserve_dispatch(
+            self._DA, None, self._IDA, self._IDA,
+            self._RESERVE, self._RESERVE, **_RESERVE_KW,
+        )
+        assert r["realised_total_eur"] == 0.0
+        assert len(r["reserve_mw"]) == 0
 
     def test_gap_attribution_identity_and_signed_forecast_cost(self) -> None:
         # full_gap == forecast_cost + timing_cost EXACTLY, across many random
