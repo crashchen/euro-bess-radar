@@ -844,10 +844,51 @@ def simulate_sequential_da_id_batch(
     return per_day, summary
 
 
+def align_reserve_price_to_index(
+    reserve_series: pd.Series | None,
+    target_index: pd.DatetimeIndex,
+    tz: str | None,
+) -> np.ndarray:
+    """Per-interval reserve price for target intervals via (local date, 4h block).
+
+    Maps a timestamp-indexed reserve capacity-price series (typically
+    block-granular FCR/aFRR data) onto the target interval timestamps by
+    matching local date + 4h block, averaging any multiple source rows that
+    fall in the same (date, block). Target intervals with no matching reserve
+    price get 0.0 (no reserve incentive). Both the 9.2a ceiling batch and the
+    9.2b sequential batch use this so they price reserve identically per
+    interval.
+    """
+    target = pd.DatetimeIndex(target_index)
+    if reserve_series is None or len(reserve_series) == 0:
+        return np.zeros(len(target))
+    src = reserve_series.dropna()
+    if len(src) == 0:
+        return np.zeros(len(target))
+    src_idx = pd.DatetimeIndex(src.index)
+    tgt_idx = target
+    if tz:
+        if src_idx.tz is not None:
+            src_idx = src_idx.tz_convert(tz)
+        if tgt_idx.tz is not None:
+            tgt_idx = tgt_idx.tz_convert(tz)
+    src_keys = pd.MultiIndex.from_arrays(
+        [src_idx.date, np.asarray(src_idx.hour) // 4],  # 4h FCR/aFRR product block
+    )
+    lookup = (
+        pd.Series(np.asarray(src.values, dtype=float), index=src_keys)
+        .groupby(level=[0, 1])
+        .mean()
+        .to_dict()
+    )
+    tgt_keys = zip(tgt_idx.date, np.asarray(tgt_idx.hour) // 4, strict=True)
+    return np.array([lookup.get(key, 0.0) for key in tgt_keys], dtype=float)
+
+
 def simulate_da_id_reserve_ceiling_batch(
     da_prices: pd.DataFrame,
     ida_prices: pd.DataFrame,
-    capacity_price_eur_mw_h: float,
+    capacity_price_eur_mw_h: float | pd.Series,
     *,
     dates: list[date],
     tz: str | None = None,
@@ -863,17 +904,28 @@ def simulate_da_id_reserve_ceiling_batch(
     ``dispatch.solve_daily_da_id_reserve_dispatch``. Days without overlapping
     DA/IDA intervals are skipped. Returns ``{"total_eur", "solved_days"}``.
 
+    ``capacity_price_eur_mw_h`` is a scalar cleared price OR a timestamp-indexed
+    reserve-price ``pd.Series`` (block-granular). The series form is aligned to
+    each day's intervals via :func:`align_reserve_price_to_index`, so the 9.2a
+    ceiling shown in the cockpit prices reserve identically (per interval) to
+    the 9.2b sequential solver's ``global_ceiling_eur``.
+
     This is a perfect-foresight UPPER BOUND, reserve = capacity headroom only
     (no activation energy), and NOT a forecast-driven policy. Each day is solved
     standalone terminal-neutral (no multi-day SoC carry), matching the
     standalone basis of ``simulate_sequential_da_id_batch``.
     """
-    try:
-        capacity_price = float(capacity_price_eur_mw_h)
-    except (TypeError, ValueError):
-        return {"total_eur": 0.0, "solved_days": 0}
-    if not math.isfinite(capacity_price):
-        return {"total_eur": 0.0, "solved_days": 0}
+    reserve_series = None
+    scalar_price = None
+    if isinstance(capacity_price_eur_mw_h, pd.Series):
+        reserve_series = capacity_price_eur_mw_h
+    else:
+        try:
+            scalar_price = float(capacity_price_eur_mw_h)
+        except (TypeError, ValueError):
+            return {"total_eur": 0.0, "solved_days": 0}
+        if not math.isfinite(scalar_price):
+            return {"total_eur": 0.0, "solved_days": 0}
 
     total = 0.0
     solved_days = 0
@@ -888,11 +940,17 @@ def simulate_da_id_reserve_ceiling_batch(
         if merged.empty or not _is_regular_utc_day(merged):
             continue
         dt = _infer_interval_hours(pd.DatetimeIndex(merged.index))
+        if reserve_series is not None:
+            day_reserve_price = align_reserve_price_to_index(
+                reserve_series, pd.DatetimeIndex(merged.index), tz,
+            )
+        else:
+            day_reserve_price = scalar_price
         result = solve_daily_da_id_reserve_dispatch(
             merged["price_eur_mwh"].to_numpy(dtype=float),
             merged["intraday_price_eur_mwh"].to_numpy(dtype=float),
             dt=dt,
-            capacity_price_eur_mw_h=capacity_price,
+            capacity_price_eur_mw_h=day_reserve_price,
             power_mw=power_mw,
             duration_hours=duration_hours,
             efficiency=efficiency,

@@ -13,6 +13,7 @@ import src.simulation as sim
 from src.simulation import (
     _count_dispatch_blocks,
     _group_clean_runs,
+    align_reserve_price_to_index,
     available_local_dates,
     build_dispatch_event_table,
     empty_simulation_result,
@@ -611,6 +612,51 @@ def test_da_id_reserve_ceiling_batch_sums_and_dominates() -> None:
         da_df, ida_df, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
     )
     assert triple["total_eur"] >= seq["total_ceiling_eur"] - 1e-6
+
+
+def test_align_reserve_price_maps_block_of_day_and_missing_to_zero() -> None:
+    idx = pd.date_range("2025-06-01", periods=24, freq="h", tz="UTC")
+    # Block 2 (08-11 UTC) priced high, the rest low.
+    res = pd.Series([5.0] * 8 + [20.0] * 4 + [5.0] * 12, index=idx)
+    out = align_reserve_price_to_index(res, idx, tz=None)
+    assert out[8:12].tolist() == [20.0, 20.0, 20.0, 20.0]
+    assert out[0:4].tolist() == [5.0, 5.0, 5.0, 5.0]
+    # None / empty -> zeros; a target day with no source price -> 0.
+    assert align_reserve_price_to_index(None, idx, None).tolist() == [0.0] * 24
+    other_day = pd.date_range("2025-07-01", periods=24, freq="h", tz="UTC")
+    assert align_reserve_price_to_index(res, other_day, None).tolist() == [0.0] * 24
+
+
+def test_ceiling_batch_constant_series_equals_scalar() -> None:
+    da_df, ida_df = _make_seq_history(days=3, anomaly_day=1)
+    dates = available_local_dates(da_df, tz="UTC")
+    scalar = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_df, 8.0, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    const_series = pd.Series(8.0, index=da_df.index)
+    series = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_df, const_series, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0,
+    )
+    assert series["solved_days"] == scalar["solved_days"]
+    assert series["total_eur"] == pytest.approx(scalar["total_eur"], abs=1e-6)
+
+
+def test_ceiling_batch_per_interval_series_differs_from_scalar_mean() -> None:
+    # A block-varying reserve price should not match its flat scalar mean: the
+    # joint MILP concentrates reserve in the high-price block.
+    da_df, ida_df = _make_seq_history(days=2, anomaly_day=None)
+    dates = available_local_dates(da_df, tz="UTC")
+    hour = pd.DatetimeIndex(da_df.index).hour
+    varying = pd.Series(np.where((hour >= 8) & (hour < 12), 40.0, 4.0), index=da_df.index)
+    mean_price = float(varying.mean())
+    per_interval = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_df, varying, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    flat_mean = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_df, mean_price, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    assert per_interval["total_eur"] != pytest.approx(flat_mean["total_eur"], abs=1.0)
 
 
 def test_da_id_reserve_ceiling_batch_skips_days_without_overlap() -> None:
