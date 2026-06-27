@@ -22,6 +22,7 @@ from src.simulation import (
     simulate_da_milp_replay,
     simulate_replay_batch,
     simulate_sequential_da_id_batch,
+    simulate_sequential_da_id_reserve_batch,
 )
 
 
@@ -657,6 +658,57 @@ def test_ceiling_batch_per_interval_series_differs_from_scalar_mean() -> None:
         da_df, ida_df, mean_price, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
     )
     assert per_interval["total_eur"] != pytest.approx(flat_mean["total_eur"], abs=1.0)
+
+
+def _block_reserve_series(da_df: pd.DataFrame) -> pd.Series:
+    hour = pd.DatetimeIndex(da_df.index).hour
+    return pd.Series(np.where((hour >= 8) & (hour < 12), 18.0, 5.0), index=da_df.index)
+
+
+def test_sequential_reserve_batch_identity_and_ceiling_consistency() -> None:
+    da_df, ida_df = _make_seq_history(days=6, anomaly_day=2)
+    res = _block_reserve_series(da_df)
+    dates = available_local_dates(da_df, tz="UTC")
+    per_day, summary = simulate_sequential_da_id_reserve_batch(
+        da_df, ida_df, res, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    # walk-forward (default) excludes the first day (no prior history).
+    assert summary["valid_days"] == 5
+    assert summary["excluded_days"] == 1
+    # Per-day exact attribution + bound.
+    lhs = per_day["forecast_effect_eur"] + per_day["timing_cost_eur"]
+    assert np.allclose(lhs, per_day["full_gap_eur"], atol=1e-4)
+    assert (per_day["realised_eur"] <= per_day["global_ceiling_eur"] + 1e-6).all()
+    # CONSISTENCY (the Increment-4 prerequisite): the batch's global ceiling
+    # equals the 9.2a ceiling batch with the SAME per-interval reserve series
+    # over the SAME valid days. Otherwise the cockpit's 9.2a row would not
+    # match the 9.2b row's global-ceiling reference.
+    ceil = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_df, res, dates=list(per_day["date"]), tz="UTC",
+        power_mw=1.0, duration_hours=2.0,
+    )
+    assert summary["total_global_ceiling_eur"] == pytest.approx(
+        ceil["total_eur"], abs=1e-6,
+    )
+
+
+def test_sequential_reserve_batch_none_reserve_commits_zero() -> None:
+    da_df, ida_df = _make_seq_history(days=4, anomaly_day=None)
+    dates = available_local_dates(da_df, tz="UTC")
+    per_day, _ = simulate_sequential_da_id_reserve_batch(
+        da_df, ida_df, None, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    # No reserve price -> no reserve committed (safe degrade to DA+ID).
+    assert (per_day["avg_reserve_mw"] == 0.0).all()
+
+
+def test_sequential_reserve_batch_empty_dates_returns_empty() -> None:
+    da_df, ida_df = _make_seq_history(days=2)
+    per_day, summary = simulate_sequential_da_id_reserve_batch(
+        da_df, ida_df, None, dates=[], tz="UTC",
+    )
+    assert per_day.empty
+    assert summary["valid_days"] == 0
 
 
 def test_da_id_reserve_ceiling_batch_skips_days_without_overlap() -> None:

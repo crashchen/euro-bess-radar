@@ -12,6 +12,7 @@ from src.ancillary import (
     build_ancillary_dataset,
     calculate_ancillary_revenue,
     capacity_price_for_product,
+    capacity_price_series_for_product,
     co_optimize_revenue_split,
     generate_template_csv,
     list_capacity_products,
@@ -836,3 +837,15 @@ class TestCapacityProductHelpers:
         assert capacity_price_for_product(df, None) is None
         assert capacity_price_for_product(df, "") is None
         assert capacity_price_for_product(df, "   ") is None
+
+    def test_price_series_returns_full_timestamped_series(self) -> None:
+        # Per-interval counterpart: the product's raw (block-granular) price
+        # series, not the duration-weighted mean. Feeds per-interval reserve
+        # pricing in the 9.2a/9.2b batches.
+        df = self._df()
+        series = capacity_price_series_for_product(df, "FCR")
+        assert isinstance(series, pd.Series)
+        assert list(series.values) == [10.0, 20.0]  # the 2 non-NaN FCR rows
+        assert capacity_price_series_for_product(df, "aFRR Up") is None
+        assert capacity_price_series_for_product(df, "") is None
+        assert capacity_price_series_for_product(None, "FCR") is None
