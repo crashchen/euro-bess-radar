@@ -8,8 +8,10 @@ import pytest
 
 from src.pages.simulation_cockpit import _reserve_history_for_product
 from src.reserve_forecast import (
+    RESERVE_FORECAST_COL,
     RESERVE_VALUE_COL,
     SKILL_BY_BLOCK_COLUMNS,
+    build_reserve_price_forecast,
     compute_reserve_forecast_skill,
 )
 
@@ -101,6 +103,65 @@ def test_empty_and_missing_column_return_empty_skill() -> None:
 def test_invalid_forecast_mode_raises() -> None:
     with pytest.raises(ValueError, match="forecast_mode"):
         compute_reserve_forecast_skill(_history(_BLOCK_SHAPE, 2), forecast_mode="bogus")
+
+
+class TestBuildReservePriceForecast:
+    """Block-of-day reserve-price forecast feeding 9.2b Stage-0."""
+
+    def test_defaults_to_walk_forward_and_drops_first_day(self) -> None:
+        df = _history(_BLOCK_SHAPE, 3)
+        dates = sorted(set(pd.DatetimeIndex(df.index).date))
+        fc, meta = build_reserve_price_forecast(df, target_dates=dates, tz=None)
+        assert meta["forecast_mode"] == "walk_forward"
+        assert RESERVE_FORECAST_COL in fc.columns
+        # Walk-forward cannot forecast the first day (no prior history) -> absent.
+        forecast_dates = set(pd.DatetimeIndex(fc.index).date)
+        assert dates[0] not in forecast_dates
+        assert len(forecast_dates) == 2
+
+    def test_walk_forward_forecast_equals_prior_day_block_means(self) -> None:
+        # Day 0 and day 1 identical; day 2's walk-forward forecast = block means
+        # of days 0-1 = the block shape exactly.
+        df = _history(_BLOCK_SHAPE, 3)
+        dates = sorted(set(pd.DatetimeIndex(df.index).date))
+        fc, _ = build_reserve_price_forecast(df, target_dates=dates, tz=None)
+        day2 = fc[pd.DatetimeIndex(fc.index).date == dates[2]]
+        assert np.allclose(day2[RESERVE_FORECAST_COL].to_numpy(), _BLOCK_SHAPE)
+
+    def test_explicit_loo_forecasts_first_day(self) -> None:
+        df = _history(_BLOCK_SHAPE, 3)
+        dates = sorted(set(pd.DatetimeIndex(df.index).date))
+        fc, meta = build_reserve_price_forecast(
+            df, target_dates=dates, tz=None, forecast_mode="loo",
+        )
+        assert meta["forecast_mode"] == "loo"
+        # loo can forecast every day (uses the other days).
+        assert len(set(pd.DatetimeIndex(fc.index).date)) == 3
+
+    def test_empty_block_falls_back_to_global_mean_flagged(self) -> None:
+        # Day 0 lacks block 2 entirely; day 1's walk-forward forecast for block 2
+        # then falls back to the global mean and is flagged n_samples == 0.
+        df = _history(_BLOCK_SHAPE, 2)
+        idx = pd.DatetimeIndex(df.index)
+        drop = (idx.date == sorted(set(idx.date))[0]) & np.isin(idx.hour, [8, 9, 10, 11])
+        df = df[~np.asarray(drop)]
+        dates = sorted(set(pd.DatetimeIndex(df.index).date))
+        fc, meta = build_reserve_price_forecast(df, target_dates=dates, tz=None)
+        day1 = fc[pd.DatetimeIndex(fc.index).date == dates[1]]
+        block2 = day1[day1["block"] == 2]
+        assert (block2["n_samples"] == 0).all()
+        assert meta["fallback_points"] >= 1
+
+    def test_empty_history_and_invalid_mode(self) -> None:
+        assert build_reserve_price_forecast(
+            pd.DataFrame(), target_dates=[pd.Timestamp("2025-02-03").date()],
+        )[0].empty
+        with pytest.raises(ValueError, match="forecast_mode"):
+            build_reserve_price_forecast(
+                _history(_BLOCK_SHAPE, 2),
+                target_dates=[pd.Timestamp("2025-02-03").date()],
+                forecast_mode="bogus",
+            )
 
 
 def test_reserve_history_for_product_filters_to_one_product() -> None:
