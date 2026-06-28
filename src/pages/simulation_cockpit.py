@@ -16,6 +16,7 @@ from src.ancillary import (
 )
 from src.assumptions import CAPTURE_PARAM_LABEL
 from src.config import ANCILLARY_CAPACITY_AVAILABILITY
+from src.data_ingestion import read_capacity_cache
 from src.dispatch import solve_joint_capacity_batch
 from src.export import cockpit_tables_to_excel
 from src.reserve_forecast import RESERVE_VALUE_COL, compute_reserve_forecast_skill
@@ -219,6 +220,7 @@ def render(
         primary_df=primary_df,
         intraday_df=intraday_df,
         anc_df=anc_df,
+        primary_zone=primary_zone,
         dates=dates,
         zone_tz=zone_tz,
         power_mw=power_mw,
@@ -840,6 +842,29 @@ def _slice_to_local_dates(
     return df[local_dates.isin(set(keep_dates))]
 
 
+# Provenance labels for the cockpit's capacity source (shown in the panel).
+_CAP_SOURCE_CACHE = "Cached unified import"
+_CAP_SOURCE_SESSION = "Session ancillary fallback"
+
+
+def _resolve_capacity_dataset(
+    primary_zone: str, anc_df: pd.DataFrame | None,
+) -> tuple[pd.DataFrame | None, str]:
+    """Cache-first reserve-capacity dataset for the cockpit + a provenance label.
+
+    Prefers the persisted unified-import cache (``read_capacity_cache``) so
+    uploaded capacity actually drives the 9.2b reserve rows; falls back to the
+    session ancillary (per-country upload / auto-fetch) only when the cache holds
+    no capacity for this zone. The full-zone frame is returned; the panel windows
+    it per valid date via ``_slice_to_local_dates`` before pricing, so a
+    full-sample mean never leaks into the comparison window.
+    """
+    cached = read_capacity_cache(primary_zone)
+    if cached is not None and not cached.empty and list_capacity_products(cached):
+        return cached, _CAP_SOURCE_CACHE
+    return anc_df, _CAP_SOURCE_SESSION
+
+
 def _reserve_coopt_total(
     primary_df: pd.DataFrame,
     reserve_product: str | None,
@@ -1168,6 +1193,7 @@ def _render_forecast_policy_section(
     primary_df: pd.DataFrame,
     intraday_df: pd.DataFrame | None,
     anc_df: pd.DataFrame | None,
+    primary_zone: str,
     dates: list,
     zone_tz: str,
     power_mw: float,
@@ -1189,7 +1215,10 @@ def _render_forecast_policy_section(
             st.info("Load IDA1 data to run the forecast-driven policy comparison.")
             return
 
-        capacity_products = list_capacity_products(anc_df)
+        # Cache-first: imported unified capacity (SQLite) drives the reserve rows;
+        # fall back to the session ancillary only when the cache is empty.
+        capacity_df, capacity_source = _resolve_capacity_dataset(primary_zone, anc_df)
+        capacity_products = list_capacity_products(capacity_df)
 
         c1, c2, c3, c4 = st.columns([1.2, 1.0, 1.1, 1.0])
         sample = c1.selectbox(
@@ -1247,6 +1276,7 @@ def _render_forecast_policy_section(
                     "no activation energy."
                 ),
             )
+            st.caption(f"Reserve capacity source: {capacity_source}.")
 
         run = st.button("Run forecast policy", key="forecast_policy_run")
         if not run:
@@ -1305,7 +1335,7 @@ def _render_forecast_policy_section(
         reserve_total, reserve_label, reserve_price = _reserve_coopt_total(
             primary_df,
             reserve_product,
-            anc_df,
+            capacity_df,
             valid_dates=valid_dates,
             tz=zone_tz,
             power_mw=power_mw,
@@ -1315,8 +1345,9 @@ def _render_forecast_policy_section(
         # Rows 5 & 6: 9.2a perfect-foresight ceiling and 9.2b forecast-driven
         # realistic triple, BOTH priced off the SAME per-interval reserve series
         # (windowed to the DA+ID valid dates so an out-of-window print can't
-        # leak), scored over the 9.2b walk-forward window.
-        window_anc = _slice_to_local_dates(anc_df, valid_dates, zone_tz)
+        # leak), scored over the 9.2b walk-forward window. capacity_df is
+        # cache-first (imported unified capacity), else the session ancillary.
+        window_anc = _slice_to_local_dates(capacity_df, valid_dates, zone_tz)
         reserve_series = capacity_price_series_for_product(window_anc, reserve_product)
         triple = _reserve_triple_totals(
             primary_df, intraday_df, reserve_series,

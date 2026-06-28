@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 import math
+from datetime import date
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from src.ancillary import capacity_price_series_for_product
+from src.ancillary import (
+    capacity_price_for_product,
+    capacity_price_series_for_product,
+    parse_capacity_import_csv,
+)
 from src.pages.simulation_cockpit import (
+    _CAP_SOURCE_CACHE,
+    _CAP_SOURCE_SESSION,
     _fmt_strategy_bar_label,
     _reserve_coopt_total,
     _reserve_triple_totals,
+    _resolve_capacity_dataset,
     _slice_to_local_dates,
 )
 from src.simulation import DAYS_PER_YEAR
@@ -413,3 +421,79 @@ def test_reserve_triple_totals_none_when_series_missing_or_empty() -> None:
         da, ida, pd.Series(dtype=float), **common,
     )
     assert empty_out["realistic_total"] is None
+
+
+# ── 6c-3: cockpit cache-first capacity consumption ────────────────────────────
+
+def _seed_capacity_cache(monkeypatch, tmp_path, csv_text: str) -> None:
+    from src import data_ingestion as di
+    monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+    di.persist_capacity_frame(parse_capacity_import_csv(csv_text))
+
+
+def test_resolve_capacity_prefers_cache_over_session(tmp_path, monkeypatch) -> None:
+    _seed_capacity_cache(
+        monkeypatch, tmp_path,
+        "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+        "2026-05-01T00:00:00Z,DE_LU,FCR,symmetric,12.5\n",
+    )
+    # Session ancillary carries a DIFFERENT product; the cache must win.
+    session = pd.DataFrame(
+        {"product_type": ["aFRR Up"], "capacity_price_eur_mw": [5.0]},
+        index=pd.to_datetime(["2026-05-01T00:00:00Z"], utc=True),
+    )
+    out, label = _resolve_capacity_dataset("DE_LU", session)
+    assert label == _CAP_SOURCE_CACHE
+    assert list(out["product_type"]) == ["FCR"]  # cached, not session aFRR
+
+
+def test_resolve_capacity_falls_back_to_session_when_cache_empty(
+    tmp_path, monkeypatch,
+) -> None:
+    from src import data_ingestion as di
+    monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")  # nothing seeded
+    session = pd.DataFrame(
+        {"product_type": ["FCR"], "capacity_price_eur_mw": [9.0]},
+        index=pd.to_datetime(["2026-05-01T00:00:00Z"], utc=True),
+    )
+    out, label = _resolve_capacity_dataset("DE_LU", session)
+    assert label == _CAP_SOURCE_SESSION
+    assert out is session
+
+
+def test_resolve_capacity_none_when_no_cache_and_no_session(
+    tmp_path, monkeypatch,
+) -> None:
+    from src import data_ingestion as di
+    monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+    out, label = _resolve_capacity_dataset("DE_LU", None)
+    assert out is None
+    assert label == _CAP_SOURCE_SESSION
+
+
+def test_resolve_capacity_cache_is_zone_scoped(tmp_path, monkeypatch) -> None:
+    # Capacity cached for FR must not leak into a DE_LU resolve (zone-scoped read).
+    _seed_capacity_cache(
+        monkeypatch, tmp_path,
+        "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+        "2026-05-01T00:00:00Z,FR,FCR,symmetric,12.5\n",
+    )
+    out, label = _resolve_capacity_dataset("DE_LU", None)
+    assert out is None and label == _CAP_SOURCE_SESSION
+
+
+def test_cache_capacity_window_slicing_excludes_out_of_window(
+    tmp_path, monkeypatch,
+) -> None:
+    # Red-line: a cached out-of-window print must not leak into the comparison
+    # window's price (slicing happens before pricing).
+    _seed_capacity_cache(
+        monkeypatch, tmp_path,
+        "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+        "2026-05-15T12:00:00Z,DE_LU,FCR,symmetric,1000.0\n"  # out of window
+        "2026-06-02T10:00:00Z,DE_LU,FCR,symmetric,10.0\n"     # Berlin Jun 2
+        "2026-06-03T10:00:00Z,DE_LU,FCR,symmetric,10.0\n",    # Berlin Jun 3
+    )
+    out, _ = _resolve_capacity_dataset("DE_LU", None)
+    window = _slice_to_local_dates(out, {date(2026, 6, 2), date(2026, 6, 3)}, "Europe/Berlin")
+    assert capacity_price_for_product(window, "FCR") == pytest.approx(10.0)
