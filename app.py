@@ -344,6 +344,8 @@ if fetch_btn or "zone_data" in st.session_state:
             zone_data=zone_data,
             zone_timezones={zone: get_zone_timezone(zone) for zone in zone_data},
             assumptions=assumptions,
+            ancillary_df=anc_df,
+            primary_zone=primary_zone,
         )
 
     # ── Export button ────────────────────────────────────────────────────

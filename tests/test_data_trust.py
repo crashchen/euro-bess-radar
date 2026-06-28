@@ -6,10 +6,36 @@ import pandas as pd
 import pytest
 
 from src.data_trust import (
+    COVERAGE_MATRIX_COLUMNS,
+    build_coverage_matrix,
     build_intraday_source_table,
     build_zone_data_quality_table,
     source_label_for_zone,
 )
+
+
+def _clean_da_frame(hours: int = 24) -> pd.DataFrame:
+    idx = pd.date_range("2026-01-01", periods=hours, freq="h", tz="UTC")
+    return pd.DataFrame(
+        {
+            "price_eur_mwh": [50.0] * hours,
+            "filled": [False] * hours,
+            "imputed": [False] * hours,
+        },
+        index=idx,
+    )
+
+
+def _capacity_anc() -> pd.DataFrame:
+    idx = pd.to_datetime(["2026-01-01T10:00:00Z", "2026-01-01T11:00:00Z"], utc=True)
+    return pd.DataFrame(
+        {
+            "product_type": ["FCR", "aFRR Up"],
+            "capacity_price_eur_mw": [12.0, 8.0],
+            "energy_price_eur_mwh": [float("nan"), float("nan")],
+        },
+        index=idx,
+    )
 
 
 def test_source_label_distinguishes_elexon_from_entsoe() -> None:
@@ -79,3 +105,48 @@ def test_quality_table_summarises_gaps_and_imputation() -> None:
 def test_empty_zone_data_returns_empty_table() -> None:
     out = build_zone_data_quality_table({})
     assert out.empty
+
+
+def test_coverage_matrix_combines_da_ida_and_reserve_streams() -> None:
+    matrix = build_coverage_matrix(
+        {"DE_LU": _clean_da_frame(24), "FR": _clean_da_frame(12)},
+        intraday_sources={
+            ("DE_LU", 1): {"source": "Manual CSV", "rows": 96},
+        },
+        ancillary_df=_capacity_anc(),
+        primary_zone="DE_LU",
+    )
+    assert list(matrix.columns) == COVERAGE_MATRIX_COLUMNS
+    # Sorted by zone: DE_LU then FR.
+    assert list(matrix["zone"]) == ["DE_LU", "FR"]
+    de = matrix.iloc[0]
+    assert de["DA"] == "100% (24/24)"
+    assert de["IDA1"] == "Manual CSV (96)"
+    assert de["IDA2"] == "—" and de["IDA3"] == "—"
+    # Reserve column reflects the primary zone's loaded capacity products.
+    assert de["reserve_capacity"] == "FCR, aFRR Up"
+    fr = matrix.iloc[1]
+    assert fr["DA"] == "100% (12/12)"
+    assert fr["IDA1"] == "—"
+    # Reserve is attributed to the primary zone only.
+    assert fr["reserve_capacity"] == "—"
+
+
+def test_coverage_matrix_includes_ida_only_cached_zone() -> None:
+    # A zone with cached IDA provenance but no DA loaded this run still appears.
+    matrix = build_coverage_matrix(
+        {},
+        intraday_sources={("NL", 1): {"source": "ENTSO-E intraday auction", "rows": 24}},
+        ancillary_df=None,
+        primary_zone="DE_LU",
+    )
+    assert list(matrix["zone"]) == ["NL"]
+    assert matrix.iloc[0]["DA"] == "—"
+    assert matrix.iloc[0]["IDA1"] == "ENTSO-E intraday auction (24)"
+    assert matrix.iloc[0]["reserve_capacity"] == "—"
+
+
+def test_coverage_matrix_empty_when_nothing_loaded() -> None:
+    matrix = build_coverage_matrix({}, intraday_sources={}, ancillary_df=None)
+    assert matrix.empty
+    assert list(matrix.columns) == COVERAGE_MATRIX_COLUMNS
