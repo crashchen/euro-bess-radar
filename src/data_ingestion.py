@@ -2246,6 +2246,208 @@ def persist_intraday_frame(long_df: pd.DataFrame) -> list[dict[str, Any]]:
     return summaries
 
 
+# ── Unified reserve-capacity cache + provenance (Step 2 / 6b) ──────────────────
+# Capacity parity with the IDA cache above: one table per zone holding all
+# (product, direction) streams, plus a provenance sidecar keyed per
+# (zone, product, direction) so a market stream with a distinct source is
+# labelled independently (e.g. DE_LU FCR symmetric = Manual CSV vs DE_LU aFRR up
+# = TSO API). The parser lives in ``ancillary.parse_capacity_import_csv``.
+
+CAPACITY_SOURCE_MANUAL = "Manual CSV"
+CAPACITY_SOURCE_MIXED = "Mixed"
+CAPACITY_SOURCE_LEGACY = "Unknown (pre-provenance cache)"
+_CAPACITY_SOURCE_TABLE = "capacity_price_sources"
+
+
+def _capacity_cache_table(zone: str) -> str:
+    """SQLite table name for one zone's reserve-capacity prices."""
+    return f"capacity_prices_{zone.lower()}"
+
+
+def write_capacity_cache(
+    df: pd.DataFrame, zone: str, *, source: str = CAPACITY_SOURCE_MANUAL,
+) -> None:
+    """Persist reserve-capacity rows for one zone (keep-last on the key).
+
+    The key is ``(timestamp, product, direction)``, so re-importing the same
+    block overwrites it (``INSERT OR REPLACE``) rather than duplicating. The
+    per-row ``source`` feeds the ``capacity_price_sources`` sidecar, which is
+    re-derived per (product, direction) AFTER the write — so an overwrite that
+    changes the source updates provenance too (no stale label on fresh data).
+    ``df`` must carry ``product_type``, ``direction``, ``capacity_price_eur_mw``
+    columns on a timestamp index (the ``ancillary.parse_capacity_import_csv``
+    output).
+    """
+    if df is None or df.empty:
+        return
+    if not {"product_type", "direction", "capacity_price_eur_mw"}.issubset(df.columns):
+        return
+    rows = []
+    for ts, row in df.iterrows():
+        price = row["capacity_price_eur_mw"]
+        if pd.isna(price):
+            continue
+        rows.append((
+            ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+            str(row["product_type"]), str(row.get("direction", "") or ""),
+            float(price), source,
+        ))
+    if not rows:
+        return
+    table = _capacity_cache_table(zone)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            f'CREATE TABLE IF NOT EXISTS "{table}" '
+            "(timestamp TEXT, product TEXT, direction TEXT, "
+            "capacity_price_eur_mw REAL NOT NULL, source TEXT, "
+            "PRIMARY KEY (timestamp, product, direction))"
+        )
+        conn.executemany(
+            f'INSERT OR REPLACE INTO "{table}" '
+            "(timestamp, product, direction, capacity_price_eur_mw, source) "
+            "VALUES (?, ?, ?, ?, ?)",
+            rows,
+        )
+        _record_capacity_sources(conn, table, zone)
+
+
+def _record_capacity_sources(
+    conn: sqlite3.Connection, table: str, zone: str,
+) -> None:
+    """Re-derive the provenance sidecar per (zone, product, direction).
+
+    Mirrors ``_record_intraday_source`` but at (product, direction) granularity:
+    a stream's label is the single source when uniform across its rows, else
+    ``Mixed``. Re-deriving from the table after each write keeps provenance in
+    lockstep with the (possibly overwritten) data.
+    """
+    conn.execute(
+        f'CREATE TABLE IF NOT EXISTS "{_CAPACITY_SOURCE_TABLE}" '
+        "(zone TEXT, product TEXT, direction TEXT, source TEXT, rows INTEGER, "
+        "first_timestamp TEXT, last_timestamp TEXT, imported_at TEXT, "
+        "PRIMARY KEY (zone, product, direction))"
+    )
+    now = datetime.now(UTC).isoformat()
+    groups = conn.execute(
+        f'SELECT product, direction, COUNT(*), MIN(timestamp), MAX(timestamp) '
+        f'FROM "{table}" GROUP BY product, direction'
+    ).fetchall()
+    for product, direction, n, first, last in groups:
+        distinct = sorted(
+            r[0] for r in conn.execute(
+                f'SELECT DISTINCT source FROM "{table}" '
+                "WHERE product = ? AND direction = ?",
+                (product, direction),
+            ) if r[0] is not None
+        )
+        if not distinct:
+            label = CAPACITY_SOURCE_LEGACY
+        elif len(distinct) == 1:
+            label = distinct[0]
+        else:
+            label = CAPACITY_SOURCE_MIXED
+        conn.execute(
+            f'INSERT OR REPLACE INTO "{_CAPACITY_SOURCE_TABLE}" '
+            "(zone, product, direction, source, rows, first_timestamp, "
+            "last_timestamp, imported_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (zone, product, direction, label, int(n), first, last, now),
+        )
+
+
+def read_capacity_sources() -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Return durable reserve-capacity provenance keyed by
+    (zone, product, direction). Empty when the sidecar does not exist yet."""
+    if not DB_PATH.exists():
+        return {}
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            recorded = conn.execute(
+                f'SELECT zone, product, direction, source, rows, '
+                f'first_timestamp, last_timestamp, imported_at '
+                f'FROM "{_CAPACITY_SOURCE_TABLE}"'
+            ).fetchall()
+    except sqlite3.DatabaseError:
+        return {}
+    out: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for zone, product, direction, source, rows, first, last, imported_at in recorded:
+        out[(str(zone), str(product), str(direction))] = {
+            "source": source,
+            "rows": int(rows),
+            "first": pd.to_datetime(first, utc=True, errors="coerce"),
+            "last": pd.to_datetime(last, utc=True, errors="coerce"),
+            "imported_at": imported_at,
+        }
+    return out
+
+
+def read_capacity_cache(
+    zone: str, start: pd.Timestamp | None = None, end: pd.Timestamp | None = None,
+) -> pd.DataFrame | None:
+    """Return cached reserve-capacity rows for a zone, or None when empty.
+
+    Columns ``product_type, direction, capacity_price_eur_mw`` on a UTC
+    timestamp index — the shape ``build_ancillary_dataset`` / the cockpit
+    capacity helpers consume. ``[start, end)`` filters when both are given.
+    """
+    if not DB_PATH.exists():
+        return None
+    table = _capacity_cache_table(zone)
+    query = (
+        f'SELECT timestamp, product, direction, capacity_price_eur_mw FROM "{table}"'
+    )
+    params: tuple = ()
+    if start is not None and end is not None:
+        query += " WHERE timestamp >= ? AND timestamp < ?"
+        params = (start.isoformat(), end.isoformat())
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            df = pd.read_sql_query(query, conn, params=params)
+    except (sqlite3.DatabaseError, pd.errors.DatabaseError):
+        return None
+    if df.empty:
+        return None
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    df = df.dropna(subset=["timestamp"]).set_index("timestamp").sort_index()
+    df.index.name = "timestamp"
+    return df.rename(columns={"product": "product_type"})
+
+
+def persist_capacity_frame(
+    long_df: pd.DataFrame, *, source: str = CAPACITY_SOURCE_MANUAL,
+) -> list[dict[str, Any]]:
+    """Write a parsed capacity frame to SQLite, one table per zone.
+
+    Args:
+        long_df: Output of ``ancillary.parse_capacity_import_csv`` (timestamp
+            index; ``zone``, ``product_type``, ``direction``,
+            ``capacity_price_eur_mw`` columns).
+        source: Provenance label stored per row.
+
+    Returns:
+        One summary dict per (zone, product, direction) written.
+    """
+    summaries: list[dict[str, Any]] = []
+    if long_df is None or long_df.empty or "zone" not in long_df.columns:
+        return summaries
+    for zone, grp in long_df.groupby("zone", sort=True):
+        zone_str = str(zone).strip()
+        if not zone_str:
+            continue
+        write_capacity_cache(grp, zone_str, source=source)
+        for (product, direction), sub in grp.groupby(
+            ["product_type", "direction"], sort=True,
+        ):
+            summaries.append({
+                "zone": zone_str,
+                "product": str(product),
+                "direction": str(direction),
+                "rows": len(sub),
+                "source": source,
+            })
+    return summaries
+
+
 def fetch_intraday_prices(
     zone: str,
     start: pd.Timestamp,

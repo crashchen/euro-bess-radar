@@ -23,6 +23,7 @@ from src.ancillary import (
     merge_revenue_stack,
     normalize_auto_fetch_dataset,
     parse_ancillary_csv,
+    parse_capacity_import_csv,
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
 from src.config import (
@@ -31,6 +32,7 @@ from src.config import (
     GBP_EUR_YEARLY,
     HOURS_PER_YEAR,
 )
+from src.data_ingestion import DataSourceParseError
 
 # ── Template CSV generation ──────────────────────────────────────────────────
 
@@ -125,6 +127,102 @@ class TestTemplateGeneration:
         assert df["energy_price_up_eur_mwh"].iloc[0] == 55.0
         assert df["energy_price_down_eur_mwh"].iloc[0] == 30.0
         assert (df["zone"] == "IT").all()
+
+class TestCapacityImportParsing:
+    """The unified zone-tagged reserve-capacity importer (Step 2 / 6b)."""
+
+    def test_parses_multi_product_multi_direction(self) -> None:
+        csv_str = (
+            "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+            "2026-05-01T00:00:00Z,DE_LU,FCR,symmetric,12.5\n"
+            "2026-05-01T00:00:00Z,DE_LU,aFRR,up,8.2\n"
+            "2026-05-01T00:00:00Z,FR,aFRR,down,6.1\n"
+        )
+        df = parse_capacity_import_csv(csv_str)
+        assert len(df) == 3
+        assert list(df["product_type"]) == ["FCR", "aFRR", "aFRR"]
+        assert list(df["direction"]) == ["symmetric", "up", "down"]
+        assert list(df["zone"]) == ["DE_LU", "DE_LU", "FR"]
+        assert df["capacity_price_eur_mw"].tolist() == [12.5, 8.2, 6.1]
+        assert str(df.index.tz) == "UTC"
+        assert df.index.name == "timestamp"
+
+    def test_template_round_trips_through_parser(self) -> None:
+        df = parse_capacity_import_csv(generate_capacity_import_template_csv())
+        assert set(df["product_type"]) == {"FCR", "aFRR"}
+        assert set(df["direction"]) <= {"up", "down", "symmetric"}
+        assert df["capacity_price_eur_mw"].notna().all()
+
+    def test_timezone_column_converts_local_to_utc(self) -> None:
+        csv_str = (
+            "timestamp,zone,product,direction,capacity_price_eur_mw_h,timezone\n"
+            "2026-05-01 00:00,DE_LU,FCR,symmetric,12.5,Europe/Berlin\n"
+        )
+        df = parse_capacity_import_csv(csv_str)
+        # Berlin 00:00 in May (CEST, +2) -> 22:00 UTC the previous day.
+        assert str(df.index[0]) == "2026-04-30 22:00:00+00:00"
+
+    def test_product_direction_case_and_separator_tolerant(self) -> None:
+        csv_str = (
+            "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+            "2026-05-01T00:00:00Z,DE_LU,a-frr,UP,8.0\n"
+            "2026-05-01T00:00:00Z,DE_LU,FcR,Symmetric,12.0\n"
+        )
+        df = parse_capacity_import_csv(csv_str)
+        assert list(df["product_type"]) == ["aFRR", "FCR"]
+        assert list(df["direction"]) == ["up", "symmetric"]
+
+    def test_blank_direction_defaults_symmetric(self) -> None:
+        csv_str = (
+            "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+            "2026-05-01T00:00:00Z,DE_LU,FCR,,12.0\n"
+        )
+        df = parse_capacity_import_csv(csv_str)
+        assert df["direction"].iloc[0] == "symmetric"
+
+    def test_default_zone_fallback(self) -> None:
+        csv_str = (
+            "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+            "2026-05-01T00:00:00Z,,FCR,symmetric,12.0\n"
+        )
+        df = parse_capacity_import_csv(csv_str, default_zone="FI")
+        assert df["zone"].iloc[0] == "FI"
+
+    def test_drops_unparseable_timestamp_and_price_rows(self) -> None:
+        csv_str = (
+            "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+            "2026-05-01T00:00:00Z,DE_LU,FCR,symmetric,12.0\n"
+            "not-a-time,DE_LU,FCR,symmetric,9.0\n"
+            "2026-05-01T04:00:00Z,DE_LU,FCR,symmetric,not-a-price\n"
+        )
+        df = parse_capacity_import_csv(csv_str)
+        assert len(df) == 1
+        assert df["capacity_price_eur_mw"].iloc[0] == 12.0
+
+    def test_unknown_product_raises(self) -> None:
+        csv_str = (
+            "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+            "2026-05-01T00:00:00Z,DE_LU,FFR,symmetric,12.0\n"
+        )
+        with pytest.raises(DataSourceParseError, match="Unknown reserve product"):
+            parse_capacity_import_csv(csv_str)
+
+    def test_unknown_direction_raises(self) -> None:
+        csv_str = (
+            "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+            "2026-05-01T00:00:00Z,DE_LU,aFRR,sideways,12.0\n"
+        )
+        with pytest.raises(DataSourceParseError, match="Unknown reserve direction"):
+            parse_capacity_import_csv(csv_str)
+
+    def test_missing_required_column_raises(self) -> None:
+        csv_str = (
+            "timestamp,zone,product,capacity_price_eur_mw_h\n"
+            "2026-05-01T00:00:00Z,DE_LU,FCR,12.0\n"
+        )
+        with pytest.raises(DataSourceParseError, match="missing columns"):
+            parse_capacity_import_csv(csv_str)
+
 
 # ── Parsing ──────────────────────────────────────────────────────────────────
 

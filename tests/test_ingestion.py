@@ -2209,3 +2209,110 @@ class TestFetchEsiosIndicator:
         )
         assert "secondary_up_capacity_eur_mw" in df.columns
         assert len(df) == 1
+
+
+class TestCapacityCache:
+    """Unified reserve-capacity persistence + provenance (Step 2 / 6b)."""
+
+    @staticmethod
+    def _frame(csv_text: str) -> pd.DataFrame:
+        from src.ancillary import parse_capacity_import_csv
+        return parse_capacity_import_csv(csv_text)
+
+    def test_persist_and_read_back(self, tmp_path, monkeypatch) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        frame = self._frame(
+            "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+            "2026-05-01T00:00:00Z,DE_LU,FCR,symmetric,12.5\n"
+            "2026-05-01T00:00:00Z,DE_LU,aFRR,up,8.2\n"
+        )
+        summaries = di.persist_capacity_frame(frame)
+        assert {(s["product"], s["direction"]) for s in summaries} == {
+            ("FCR", "symmetric"), ("aFRR", "up"),
+        }
+        back = di.read_capacity_cache("DE_LU")
+        assert len(back) == 2
+        assert set(back["product_type"]) == {"FCR", "aFRR"}
+        assert str(back.index.tz) == "UTC"
+
+    def test_provenance_is_per_stream(self, tmp_path, monkeypatch) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        di.persist_capacity_frame(
+            self._frame(
+                "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+                "2026-05-01T00:00:00Z,DE_LU,FCR,symmetric,12.5\n"
+            ),
+            source="Manual CSV",
+        )
+        di.persist_capacity_frame(
+            self._frame(
+                "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+                "2026-05-01T00:00:00Z,DE_LU,aFRR,up,8.2\n"
+            ),
+            source="TSO API",
+        )
+        sources = di.read_capacity_sources()
+        # Independent label per (zone, product, direction).
+        assert sources[("DE_LU", "FCR", "symmetric")]["source"] == "Manual CSV"
+        assert sources[("DE_LU", "aFRR", "up")]["source"] == "TSO API"
+
+    def test_keep_last_overwrite_refreshes_price_and_provenance(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # Red-line: re-importing the same (timestamp, product, direction) must
+        # overwrite the value AND refresh provenance — no stale source on fresh
+        # data.
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        di.persist_capacity_frame(
+            self._frame(
+                "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+                "2026-05-01T00:00:00Z,DE_LU,FCR,symmetric,10.0\n"
+            ),
+            source="Manual CSV",
+        )
+        di.persist_capacity_frame(
+            self._frame(
+                "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+                "2026-05-01T00:00:00Z,DE_LU,FCR,symmetric,20.0\n"
+            ),
+            source="TSO API",
+        )
+        back = di.read_capacity_cache("DE_LU")
+        assert len(back) == 1  # keep-last, not duplicated
+        assert back["capacity_price_eur_mw"].iloc[0] == 20.0  # new value
+        assert (
+            di.read_capacity_sources()[("DE_LU", "FCR", "symmetric")]["source"]
+            == "TSO API"  # provenance followed the overwrite
+        )
+
+    def test_mixed_sources_on_one_stream_labelled_mixed(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        di.persist_capacity_frame(
+            self._frame(
+                "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+                "2026-05-01T00:00:00Z,DE_LU,FCR,symmetric,10.0\n"
+            ),
+            source="Manual CSV",
+        )
+        di.persist_capacity_frame(  # different timestamp, same stream, new source
+            self._frame(
+                "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+                "2026-05-01T04:00:00Z,DE_LU,FCR,symmetric,11.0\n"
+            ),
+            source="TSO API",
+        )
+        sources = di.read_capacity_sources()
+        assert sources[("DE_LU", "FCR", "symmetric")]["source"] == di.CAPACITY_SOURCE_MIXED
+        assert sources[("DE_LU", "FCR", "symmetric")]["rows"] == 2
+
+    def test_read_empty_returns_none(self, tmp_path, monkeypatch) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        assert di.read_capacity_cache("DE_LU") is None
+        assert di.read_capacity_sources() == {}
