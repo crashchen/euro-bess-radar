@@ -49,7 +49,7 @@ class TestTemplateGeneration:
         assert "EUR/MW/h" in csv_str
         assert "block total" in csv_str  # per-hour rate, not a 4h block sum
         data_lines = [
-            line for line in csv_str.strip().split("\n") if not line.startswith("#")
+            line for line in csv_str.strip().splitlines() if not line.startswith("#")
         ]
         assert data_lines[0].split(",") == list(CAPACITY_IMPORT_COLUMNS)
         # Every example row: 5 fields, a parseable price, enumerated product/direction.

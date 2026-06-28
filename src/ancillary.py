@@ -168,7 +168,8 @@ def generate_capacity_import_template_csv() -> str:
     total. ``product``/``direction`` are enumerated. See
     ``docs/import-templates.md`` for the full spec to send to a data provider.
     """
-    header = (
+    buf = io.StringIO()
+    buf.write(
         "# Unified reserve-capacity import template (one format for all zones).\n"
         "# timestamp: UTC, ISO-8601 (e.g. 2026-05-01T00:00:00Z). If your export is\n"
         "#   in local market time, convert to UTC OR add a 'timezone' column with an\n"
@@ -180,14 +181,15 @@ def generate_capacity_import_template_csv() -> str:
         "#   block total. One row per pricing block (e.g. 4h) is fine; give the\n"
         "#   hourly rate, not the block sum.\n"
     )
-    rows = [
-        ",".join(CAPACITY_IMPORT_COLUMNS),
-        "2026-05-01T00:00:00Z,DE_LU,FCR,symmetric,12.50",
-        "2026-05-01T04:00:00Z,DE_LU,FCR,symmetric,15.00",
-        "2026-05-01T00:00:00Z,DE_LU,aFRR,up,8.20",
-        "2026-05-01T00:00:00Z,DE_LU,aFRR,down,6.10",
-    ]
-    return header + "\n".join(rows) + "\n"
+    writer = csv.writer(buf)
+    writer.writerow(CAPACITY_IMPORT_COLUMNS)
+    writer.writerows([
+        ["2026-05-01T00:00:00Z", "DE_LU", "FCR", "symmetric", "12.50"],
+        ["2026-05-01T04:00:00Z", "DE_LU", "FCR", "symmetric", "15.00"],
+        ["2026-05-01T00:00:00Z", "DE_LU", "aFRR", "up", "8.20"],
+        ["2026-05-01T00:00:00Z", "DE_LU", "aFRR", "down", "6.10"],
+    ])
+    return buf.getvalue()
 
 
 # ── Parsing ──────────────────────────────────────────────────────────────────
