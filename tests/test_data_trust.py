@@ -213,5 +213,17 @@ def test_capacity_source_table_from_sources() -> None:
     assert table.iloc[1]["source"] == "TSO API"
 
 
+def test_capacity_source_table_tolerates_malformed_metadata() -> None:
+    table = build_capacity_source_table({
+        ("DE_LU", "FCR", "symmetric"): None,
+    })
+    assert len(table) == 1
+    row = table.iloc[0]
+    assert row["zone"] == "DE_LU"
+    assert row["source"] == "Manual CSV"
+    assert row["rows"] == 0
+    assert pd.isna(row["first_timestamp_utc"])
+
+
 def test_capacity_source_table_empty_when_no_sources() -> None:
     assert build_capacity_source_table({}).empty

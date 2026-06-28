@@ -58,15 +58,16 @@ def build_capacity_source_table(
         sources = read_capacity_sources()
     rows: list[dict[str, object]] = []
     for (zone, product, direction), meta in sorted((sources or {}).items()):
+        meta_dict = meta if isinstance(meta, dict) else {}
         rows.append({
             "zone": str(zone),
             "product": str(product),
             "direction": str(direction),
-            "source": meta.get("source", "Manual CSV"),
-            "rows": int(meta.get("rows", 0)),
-            "first_timestamp_utc": meta.get("first", pd.NaT),
-            "last_timestamp_utc": meta.get("last", pd.NaT),
-            "imported_at": meta.get("imported_at"),
+            "source": meta_dict.get("source", "Manual CSV"),
+            "rows": int(meta_dict.get("rows", 0)),
+            "first_timestamp_utc": meta_dict.get("first", pd.NaT),
+            "last_timestamp_utc": meta_dict.get("last", pd.NaT),
+            "imported_at": meta_dict.get("imported_at"),
         })
     if not rows:
         return pd.DataFrame(columns=CAPACITY_SOURCE_COLUMNS)
@@ -247,7 +248,7 @@ def build_coverage_matrix(
     zone_data = zone_data or {}
 
     # Zone-tagged unified-import capacity (persisted) -> products per zone.
-    persisted_by_zone: dict[str, set] = {}
+    persisted_by_zone: dict[str, set[str]] = {}
     for (zone, product, _direction) in (capacity_sources or {}):
         persisted_by_zone.setdefault(str(zone), set()).add(str(product))
     # Session per-country / auto-fetch capacity is primary-zone only (fallback).
