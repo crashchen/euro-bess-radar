@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
+from src.ancillary import list_capacity_products
 from src.config import get_zone_timezone, is_elexon_zone
 from src.data_ingestion import read_intraday_sources, summarize_price_data_quality
 
@@ -18,6 +19,11 @@ INTRADAY_SOURCE_COLUMNS = [
     "zone", "sequence", "source", "rows",
     "first_timestamp_utc", "last_timestamp_utc", "imported_at",
 ]
+
+COVERAGE_MATRIX_COLUMNS = ["zone", "DA", "IDA1", "IDA2", "IDA3", "reserve_capacity"]
+
+# Displayed when a (zone, stream) cell has no loaded/cached data.
+_NO_DATA = "—"
 
 
 def build_intraday_source_table(
@@ -127,3 +133,83 @@ def build_zone_data_quality_table(
         .sort_values("zone")
         .reset_index(drop=True)
     )
+
+
+def _da_coverage_cell(df: pd.DataFrame | None) -> str:
+    """DA stream cell: coverage% + valid/total interval count, or no-data."""
+    if df is None:
+        return _NO_DATA
+    quality = summarize_price_data_quality(df)
+    total = int(quality["total_intervals"])
+    valid = int(quality["valid_intervals"])
+    if total == 0:
+        return "empty"
+    return f"{100.0 * valid / total:.0f}% ({valid}/{total})"
+
+
+def _intraday_cell(
+    intraday_sources: dict[tuple[str, int], dict] | None, zone: str, sequence: int,
+) -> str:
+    """IDA{n} stream cell: provenance label + cached row count, or no-data."""
+    meta = (intraday_sources or {}).get((zone, sequence))
+    if not meta:
+        return _NO_DATA
+    return f"{meta.get('source', '?')} ({int(meta.get('rows', 0))})"
+
+
+def build_coverage_matrix(
+    zone_data: dict[str, pd.DataFrame],
+    *,
+    intraday_sources: dict[tuple[str, int], dict] | None = None,
+    ancillary_df: pd.DataFrame | None = None,
+    primary_zone: str | None = None,
+) -> pd.DataFrame:
+    """Zone x data-stream coverage matrix for the Data Trust tab.
+
+    One row per zone the run touches (loaded DA zones, plus zones with cached
+    IDA provenance, plus the primary zone), with a short status per stream so a
+    user can see at a glance what is loaded and where the gaps are before
+    trusting any revenue/uplift number.
+
+    Args:
+        zone_data: Mapping of bidding-zone code to cleaned DA price DataFrame.
+        intraday_sources: ``(zone, sequence) -> provenance`` mapping (from
+            ``read_intraday_sources``); read from the DB sidecar when omitted.
+        ancillary_df: Merged ancillary dataset for the *primary* zone (capacity
+            products are read from it; it is not zone-tagged, so reserve coverage
+            is attributed to ``primary_zone`` only).
+        primary_zone: The zone whose ancillary capacity products the reserve
+            column reflects.
+
+    Returns:
+        Wide DataFrame with columns ``COVERAGE_MATRIX_COLUMNS``; cells hold
+        ``DA`` coverage%, ``IDA{n}`` ``source (rows)``, a reserve product list,
+        or ``"—"`` when a stream is absent. Empty (with columns) when nothing
+        is loaded.
+    """
+    if intraday_sources is None:
+        intraday_sources = read_intraday_sources()
+    zone_data = zone_data or {}
+
+    capacity_products = list_capacity_products(ancillary_df)
+    zones = set(zone_data) | {z for (z, _seq) in (intraday_sources or {})}
+    if primary_zone and capacity_products:
+        zones.add(primary_zone)
+    if not zones:
+        return pd.DataFrame(columns=COVERAGE_MATRIX_COLUMNS)
+
+    rows: list[dict[str, object]] = []
+    for zone in sorted(zones):
+        reserve = (
+            ", ".join(capacity_products)
+            if zone == primary_zone and capacity_products else _NO_DATA
+        )
+        rows.append({
+            "zone": zone,
+            "DA": _da_coverage_cell(zone_data.get(zone)),
+            "IDA1": _intraday_cell(intraday_sources, zone, 1),
+            "IDA2": _intraday_cell(intraday_sources, zone, 2),
+            "IDA3": _intraday_cell(intraday_sources, zone, 3),
+            "reserve_capacity": reserve,
+        })
+    return pd.DataFrame(rows, columns=COVERAGE_MATRIX_COLUMNS)

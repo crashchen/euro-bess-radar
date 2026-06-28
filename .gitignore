@@ -16,6 +16,9 @@ data/cache/
 data/exports/
 *.db
 
+# Generated demo samples (created by scripts/seed_demo_9_2b.py)
+samples/
+
 # IDE
 .vscode/
 .idea/

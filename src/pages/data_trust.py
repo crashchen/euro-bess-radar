@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from src.data_trust import (
+    build_coverage_matrix,
     build_intraday_source_table,
     build_zone_data_quality_table,
 )
@@ -16,6 +17,8 @@ def render(
     zone_data: dict[str, pd.DataFrame],
     zone_timezones: dict[str, str] | None = None,
     assumptions: pd.DataFrame | None = None,
+    ancillary_df: pd.DataFrame | None = None,
+    primary_zone: str | None = None,
 ) -> None:
     """Render source and data-quality diagnostics for fetched zones."""
     st.subheader("Data Trust — Source Traceability")
@@ -52,6 +55,31 @@ def render(
             "The imputed share is shown below and exported as data-quality metadata."
         )
 
+    matrix = build_coverage_matrix(
+        zone_data,
+        ancillary_df=ancillary_df,
+        primary_zone=primary_zone,
+    )
+    if not matrix.empty:
+        st.markdown("**Coverage matrix (zone x data stream)**")
+        st.caption(
+            "What is loaded per zone, before trusting any revenue/uplift number: "
+            "DA = coverage% (valid/total intervals); IDA1-3 = provenance + cached "
+            "row count; Reserve = the primary zone's loaded capacity products. "
+            "Ancillary is not zone-tagged, so reserve coverage is attributed to "
+            "the primary zone only; a dash means the stream is not loaded/cached."
+        )
+        st.dataframe(
+            matrix,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "zone": "Zone",
+                "reserve_capacity": "Reserve (capacity)",
+            },
+        )
+
+    st.markdown("**Per-zone day-ahead quality**")
     st.dataframe(
         quality,
         width="stretch",
