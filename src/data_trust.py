@@ -6,7 +6,11 @@ import pandas as pd
 
 from src.ancillary import list_capacity_products
 from src.config import get_zone_timezone, is_elexon_zone
-from src.data_ingestion import read_intraday_sources, summarize_price_data_quality
+from src.data_ingestion import (
+    read_capacity_sources,
+    read_intraday_sources,
+    summarize_price_data_quality,
+)
 
 QUALITY_COLUMNS = [
     "zone", "source", "timezone", "first_timestamp_utc", "last_timestamp_utc",
@@ -22,8 +26,51 @@ INTRADAY_SOURCE_COLUMNS = [
 
 COVERAGE_MATRIX_COLUMNS = ["zone", "DA", "IDA1", "IDA2", "IDA3", "reserve_capacity"]
 
+CAPACITY_SOURCE_COLUMNS = [
+    "zone", "product", "direction", "source", "rows",
+    "first_timestamp_utc", "last_timestamp_utc", "imported_at",
+]
+
 # Displayed when a (zone, stream) cell has no loaded/cached data.
 _NO_DATA = "—"
+
+
+def build_capacity_source_table(
+    sources: dict[tuple[str, str, str], dict] | None = None,
+) -> pd.DataFrame:
+    """Build an audit table of cached reserve-capacity provenance.
+
+    Mirrors :func:`build_intraday_source_table` but at the
+    ``(zone, product, direction)`` granularity of the durable
+    ``capacity_price_sources`` sidecar (written by ``write_capacity_cache``), so
+    each reserve stream's source survives a restart and a re-import that changes
+    the source relabels that stream instead of leaving a stale label.
+
+    Args:
+        sources: Optional pre-built mapping ``(zone, product, direction) ->
+            {"source", "rows", "first", "last", "imported_at"}``. Read from the
+            database when None (the normal path; the argument exists for testing).
+
+    Returns:
+        One row per (zone, product, direction), sorted.
+    """
+    if sources is None:
+        sources = read_capacity_sources()
+    rows: list[dict[str, object]] = []
+    for (zone, product, direction), meta in sorted((sources or {}).items()):
+        rows.append({
+            "zone": str(zone),
+            "product": str(product),
+            "direction": str(direction),
+            "source": meta.get("source", "Manual CSV"),
+            "rows": int(meta.get("rows", 0)),
+            "first_timestamp_utc": meta.get("first", pd.NaT),
+            "last_timestamp_utc": meta.get("last", pd.NaT),
+            "imported_at": meta.get("imported_at"),
+        })
+    if not rows:
+        return pd.DataFrame(columns=CAPACITY_SOURCE_COLUMNS)
+    return pd.DataFrame(rows, columns=CAPACITY_SOURCE_COLUMNS)
 
 
 def build_intraday_source_table(
@@ -162,6 +209,7 @@ def build_coverage_matrix(
     *,
     intraday_sources: dict[tuple[str, int], dict] | None = None,
     ancillary_df: pd.DataFrame | None = None,
+    capacity_sources: dict[tuple[str, str, str], dict] | None = None,
     primary_zone: str | None = None,
 ) -> pd.DataFrame:
     """Zone x data-stream coverage matrix for the Data Trust tab.
@@ -175,11 +223,16 @@ def build_coverage_matrix(
         zone_data: Mapping of bidding-zone code to cleaned DA price DataFrame.
         intraday_sources: ``(zone, sequence) -> provenance`` mapping (from
             ``read_intraday_sources``); read from the DB sidecar when omitted.
-        ancillary_df: Merged ancillary dataset for the *primary* zone (capacity
-            products are read from it; it is not zone-tagged, so reserve coverage
-            is attributed to ``primary_zone`` only).
-        primary_zone: The zone whose ancillary capacity products the reserve
-            column reflects.
+        ancillary_df: Merged ancillary dataset for the *primary* zone (session
+            per-country / auto-fetch capacity; not zone-tagged, so it backs the
+            reserve cell for ``primary_zone`` only — the fallback when a zone has
+            no persisted unified-import capacity).
+        capacity_sources: ``(zone, product, direction) -> provenance`` mapping
+            (from ``read_capacity_sources``); read from the DB sidecar when
+            omitted. This is the zone-tagged unified-import capacity, so the
+            reserve column is shown PER zone, not just the primary.
+        primary_zone: The zone whose session ancillary capacity products back the
+            reserve cell when that zone has no persisted unified-import capacity.
 
     Returns:
         Wide DataFrame with columns ``COVERAGE_MATRIX_COLUMNS``; cells hold
@@ -189,21 +242,36 @@ def build_coverage_matrix(
     """
     if intraday_sources is None:
         intraday_sources = read_intraday_sources()
+    if capacity_sources is None:
+        capacity_sources = read_capacity_sources()
     zone_data = zone_data or {}
 
-    capacity_products = list_capacity_products(ancillary_df)
-    zones = set(zone_data) | {z for (z, _seq) in (intraday_sources or {})}
-    if primary_zone and capacity_products:
+    # Zone-tagged unified-import capacity (persisted) -> products per zone.
+    persisted_by_zone: dict[str, set] = {}
+    for (zone, product, _direction) in (capacity_sources or {}):
+        persisted_by_zone.setdefault(str(zone), set()).add(str(product))
+    # Session per-country / auto-fetch capacity is primary-zone only (fallback).
+    session_products = list_capacity_products(ancillary_df)
+
+    zones = (
+        set(zone_data)
+        | {z for (z, _seq) in (intraday_sources or {})}
+        | set(persisted_by_zone)
+    )
+    if primary_zone and session_products:
         zones.add(primary_zone)
     if not zones:
         return pd.DataFrame(columns=COVERAGE_MATRIX_COLUMNS)
 
     rows: list[dict[str, object]] = []
     for zone in sorted(zones):
-        reserve = (
-            ", ".join(capacity_products)
-            if zone == primary_zone and capacity_products else _NO_DATA
-        )
+        persisted = sorted(persisted_by_zone.get(zone, set()))
+        if persisted:
+            reserve = ", ".join(persisted)
+        elif zone == primary_zone and session_products:
+            reserve = ", ".join(session_products)
+        else:
+            reserve = _NO_DATA
         rows.append({
             "zone": zone,
             "DA": _da_coverage_cell(zone_data.get(zone)),
