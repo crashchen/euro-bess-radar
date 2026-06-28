@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pandas as pd
 import streamlit as st
 
@@ -10,6 +12,7 @@ from src.ancillary import (
     generate_capacity_import_template_csv,
     generate_template_csv,
     parse_ancillary_csv,
+    parse_capacity_import_csv,
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
 from src.config import ALL_ZONES
@@ -21,6 +24,7 @@ from src.data_ingestion import (
     fetch_prices,
     generate_intraday_template_csv,
     parse_intraday_csv,
+    persist_capacity_frame,
     persist_intraday_frame,
     read_intraday_sources,
 )
@@ -107,6 +111,44 @@ def _parse_and_store_ancillary_upload(
         st.error("Parse error: the uploaded file is not valid UTF-8/CSV text.")
     except (ValueError, pd.errors.ParserError) as exc:
         st.error(f"Parse error: {exc}")
+
+
+def _parse_and_store_capacity_upload(uploaded_file, default_zone: str) -> None:
+    """Parse + persist an uploaded unified reserve-capacity CSV.
+
+    Writes to the ``capacity_prices_{zone}`` SQLite tables + the
+    ``capacity_price_sources`` provenance sidecar (via ``persist_capacity_frame``
+    -> ``write_capacity_cache``), so Data Trust shows it per
+    (zone, product, direction) and survives a restart. This is the zone-tagged
+    SQLite/provenance path — distinct from the per-country session-ancillary
+    uploader, which is left untouched.
+    """
+    try:
+        content = uploaded_file.getvalue().decode("utf-8-sig")
+        parsed = parse_capacity_import_csv(content, default_zone=default_zone)
+    except UnicodeDecodeError:
+        st.error("Parse error: the uploaded file is not valid UTF-8/CSV text.")
+        return
+    except DataSourceParseError as exc:
+        st.error(f"Capacity import error: {exc}")
+        return
+
+    if parsed.empty:
+        st.warning("No valid capacity rows found in the uploaded file.")
+        return
+    try:
+        summaries = persist_capacity_frame(parsed, source="Manual CSV")
+    except (OSError, sqlite3.DatabaseError, ValueError) as exc:
+        st.error(f"Capacity import persistence error: {exc}")
+        return
+    total = sum(s["rows"] for s in summaries)
+    streams = ", ".join(
+        f"{s['zone']} {s['product']} {s['direction']}" for s in summaries
+    )
+    st.success(
+        f"Imported {total} reserve-capacity rows ({streams}). See Data Trust → "
+        "'Reserve-capacity price sources' and the coverage matrix."
+    )
 
 
 def _run_and_store_ancillary_fetch(zone: str, start: object, end: object) -> None:
@@ -281,8 +323,22 @@ def render_sidebar() -> dict:
         st.caption(
             "Unified zone-tagged reserve-capacity format (EUR/MW/h, UTC) to "
             "request from exchanges/TSOs; one provenance/cache path for all "
-            "zones. See docs/import-templates.md. Import support lands next."
+            "zones. See docs/import-templates.md."
         )
+
+        st.markdown("**Unified Reserve Capacity CSV**")
+        st.caption(
+            "Import the template above. Writes to the SQLite cache + provenance "
+            "sidecar (distinct from the per-country uploader); shows up in Data "
+            "Trust per (zone, product, direction)."
+        )
+        cap_file = st.file_uploader(
+            "Upload unified capacity CSV", type=["csv"], key="cap_import_upload",
+        )
+        if cap_file is not None and st.button(
+            "Parse & Import capacity", key="cap_import_btn",
+        ):
+            _parse_and_store_capacity_upload(cap_file, primary_zone_for_fetch)
 
     # ── Intraday (IDA) price upload ──────────────────────────────────────
     with st.sidebar.expander("Intraday (IDA) Prices"):
