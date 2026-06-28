@@ -875,10 +875,14 @@ def align_reserve_price_to_index(
     src_idx = pd.DatetimeIndex(src.index)
     tgt_idx = target
     if tz:
-        if src_idx.tz is not None:
-            src_idx = src_idx.tz_convert(tz)
-        if tgt_idx.tz is not None:
-            tgt_idx = tgt_idx.tz_convert(tz)
+        # Project-internal timestamps are UTC. Treat naive cache/manual series
+        # as UTC before converting, otherwise local block matching can shift.
+        if src_idx.tz is None:
+            src_idx = src_idx.tz_localize("UTC")
+        src_idx = src_idx.tz_convert(tz)
+        if tgt_idx.tz is None:
+            tgt_idx = tgt_idx.tz_localize("UTC")
+        tgt_idx = tgt_idx.tz_convert(tz)
     src_keys = pd.MultiIndex.from_arrays(
         [src_idx.date, np.asarray(src_idx.hour) // 4],  # 4h FCR/aFRR product block
     )

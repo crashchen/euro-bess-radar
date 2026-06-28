@@ -628,6 +628,31 @@ def test_align_reserve_price_maps_block_of_day_and_missing_to_zero() -> None:
     assert align_reserve_price_to_index(res, other_day, None).tolist() == [0.0] * 24
 
 
+def test_align_reserve_price_treats_naive_indices_as_utc_for_tz_alignment() -> None:
+    target = pd.date_range("2025-06-01", periods=24, freq="h", tz="UTC")
+    # Block-start prices in UTC. 06:00 UTC is the 08:00-12:00 local block in
+    # Berlin summer time. A naive source must be treated as UTC, not local wall
+    # time, otherwise that high block maps to the wrong local 4h bucket.
+    block_starts_naive = pd.DatetimeIndex([
+        "2025-06-01 02:00", "2025-06-01 06:00", "2025-06-01 10:00",
+        "2025-06-01 14:00", "2025-06-01 18:00", "2025-06-01 22:00",
+    ])
+    values = [5.0, 20.0, 5.0, 5.0, 5.0, 5.0]
+    aware_res = pd.Series(values, index=block_starts_naive.tz_localize("UTC"))
+    naive_res = pd.Series(values, index=block_starts_naive)
+
+    expected = align_reserve_price_to_index(aware_res, target, tz="Europe/Berlin")
+    out = align_reserve_price_to_index(naive_res, target, tz="Europe/Berlin")
+    assert out.tolist() == expected.tolist()
+    assert out[6:10].tolist() == [20.0, 20.0, 20.0, 20.0]
+
+    naive_target = pd.date_range("2025-06-01", periods=24, freq="h")
+    out_naive_target = align_reserve_price_to_index(
+        naive_res, naive_target, tz="Europe/Berlin",
+    )
+    assert out_naive_target.tolist() == expected.tolist()
+
+
 def test_ceiling_batch_constant_series_equals_scalar() -> None:
     da_df, ida_df = _make_seq_history(days=3, anomaly_day=1)
     dates = available_local_dates(da_df, tz="UTC")
