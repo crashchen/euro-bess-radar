@@ -192,6 +192,120 @@ def generate_capacity_import_template_csv() -> str:
     return buf.getvalue()
 
 
+_CAPACITY_PRODUCT_CANON = {"fcr": "FCR", "afrr": "aFRR", "mfrr": "mFRR"}
+_CAPACITY_DIRECTION_CANON = {
+    "up": "up", "down": "down", "symmetric": "symmetric", "sym": "symmetric",
+}
+
+
+def _canonical_capacity_product(value: object) -> str:
+    """Canonicalise a product label to FCR/aFRR/mFRR (case/separator tolerant)."""
+    key = _normalize_product_key(value).replace(" ", "")
+    canon = _CAPACITY_PRODUCT_CANON.get(key)
+    if canon is None:
+        raise DataSourceParseError(
+            f"Unknown reserve product {value!r}; expected one of FCR / aFRR / mFRR."
+        )
+    return canon
+
+
+def _canonical_capacity_direction(value: object) -> str:
+    """Canonicalise a direction to up/down/symmetric; blank defaults symmetric."""
+    key = _normalize_product_key(value).replace(" ", "")
+    if not key:
+        return "symmetric"
+    canon = _CAPACITY_DIRECTION_CANON.get(key)
+    if canon is None:
+        raise DataSourceParseError(
+            f"Unknown reserve direction {value!r}; expected up / down / symmetric."
+        )
+    return canon
+
+
+def _capacity_utc_index(timestamps, tz_col) -> pd.DatetimeIndex:
+    """UTC index from timestamps, honouring an optional per-row IANA timezone.
+
+    Without a ``timezone`` column (or for blank cells) a value is assumed UTC —
+    the project-internal convention. Unparseable timestamps / unknown zones
+    become ``NaT`` so the caller drops them.
+    """
+    ts = pd.Series(timestamps).astype(str).str.strip()
+    if tz_col is None:
+        return pd.DatetimeIndex(pd.to_datetime(ts, utc=True, errors="coerce"))
+    tzs = pd.Series(tz_col).astype(str).str.strip()
+    out: list = []
+    for stamp_str, tz_name in zip(ts, tzs, strict=True):
+        tz = tz_name if tz_name and tz_name.lower() != "nan" else "UTC"
+        try:
+            stamp = pd.Timestamp(stamp_str)
+            if pd.isna(stamp):
+                out.append(pd.NaT)
+                continue
+            stamp = stamp.tz_localize(tz) if stamp.tzinfo is None else stamp
+            out.append(stamp.tz_convert("UTC"))
+        except (ValueError, TypeError, KeyError):
+            out.append(pd.NaT)  # bad timestamp or unknown IANA zone
+    return pd.DatetimeIndex(out)
+
+
+def parse_capacity_import_csv(
+    content: str, *, default_zone: str | None = None,
+) -> pd.DataFrame:
+    """Parse the unified reserve-capacity import CSV into the standard frame.
+
+    Schema (case-insensitive headers): ``timestamp, zone, product, direction,
+    capacity_price_eur_mw_h`` plus an optional ``timezone`` column. Timestamps
+    are UTC unless a per-row IANA ``timezone`` is given. ``product`` is
+    canonicalised to FCR/aFRR/mFRR and ``direction`` to up/down/symmetric
+    (case/separator tolerant); an unrecognised value RAISES rather than being
+    silently mis-filed (same strictness as the IDA importer). The per-hour
+    ``capacity_price_eur_mw_h`` maps to the established frame column
+    ``capacity_price_eur_mw`` (same unit), and ``product_type``/``direction``
+    are kept faithful to the CSV (direction is NOT folded into the product
+    label here). Rows with an unparseable timestamp or price are dropped.
+
+    Returns a standard ancillary frame (timestamp-indexed, UTC) ready to merge
+    via ``build_ancillary_dataset``. Raises ``DataSourceParseError`` on missing
+    required columns or an unknown product/direction.
+    """
+    delimiter = _detect_delimiter(content)
+    # keep_default_na=False so a blank cell is "" (not NaN -> "nan"), keeping the
+    # blank-direction -> symmetric and blank-zone -> default_zone fallbacks honest.
+    try:
+        raw = pd.read_csv(
+            io.StringIO(content), sep=delimiter, comment="#",
+            dtype=str, keep_default_na=False,
+        )
+    except (pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+        raise DataSourceParseError(
+            f"Could not parse capacity import CSV: {exc}"
+        ) from exc
+    raw.columns = [str(c).strip().lower() for c in raw.columns]
+    required = {"timestamp", "zone", "product", "direction", "capacity_price_eur_mw_h"}
+    missing = required - set(raw.columns)
+    if missing:
+        raise DataSourceParseError(
+            "Capacity import CSV missing columns: " + ", ".join(sorted(missing))
+        )
+
+    price = pd.to_numeric(raw["capacity_price_eur_mw_h"], errors="coerce")
+    tz_col = raw["timezone"] if "timezone" in raw.columns else None
+    index = _capacity_utc_index(raw["timestamp"], tz_col)
+    valid = price.notna().to_numpy() & ~pd.isna(index)
+    raw, price, index = raw[valid], price[valid], index[valid]
+    if raw.empty:
+        return _empty_ancillary_frame()
+
+    out = _initialise_output(pd.DatetimeIndex(index))
+    out["product_type"] = [_canonical_capacity_product(p) for p in raw["product"]]
+    out["direction"] = [_canonical_capacity_direction(d) for d in raw["direction"]]
+    out["zone"] = [
+        (str(z).strip() or (default_zone or "")) for z in raw["zone"]
+    ]
+    out["capacity_price_eur_mw"] = price.to_numpy()
+    return out
+
+
 # ── Parsing ──────────────────────────────────────────────────────────────────
 
 def _detect_delimiter(content: str) -> str:
