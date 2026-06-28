@@ -9,11 +9,15 @@ import pytest
 
 from src.ancillary import (
     ANCILLARY_TEMPLATES,
+    CAPACITY_IMPORT_COLUMNS,
+    CAPACITY_IMPORT_DIRECTIONS,
+    CAPACITY_IMPORT_PRODUCTS,
     build_ancillary_dataset,
     calculate_ancillary_revenue,
     capacity_price_for_product,
     capacity_price_series_for_product,
     co_optimize_revenue_split,
+    generate_capacity_import_template_csv,
     generate_template_csv,
     list_capacity_products,
     merge_revenue_stack,
@@ -37,6 +41,24 @@ class TestTemplateGeneration:
             assert len(csv_str) > 0
             lines = [line for line in csv_str.strip().split("\n") if not line.startswith("#")]
             assert len(lines) == 3  # header + 2 example rows
+
+    def test_capacity_import_template_pins_unit_and_schema(self) -> None:
+        csv_str = generate_capacity_import_template_csv()
+        # The header must pin the two historically-confused semantics.
+        assert "UTC" in csv_str
+        assert "EUR/MW/h" in csv_str
+        assert "block total" in csv_str  # per-hour rate, not a 4h block sum
+        data_lines = [
+            line for line in csv_str.strip().splitlines() if not line.startswith("#")
+        ]
+        assert data_lines[0].split(",") == list(CAPACITY_IMPORT_COLUMNS)
+        # Every example row: 5 fields, a parseable price, enumerated product/direction.
+        for row in data_lines[1:]:
+            fields = row.split(",")
+            assert len(fields) == len(CAPACITY_IMPORT_COLUMNS)
+            float(fields[4])  # capacity_price_eur_mw_h
+            assert fields[2] in CAPACITY_IMPORT_PRODUCTS
+            assert fields[3] in CAPACITY_IMPORT_DIRECTIONS
 
     def test_template_has_correct_headers(self) -> None:
         for key, tmpl in ANCILLARY_TEMPLATES.items():
