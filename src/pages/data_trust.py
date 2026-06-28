@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from src.data_trust import (
+    build_capacity_source_table,
     build_coverage_matrix,
     build_intraday_source_table,
     build_zone_data_quality_table,
@@ -131,6 +132,37 @@ def render(
             column_config={
                 "zone": "Zone",
                 "sequence": "IDA Round",
+                "source": "Source",
+                "rows": st.column_config.NumberColumn("Rows", format="%d"),
+                "first_timestamp_utc": st.column_config.DatetimeColumn(
+                    "First UTC", format="YYYY-MM-DD HH:mm",
+                ),
+                "last_timestamp_utc": st.column_config.DatetimeColumn(
+                    "Last UTC", format="YYYY-MM-DD HH:mm",
+                ),
+                "imported_at": st.column_config.DatetimeColumn(
+                    "Imported (UTC)", format="YYYY-MM-DD HH:mm",
+                ),
+            },
+        )
+
+    capacity_sources = build_capacity_source_table()
+    if not capacity_sources.empty:
+        st.markdown("**Reserve-capacity price sources**")
+        st.caption(
+            "Provenance of imported reserve-capacity prices, one row per "
+            "(zone, product, direction). 'Manual CSV' rows came from an upload, "
+            "not a live fetch; 'Mixed' means a stream blends sources. The "
+            "coverage matrix above shows reserve per zone from this sidecar."
+        )
+        st.dataframe(
+            capacity_sources,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "zone": "Zone",
+                "product": "Product",
+                "direction": "Direction",
                 "source": "Source",
                 "rows": st.column_config.NumberColumn("Rows", format="%d"),
                 "first_timestamp_utc": st.column_config.DatetimeColumn(
