@@ -11,8 +11,16 @@ An optional fourth row reframes a DA + reserve-capacity co-optimisation total
 *different revenue stream* (reserve capacity headroom, not intraday rebidding)
 and is a headroom-aware capacity estimate — it does NOT model activation
 energy and is NOT additive with DA, because the joint MILP makes reserve
-headroom compete with DA charge/discharge for the same power budget. A true
-cumulative DA + IDA + reserve triple-joint solve is a heavier future upgrade.
+headroom compete with DA charge/discharge for the same power budget.
+
+A fifth row is the cumulative DA + IDA + reserve perfect-foresight ceiling
+(Phase 9.2a). An optional sixth row is the *forecast-driven realistic*
+triple-joint (Phase 9.2b): the reserve-first sequential policy's window total.
+The ceiling and realistic rows are scored over the 9.2b walk-forward window, so
+they take their own ``triple_valid_days`` denominator and ``triple_da_baseline``
+uplift baseline (which may differ from the DA/IDA rows' window when walk-forward
+drops the earliest day) — keeping ``realistic <= ceiling`` and matching the
+cockpit's forecast-effect gap panel exactly.
 """
 
 from __future__ import annotations
@@ -32,6 +40,7 @@ _FORECAST = "DA + IDA1 (forecast-driven)"
 _CEILING = "DA + IDA1 (perfect-foresight ceiling)"
 _RESERVE_DEFAULT = "DA + reserve co-opt (headroom)"
 _TRIPLE_DEFAULT = "DA + IDA1 + reserve (co-opt ceiling)"
+_REALISTIC_DEFAULT = "DA + IDA1 + reserve (forecast-driven realistic)"
 
 
 def build_strategy_comparison(
@@ -40,6 +49,10 @@ def build_strategy_comparison(
     reserve_label: str | None = None,
     triple_joint_total: float | None = None,
     triple_joint_label: str | None = None,
+    realistic_triple_total: float | None = None,
+    realistic_triple_label: str | None = None,
+    triple_valid_days: int | None = None,
+    triple_da_baseline: float | None = None,
 ) -> pd.DataFrame:
     """Reframe a sequential DA+ID batch summary as a strategy comparison.
 
@@ -59,13 +72,28 @@ def build_strategy_comparison(
         reserve_label: Display label for the reserve row.
         triple_joint_total: Optional window total (EUR) for the cumulative
             DA + IDA + reserve perfect-foresight ceiling
-            (``simulation.simulate_da_id_reserve_ceiling_batch``). When provided
-            and finite, adds a fifth row on the same window basis. Unlike the
-            reserve row this IS a cumulative ladder step (it stacks IDA rebid
-            and reserve headroom on DA in one co-optimised solve); same red-line
-            — capacity headroom, no activation energy. A perfect-foresight upper
-            bound, not a forecast-driven policy.
+            (``simulation.simulate_da_id_reserve_ceiling_batch`` or the 9.2b
+            batch's ``total_global_ceiling_eur``). When provided and finite,
+            adds a fifth row. Unlike the reserve row this IS a cumulative ladder
+            step (it stacks IDA rebid and reserve headroom on DA in one
+            co-optimised solve); same red-line — capacity headroom, no
+            activation energy. A perfect-foresight upper bound.
         triple_joint_label: Display label for the triple-joint ceiling row.
+        realistic_triple_total: Optional window total (EUR) for the
+            *forecast-driven realistic* triple-joint (Phase 9.2b reserve-first
+            sequential policy, ``simulate_sequential_da_id_reserve_batch``'s
+            ``total_realised_eur``). When provided and finite, adds a sixth row.
+            This is NOT a ceiling — it is the walk-forward forecast-driven
+            policy, so it sits below the perfect-foresight ceiling by the
+            forecast + commitment-timing gap.
+        realistic_triple_label: Display label for the realistic triple row.
+        triple_valid_days: Annualisation denominator for the triple ceiling and
+            realistic rows. The 9.2b walk-forward window may exclude the
+            earliest day, so these two rows are scored over their own day count;
+            defaults to ``summary["valid_days"]`` (DA/IDA window) when omitted.
+        triple_da_baseline: DA-only baseline (EUR) for the triple ceiling and
+            realistic rows' uplift%, matching their walk-forward window;
+            defaults to ``summary["total_da_only_eur"]`` when omitted.
 
     Returns:
         One row per strategy with columns ``[strategy, window_revenue_eur,
@@ -81,16 +109,16 @@ def build_strategy_comparison(
     realised = float(summary.get("total_realised_eur", 0.0))
     ceiling = float(summary.get("total_ceiling_eur", 0.0))
 
-    def annualized_per_mw(total: float) -> float:
-        if power_mw <= 0:
+    def annualized_per_mw(total: float, days: int = valid_days) -> float:
+        if power_mw <= 0 or days <= 0:
             return float("nan")
-        return total * DAYS_PER_YEAR / valid_days / power_mw
+        return total * DAYS_PER_YEAR / days / power_mw
 
-    def uplift_pct(total: float) -> float:
+    def uplift_pct(total: float, baseline: float = da) -> float:
         # Undefined when the DA-only baseline is ~0 (no meaningful denominator).
-        if abs(da) < 1e-9:
+        if abs(baseline) < 1e-9:
             return float("nan")
-        return (total - da) / da * 100.0
+        return (total - baseline) / baseline * 100.0
 
     rows = [
         (_DA_ONLY, da, annualized_per_mw(da), 0.0),
@@ -103,10 +131,21 @@ def build_strategy_comparison(
             (reserve_label or _RESERVE_DEFAULT, rc,
              annualized_per_mw(rc), uplift_pct(rc)),
         )
+    # The triple ceiling + forecast-driven realistic rows may be scored over a
+    # different (9.2b walk-forward) window than the DA/IDA rows, so they take
+    # their own denominator and DA baseline when supplied.
+    t_days = int(triple_valid_days) if triple_valid_days else valid_days
+    t_base = float(triple_da_baseline) if triple_da_baseline is not None else da
     if triple_joint_total is not None and math.isfinite(float(triple_joint_total)):
         tj = float(triple_joint_total)
         rows.append(
             (triple_joint_label or _TRIPLE_DEFAULT, tj,
-             annualized_per_mw(tj), uplift_pct(tj)),
+             annualized_per_mw(tj, t_days), uplift_pct(tj, t_base)),
+        )
+    if realistic_triple_total is not None and math.isfinite(float(realistic_triple_total)):
+        rt = float(realistic_triple_total)
+        rows.append(
+            (realistic_triple_label or _REALISTIC_DEFAULT, rt,
+             annualized_per_mw(rt, t_days), uplift_pct(rt, t_base)),
         )
     return pd.DataFrame(rows, columns=STRATEGY_COMPARE_COLUMNS)

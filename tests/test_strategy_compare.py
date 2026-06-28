@@ -8,9 +8,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.ancillary import capacity_price_series_for_product
 from src.pages.simulation_cockpit import (
     _fmt_strategy_bar_label,
     _reserve_coopt_total,
+    _reserve_triple_totals,
     _slice_to_local_dates,
 )
 from src.simulation import DAYS_PER_YEAR
@@ -166,6 +168,82 @@ def test_triple_joint_row_dropped_when_non_finite() -> None:
         assert len(table) == 3
 
 
+def test_realistic_triple_row_appended_with_default_label() -> None:
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        realistic_triple_total=150.0,
+    )
+    assert len(table) == 4  # 3 base + realistic (no reserve/ceiling here)
+    assert table.iloc[3]["strategy"] == "DA + IDA1 + reserve (forecast-driven realistic)"
+    assert table.iloc[3]["uplift_vs_da_pct"] == pytest.approx(50.0)
+
+
+def test_realistic_triple_row_dropped_when_non_finite() -> None:
+    for bad in (float("nan"), float("inf")):
+        table = build_strategy_comparison(
+            _summary(100.0, 130.0, 160.0, valid_days=10),
+            power_mw=2.0,
+            realistic_triple_total=bad,
+        )
+        assert len(table) == 3
+
+
+def test_triple_rows_use_their_own_window_denominator_and_baseline() -> None:
+    # The 9.2b walk-forward window can span fewer days (8) and carry a different
+    # DA baseline (80) than the DA/IDA rows (10 days, baseline 100). The triple
+    # ceiling + realistic rows must annualise/uplift on THEIR window, not the
+    # DA/IDA one.
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        triple_joint_total=180.0,
+        triple_joint_label="DA + IDA1 + FCR (co-opt ceiling)",
+        realistic_triple_total=150.0,
+        realistic_triple_label="DA + IDA1 + FCR (forecast-driven realistic)",
+        triple_valid_days=8,
+        triple_da_baseline=80.0,
+    )
+    assert len(table) == 5  # da, forecast, ceiling, triple(4), realistic(5)
+    # Ceiling + realistic annualise over 8 days and uplift vs baseline 80.
+    assert table.iloc[3]["annualized_eur_per_mw"] == pytest.approx(
+        180.0 * DAYS_PER_YEAR / 8 / 2.0,
+    )
+    assert table.iloc[3]["uplift_vs_da_pct"] == pytest.approx((180.0 - 80.0) / 80.0 * 100.0)
+    assert table.iloc[4]["annualized_eur_per_mw"] == pytest.approx(
+        150.0 * DAYS_PER_YEAR / 8 / 2.0,
+    )
+    assert table.iloc[4]["uplift_vs_da_pct"] == pytest.approx((150.0 - 80.0) / 80.0 * 100.0)
+    # The DA/IDA rows still use the 10-day / baseline-100 convention.
+    assert table.iloc[0]["annualized_eur_per_mw"] == pytest.approx(
+        100.0 * DAYS_PER_YEAR / 10 / 2.0,
+    )
+    assert table.iloc[1]["uplift_vs_da_pct"] == pytest.approx(30.0)
+
+
+def test_six_row_layout_reserve_triple_realistic() -> None:
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        reserve_coopt_total=120.0,
+        reserve_label="DA + FCR co-opt (headroom)",
+        triple_joint_total=175.0,
+        triple_joint_label="DA + IDA1 + FCR (co-opt ceiling)",
+        realistic_triple_total=150.0,
+        realistic_triple_label="DA + IDA1 + FCR (forecast-driven realistic)",
+        triple_valid_days=9,
+        triple_da_baseline=95.0,
+    )
+    assert list(table["strategy"]) == [
+        "DA-only",
+        "DA + IDA1 (forecast-driven)",
+        "DA + IDA1 (perfect-foresight ceiling)",
+        "DA + FCR co-opt (headroom)",
+        "DA + IDA1 + FCR (co-opt ceiling)",
+        "DA + IDA1 + FCR (forecast-driven realistic)",
+    ]
+
+
 def _price_frame(days: int = 4) -> pd.DataFrame:
     idx = pd.date_range("2025-06-01 00:00", periods=24 * days, freq="h", tz="UTC")
     prices = 50 + 40 * np.sin(np.arange(24 * days) / 24 * 2 * np.pi)
@@ -264,3 +342,74 @@ def test_reserve_coopt_total_guards_return_none() -> None:
     assert _reserve_coopt_total(
         df, "aFRR Up", energy_only, valid_dates=valid, **common,
     ) == (None, None, None)
+
+
+def _ida_frame(days: int = 4) -> pd.DataFrame:
+    """IDA series on the same timestamps as ``_price_frame``, perturbed off DA so
+    the rebid stage has something to act on."""
+    n = 24 * days
+    idx = pd.date_range("2025-06-01 00:00", periods=n, freq="h", tz="UTC")
+    prices = (
+        50 + 40 * np.sin(np.arange(n) / 24 * 2 * np.pi)
+        + 6 * np.cos(np.arange(n) / 12 * 2 * np.pi)
+    )
+    return pd.DataFrame({"intraday_price_eur_mwh": prices}, index=idx)
+
+
+def _fcr_series_daily(days: int = 4) -> pd.DataFrame:
+    """One FCR capacity print per 4h block per day, so the block-of-day reserve
+    climatology has history to forecast from."""
+    base = pd.Timestamp("2025-06-01 00:00", tz="UTC")
+    stamps = [
+        base + pd.Timedelta(days=d, hours=h)
+        for d in range(days) for h in range(0, 24, 4)
+    ]
+    return pd.DataFrame(
+        {
+            "product_type": ["FCR"] * len(stamps),
+            "capacity_price_eur_mw": [12.0] * len(stamps),
+            "energy_price_eur_mwh": [np.nan] * len(stamps),
+        },
+        index=pd.DatetimeIndex(stamps),
+    )
+
+
+def test_reserve_triple_totals_ceiling_matches_summary_and_bounds_realistic() -> None:
+    da = _price_frame(days=4)
+    ida = _ida_frame(days=4)
+    series = capacity_price_series_for_product(_fcr_series_daily(days=4), "FCR")
+    valid = set(_berlin_dates(da))
+    out = _reserve_triple_totals(
+        da, ida, series, valid_dates=valid, tz="Europe/Berlin",
+        power_mw=1.0, duration_hours=2, efficiency=0.88, bucket="hour_of_day",
+    )
+    assert out["seq_per_day"] is not None and not out["seq_per_day"].empty
+    # The displayed 9.2a ceiling equals the 9.2b batch's global-ceiling ref.
+    assert out["triple_total"] == pytest.approx(
+        out["seq_summary"]["total_global_ceiling_eur"],
+    )
+    # Forecast-driven realistic can never beat the perfect-foresight ceiling.
+    assert out["realistic_total"] <= out["triple_total"] + 1e-6
+    # Both rows share the walk-forward window's denominator + DA baseline.
+    assert out["triple_valid_days"] == out["seq_summary"]["valid_days"]
+    assert out["triple_da_baseline"] == pytest.approx(
+        out["seq_summary"]["total_da_only_eur"],
+    )
+
+
+def test_reserve_triple_totals_none_when_series_missing_or_empty() -> None:
+    da = _price_frame(days=4)
+    ida = _ida_frame(days=4)
+    valid = set(_berlin_dates(da))
+    common = dict(
+        valid_dates=valid, tz="Europe/Berlin", power_mw=1.0,
+        duration_hours=2, efficiency=0.88, bucket="hour_of_day",
+    )
+    none_out = _reserve_triple_totals(da, ida, None, **common)
+    assert none_out["triple_total"] is None
+    assert none_out["realistic_total"] is None
+    assert none_out["seq_per_day"] is None
+    empty_out = _reserve_triple_totals(
+        da, ida, pd.Series(dtype=float), **common,
+    )
+    assert empty_out["realistic_total"] is None
