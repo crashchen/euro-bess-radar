@@ -461,6 +461,16 @@ def test_resolve_capacity_falls_back_to_session_when_cache_empty(
     assert out is session
 
 
+def test_resolve_capacity_empty_zone_falls_back_without_cache_lookup() -> None:
+    session = pd.DataFrame(
+        {"product_type": ["FCR"], "capacity_price_eur_mw": [9.0]},
+        index=pd.to_datetime(["2026-05-01T00:00:00Z"], utc=True),
+    )
+    out, label = _resolve_capacity_dataset("", session)
+    assert label == _CAP_SOURCE_SESSION
+    assert out is session
+
+
 def test_resolve_capacity_none_when_no_cache_and_no_session(
     tmp_path, monkeypatch,
 ) -> None:

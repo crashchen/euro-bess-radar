@@ -848,7 +848,7 @@ _CAP_SOURCE_SESSION = "Session ancillary fallback"
 
 
 def _resolve_capacity_dataset(
-    primary_zone: str, anc_df: pd.DataFrame | None,
+    primary_zone: str | None, anc_df: pd.DataFrame | None,
 ) -> tuple[pd.DataFrame | None, str]:
     """Cache-first reserve-capacity dataset for the cockpit + a provenance label.
 
@@ -859,6 +859,8 @@ def _resolve_capacity_dataset(
     it per valid date via ``_slice_to_local_dates`` before pricing, so a
     full-sample mean never leaks into the comparison window.
     """
+    if not primary_zone:
+        return anc_df, _CAP_SOURCE_SESSION
     cached = read_capacity_cache(primary_zone)
     if cached is not None and not cached.empty and list_capacity_products(cached):
         return cached, _CAP_SOURCE_CACHE
