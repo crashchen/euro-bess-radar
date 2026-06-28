@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import pandas as pd
 import streamlit as st
 
@@ -134,7 +136,11 @@ def _parse_and_store_capacity_upload(uploaded_file, default_zone: str) -> None:
     if parsed.empty:
         st.warning("No valid capacity rows found in the uploaded file.")
         return
-    summaries = persist_capacity_frame(parsed, source="Manual CSV")
+    try:
+        summaries = persist_capacity_frame(parsed, source="Manual CSV")
+    except (OSError, sqlite3.DatabaseError, ValueError) as exc:
+        st.error(f"Capacity import persistence error: {exc}")
+        return
     total = sum(s["rows"] for s in summaries)
     streams = ", ".join(
         f"{s['zone']} {s['product']} {s['direction']}" for s in summaries
