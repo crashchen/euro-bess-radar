@@ -9,8 +9,10 @@ product. They do not touch the real cache (DB paths are monkeypatched).
 from __future__ import annotations
 
 import sqlite3
+from io import StringIO
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from scripts import seed_demo_9_2b as seed
@@ -42,8 +44,12 @@ def test_demo_ida_frame_has_intraday_column_on_same_index() -> None:
 
 
 def test_demo_reserve_csv_parses_to_block_granular_fcr() -> None:
-    idx = seed._window(2)
+    idx = pd.date_range("2025-06-01", periods=48, freq="h", tz="UTC")
     csv_text = seed.build_demo_reserve_csv(idx, _rng())
+    raw = pd.read_csv(StringIO(csv_text))
+    # Berlin summer time: a UTC-midnight window starts at 02:00 local, so the
+    # first German 4h reserve block begins at 04:00 local rather than 00:00 UTC.
+    assert pd.to_datetime(raw["date"]).dt.hour.iloc[0] == 4
     parsed = parse_ancillary_csv(csv_text, template_key="DE_FCR")
     assert list_capacity_products(parsed) == ["FCR"]
     # 6 four-hour blocks per day -> block-granular, not one row per day.
@@ -59,7 +65,7 @@ def test_seed_and_clean_round_trip(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(seed, "SAMPLES_DIR", tmp_path / "samples")
     monkeypatch.setattr(seed, "RESERVE_CSV", tmp_path / "samples" / "reserve.csv")
 
-    seed.seed(days=4, seed=1)
+    seed.seed(days=4, rng_seed=1)
 
     assert seed.RESERVE_CSV.exists()
     with sqlite3.connect(db) as conn:
@@ -99,7 +105,7 @@ def test_seed_refuses_to_overwrite_unmarked_real_cache(tmp_path, monkeypatch) ->
     monkeypatch.setattr(seed, "RESERVE_CSV", tmp_path / "samples" / "reserve.csv")
 
     with pytest.raises(SystemExit, match="Refusing to overwrite"):
-        seed.seed(days=2, seed=1)
+        seed.seed(days=2, rng_seed=1)
 
     with sqlite3.connect(db) as conn:
         rows = conn.execute('SELECT COUNT(*) FROM "da_prices_de_lu"').fetchone()[0]

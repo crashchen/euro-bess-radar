@@ -53,13 +53,14 @@ def _window(days: int) -> pd.DatetimeIndex:
 
 def build_demo_da_frame(idx: pd.DatetimeIndex, rng: np.random.Generator) -> pd.DataFrame:
     """Synthetic DA prices with a double-peak daily shape + weekend dip."""
-    hour = idx.hour.to_numpy()
+    local_idx = idx.tz_convert("Europe/Berlin")
+    hour = local_idx.hour.to_numpy()
     daily = (
         60.0
         + 30.0 * np.sin((hour - 8) / 24 * 2 * np.pi)
         + 12.0 * np.sin((hour - 18) / 12 * 2 * np.pi)
     )
-    weekend = np.where(idx.dayofweek.to_numpy() >= 5, -8.0, 0.0)
+    weekend = np.where(local_idx.dayofweek.to_numpy() >= 5, -8.0, 0.0)
     price = daily + weekend + rng.normal(0.0, 4.0, len(idx))
     df = pd.DataFrame({"price_eur_mwh": np.round(price, 2)}, index=idx)
     df.index.name = "timestamp"
@@ -83,7 +84,8 @@ def build_demo_reserve_csv(idx: pd.DatetimeIndex, rng: np.random.Generator) -> s
     ``align_reserve_price_to_index`` maps source rows onto target intervals by
     (local date, 4h block).
     """
-    block_starts = idx[idx.hour % 4 == 0]
+    local_idx = idx.tz_convert("Europe/Berlin")
+    block_starts = local_idx[local_idx.hour % 4 == 0]
     base = 14.0 + 4.0 * np.sin(np.arange(len(block_starts)) / 6 * 2 * np.pi)
     prices = np.clip(base + rng.normal(0.0, 2.0, len(block_starts)), 2.0, None)
     out = pd.DataFrame({
@@ -133,7 +135,7 @@ def clean(*, force: bool = False) -> None:
     if not DB_PATH.exists():
         print(f"No cache DB at {DB_PATH}; nothing to clean.")
         return
-    with sqlite3.connect(DB_PATH) as conn:
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
         if not _demo_marker_exists(conn) and not force:
             print(
                 f"No {SYNTHETIC_SOURCE!r} marker found in {DB_PATH}; refusing "
@@ -149,15 +151,16 @@ def clean(*, force: bool = False) -> None:
                 conn.execute(f'DELETE FROM "{table}" WHERE {col} = ?', (ZONE,))
         with contextlib.suppress(sqlite3.OperationalError):
             conn.execute(f'DELETE FROM "{DEMO_MARKER_TABLE}" WHERE zone = ?', (ZONE,))
+        conn.commit()
     if RESERVE_CSV.exists():
         RESERVE_CSV.unlink()
     print(f"Cleaned demo tables {_demo_tables()} and {RESERVE_CSV.name}.")
 
 
-def seed(days: int, seed: int, *, force: bool = False) -> None:
+def seed(days: int, rng_seed: int, *, force: bool = False) -> None:
     """Generate and persist the synthetic DA + IDA1 + reserve demo dataset."""
     if DB_PATH.exists():
-        with sqlite3.connect(DB_PATH) as conn:
+        with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
             has_marker = _demo_marker_exists(conn)
             existing_tables = [table for table in _demo_tables() if _table_exists(conn, table)]
         if existing_tables:
@@ -170,7 +173,7 @@ def seed(days: int, seed: int, *, force: bool = False) -> None:
                 )
             clean(force=True)
 
-    rng = np.random.default_rng(seed)
+    rng = np.random.default_rng(rng_seed)
     idx = _window(days)
     da = build_demo_da_frame(idx, rng)
     ida = build_demo_ida_frame(da, rng)
@@ -180,8 +183,9 @@ def seed(days: int, seed: int, *, force: bool = False) -> None:
 
     SAMPLES_DIR.mkdir(parents=True, exist_ok=True)
     RESERVE_CSV.write_text(build_demo_reserve_csv(idx, rng))
-    with sqlite3.connect(DB_PATH) as conn:
+    with contextlib.closing(sqlite3.connect(DB_PATH)) as conn:
         _write_demo_marker(conn)
+        conn.commit()
 
     start_local = idx.min().tz_convert("Europe/Berlin").date()
     end_local = idx.max().tz_convert("Europe/Berlin").date()
@@ -221,7 +225,7 @@ def main() -> None:
     if args.clean:
         clean(force=args.force)
         return
-    seed(args.days, args.seed, force=args.force)
+    seed(args.days, rng_seed=args.seed, force=args.force)
 
 
 if __name__ == "__main__":
