@@ -12,6 +12,7 @@ import pandas as pd
 
 from src.analytics import _infer_interval_hours, _to_local
 from src.config import ANCILLARY_CAPACITY_AVAILABILITY, MAX_CONTINUOUS_REPLAY_INTERVALS
+from src.da_forecast import DA_FORECAST_COL, build_da_price_forecast
 from src.degradation import (
     DEFAULT_CYCLE_LIFE,
     DEFAULT_EOL_CAPACITY_PCT,
@@ -23,11 +24,17 @@ from src.dispatch import (
     solve_daily_da_id_reserve_dispatch,
     solve_daily_lp,
     solve_sequential_da_id_dispatch,
+    solve_sequential_da_id_reserve_dispatch,
 )
 from src.ida_forecast import (
     FORECAST_COL,
     build_ida_forecast,
     compute_forecast_skill,
+)
+from src.reserve_forecast import (
+    RESERVE_FORECAST_COL,
+    RESERVE_VALUE_COL,
+    build_reserve_price_forecast,
 )
 
 DAYS_PER_YEAR = 365.25
@@ -844,10 +851,55 @@ def simulate_sequential_da_id_batch(
     return per_day, summary
 
 
+def align_reserve_price_to_index(
+    reserve_series: pd.Series | None,
+    target_index: pd.DatetimeIndex,
+    tz: str | None,
+) -> np.ndarray:
+    """Per-interval reserve price for target intervals via (local date, 4h block).
+
+    Maps a timestamp-indexed reserve capacity-price series (typically
+    block-granular FCR/aFRR data) onto the target interval timestamps by
+    matching local date + 4h block, averaging any multiple source rows that
+    fall in the same (date, block). Target intervals with no matching reserve
+    price get 0.0 (no reserve incentive). Both the 9.2a ceiling batch and the
+    9.2b sequential batch use this so they price reserve identically per
+    interval.
+    """
+    target = pd.DatetimeIndex(target_index)
+    if reserve_series is None or len(reserve_series) == 0:
+        return np.zeros(len(target))
+    src = reserve_series.dropna()
+    if len(src) == 0:
+        return np.zeros(len(target))
+    src_idx = pd.DatetimeIndex(src.index)
+    tgt_idx = target
+    if tz:
+        # Project-internal timestamps are UTC. Treat naive cache/manual series
+        # as UTC before converting, otherwise local block matching can shift.
+        if src_idx.tz is None:
+            src_idx = src_idx.tz_localize("UTC")
+        src_idx = src_idx.tz_convert(tz)
+        if tgt_idx.tz is None:
+            tgt_idx = tgt_idx.tz_localize("UTC")
+        tgt_idx = tgt_idx.tz_convert(tz)
+    src_keys = pd.MultiIndex.from_arrays(
+        [src_idx.date, np.asarray(src_idx.hour) // 4],  # 4h FCR/aFRR product block
+    )
+    lookup = (
+        pd.Series(np.asarray(src.values, dtype=float), index=src_keys)
+        .groupby(level=[0, 1])
+        .mean()
+        .to_dict()
+    )
+    tgt_keys = zip(tgt_idx.date, np.asarray(tgt_idx.hour) // 4, strict=True)
+    return np.array([lookup.get(key, 0.0) for key in tgt_keys], dtype=float)
+
+
 def simulate_da_id_reserve_ceiling_batch(
     da_prices: pd.DataFrame,
     ida_prices: pd.DataFrame,
-    capacity_price_eur_mw_h: float,
+    capacity_price_eur_mw_h: float | pd.Series,
     *,
     dates: list[date],
     tz: str | None = None,
@@ -863,17 +915,28 @@ def simulate_da_id_reserve_ceiling_batch(
     ``dispatch.solve_daily_da_id_reserve_dispatch``. Days without overlapping
     DA/IDA intervals are skipped. Returns ``{"total_eur", "solved_days"}``.
 
+    ``capacity_price_eur_mw_h`` is a scalar cleared price OR a timestamp-indexed
+    reserve-price ``pd.Series`` (block-granular). The series form is aligned to
+    each day's intervals via :func:`align_reserve_price_to_index`, so the 9.2a
+    ceiling shown in the cockpit prices reserve identically (per interval) to
+    the 9.2b sequential solver's ``global_ceiling_eur``.
+
     This is a perfect-foresight UPPER BOUND, reserve = capacity headroom only
     (no activation energy), and NOT a forecast-driven policy. Each day is solved
     standalone terminal-neutral (no multi-day SoC carry), matching the
     standalone basis of ``simulate_sequential_da_id_batch``.
     """
-    try:
-        capacity_price = float(capacity_price_eur_mw_h)
-    except (TypeError, ValueError):
-        return {"total_eur": 0.0, "solved_days": 0}
-    if not math.isfinite(capacity_price):
-        return {"total_eur": 0.0, "solved_days": 0}
+    reserve_series = None
+    scalar_price = None
+    if isinstance(capacity_price_eur_mw_h, pd.Series):
+        reserve_series = capacity_price_eur_mw_h
+    else:
+        try:
+            scalar_price = float(capacity_price_eur_mw_h)
+        except (TypeError, ValueError):
+            return {"total_eur": 0.0, "solved_days": 0}
+        if not math.isfinite(scalar_price):
+            return {"total_eur": 0.0, "solved_days": 0}
 
     total = 0.0
     solved_days = 0
@@ -888,11 +951,17 @@ def simulate_da_id_reserve_ceiling_batch(
         if merged.empty or not _is_regular_utc_day(merged):
             continue
         dt = _infer_interval_hours(pd.DatetimeIndex(merged.index))
+        if reserve_series is not None:
+            day_reserve_price = align_reserve_price_to_index(
+                reserve_series, pd.DatetimeIndex(merged.index), tz,
+            )
+        else:
+            day_reserve_price = scalar_price
         result = solve_daily_da_id_reserve_dispatch(
             merged["price_eur_mwh"].to_numpy(dtype=float),
             merged["intraday_price_eur_mwh"].to_numpy(dtype=float),
             dt=dt,
-            capacity_price_eur_mw_h=capacity_price,
+            capacity_price_eur_mw_h=day_reserve_price,
             power_mw=power_mw,
             duration_hours=duration_hours,
             efficiency=efficiency,
@@ -901,6 +970,158 @@ def simulate_da_id_reserve_ceiling_batch(
         total += result["total_cash_eur"]
         solved_days += 1
     return {"total_eur": round(total, 6), "solved_days": solved_days}
+
+
+_SEQ_RESERVE_COLUMNS = [
+    "date", "da_only_eur", "realised_eur", "reserve_first_ceiling_eur",
+    "global_ceiling_eur", "forecast_effect_eur", "timing_cost_eur",
+    "full_gap_eur", "avg_reserve_mw",
+]
+
+
+def _empty_seq_reserve_summary(forecast_mode: str, bucket: str) -> dict[str, Any]:
+    return {
+        "total_da_only_eur": 0.0,
+        "total_realised_eur": 0.0,
+        "total_reserve_first_ceiling_eur": 0.0,
+        "total_global_ceiling_eur": 0.0,
+        "total_forecast_effect_eur": 0.0,
+        "total_timing_cost_eur": 0.0,
+        "total_full_gap_eur": 0.0,
+        "valid_days": 0,
+        "excluded_days": 0,
+        "forecast_mode": forecast_mode,
+        "bucket": bucket,
+    }
+
+
+def simulate_sequential_da_id_reserve_batch(
+    da_prices: pd.DataFrame,
+    ida_prices: pd.DataFrame,
+    reserve_price_series: pd.Series | None,
+    *,
+    dates: list[date],
+    tz: str | None = None,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
+    bucket: str = "hour_of_day",
+    forecast_mode: str = "walk_forward",
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Forecast-driven reserve-first DA+IDA+reserve policy over a window.
+
+    Builds DA / IDA / reserve-price forecasts once (``forecast_mode`` defaults
+    to ``"walk_forward"`` — Stage-0 reserve is a real-time commitment that must
+    not see the target/future day), aligns them and the realised reserve price
+    to each day's merged DA/IDA intervals (per-interval, via
+    :func:`align_reserve_price_to_index`), and solves
+    ``dispatch.solve_sequential_da_id_reserve_dispatch`` per day. Aggregates the
+    gap attribution. Returns ``(per_day_df, summary)``.
+
+    Days missing a usable DA/IDA forecast (e.g. walk-forward's first day) or
+    without DA/IDA overlap are excluded; a day with no reserve forecast simply
+    commits ``reserve_mw = 0`` (safe degrade, not silent optimism). The summary
+    keeps ``forecast_effect`` signed (negative = the forecast helped) and the
+    identity ``full_gap == forecast_effect + timing_cost`` holds per day.
+    """
+    if not dates:
+        return pd.DataFrame(columns=_SEQ_RESERVE_COLUMNS), _empty_seq_reserve_summary(
+            forecast_mode, bucket,
+        )
+
+    da_fc_df, _ = build_da_price_forecast(
+        da_prices, target_dates=dates, tz=tz, bucket=bucket, forecast_mode=forecast_mode,
+    )
+    ida_fc_df, _ = build_ida_forecast(
+        ida_prices, target_dates=dates, tz=tz, bucket=bucket, forecast_mode=forecast_mode,
+    )
+    if reserve_price_series is not None and len(reserve_price_series) > 0:
+        reserve_hist = pd.DataFrame({RESERVE_VALUE_COL: reserve_price_series})
+        reserve_fc_df, _ = build_reserve_price_forecast(
+            reserve_hist, target_dates=dates, tz=tz, forecast_mode=forecast_mode,
+        )
+        reserve_fc_series = (
+            reserve_fc_df[RESERVE_FORECAST_COL] if not reserve_fc_df.empty else None
+        )
+    else:
+        reserve_fc_series = None
+
+    rows: list[dict[str, Any]] = []
+    excluded = 0
+    for local_date in dates:
+        da_day = _select_local_day(da_prices, local_date, tz)
+        ida_day = _select_local_day(ida_prices, local_date, tz)
+        if da_day.empty or ida_day.empty or "intraday_price_eur_mwh" not in ida_day.columns:
+            excluded += 1
+            continue
+        merged = da_day[["price_eur_mwh"]].join(
+            ida_day[["intraday_price_eur_mwh"]], how="inner",
+        ).dropna()
+        if merged.empty or not _is_regular_utc_day(merged):
+            excluded += 1
+            continue
+        idx = pd.DatetimeIndex(merged.index)
+        da_fc = (
+            da_fc_df[DA_FORECAST_COL].reindex(idx)
+            if not da_fc_df.empty else pd.Series(np.nan, index=idx)
+        )
+        ida_fc = (
+            ida_fc_df[FORECAST_COL].reindex(idx)
+            if not ida_fc_df.empty else pd.Series(np.nan, index=idx)
+        )
+        if da_fc.isna().any() or ida_fc.isna().any():
+            # No usable DA/IDA forecast for this day (e.g. walk-forward first day).
+            excluded += 1
+            continue
+        reserve_realised = align_reserve_price_to_index(reserve_price_series, idx, tz)
+        reserve_forecast = align_reserve_price_to_index(reserve_fc_series, idx, tz)
+        result = solve_sequential_da_id_reserve_dispatch(
+            da_fc.to_numpy(dtype=float),
+            merged["price_eur_mwh"].to_numpy(dtype=float),
+            ida_fc.to_numpy(dtype=float),
+            merged["intraday_price_eur_mwh"].to_numpy(dtype=float),
+            reserve_forecast,
+            reserve_realised,
+            dt=_infer_interval_hours(idx),
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            availability=availability,
+        )
+        rows.append({
+            "date": local_date,
+            "da_only_eur": result["da_only_revenue_eur"],
+            "realised_eur": result["realised_total_eur"],
+            "reserve_first_ceiling_eur": result["reserve_first_ceiling_eur"],
+            "global_ceiling_eur": result["global_ceiling_eur"],
+            "forecast_effect_eur": result["forecast_cost_eur"],
+            "timing_cost_eur": result["timing_cost_eur"],
+            "full_gap_eur": result["full_gap_eur"],
+            "avg_reserve_mw": float(np.mean(result["reserve_mw"])),
+        })
+
+    per_day = pd.DataFrame(rows, columns=_SEQ_RESERVE_COLUMNS)
+    if per_day.empty:
+        summary = _empty_seq_reserve_summary(forecast_mode, bucket)
+        summary["excluded_days"] = excluded
+        return per_day, summary
+
+    per_day = per_day.sort_values("date").reset_index(drop=True)
+    summary = {
+        "total_da_only_eur": float(per_day["da_only_eur"].sum()),
+        "total_realised_eur": float(per_day["realised_eur"].sum()),
+        "total_reserve_first_ceiling_eur": float(per_day["reserve_first_ceiling_eur"].sum()),
+        "total_global_ceiling_eur": float(per_day["global_ceiling_eur"].sum()),
+        "total_forecast_effect_eur": float(per_day["forecast_effect_eur"].sum()),
+        "total_timing_cost_eur": float(per_day["timing_cost_eur"].sum()),
+        "total_full_gap_eur": float(per_day["full_gap_eur"].sum()),
+        "valid_days": len(per_day),
+        "excluded_days": excluded,
+        "forecast_mode": forecast_mode,
+        "bucket": bucket,
+    }
+    return per_day, summary
 
 
 def _sequential_day_row(

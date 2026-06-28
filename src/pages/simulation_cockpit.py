@@ -9,7 +9,11 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.ancillary import capacity_price_for_product, list_capacity_products
+from src.ancillary import (
+    capacity_price_for_product,
+    capacity_price_series_for_product,
+    list_capacity_products,
+)
 from src.assumptions import CAPTURE_PARAM_LABEL
 from src.config import ANCILLARY_CAPACITY_AVAILABILITY
 from src.dispatch import solve_joint_capacity_batch
@@ -23,6 +27,7 @@ from src.simulation import (
     simulate_da_milp_replay,
     simulate_replay_batch,
     simulate_sequential_da_id_batch,
+    simulate_sequential_da_id_reserve_batch,
 )
 from src.strategy_compare import build_strategy_comparison
 
@@ -891,6 +896,70 @@ def _reserve_coopt_total(
     return total, f"DA + {reserve_product} co-opt (headroom)", float(price)
 
 
+def _reserve_triple_totals(
+    primary_df: pd.DataFrame,
+    intraday_df: pd.DataFrame,
+    reserve_series: pd.Series | None,
+    *,
+    valid_dates: set,
+    tz: str,
+    power_mw: float,
+    duration_hours: int,
+    efficiency: float,
+    bucket: str,
+) -> dict:
+    """9.2a ceiling + 9.2b forecast-driven realistic totals over a shared window.
+
+    Both the perfect-foresight ceiling (Phase 9.2a) and the forecast-driven
+    realistic triple (Phase 9.2b reserve-first sequential) are priced off the
+    SAME per-interval ``reserve_series`` (via
+    :func:`simulation.align_reserve_price_to_index`), so ``realistic <= ceiling``
+    and the cockpit's forecast-effect gap panel is internally consistent.
+
+    The realistic policy is ALWAYS walk-forward (reserve is committed D-1 before
+    the DA gate and must not see the target/future day) regardless of the
+    panel's LOO/walk-forward toggle, which only controls the DA/IDA skill
+    estimate. When the 9.2b batch keeps at least one day, the ceiling is taken
+    from its ``total_global_ceiling_eur`` (so both rows share the walk-forward
+    window + denominator); otherwise it falls back to the standalone 9.2a
+    ceiling over the DA/IDA window. Returns Nones when ``reserve_series`` is
+    missing/empty or no day is solvable.
+    """
+    out = {
+        "triple_total": None, "realistic_total": None,
+        "seq_per_day": None, "seq_summary": None,
+        "triple_valid_days": None, "triple_da_baseline": None,
+    }
+    if reserve_series is None or reserve_series.empty or not valid_dates:
+        return out
+    per_day, summary = simulate_sequential_da_id_reserve_batch(
+        primary_df, intraday_df, reserve_series,
+        dates=sorted(valid_dates), tz=tz, power_mw=power_mw,
+        duration_hours=duration_hours, efficiency=efficiency,
+        bucket=bucket, forecast_mode="walk_forward",
+    )
+    if not per_day.empty:
+        out.update(
+            triple_total=summary["total_global_ceiling_eur"],
+            realistic_total=summary["total_realised_eur"],
+            triple_valid_days=summary["valid_days"],
+            triple_da_baseline=summary["total_da_only_eur"],
+            seq_per_day=per_day, seq_summary=summary,
+        )
+        return out
+    # 9.2b excluded every day (e.g. a 1-day walk-forward window): fall back to
+    # the standalone 9.2a ceiling over the DA/IDA window, still per-interval
+    # priced. No realistic row in this degenerate case.
+    ceiling = simulate_da_id_reserve_ceiling_batch(
+        primary_df, intraday_df, reserve_series, dates=sorted(valid_dates),
+        tz=tz, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency,
+    )
+    if ceiling["solved_days"] > 0:
+        out["triple_total"] = ceiling["total_eur"]
+    return out
+
+
 def _append_reserve_assumptions(
     assumptions: pd.DataFrame | None,
     *,
@@ -960,6 +1029,52 @@ def _append_triple_assumptions(
             "headroom only, no activation energy, NOT forecast-driven"
         ),
     }])
+    return pd.concat([assumptions, rows], ignore_index=True)
+
+
+def _append_realistic_triple_assumptions(
+    assumptions: pd.DataFrame | None,
+) -> pd.DataFrame | None:
+    """Append DA+IDA+reserve forecast-driven (9.2b) provenance to the export."""
+    if assumptions is None:
+        return None
+    rows = pd.DataFrame([
+        {
+            "parameter": "DA+IDA1+reserve (forecast-driven) row type",
+            "value": "reserve-first sequential, forecast-driven",
+            "unit": "",
+            "source": "simulate_sequential_da_id_reserve_batch",
+            "affects": (
+                "9.2b realistic row: reserve committed D-1 BEFORE the DA gate "
+                "(reserve-first); DA remains a financial commitment, while "
+                "physical IDA execution/rebid is capped by reserved headroom"
+            ),
+        },
+        {
+            "parameter": "Reserve commitment information",
+            "value": "walk-forward (prior days only)",
+            "unit": "",
+            "source": "build_reserve_price_forecast forecast_mode",
+            "affects": (
+                "Reserve price forecast sees no target/future day — a "
+                "real-time D-1 commitment, not an unbiased skill estimate"
+            ),
+        },
+        {
+            "parameter": "Forecast effect sign",
+            "value": "signed (negative = forecast helped)",
+            "unit": "",
+            "source": "full gap = forecast effect + timing cost",
+            "affects": "Gap attribution is not clamped",
+        },
+        {
+            "parameter": "Reserve energy (9.2b)",
+            "value": "not modelled",
+            "unit": "",
+            "source": "solve_sequential_da_id_reserve_dispatch scope",
+            "affects": "Reserve is capacity headroom only; activation energy excluded",
+        },
+    ])
     return pd.concat([assumptions, rows], ignore_index=True)
 
 
@@ -1120,18 +1235,16 @@ def _render_forecast_policy_section(
         reserve_product = None
         if capacity_products:
             reserve_product = st.selectbox(
-                "Reserve co-opt product (adds a 4th strategy row)",
+                "Reserve product (adds reserve strategy rows)",
                 options=capacity_products,
                 index=0,
                 key="forecast_policy_reserve_product",
                 help=(
-                    "Adds a DA + reserve-capacity co-optimisation row to the "
-                    "strategy comparison, priced from the loaded ancillary "
-                    "capacity data. Headroom-aware capacity estimate: reserve "
-                    "competes with DA for power (so it is NOT additive with "
-                    "DA), and activation energy is NOT modelled. A different "
-                    "revenue stream from the DA+IDA rows, not a cumulative "
-                    "DA+IDA+reserve ladder."
+                    "Adds reserve-capacity strategy rows when data is "
+                    "available: a DA + reserve headroom row, plus cumulative "
+                    "DA + IDA1 + reserve ceiling/forecast-driven rows when "
+                    "IDA and capacity prices overlap. Capacity headroom only; "
+                    "no activation energy."
                 ),
             )
 
@@ -1199,43 +1312,52 @@ def _render_forecast_policy_section(
             duration_hours=duration_hours,
             efficiency=efficiency,
         )
-        # Cumulative DA+IDA+reserve perfect-foresight ceiling. Gated on
-        # reserve_price (already in-window) so it shares the same capacity
-        # price and window as the reserve row; IDA is guaranteed present here.
-        triple_total = None
-        triple_label = None
-        if reserve_price is not None:
-            triple = simulate_da_id_reserve_ceiling_batch(
-                primary_df,
-                intraday_df,
-                reserve_price,
-                dates=sorted(valid_dates),
-                tz=zone_tz,
-                power_mw=power_mw,
-                duration_hours=duration_hours,
-                efficiency=efficiency,
-            )
-            if triple["solved_days"] > 0:
-                triple_total = triple["total_eur"]
-                triple_label = f"DA + IDA1 + {reserve_product} (co-opt ceiling)"
+        # Rows 5 & 6: 9.2a perfect-foresight ceiling and 9.2b forecast-driven
+        # realistic triple, BOTH priced off the SAME per-interval reserve series
+        # (windowed to the DA+ID valid dates so an out-of-window print can't
+        # leak), scored over the 9.2b walk-forward window.
+        window_anc = _slice_to_local_dates(anc_df, valid_dates, zone_tz)
+        reserve_series = capacity_price_series_for_product(window_anc, reserve_product)
+        triple = _reserve_triple_totals(
+            primary_df, intraday_df, reserve_series,
+            valid_dates=valid_dates, tz=zone_tz, power_mw=power_mw,
+            duration_hours=duration_hours, efficiency=efficiency, bucket=bucket,
+        )
+        triple_label = (
+            f"DA + IDA1 + {reserve_product} (co-opt ceiling)"
+            if triple["triple_total"] is not None else None
+        )
+        realistic_label = (
+            f"DA + IDA1 + {reserve_product} (forecast-driven realistic)"
+            if triple["realistic_total"] is not None else None
+        )
         comparison = build_strategy_comparison(
             summary,
             power_mw=power_mw,
             reserve_coopt_total=reserve_total,
             reserve_label=reserve_label,
-            triple_joint_total=triple_total,
+            triple_joint_total=triple["triple_total"],
             triple_joint_label=triple_label,
+            realistic_triple_total=triple["realistic_total"],
+            realistic_triple_label=realistic_label,
+            triple_valid_days=triple["triple_valid_days"],
+            triple_da_baseline=triple["triple_da_baseline"],
         )
         _render_strategy_comparison(
             comparison, chart_template,
             has_reserve=reserve_total is not None,
-            has_triple=triple_total is not None,
+            has_triple=triple["triple_total"] is not None,
+            has_realistic=triple["realistic_total"] is not None,
         )
         if reserve_product and reserve_total is None:
             st.caption(
                 f"Reserve row omitted: no {reserve_product} capacity price "
                 "overlaps this comparison window, so it cannot be priced "
                 "co-temporally with the DA+ID rows."
+            )
+        if triple["seq_summary"] is not None:
+            _render_reserve_gap_panel(
+                triple["seq_summary"], reserve_product, chart_template,
             )
         st.dataframe(per_day, width="stretch", hide_index=True)
         # This panel reports raw solver values — no capture haircut applied.
@@ -1254,10 +1376,15 @@ def _render_forecast_policy_section(
                 product=reserve_product,
                 capacity_price_eur_mw_h=reserve_price,
             )
-        if triple_total is not None:
+        if triple["triple_total"] is not None:
             export_assumptions = _append_triple_assumptions(export_assumptions)
+        if triple["realistic_total"] is not None:
+            export_assumptions = _append_realistic_triple_assumptions(export_assumptions)
+        export_tables = {"Strategy comparison": comparison, "Sequential DA+ID": per_day}
+        if triple["seq_per_day"] is not None and not triple["seq_per_day"].empty:
+            export_tables["Sequential DA+ID+reserve"] = triple["seq_per_day"]
         _cockpit_download_button(
-            {"Strategy comparison": comparison, "Sequential DA+ID": per_day},
+            export_tables,
             export_assumptions,
             key="dl_forecast_policy",
             label="\U0001f4e5 Download forecast policy + comparison (Excel)",
@@ -1333,6 +1460,7 @@ def _render_forecast_policy_kpis(summary: dict) -> None:
 def _render_strategy_comparison(
     comparison: pd.DataFrame, chart_template: str, *,
     has_reserve: bool = False, has_triple: bool = False,
+    has_realistic: bool = False,
 ) -> None:
     """Investment-framed comparison of the dispatch strategies."""
     if comparison is None or comparison.empty:
@@ -1347,21 +1475,35 @@ def _render_strategy_comparison(
         )
     if has_triple:
         notes.append(
-            "The DA+IDA1+reserve row IS the cumulative ladder: a "
+            "The DA+IDA1+reserve (co-opt ceiling) row is the cumulative "
             "perfect-foresight ceiling (full DA/IDA/capacity knowledge, "
             "capacity headroom only, no activation energy, not forecast-driven)."
+        )
+    if has_realistic:
+        notes.append(
+            "The DA+IDA1+reserve (forecast-driven realistic) row is the 9.2b "
+            "reserve-first walk-forward policy — it sits BELOW the ceiling by "
+            "the forecast + commitment-timing gap (see the gap panel). It and "
+            "the ceiling are scored over the walk-forward window, which may "
+            "span one fewer day than the DA/IDA rows."
         )
     if not has_reserve and not has_triple:
         notes.append(
             "A reserve (FCR/aFRR) co-optimisation strategy adds further rows "
             "when ancillary capacity prices are loaded."
         )
-    st.caption(
-        "Same window, strategies side by side. Annualised EUR/MW/yr = window "
-        "revenue x 365.25 / valid days / power; uplift is vs the DA-only "
-        f"baseline. Raw solver values (no capture haircut). {' '.join(notes)}"
+    window_note = (
+        "DA/IDA rows use the forecast-policy window; reserve-first triple rows "
+        "use their own walk-forward window. "
+        if has_realistic
+        else "Same window, strategies side by side. "
     )
-    palette = [_C_REVENUE, _C_PRICE_IDA, _C_DISCHARGE, _C_AVAIL, _C_SOC]
+    st.caption(
+        f"{window_note}Annualised EUR/MW/yr = window revenue x 365.25 / valid "
+        "days / power; uplift is vs the matching DA-only baseline. Raw solver "
+        f"values (no capture haircut). {' '.join(notes)}"
+    )
+    palette = [_C_REVENUE, _C_PRICE_IDA, _C_DISCHARGE, _C_AVAIL, _C_SOC, _C_CHARGE]
     colors = [palette[i % len(palette)] for i in range(len(comparison))]
     fig = go.Figure(go.Bar(
         x=comparison["strategy"],
@@ -1395,6 +1537,53 @@ def _render_strategy_comparison(
             ),
         },
     )
+
+
+def _render_reserve_gap_panel(
+    summary: dict, reserve_product: str, chart_template: str,
+) -> None:
+    """Decompose the 9.2b realistic-vs-ceiling gap (forecast effect + timing).
+
+    The full gap (perfect-foresight ceiling - forecast-driven realistic) splits
+    into a SIGNED forecast effect (negative = the forecast HELPED) and a
+    commitment-timing cost (reserve is locked D-1 before the DA gate). Reserve =
+    capacity headroom only; no activation energy.
+    """
+    if summary is None or summary.get("valid_days", 0) <= 0:
+        return
+    realistic = summary["total_realised_eur"]
+    ceiling = summary["total_global_ceiling_eur"]
+    forecast_effect = summary["total_forecast_effect_eur"]
+    timing_cost = summary["total_timing_cost_eur"]
+    full_gap = summary["total_full_gap_eur"]
+    st.markdown(f"**Forecast-driven reserve gap ({reserve_product}, Phase 9.2b)**")
+    cols = st.columns(4)
+    cols[0].metric("Forecast-driven realistic", f"EUR {realistic:,.0f}")
+    cols[1].metric("Perfect-foresight ceiling", f"EUR {ceiling:,.0f}")
+    cols[2].metric("Full gap", f"EUR {full_gap:,.0f}")
+    cols[3].metric("Forecast effect", f"EUR {forecast_effect:+,.0f}")
+    st.caption(
+        "Reserve-first sequential (walk-forward): reserve committed D-1 under a "
+        "price forecast; DA remains a financial commitment; physical IDA "
+        "execution/rebid is capped by reserved headroom. Full gap (ceiling - "
+        f"realistic) = forecast effect + timing cost = "
+        f"EUR {forecast_effect:+,.0f} + EUR {timing_cost:,.0f}. Forecast effect "
+        "is SIGNED: negative means the forecast HELPED (realistic beat the "
+        "no-skill split); timing cost is the D-1 commitment-ordering penalty. "
+        "Capacity headroom only — no activation energy."
+    )
+    fig = go.Figure(go.Bar(
+        x=["Timing cost", "Forecast effect"],
+        y=[timing_cost, forecast_effect],
+        marker_color=[_C_AVAIL, _C_PRICE_IDA],
+        text=[f"{timing_cost:,.0f}", f"{forecast_effect:+,.0f}"],
+        textposition="outside",
+    ))
+    _apply_panel_layout(
+        fig, "Gap decomposition (ceiling - realistic)", "EUR (window)",
+        chart_template, height=240,
+    )
+    st.plotly_chart(fig, width="stretch")
 
 
 def _plot_forecast_policy(per_day: pd.DataFrame, chart_template: str) -> None:

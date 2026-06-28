@@ -13,6 +13,7 @@ import src.simulation as sim
 from src.simulation import (
     _count_dispatch_blocks,
     _group_clean_runs,
+    align_reserve_price_to_index,
     available_local_dates,
     build_dispatch_event_table,
     empty_simulation_result,
@@ -21,6 +22,7 @@ from src.simulation import (
     simulate_da_milp_replay,
     simulate_replay_batch,
     simulate_sequential_da_id_batch,
+    simulate_sequential_da_id_reserve_batch,
 )
 
 
@@ -611,6 +613,127 @@ def test_da_id_reserve_ceiling_batch_sums_and_dominates() -> None:
         da_df, ida_df, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
     )
     assert triple["total_eur"] >= seq["total_ceiling_eur"] - 1e-6
+
+
+def test_align_reserve_price_maps_block_of_day_and_missing_to_zero() -> None:
+    idx = pd.date_range("2025-06-01", periods=24, freq="h", tz="UTC")
+    # Block 2 (08-11 UTC) priced high, the rest low.
+    res = pd.Series([5.0] * 8 + [20.0] * 4 + [5.0] * 12, index=idx)
+    out = align_reserve_price_to_index(res, idx, tz=None)
+    assert out[8:12].tolist() == [20.0, 20.0, 20.0, 20.0]
+    assert out[0:4].tolist() == [5.0, 5.0, 5.0, 5.0]
+    # None / empty -> zeros; a target day with no source price -> 0.
+    assert align_reserve_price_to_index(None, idx, None).tolist() == [0.0] * 24
+    other_day = pd.date_range("2025-07-01", periods=24, freq="h", tz="UTC")
+    assert align_reserve_price_to_index(res, other_day, None).tolist() == [0.0] * 24
+
+
+def test_align_reserve_price_treats_naive_indices_as_utc_for_tz_alignment() -> None:
+    target = pd.date_range("2025-06-01", periods=24, freq="h", tz="UTC")
+    # Block-start prices in UTC. 06:00 UTC is the 08:00-12:00 local block in
+    # Berlin summer time. A naive source must be treated as UTC, not local wall
+    # time, otherwise that high block maps to the wrong local 4h bucket.
+    block_starts_naive = pd.DatetimeIndex([
+        "2025-06-01 02:00", "2025-06-01 06:00", "2025-06-01 10:00",
+        "2025-06-01 14:00", "2025-06-01 18:00", "2025-06-01 22:00",
+    ])
+    values = [5.0, 20.0, 5.0, 5.0, 5.0, 5.0]
+    aware_res = pd.Series(values, index=block_starts_naive.tz_localize("UTC"))
+    naive_res = pd.Series(values, index=block_starts_naive)
+
+    expected = align_reserve_price_to_index(aware_res, target, tz="Europe/Berlin")
+    out = align_reserve_price_to_index(naive_res, target, tz="Europe/Berlin")
+    assert out.tolist() == expected.tolist()
+    assert out[6:10].tolist() == [20.0, 20.0, 20.0, 20.0]
+
+    naive_target = pd.date_range("2025-06-01", periods=24, freq="h")
+    out_naive_target = align_reserve_price_to_index(
+        naive_res, naive_target, tz="Europe/Berlin",
+    )
+    assert out_naive_target.tolist() == expected.tolist()
+
+
+def test_ceiling_batch_constant_series_equals_scalar() -> None:
+    da_df, ida_df = _make_seq_history(days=3, anomaly_day=1)
+    dates = available_local_dates(da_df, tz="UTC")
+    scalar = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_df, 8.0, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    const_series = pd.Series(8.0, index=da_df.index)
+    series = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_df, const_series, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0,
+    )
+    assert series["solved_days"] == scalar["solved_days"]
+    assert series["total_eur"] == pytest.approx(scalar["total_eur"], abs=1e-6)
+
+
+def test_ceiling_batch_per_interval_series_differs_from_scalar_mean() -> None:
+    # A block-varying reserve price should not match its flat scalar mean: the
+    # joint MILP concentrates reserve in the high-price block.
+    da_df, ida_df = _make_seq_history(days=2, anomaly_day=None)
+    dates = available_local_dates(da_df, tz="UTC")
+    hour = pd.DatetimeIndex(da_df.index).hour
+    varying = pd.Series(np.where((hour >= 8) & (hour < 12), 40.0, 4.0), index=da_df.index)
+    mean_price = float(varying.mean())
+    per_interval = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_df, varying, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    flat_mean = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_df, mean_price, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    assert per_interval["total_eur"] != pytest.approx(flat_mean["total_eur"], abs=1.0)
+
+
+def _block_reserve_series(da_df: pd.DataFrame) -> pd.Series:
+    hour = pd.DatetimeIndex(da_df.index).hour
+    return pd.Series(np.where((hour >= 8) & (hour < 12), 18.0, 5.0), index=da_df.index)
+
+
+def test_sequential_reserve_batch_identity_and_ceiling_consistency() -> None:
+    da_df, ida_df = _make_seq_history(days=6, anomaly_day=2)
+    res = _block_reserve_series(da_df)
+    dates = available_local_dates(da_df, tz="UTC")
+    per_day, summary = simulate_sequential_da_id_reserve_batch(
+        da_df, ida_df, res, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    # walk-forward (default) excludes the first day (no prior history).
+    assert summary["valid_days"] == 5
+    assert summary["excluded_days"] == 1
+    # Per-day exact attribution + bound.
+    lhs = per_day["forecast_effect_eur"] + per_day["timing_cost_eur"]
+    assert np.allclose(lhs, per_day["full_gap_eur"], atol=1e-4)
+    assert (per_day["realised_eur"] <= per_day["global_ceiling_eur"] + 1e-6).all()
+    # CONSISTENCY (the Increment-4 prerequisite): the batch's global ceiling
+    # equals the 9.2a ceiling batch with the SAME per-interval reserve series
+    # over the SAME valid days. Otherwise the cockpit's 9.2a row would not
+    # match the 9.2b row's global-ceiling reference.
+    ceil = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_df, res, dates=list(per_day["date"]), tz="UTC",
+        power_mw=1.0, duration_hours=2.0,
+    )
+    assert summary["total_global_ceiling_eur"] == pytest.approx(
+        ceil["total_eur"], abs=1e-6,
+    )
+
+
+def test_sequential_reserve_batch_none_reserve_commits_zero() -> None:
+    da_df, ida_df = _make_seq_history(days=4, anomaly_day=None)
+    dates = available_local_dates(da_df, tz="UTC")
+    per_day, _ = simulate_sequential_da_id_reserve_batch(
+        da_df, ida_df, None, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
+    )
+    # No reserve price -> no reserve committed (safe degrade to DA+ID).
+    assert (per_day["avg_reserve_mw"] == 0.0).all()
+
+
+def test_sequential_reserve_batch_empty_dates_returns_empty() -> None:
+    da_df, ida_df = _make_seq_history(days=2)
+    per_day, summary = simulate_sequential_da_id_reserve_batch(
+        da_df, ida_df, None, dates=[], tz="UTC",
+    )
+    assert per_day.empty
+    assert summary["valid_days"] == 0
 
 
 def test_da_id_reserve_ceiling_batch_skips_days_without_overlap() -> None:

@@ -783,6 +783,33 @@ def capacity_price_for_product(
     return _capacity_price_mean(cap_prices, product)
 
 
+def capacity_price_series_for_product(
+    ancillary_df: pd.DataFrame | None, product: str | None,
+) -> pd.Series | None:
+    """Timestamp-indexed reserve capacity-price series (EUR/MW/h) for a product.
+
+    The per-interval counterpart to :func:`capacity_price_for_product`: instead
+    of collapsing to a duration-weighted mean it returns the product's full
+    block-granular price series, so the 9.2a ceiling and the 9.2b sequential
+    batch can price reserve identically per interval (via
+    ``simulation.align_reserve_price_to_index``) rather than off a flat scalar.
+
+    Returns ``None`` when the product is blank or carries no capacity price.
+    """
+    if product is None or not str(product).strip():
+        return None
+    if ancillary_df is None or ancillary_df.empty:
+        return None
+    if "capacity_price_eur_mw" not in ancillary_df or "product_type" not in ancillary_df:
+        return None
+    labels = ancillary_df["product_type"].fillna("UNKNOWN").astype(str).str.strip()
+    group = ancillary_df[labels == str(product).strip()]
+    cap_prices = group["capacity_price_eur_mw"].dropna()
+    if cap_prices.empty:
+        return None
+    return cap_prices.sort_index()
+
+
 def calculate_ancillary_revenue(
     ancillary_df: pd.DataFrame,
     power_mw: float = 1.0,
