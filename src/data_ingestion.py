@@ -2287,9 +2287,11 @@ def write_capacity_cache(
         price = row["capacity_price_eur_mw"]
         if pd.isna(price):
             continue
+        direction = row.get("direction", "")
+        direction_str = "" if pd.isna(direction) else str(direction).strip()
         rows.append((
             ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
-            str(row["product_type"]), str(row.get("direction", "") or ""),
+            str(row["product_type"]), direction_str,
             float(price), source,
         ))
     if not rows:

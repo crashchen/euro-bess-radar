@@ -271,9 +271,15 @@ def parse_capacity_import_csv(
     delimiter = _detect_delimiter(content)
     # keep_default_na=False so a blank cell is "" (not NaN -> "nan"), keeping the
     # blank-direction -> symmetric and blank-zone -> default_zone fallbacks honest.
-    raw = pd.read_csv(
-        io.StringIO(content), sep=delimiter, comment="#", dtype=str, keep_default_na=False,
-    )
+    try:
+        raw = pd.read_csv(
+            io.StringIO(content), sep=delimiter, comment="#",
+            dtype=str, keep_default_na=False,
+        )
+    except (pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+        raise DataSourceParseError(
+            f"Could not parse capacity import CSV: {exc}"
+        ) from exc
     raw.columns = [str(c).strip().lower() for c in raw.columns]
     required = {"timestamp", "zone", "product", "direction", "capacity_price_eur_mw_h"}
     missing = required - set(raw.columns)

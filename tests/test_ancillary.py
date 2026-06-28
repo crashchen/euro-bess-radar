@@ -223,6 +223,10 @@ class TestCapacityImportParsing:
         with pytest.raises(DataSourceParseError, match="missing columns"):
             parse_capacity_import_csv(csv_str)
 
+    def test_empty_or_comment_only_csv_raises_project_parse_error(self) -> None:
+        with pytest.raises(DataSourceParseError, match="Could not parse"):
+            parse_capacity_import_csv("# comments only\n# no data\n")
+
 
 # ── Parsing ──────────────────────────────────────────────────────────────────
 

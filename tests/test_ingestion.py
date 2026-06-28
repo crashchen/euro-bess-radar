@@ -2316,3 +2316,22 @@ class TestCapacityCache:
         monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
         assert di.read_capacity_cache("DE_LU") is None
         assert di.read_capacity_sources() == {}
+
+    def test_nan_direction_persists_as_blank_not_nan_string(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        frame = pd.DataFrame(
+            {
+                "zone": ["DE_LU"],
+                "product_type": ["FCR"],
+                "direction": [float("nan")],
+                "capacity_price_eur_mw": [12.5],
+            },
+            index=pd.DatetimeIndex(["2026-05-01T00:00:00Z"], name="timestamp"),
+        )
+        di.persist_capacity_frame(frame, source="Manual CSV")
+        back = di.read_capacity_cache("DE_LU")
+        assert back["direction"].iloc[0] == ""
+        assert ("DE_LU", "FCR", "") in di.read_capacity_sources()
