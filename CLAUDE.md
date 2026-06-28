@@ -104,6 +104,8 @@ Supported templates:
 
 Upload via sidebar. Template CSVs downloadable from the UI. A separate **Intraday (IDA) Prices** sidebar uploader handles IDA1/2/3 price CSVs (see the ENTSO-E Intraday section) — it does not use the `ANCILLARY_TEMPLATES` registry.
 
+**Unified reserve-capacity import (Step 2, import-first)**: `ancillary.generate_capacity_import_template_csv()` is the single zone-tagged capacity format — columns `timestamp, zone, product, direction, capacity_price_eur_mw_h` (+ optional `timezone`), downloadable from the sidebar and documented in `docs/import-templates.md` (the spec to hand to an exchange/TSO). Two semantics are pinned in the template header: timestamps are UTC (or carry a `timezone` column), and `capacity_price_eur_mw_h` is a PER-HOUR rate, never a 4h-block total. As of increment 6a only the template + spec ship; the unified parser, SQLite persistence, and a `capacity_price_sources` provenance sidecar (full parity with the IDA `ida_price_sources` path, fixing the coverage matrix's primary-zone-only reserve attribution) land in 6b.
+
 ### Data Merging
 `build_ancillary_dataset()` merges manual + auto-fetch data. Manual uploads override auto-fetch for the same product type only — other auto-fetched products are preserved. `normalize_auto_fetch_dataset()` converts varied fetcher schemas into a standard ancillary format with per-product rows. Override matching uses `_normalize_product_key()` (case- and separator-insensitive) so an upstream label flip from `aFRR Up` to `afrr_up` does not silently bypass the override.
 
@@ -154,7 +156,7 @@ Fingrid / Regelleistung / Elexon all detect HTTP 401/403 via the shared `_raise_
 
 ## Commands
 - `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
-- `python -m pytest tests/ -v` — run all tests (571 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
+- `python -m pytest tests/ -v` — run all tests (572 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
 - `python scripts/seed_demo_9_2b.py` — seed a SYNTHETIC DE_LU DA+IDA1+reserve dataset into the cache to validate the Phase 9.2b cockpit panel offline (`--clean` to remove). See `docs/runbooks/validate-9-2b.md`.
 - `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
 - `streamlit run app.py` — launch the dashboard.

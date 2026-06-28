@@ -7,6 +7,7 @@ import streamlit as st
 
 from src.ancillary import (
     ANCILLARY_TEMPLATES,
+    generate_capacity_import_template_csv,
     generate_template_csv,
     parse_ancillary_csv,
 )
@@ -269,6 +270,18 @@ def render_sidebar() -> dict:
             file_name=f"{tmpl_key}_template.csv",
             mime="text/csv",
             key="tmpl_download",
+        )
+        st.download_button(
+            label="\U0001f4e5 Download unified reserve-capacity template",
+            data=generate_capacity_import_template_csv(),
+            file_name="reserve_capacity_import_template.csv",
+            mime="text/csv",
+            key="cap_import_tmpl_download",
+        )
+        st.caption(
+            "Unified zone-tagged reserve-capacity format (EUR/MW/h, UTC) to "
+            "request from exchanges/TSOs; one provenance/cache path for all "
+            "zones. See docs/import-templates.md. Import support lands next."
         )
 
     # ── Intraday (IDA) price upload ──────────────────────────────────────

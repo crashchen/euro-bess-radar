@@ -148,6 +148,48 @@ def generate_template_csv(template_key: str) -> str:
     return buf.getvalue()
 
 
+# Unified, zone-tagged reserve-capacity import format (the Step-2 "import-first"
+# target, distinct from the per-country ANCILLARY_TEMPLATES). The parser lands in
+# a follow-up increment; this template + docs/import-templates.md is the spec to
+# hand to an exchange / TSO / aggregator when requesting sample data.
+CAPACITY_IMPORT_COLUMNS = (
+    "timestamp", "zone", "product", "direction", "capacity_price_eur_mw_h",
+)
+CAPACITY_IMPORT_PRODUCTS = ("FCR", "aFRR", "mFRR")
+CAPACITY_IMPORT_DIRECTIONS = ("up", "down", "symmetric")
+
+
+def generate_capacity_import_template_csv() -> str:
+    """Return the unified reserve-capacity import template (EUR/MW/h).
+
+    Units and time semantics are pinned in the header because they are the two
+    historically error-prone fields: timestamps must be UTC (or carry a
+    ``timezone`` column), and the price is a PER-HOUR rate, never a 4h-block
+    total. ``product``/``direction`` are enumerated. See
+    ``docs/import-templates.md`` for the full spec to send to a data provider.
+    """
+    header = (
+        "# Unified reserve-capacity import template (one format for all zones).\n"
+        "# timestamp: UTC, ISO-8601 (e.g. 2026-05-01T00:00:00Z). If your export is\n"
+        "#   in local market time, convert to UTC OR add a 'timezone' column with an\n"
+        "#   IANA name (e.g. Europe/Berlin) and it is converted to UTC on import.\n"
+        "# zone: bidding-zone code (e.g. DE_LU, FI, FR).\n"
+        "# product: FCR | aFRR | mFRR (case- and separator-insensitive on import).\n"
+        "# direction: up | down | symmetric (FCR is symmetric; aFRR/mFRR up or down).\n"
+        "# capacity_price_eur_mw_h: PER-HOUR capacity price in EUR/MW/h -- NOT a 4h\n"
+        "#   block total. One row per pricing block (e.g. 4h) is fine; give the\n"
+        "#   hourly rate, not the block sum.\n"
+    )
+    rows = [
+        ",".join(CAPACITY_IMPORT_COLUMNS),
+        "2026-05-01T00:00:00Z,DE_LU,FCR,symmetric,12.50",
+        "2026-05-01T04:00:00Z,DE_LU,FCR,symmetric,15.00",
+        "2026-05-01T00:00:00Z,DE_LU,aFRR,up,8.20",
+        "2026-05-01T00:00:00Z,DE_LU,aFRR,down,6.10",
+    ]
+    return header + "\n".join(rows) + "\n"
+
+
 # ── Parsing ──────────────────────────────────────────────────────────────────
 
 def _detect_delimiter(content: str) -> str:
