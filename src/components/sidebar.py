@@ -37,6 +37,42 @@ ANCILLARY_STATE_KEYS = (
     "ancillary_dates",
 )
 
+DURATION_PRESET_HOURS = (1.0, 2.0, 4.0, 6.0, 8.0)
+
+_UNIFIED_CAPACITY_COLUMNS = {
+    "timestamp",
+    "zone",
+    "product",
+    "direction",
+    "capacity_price_eur_mw_h",
+}
+
+
+def _format_duration_option(hours: float) -> str:
+    """Readable duration labels for the sidebar selectbox."""
+    return f"{hours:g}"
+
+
+def _looks_like_unified_capacity_csv(content: str) -> bool:
+    """Return True when a CSV header matches the unified capacity schema.
+
+    This catches a common UI mistake: dropping the zone-tagged capacity import
+    file into the legacy per-country ancillary uploader. The two uploaders feed
+    different persistence paths, so we detect the schema early and point the
+    user to the correct box instead of surfacing a template-column traceback.
+    """
+    for raw_line in content.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        delimiter = next((delim for delim in [",", ";", "\t"] if delim in line), ",")
+        columns = {
+            col.strip().lower().lstrip("\ufeff")
+            for col in line.split(delimiter)
+        }
+        return _UNIFIED_CAPACITY_COLUMNS.issubset(columns)
+    return False
+
 
 def _clear_stale_ancillary_state() -> None:
     """Remove ancillary data that no longer matches the active sidebar scope."""
@@ -102,6 +138,13 @@ def _parse_and_store_ancillary_upload(
     """Parse one uploaded ancillary CSV and store it under the active scope."""
     try:
         content = uploaded_file.getvalue().decode("utf-8-sig")
+        if _looks_like_unified_capacity_csv(content):
+            st.error(
+                "This looks like the unified reserve-capacity CSV. Use the "
+                "'Unified Reserve Capacity CSV' uploader below, not the "
+                "per-country ancillary template uploader."
+            )
+            return
         parsed = parse_ancillary_csv(content, template_key)
         st.session_state["ancillary_df"] = parsed
         st.session_state["ancillary_template"] = template_key
@@ -109,7 +152,7 @@ def _parse_and_store_ancillary_upload(
         st.success(f"{template_key} loaded: {len(parsed)} rows")
     except UnicodeDecodeError:
         st.error("Parse error: the uploaded file is not valid UTF-8/CSV text.")
-    except (ValueError, pd.errors.ParserError) as exc:
+    except (DataSourceParseError, ValueError, pd.errors.ParserError) as exc:
         st.error(f"Parse error: {exc}")
 
 
@@ -257,7 +300,11 @@ def render_sidebar() -> dict:
     with st.sidebar.form("bess_params"):
         st.caption("Changes here update the dashboard only after you click Apply.")
         power_mw = st.number_input("Power (MW)", min_value=0.1, value=10.0, step=1.0)
-        duration_hours = st.selectbox("Duration (h)", [1, 2, 4], index=0)
+        duration_options = [
+            _format_duration_option(hours) for hours in DURATION_PRESET_HOURS
+        ]
+        duration_choice = st.selectbox("Duration (h)", duration_options, index=0)
+        duration_hours = float(duration_choice)
         efficiency = st.slider("Efficiency (%)", 85, 95, 88) / 100.0
         capture_rate = st.slider("Capture (%)", 30, 100, 70) / 100.0
         capex_eur_kwh = st.number_input(
@@ -285,7 +332,14 @@ def render_sidebar() -> dict:
             "Template", list(ANCILLARY_TEMPLATES.keys()),
             format_func=lambda k: f"{k} — {ANCILLARY_TEMPLATES[k]['description'][:40]}",
         )
-        anc_file = st.file_uploader("Upload CSV", type=["csv"], key="anc_upload")
+        anc_file = st.file_uploader(
+            "Upload per-country ancillary CSV", type=["csv"], key="anc_upload",
+        )
+        st.caption(
+            "Use this box only for the selected per-country template above. "
+            "For the zone-tagged unified reserve-capacity file, use the "
+            "'Unified Reserve Capacity CSV' uploader below."
+        )
 
         if anc_file is not None and st.button("Parse & Import"):
             _parse_and_store_ancillary_upload(
