@@ -128,4 +128,10 @@ def build_assumptions_table(
             "NOT co-optimized, NOT additive to the strategy total, no SoC "
             "coupling; historical replay only, not aggregator dispatch",
         ))
+        rows.append((
+            "Activation reserve cap", "Sidebar Power (MW)", "", "Cockpit panel",
+            "Overlay assumes the full BESS power is available as the reserve "
+            "cap; delivered = min(power, capture_share x system volume), so "
+            "power_mw bounds the overlay too, not just the capture share",
+        ))
     return pd.DataFrame(rows, columns=ASSUMPTION_COLUMNS)
