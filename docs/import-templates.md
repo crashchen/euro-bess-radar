@@ -8,8 +8,8 @@ Cockpit path. Download the live templates from the dashboard sidebar
 > Status: the **IDA**, **reserve-capacity**, and **activation-energy** import
 > paths are live end-to-end (upload → parse → SQLite + provenance → Data Trust
 > → cockpit where applicable). The **reBAP / imbalance-settlement** import is
-> at Step 4b: upload → parse → SQLite + provenance is live; Data Trust
-> visibility and replay-model integration land in later increments.
+> at Step 4c: upload → parse → SQLite + provenance → Data Trust visibility is
+> live; replay-model integration lands in a later increment.
 
 ## 1. IDA prices CSV (live)
 
@@ -94,8 +94,8 @@ balancing-energy payments. Columns:
 
 Rows write to per-zone `imbalance_prices_{zone}` tables and a per-zone
 `imbalance_price_sources` sidecar. Re-importing the same timestamp keeps the
-last row and refreshes provenance. Data Trust surfacing and cockpit replay are
-intentionally later steps.
+last row and refreshes provenance. Data Trust shows this as a per-zone
+`source (rows)` stream; cockpit replay is intentionally a later step.
 
 ### Four red-lines we pin
 - **Separate strategy**: imbalance settlement is a passive BRP/portfolio

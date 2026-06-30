@@ -9,6 +9,7 @@ from src.data_trust import (
     build_activation_source_table,
     build_capacity_source_table,
     build_coverage_matrix,
+    build_imbalance_source_table,
     build_intraday_source_table,
     build_zone_data_quality_table,
 )
@@ -68,9 +69,10 @@ def render(
             "What is loaded per zone, before trusting any revenue/uplift number: "
             "DA = coverage% (valid/total intervals); IDA1-3 = provenance + cached "
             "row count; Reserve / Activation = imported capacity / activation-"
-            "energy products per zone (Reserve also falls back to the primary "
-            "zone's session ancillary when not zone-tagged). A dash means the "
-            "stream is not loaded/cached."
+            "energy products per zone; Imbalance = imported reBAP/imbalance "
+            "source + row count (Reserve also falls back to the primary zone's "
+            "session ancillary when not zone-tagged). A dash means the stream "
+            "is not loaded/cached."
         )
         st.dataframe(
             matrix,
@@ -80,6 +82,7 @@ def render(
                 "zone": "Zone",
                 "reserve_capacity": "Reserve (capacity)",
                 "activation_energy": "Activation (energy)",
+                "imbalance_settlement": "Imbalance (reBAP)",
             },
         )
 
@@ -198,6 +201,35 @@ def render(
                 "zone": "Zone",
                 "product": "Product",
                 "direction": "Direction",
+                "source": "Source",
+                "rows": st.column_config.NumberColumn("Rows", format="%d"),
+                "first_timestamp_utc": st.column_config.DatetimeColumn(
+                    "First UTC", format="YYYY-MM-DD HH:mm",
+                ),
+                "last_timestamp_utc": st.column_config.DatetimeColumn(
+                    "Last UTC", format="YYYY-MM-DD HH:mm",
+                ),
+                "imported_at": st.column_config.DatetimeColumn(
+                    "Imported (UTC)", format="YYYY-MM-DD HH:mm",
+                ),
+            },
+        )
+
+    imbalance_sources = build_imbalance_source_table()
+    if not imbalance_sources.empty:
+        st.markdown("**reBAP / imbalance settlement sources**")
+        st.caption(
+            "Provenance of imported passive imbalance-settlement prices, one "
+            "row per zone. This is separate from reserve capacity fees and "
+            "activation energy; it is not consumed by a cockpit replay model in "
+            "this increment."
+        )
+        st.dataframe(
+            imbalance_sources,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "zone": "Zone",
                 "source": "Source",
                 "rows": st.column_config.NumberColumn("Rows", format="%d"),
                 "first_timestamp_utc": st.column_config.DatetimeColumn(
