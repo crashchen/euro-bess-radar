@@ -286,12 +286,13 @@ def _canonical_capacity_direction(value: object) -> str:
     return canon
 
 
-def _capacity_utc_index(timestamps, tz_col) -> pd.DatetimeIndex:
+def _import_utc_index(timestamps, tz_col) -> pd.DatetimeIndex:
     """UTC index from timestamps, honouring an optional per-row IANA timezone.
 
-    Without a ``timezone`` column (or for blank cells) a value is assumed UTC —
-    the project-internal convention. Unparseable timestamps / unknown zones
-    become ``NaT`` so the caller drops them.
+    Shared by the unified capacity and activation-energy importers. Without a
+    ``timezone`` column (or for blank cells) a value is assumed UTC — the
+    project-internal convention. Unparseable timestamps / unknown zones become
+    ``NaT`` so the caller drops them.
     """
     ts = pd.Series(timestamps).astype(str).str.strip()
     if tz_col is None:
@@ -354,7 +355,7 @@ def parse_capacity_import_csv(
 
     price = pd.to_numeric(raw["capacity_price_eur_mw_h"], errors="coerce")
     tz_col = raw["timezone"] if "timezone" in raw.columns else None
-    index = _capacity_utc_index(raw["timestamp"], tz_col)
+    index = _import_utc_index(raw["timestamp"], tz_col)
     valid = price.notna().to_numpy() & ~pd.isna(index)
     raw, price, index = raw[valid], price[valid], index[valid]
     if raw.empty:
@@ -367,6 +368,125 @@ def parse_capacity_import_csv(
         (str(z).strip() or (default_zone or "")) for z in raw["zone"]
     ]
     out["capacity_price_eur_mw"] = price.to_numpy()
+    return out
+
+
+# Unified activation-ENERGY import parser (Step 3b). It returns a DEDICATED
+# activation frame, not the standard ancillary frame, because it carries
+# energy-leg columns the standard frame does not (activation_price_eur_mwh,
+# system_activated_volume_mw) AND because activation energy is a SEPARATE stream
+# (red-line) — it is NOT folded into the capacity/DA revenue here.
+_ACTIVATION_FRAME_COLUMNS = [
+    "zone", "product_type", "direction",
+    "activation_price_eur_mwh", "system_activated_volume_mw",
+]
+_ACTIVATION_PRODUCT_CANON = {"afrr": "aFRR", "mfrr": "mFRR"}
+_ACTIVATION_DIRECTION_CANON = {"up": "up", "down": "down"}
+
+
+def _canonical_activation_product(value: object) -> str:
+    """Canonicalise an activation product to aFRR/mFRR.
+
+    FCR is REJECTED (it has no separately-paid energy leg); unknown values raise
+    — same strictness as the capacity/IDA importers, never silently mis-filed.
+    """
+    key = _normalize_product_key(value).replace(" ", "")
+    canon = _ACTIVATION_PRODUCT_CANON.get(key)
+    if canon is None:
+        raise DataSourceParseError(
+            f"Unknown or unsupported activation product {value!r}; expected "
+            "aFRR or mFRR (FCR has no separately-paid energy leg)."
+        )
+    return canon
+
+
+def _canonical_activation_direction(value: object) -> str:
+    """Canonicalise an activation direction to up/down.
+
+    Energy activation is directional, so there is no ``symmetric`` and a blank
+    or unknown value raises (unlike capacity, where a blank defaults symmetric).
+    """
+    key = _normalize_product_key(value).replace(" ", "")
+    canon = _ACTIVATION_DIRECTION_CANON.get(key)
+    if canon is None:
+        raise DataSourceParseError(
+            f"Unknown or unsupported activation direction {value!r}; expected "
+            "up or down (energy activation is directional; no symmetric)."
+        )
+    return canon
+
+
+def _empty_activation_frame() -> pd.DataFrame:
+    """Empty activation frame with a UTC DatetimeIndex and the standard columns."""
+    out = pd.DataFrame(columns=_ACTIVATION_FRAME_COLUMNS)
+    out.index = pd.DatetimeIndex([], name="timestamp", tz="UTC")
+    return out
+
+
+def parse_activation_import_csv(
+    content: str, *, default_zone: str | None = None,
+) -> pd.DataFrame:
+    """Parse the unified activation-energy import CSV into an activation frame.
+
+    Schema (case-insensitive headers): ``timestamp, zone, product, direction,
+    activation_price_eur_mwh, system_activated_volume_mw`` plus an optional
+    ``timezone`` column. Timestamps are UTC unless a per-row IANA ``timezone`` is
+    given. ``product`` is canonicalised to aFRR/mFRR (FCR is REJECTED — no
+    separately-paid energy leg) and ``direction`` to up/down (energy activation
+    is directional — no ``symmetric``); an unknown/blank value RAISES, the same
+    strictness as the capacity/IDA importers. ``system_activated_volume_mw`` is
+    kept SYSTEM-level exactly as imported — the asset/capture share is a model
+    assumption applied downstream, NEVER multiplied in here (red-line). Rows with
+    an unparseable timestamp, price, or volume are dropped.
+
+    Returns a frame indexed by UTC ``timestamp`` with columns ``zone``,
+    ``product_type``, ``direction``, ``activation_price_eur_mwh``,
+    ``system_activated_volume_mw``. Raises ``DataSourceParseError`` on missing
+    required columns or an unknown product/direction.
+    """
+    delimiter = _detect_delimiter(content)
+    try:
+        raw = pd.read_csv(
+            io.StringIO(content), sep=delimiter, comment="#",
+            dtype=str, keep_default_na=False,
+        )
+    except (pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+        raise DataSourceParseError(
+            f"Could not parse activation import CSV: {exc}"
+        ) from exc
+    raw.columns = [str(c).strip().lower() for c in raw.columns]
+    required = {
+        "timestamp", "zone", "product", "direction",
+        "activation_price_eur_mwh", "system_activated_volume_mw",
+    }
+    missing = required - set(raw.columns)
+    if missing:
+        raise DataSourceParseError(
+            "Activation import CSV missing columns: " + ", ".join(sorted(missing))
+        )
+
+    price = pd.to_numeric(raw["activation_price_eur_mwh"], errors="coerce")
+    volume = pd.to_numeric(raw["system_activated_volume_mw"], errors="coerce")
+    tz_col = raw["timezone"] if "timezone" in raw.columns else None
+    index = _import_utc_index(raw["timestamp"], tz_col)
+    valid = price.notna().to_numpy() & volume.notna().to_numpy() & ~pd.isna(index)
+    raw, price, volume, index = raw[valid], price[valid], volume[valid], index[valid]
+    if raw.empty:
+        return _empty_activation_frame()
+
+    # Canonicalise on the surviving rows so an unknown product/direction RAISES
+    # (strict) rather than being silently dropped with the bad-data rows.
+    out = pd.DataFrame(
+        {
+            "zone": [(str(z).strip() or (default_zone or "")) for z in raw["zone"]],
+            "product_type": [_canonical_activation_product(p) for p in raw["product"]],
+            "direction": [_canonical_activation_direction(d) for d in raw["direction"]],
+            "activation_price_eur_mwh": price.to_numpy(),
+            "system_activated_volume_mw": volume.to_numpy(),
+        },
+        index=pd.DatetimeIndex(index),
+    )
+    out.index.name = "timestamp"
     return out
 
 

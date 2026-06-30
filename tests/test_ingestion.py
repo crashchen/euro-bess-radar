@@ -2335,3 +2335,106 @@ class TestCapacityCache:
         back = di.read_capacity_cache("DE_LU")
         assert back["direction"].iloc[0] == ""
         assert ("DE_LU", "FCR", "") in di.read_capacity_sources()
+
+
+class TestActivationCache:
+    """Unified activation-energy persistence + provenance (Step 3 / 3b)."""
+
+    _HDR = (
+        "timestamp,zone,product,direction,activation_price_eur_mwh,"
+        "system_activated_volume_mw\n"
+    )
+
+    @classmethod
+    def _frame(cls, body: str) -> pd.DataFrame:
+        from src.ancillary import parse_activation_import_csv
+        return parse_activation_import_csv(cls._HDR + body)
+
+    def test_persist_and_read_back(self, tmp_path, monkeypatch) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        frame = self._frame(
+            "2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.4,320\n"
+            "2026-05-01T00:00:00Z,DE_LU,mFRR,down,5.0,90\n"
+        )
+        summaries = di.persist_activation_frame(frame)
+        assert {(s["product"], s["direction"]) for s in summaries} == {
+            ("aFRR", "up"), ("mFRR", "down"),
+        }
+        back = di.read_activation_cache("DE_LU")
+        assert len(back) == 2
+        assert set(back["product_type"]) == {"aFRR", "mFRR"}
+        assert str(back.index.tz) == "UTC"
+
+    def test_system_volume_persists_and_reads_back(self, tmp_path, monkeypatch) -> None:
+        # The energy leg's quantity dimension survives the round-trip untouched.
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        di.persist_activation_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.0,1234.5\n")
+        )
+        back = di.read_activation_cache("DE_LU")
+        assert back["system_activated_volume_mw"].iloc[0] == 1234.5
+        assert back["activation_price_eur_mwh"].iloc[0] == 85.0
+
+    def test_provenance_is_per_stream(self, tmp_path, monkeypatch) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        di.persist_activation_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.0,100\n"),
+            source="Manual CSV",
+        )
+        di.persist_activation_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,mFRR,down,5.0,50\n"),
+            source="TSO API",
+        )
+        sources = di.read_activation_sources()
+        assert sources[("DE_LU", "aFRR", "up")]["source"] == "Manual CSV"
+        assert sources[("DE_LU", "mFRR", "down")]["source"] == "TSO API"
+
+    def test_keep_last_overwrite_refreshes_value_and_provenance(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # Red-line: re-importing the same (timestamp, product, direction) must
+        # overwrite price AND volume AND refresh provenance.
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        di.persist_activation_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,aFRR,up,80.0,100\n"),
+            source="Manual CSV",
+        )
+        di.persist_activation_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,aFRR,up,95.0,250\n"),
+            source="TSO API",
+        )
+        back = di.read_activation_cache("DE_LU")
+        assert len(back) == 1  # keep-last, not duplicated
+        assert back["activation_price_eur_mwh"].iloc[0] == 95.0
+        assert back["system_activated_volume_mw"].iloc[0] == 250.0
+        assert (
+            di.read_activation_sources()[("DE_LU", "aFRR", "up")]["source"]
+            == "TSO API"
+        )
+
+    def test_mixed_sources_on_one_stream_labelled_mixed(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        di.persist_activation_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,aFRR,up,80.0,100\n"),
+            source="Manual CSV",
+        )
+        di.persist_activation_frame(  # different timestamp, same stream, new source
+            self._frame("2026-05-01T04:00:00Z,DE_LU,aFRR,up,82.0,110\n"),
+            source="TSO API",
+        )
+        sources = di.read_activation_sources()
+        assert sources[("DE_LU", "aFRR", "up")]["source"] == di.ACTIVATION_SOURCE_MIXED
+        assert sources[("DE_LU", "aFRR", "up")]["rows"] == 2
+
+    def test_read_empty_returns_none(self, tmp_path, monkeypatch) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        assert di.read_activation_cache("DE_LU") is None
+        assert di.read_activation_sources() == {}

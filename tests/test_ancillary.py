@@ -26,6 +26,7 @@ from src.ancillary import (
     list_capacity_products,
     merge_revenue_stack,
     normalize_auto_fetch_dataset,
+    parse_activation_import_csv,
     parse_ancillary_csv,
     parse_capacity_import_csv,
 )
@@ -253,6 +254,124 @@ class TestCapacityImportParsing:
     def test_empty_or_comment_only_csv_raises_project_parse_error(self) -> None:
         with pytest.raises(DataSourceParseError, match="Could not parse"):
             parse_capacity_import_csv("# comments only\n# no data\n")
+
+
+class TestActivationImportParsing:
+    """The unified zone-tagged activation-energy importer (Step 3 / 3b)."""
+
+    _HDR = (
+        "timestamp,zone,product,direction,activation_price_eur_mwh,"
+        "system_activated_volume_mw\n"
+    )
+
+    def test_parses_multi_product_multi_direction(self) -> None:
+        csv_str = (
+            self._HDR
+            + "2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.4,320\n"
+            + "2026-05-01T00:00:00Z,DE_LU,mFRR,down,5.0,90\n"
+            + "2026-05-01T00:00:00Z,FR,aFRR,down,12.1,210\n"
+        )
+        df = parse_activation_import_csv(csv_str)
+        assert len(df) == 3
+        assert list(df["product_type"]) == ["aFRR", "mFRR", "aFRR"]
+        assert list(df["direction"]) == ["up", "down", "down"]
+        assert list(df["zone"]) == ["DE_LU", "DE_LU", "FR"]
+        assert df["activation_price_eur_mwh"].tolist() == [85.4, 5.0, 12.1]
+        assert df["system_activated_volume_mw"].tolist() == [320.0, 90.0, 210.0]
+        assert str(df.index.tz) == "UTC"
+        assert df.index.name == "timestamp"
+
+    def test_template_round_trips_through_parser(self) -> None:
+        df = parse_activation_import_csv(generate_activation_import_template_csv())
+        assert set(df["product_type"]) == {"aFRR", "mFRR"}
+        assert set(df["direction"]) == {"up", "down"}
+        assert df["activation_price_eur_mwh"].notna().all()
+        assert df["system_activated_volume_mw"].notna().all()
+
+    def test_timezone_column_converts_local_to_utc(self) -> None:
+        csv_str = (
+            "timestamp,zone,product,direction,activation_price_eur_mwh,"
+            "system_activated_volume_mw,timezone\n"
+            "2026-05-01 00:00,DE_LU,aFRR,up,85.0,100,Europe/Berlin\n"
+        )
+        df = parse_activation_import_csv(csv_str)
+        # Berlin 00:00 in May (CEST, +2) -> 22:00 UTC the previous day.
+        assert str(df.index[0]) == "2026-04-30 22:00:00+00:00"
+
+    def test_product_direction_case_and_separator_tolerant(self) -> None:
+        csv_str = (
+            self._HDR
+            + "2026-05-01T00:00:00Z,DE_LU,a-frr,UP,85.0,100\n"
+            + "2026-05-01T00:00:00Z,DE_LU,m_FRR,Down,5.0,50\n"
+        )
+        df = parse_activation_import_csv(csv_str)
+        assert list(df["product_type"]) == ["aFRR", "mFRR"]
+        assert list(df["direction"]) == ["up", "down"]
+
+    def test_system_volume_kept_system_level_not_scaled(self) -> None:
+        # Red-line: the parser must NOT apply any asset/capture share — the value
+        # lands in the frame exactly as imported.
+        csv_str = self._HDR + "2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.0,1234.5\n"
+        df = parse_activation_import_csv(csv_str)
+        assert df["system_activated_volume_mw"].iloc[0] == 1234.5
+
+    def test_negative_activation_price_is_kept(self) -> None:
+        # Down-activation can pay you to absorb -> negative prices are valid.
+        csv_str = self._HDR + "2026-05-01T00:00:00Z,DE_LU,aFRR,down,-15.0,80\n"
+        df = parse_activation_import_csv(csv_str)
+        assert df["activation_price_eur_mwh"].iloc[0] == -15.0
+
+    def test_default_zone_fallback(self) -> None:
+        csv_str = self._HDR + "2026-05-01T00:00:00Z,,aFRR,up,85.0,100\n"
+        df = parse_activation_import_csv(csv_str, default_zone="FI")
+        assert df["zone"].iloc[0] == "FI"
+
+    def test_drops_unparseable_timestamp_price_and_volume_rows(self) -> None:
+        csv_str = (
+            self._HDR
+            + "2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.0,100\n"
+            + "not-a-time,DE_LU,aFRR,up,9.0,100\n"
+            + "2026-05-01T04:00:00Z,DE_LU,aFRR,up,not-a-price,100\n"
+            + "2026-05-01T08:00:00Z,DE_LU,aFRR,up,9.0,not-a-volume\n"
+        )
+        df = parse_activation_import_csv(csv_str)
+        assert len(df) == 1
+        assert df["activation_price_eur_mwh"].iloc[0] == 85.0
+
+    def test_fcr_product_rejected(self) -> None:
+        # FCR has no separately-paid energy leg -> must raise, not be filed.
+        csv_str = self._HDR + "2026-05-01T00:00:00Z,DE_LU,FCR,up,85.0,100\n"
+        with pytest.raises(DataSourceParseError, match="activation product"):
+            parse_activation_import_csv(csv_str)
+
+    def test_symmetric_direction_rejected(self) -> None:
+        # Energy activation is directional -> no 'symmetric'.
+        csv_str = self._HDR + "2026-05-01T00:00:00Z,DE_LU,aFRR,symmetric,85.0,100\n"
+        with pytest.raises(DataSourceParseError, match="activation direction"):
+            parse_activation_import_csv(csv_str)
+
+    def test_blank_direction_raises(self) -> None:
+        # Unlike capacity (blank -> symmetric), activation direction is required.
+        csv_str = self._HDR + "2026-05-01T00:00:00Z,DE_LU,aFRR,,85.0,100\n"
+        with pytest.raises(DataSourceParseError, match="activation direction"):
+            parse_activation_import_csv(csv_str)
+
+    def test_unknown_product_raises(self) -> None:
+        csv_str = self._HDR + "2026-05-01T00:00:00Z,DE_LU,FFR,up,85.0,100\n"
+        with pytest.raises(DataSourceParseError, match="activation product"):
+            parse_activation_import_csv(csv_str)
+
+    def test_missing_required_column_raises(self) -> None:
+        csv_str = (
+            "timestamp,zone,product,direction,activation_price_eur_mwh\n"
+            "2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.0\n"
+        )
+        with pytest.raises(DataSourceParseError, match="missing columns"):
+            parse_activation_import_csv(csv_str)
+
+    def test_empty_or_comment_only_csv_raises_project_parse_error(self) -> None:
+        with pytest.raises(DataSourceParseError, match="Could not parse"):
+            parse_activation_import_csv("# comments only\n# no data\n")
 
 
 # ── Parsing ──────────────────────────────────────────────────────────────────

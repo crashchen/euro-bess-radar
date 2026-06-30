@@ -2450,6 +2450,216 @@ def persist_capacity_frame(
     return summaries
 
 
+# ── Unified activation-energy cache + provenance (Step 3 / 3b) ─────────────────
+# Energy-leg parity with the capacity cache above: one table per zone holding all
+# (product, direction) activation streams + a provenance sidecar keyed per
+# (zone, product, direction). ``system_activated_volume_mw`` is stored
+# SYSTEM-level exactly as imported (red-line: the asset/capture share is a model
+# assumption, never multiplied in at persistence). Parser lives in
+# ``ancillary.parse_activation_import_csv``.
+
+ACTIVATION_SOURCE_MANUAL = "Manual CSV"
+ACTIVATION_SOURCE_MIXED = "Mixed"
+ACTIVATION_SOURCE_LEGACY = "Unknown (pre-provenance cache)"
+_ACTIVATION_SOURCE_TABLE = "activation_price_sources"
+
+
+def _activation_cache_table(zone: str) -> str:
+    """SQLite table name for one zone's activation-energy prices."""
+    return f"activation_prices_{zone.lower()}"
+
+
+def write_activation_cache(
+    df: pd.DataFrame, zone: str, *, source: str = ACTIVATION_SOURCE_MANUAL,
+) -> None:
+    """Persist activation-energy rows for one zone (keep-last on the key).
+
+    Key ``(timestamp, product, direction)`` — re-importing the same interval
+    overwrites it (``INSERT OR REPLACE``). The per-row ``source`` feeds the
+    ``activation_price_sources`` sidecar, re-derived per (product, direction)
+    AFTER the write so an overwrite that changes the source refreshes provenance.
+    ``df`` must carry ``product_type``, ``direction``, ``activation_price_eur_mwh``,
+    ``system_activated_volume_mw`` on a timestamp index (the
+    ``ancillary.parse_activation_import_csv`` output).
+    """
+    if df is None or df.empty:
+        return
+    needed = {
+        "product_type", "direction",
+        "activation_price_eur_mwh", "system_activated_volume_mw",
+    }
+    if not needed.issubset(df.columns):
+        return
+    rows = []
+    for ts, row in df.iterrows():
+        price = row["activation_price_eur_mwh"]
+        volume = row["system_activated_volume_mw"]
+        if pd.isna(price) or pd.isna(volume):
+            continue
+        direction = row.get("direction", "")
+        direction_str = "" if pd.isna(direction) else str(direction).strip()
+        rows.append((
+            ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+            str(row["product_type"]), direction_str,
+            float(price), float(volume), source,
+        ))
+    if not rows:
+        return
+    table = _activation_cache_table(zone)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            f'CREATE TABLE IF NOT EXISTS "{table}" '
+            "(timestamp TEXT, product TEXT, direction TEXT, "
+            "activation_price_eur_mwh REAL NOT NULL, "
+            "system_activated_volume_mw REAL NOT NULL, source TEXT, "
+            "PRIMARY KEY (timestamp, product, direction))"
+        )
+        conn.executemany(
+            f'INSERT OR REPLACE INTO "{table}" '
+            "(timestamp, product, direction, activation_price_eur_mwh, "
+            "system_activated_volume_mw, source) VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        _record_activation_sources(conn, table, zone)
+
+
+def _record_activation_sources(
+    conn: sqlite3.Connection, table: str, zone: str,
+) -> None:
+    """Re-derive the activation provenance sidecar per (zone, product, direction).
+
+    Same logic as ``_record_capacity_sources``: a stream's label is the single
+    source when uniform, else ``Mixed``; re-derived from the table after each
+    write so provenance stays in lockstep with overwritten data.
+    """
+    conn.execute(
+        f'CREATE TABLE IF NOT EXISTS "{_ACTIVATION_SOURCE_TABLE}" '
+        "(zone TEXT, product TEXT, direction TEXT, source TEXT, rows INTEGER, "
+        "first_timestamp TEXT, last_timestamp TEXT, imported_at TEXT, "
+        "PRIMARY KEY (zone, product, direction))"
+    )
+    now = datetime.now(UTC).isoformat()
+    groups = conn.execute(
+        f'SELECT product, direction, COUNT(*), MIN(timestamp), MAX(timestamp) '
+        f'FROM "{table}" GROUP BY product, direction'
+    ).fetchall()
+    for product, direction, n, first, last in groups:
+        distinct = sorted(
+            r[0] for r in conn.execute(
+                f'SELECT DISTINCT source FROM "{table}" '
+                "WHERE product = ? AND direction = ?",
+                (product, direction),
+            ) if r[0] is not None
+        )
+        if not distinct:
+            label = ACTIVATION_SOURCE_LEGACY
+        elif len(distinct) == 1:
+            label = distinct[0]
+        else:
+            label = ACTIVATION_SOURCE_MIXED
+        conn.execute(
+            f'INSERT OR REPLACE INTO "{_ACTIVATION_SOURCE_TABLE}" '
+            "(zone, product, direction, source, rows, first_timestamp, "
+            "last_timestamp, imported_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (zone, product, direction, label, int(n), first, last, now),
+        )
+
+
+def read_activation_sources() -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Return durable activation provenance keyed by (zone, product, direction).
+    Empty when the sidecar does not exist yet."""
+    if not DB_PATH.exists():
+        return {}
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            recorded = conn.execute(
+                f'SELECT zone, product, direction, source, rows, '
+                f'first_timestamp, last_timestamp, imported_at '
+                f'FROM "{_ACTIVATION_SOURCE_TABLE}"'
+            ).fetchall()
+    except sqlite3.DatabaseError:
+        return {}
+    out: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for zone, product, direction, source, rows, first, last, imported_at in recorded:
+        out[(str(zone), str(product), str(direction))] = {
+            "source": source,
+            "rows": int(rows),
+            "first": pd.to_datetime(first, utc=True, errors="coerce"),
+            "last": pd.to_datetime(last, utc=True, errors="coerce"),
+            "imported_at": imported_at,
+        }
+    return out
+
+
+def read_activation_cache(
+    zone: str, start: pd.Timestamp | None = None, end: pd.Timestamp | None = None,
+) -> pd.DataFrame | None:
+    """Return cached activation-energy rows for a zone, or None when empty.
+
+    Columns ``product_type, direction, activation_price_eur_mwh,
+    system_activated_volume_mw`` on a UTC timestamp index. ``[start, end)``
+    filters when both are given.
+    """
+    if not DB_PATH.exists():
+        return None
+    table = _activation_cache_table(zone)
+    query = (
+        f'SELECT timestamp, product, direction, activation_price_eur_mwh, '
+        f'system_activated_volume_mw FROM "{table}"'
+    )
+    params: tuple = ()
+    if start is not None and end is not None:
+        query += " WHERE timestamp >= ? AND timestamp < ?"
+        params = (start.isoformat(), end.isoformat())
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            df = pd.read_sql_query(query, conn, params=params)
+    except (sqlite3.DatabaseError, pd.errors.DatabaseError):
+        return None
+    if df.empty:
+        return None
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    df = df.dropna(subset=["timestamp"]).set_index("timestamp").sort_index()
+    df.index.name = "timestamp"
+    return df.rename(columns={"product": "product_type"})
+
+
+def persist_activation_frame(
+    long_df: pd.DataFrame, *, source: str = ACTIVATION_SOURCE_MANUAL,
+) -> list[dict[str, Any]]:
+    """Write a parsed activation frame to SQLite, one table per zone.
+
+    Args:
+        long_df: Output of ``ancillary.parse_activation_import_csv`` (timestamp
+            index; ``zone``, ``product_type``, ``direction``,
+            ``activation_price_eur_mwh``, ``system_activated_volume_mw`` columns).
+        source: Provenance label stored per row.
+
+    Returns:
+        One summary dict per (zone, product, direction) written.
+    """
+    summaries: list[dict[str, Any]] = []
+    if long_df is None or long_df.empty or "zone" not in long_df.columns:
+        return summaries
+    for zone, grp in long_df.groupby("zone", sort=True):
+        zone_str = str(zone).strip()
+        if not zone_str:
+            continue
+        write_activation_cache(grp, zone_str, source=source)
+        for (product, direction), sub in grp.groupby(
+            ["product_type", "direction"], sort=True,
+        ):
+            summaries.append({
+                "zone": zone_str,
+                "product": str(product),
+                "direction": str(direction),
+                "rows": len(sub),
+                "source": source,
+            })
+    return summaries
+
+
 def fetch_intraday_prices(
     zone: str,
     start: pd.Timestamp,
