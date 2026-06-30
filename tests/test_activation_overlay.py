@@ -116,6 +116,19 @@ def test_interval_hours_inferred_and_overridable() -> None:
     assert override["activation_energy_overlay_eur"] == pytest.approx(1000.0)
 
 
+def test_duplicate_timestamps_do_not_crash_and_infer_gap() -> None:
+    # Duplicate timestamps (e.g. an uncleaned feed) must not break interval
+    # inference: the zero gap is filtered, the 4h gap still resolves.
+    f = _frame([
+        ("2026-05-01T00:00:00Z", "aFRR", "up", 100.0, 5.0),
+        ("2026-05-01T00:00:00Z", "aFRR", "up", 100.0, 5.0),
+        ("2026-05-01T04:00:00Z", "aFRR", "up", 100.0, 5.0),
+    ])
+    out = compute_activation_overlay(f, reserve_mw=10, capture_share=1.0)
+    # dt inferred as 4h; asset_mw = min(10, 5) = 5; 3 rows * 5 MW * 4h = 60 MWh.
+    assert out["activation_energy_overlay_eur"] == pytest.approx(6000.0)
+
+
 def test_total_is_named_overlay_not_revenue() -> None:
     # Red-line: the headline figure must not be labelled strategy/revenue.
     out = compute_activation_overlay(None, reserve_mw=10, capture_share=0.5)

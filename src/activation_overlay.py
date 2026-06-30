@@ -46,7 +46,9 @@ def _interval_hours(index: pd.DatetimeIndex, default: float = 1.0) -> float:
     if index is None or len(index) < 2:
         return default
     ordered = pd.DatetimeIndex(index).sort_values()
-    deltas = ordered.to_series().diff().dropna().dt.total_seconds()
+    # pd.Series(ordered) gives a clean RangeIndex; we only want consecutive gaps,
+    # so we avoid carrying the (possibly duplicated) timestamps as the index.
+    deltas = pd.Series(ordered).diff().dropna().dt.total_seconds()
     deltas = deltas[deltas > 0]
     if deltas.empty:
         return default
