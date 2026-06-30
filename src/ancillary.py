@@ -192,6 +192,68 @@ def generate_capacity_import_template_csv() -> str:
     return buf.getvalue()
 
 
+# Unified, zone-tagged activation-ENERGY import format (Step 3a). This is the
+# energy leg of reserves and complements the capacity-fee import above. Three
+# red-lines are pinned in the template header and docs/import-templates.md:
+#   1. ``system_activated_volume_mw`` is SYSTEM-level activated power, NOT this
+#      asset's output -- the asset/capture share is a model assumption that lives
+#      in the audit panel, never pre-mixed into the data file.
+#   2. Activation energy is a SEPARATE stream from the capacity fee and from
+#      reBAP/imbalance settlement, and is NOT free additive revenue (it spends
+#      SoC that DA/IDA could otherwise have sold).
+#   3. With no forward activation signal it supports HISTORICAL REPLAY ONLY --
+#      never live dispatch or aggregator following.
+# The parser/persistence land in a follow-up increment (3b); this template is the
+# stable data contract to hand to a TSO / exchange / aggregator.
+ACTIVATION_IMPORT_COLUMNS = (
+    "timestamp", "zone", "product", "direction",
+    "activation_price_eur_mwh", "system_activated_volume_mw",
+)
+ACTIVATION_IMPORT_PRODUCTS = ("aFRR", "mFRR")
+ACTIVATION_IMPORT_DIRECTIONS = ("up", "down")
+
+
+def generate_activation_import_template_csv() -> str:
+    """Return the unified activation-energy import template (EUR/MWh).
+
+    This is the ENERGY leg of reserves, distinct from the capacity-fee import.
+    The header pins the red-lines: ``system_activated_volume_mw`` is the
+    SYSTEM-level activated power (the asset/capture share is a model assumption,
+    not a CSV field); activation energy is a separate stream from the capacity
+    fee and from reBAP/imbalance and is not free additive revenue (it spends SoC
+    DA/IDA could have sold); and it is for historical replay only, not live
+    dispatch. ``product`` is aFRR/mFRR (FCR has no separately-paid energy leg)
+    and ``direction`` is up/down (energy activation is directional). See
+    ``docs/import-templates.md`` for the full spec to send to a data provider.
+    """
+    buf = io.StringIO()
+    buf.write(
+        "# Unified activation-ENERGY import template (the energy leg of reserves).\n"
+        "# Separate stream from the capacity fee AND from reBAP/imbalance -- do not\n"
+        "#   sum them blindly; activation energy spends SoC DA/IDA could have sold.\n"
+        "# Historical replay only (no forward activation signal); NOT live dispatch.\n"
+        "# timestamp: UTC, ISO-8601 (e.g. 2026-05-01T00:00:00Z). If local market\n"
+        "#   time, convert to UTC OR add a 'timezone' column (IANA, e.g.\n"
+        "#   Europe/Berlin) and it is converted to UTC on import.\n"
+        "# zone: bidding-zone code (e.g. DE_LU, FI, FR).\n"
+        "# product: aFRR | mFRR (FCR has no separately-paid energy leg).\n"
+        "# direction: up | down (energy activation is directional; no symmetric).\n"
+        "# activation_price_eur_mwh: energy price paid/charged WHEN activated, EUR/MWh.\n"
+        "# system_activated_volume_mw: SYSTEM-level activated power in the interval,\n"
+        "#   MW -- NOT this asset's output. The asset/capture share is a model\n"
+        "#   assumption (audit panel), never pre-mixed into this file.\n"
+    )
+    writer = csv.writer(buf)
+    writer.writerow(ACTIVATION_IMPORT_COLUMNS)
+    writer.writerows([
+        ["2026-05-01T00:00:00Z", "DE_LU", "aFRR", "up", "85.40", "320"],
+        ["2026-05-01T00:00:00Z", "DE_LU", "aFRR", "down", "12.10", "210"],
+        ["2026-05-01T00:00:00Z", "DE_LU", "mFRR", "up", "120.00", "150"],
+        ["2026-05-01T00:00:00Z", "DE_LU", "mFRR", "down", "5.00", "90"],
+    ])
+    return buf.getvalue()
+
+
 _CAPACITY_PRODUCT_CANON = {"fcr": "FCR", "afrr": "aFRR", "mfrr": "mFRR"}
 _CAPACITY_DIRECTION_CANON = {
     "up": "up", "down": "down", "symmetric": "symmetric", "sym": "symmetric",

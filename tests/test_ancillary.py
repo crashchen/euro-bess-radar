@@ -8,6 +8,9 @@ import pandas as pd
 import pytest
 
 from src.ancillary import (
+    ACTIVATION_IMPORT_COLUMNS,
+    ACTIVATION_IMPORT_DIRECTIONS,
+    ACTIVATION_IMPORT_PRODUCTS,
     ANCILLARY_TEMPLATES,
     CAPACITY_IMPORT_COLUMNS,
     CAPACITY_IMPORT_DIRECTIONS,
@@ -17,6 +20,7 @@ from src.ancillary import (
     capacity_price_for_product,
     capacity_price_series_for_product,
     co_optimize_revenue_split,
+    generate_activation_import_template_csv,
     generate_capacity_import_template_csv,
     generate_template_csv,
     list_capacity_products,
@@ -61,6 +65,27 @@ class TestTemplateGeneration:
             float(fields[4])  # capacity_price_eur_mw_h
             assert fields[2] in CAPACITY_IMPORT_PRODUCTS
             assert fields[3] in CAPACITY_IMPORT_DIRECTIONS
+
+    def test_activation_import_template_pins_schema_and_redlines(self) -> None:
+        csv_str = generate_activation_import_template_csv()
+        # Header must pin the energy unit, UTC, and the three red-lines.
+        assert "UTC" in csv_str
+        assert "EUR/MWh" in csv_str
+        assert "SYSTEM-level" in csv_str            # system volume, not asset output
+        assert "Historical replay only" in csv_str  # not live dispatch
+        assert "Separate stream" in csv_str         # not free additive revenue
+        data_lines = [
+            line for line in csv_str.strip().splitlines() if not line.startswith("#")
+        ]
+        assert data_lines[0].split(",") == list(ACTIVATION_IMPORT_COLUMNS)
+        # Every example row: 6 fields, parseable price + volume, enumerated enums.
+        for row in data_lines[1:]:
+            fields = row.split(",")
+            assert len(fields) == len(ACTIVATION_IMPORT_COLUMNS)
+            float(fields[4])  # activation_price_eur_mwh
+            float(fields[5])  # system_activated_volume_mw
+            assert fields[2] in ACTIVATION_IMPORT_PRODUCTS
+            assert fields[3] in ACTIVATION_IMPORT_DIRECTIONS
 
     def test_template_has_correct_headers(self) -> None:
         for key, tmpl in ANCILLARY_TEMPLATES.items():
