@@ -12,6 +12,7 @@ from src.ancillary import (
     generate_activation_import_template_csv,
     generate_capacity_import_template_csv,
     generate_template_csv,
+    parse_activation_import_csv,
     parse_ancillary_csv,
     parse_capacity_import_csv,
 )
@@ -25,6 +26,7 @@ from src.data_ingestion import (
     fetch_prices,
     generate_intraday_template_csv,
     parse_intraday_csv,
+    persist_activation_frame,
     persist_capacity_frame,
     persist_intraday_frame,
     read_intraday_sources,
@@ -192,6 +194,43 @@ def _parse_and_store_capacity_upload(uploaded_file, default_zone: str) -> None:
     st.success(
         f"Imported {total} reserve-capacity rows ({streams}). See Data Trust → "
         "'Reserve-capacity price sources' and the coverage matrix."
+    )
+
+
+def _parse_and_store_activation_upload(uploaded_file, default_zone: str) -> None:
+    """Parse + persist an uploaded unified activation-energy CSV.
+
+    Writes to the ``activation_prices_{zone}`` SQLite tables + the
+    ``activation_price_sources`` provenance sidecar (via
+    ``persist_activation_frame`` -> ``write_activation_cache``). Energy-leg
+    parity with the capacity uploader; ``system_activated_volume_mw`` is stored
+    system-level (the asset/capture share is a model assumption applied later).
+    """
+    try:
+        content = uploaded_file.getvalue().decode("utf-8-sig")
+        parsed = parse_activation_import_csv(content, default_zone=default_zone)
+    except UnicodeDecodeError:
+        st.error("Parse error: the uploaded file is not valid UTF-8/CSV text.")
+        return
+    except DataSourceParseError as exc:
+        st.error(f"Activation import error: {exc}")
+        return
+
+    if parsed.empty:
+        st.warning("No valid activation-energy rows found in the uploaded file.")
+        return
+    try:
+        summaries = persist_activation_frame(parsed, source="Manual CSV")
+    except (OSError, sqlite3.DatabaseError, ValueError) as exc:
+        st.error(f"Activation import persistence error: {exc}")
+        return
+    total = sum(s["rows"] for s in summaries)
+    streams = ", ".join(
+        f"{s['zone']} {s['product']} {s['direction']}" for s in summaries
+    )
+    st.success(
+        f"Imported {total} activation-energy rows ({streams}). System-level "
+        "volumes stored as-is; capture share is applied later in the model."
     )
 
 
@@ -390,8 +429,8 @@ def render_sidebar() -> dict:
         st.caption(
             "Activation-ENERGY leg (EUR/MWh, UTC), separate from the capacity "
             "fee. system_activated_volume_mw is system-level (the asset/capture "
-            "share is a model assumption); historical replay only. Parser lands "
-            "in a follow-up increment. See docs/import-templates.md."
+            "share is a model assumption); historical replay only. See "
+            "docs/import-templates.md."
         )
 
         st.markdown("**Unified Reserve Capacity CSV**")
@@ -407,6 +446,20 @@ def render_sidebar() -> dict:
             "Parse & Import capacity", key="cap_import_btn",
         ):
             _parse_and_store_capacity_upload(cap_file, primary_zone_for_fetch)
+
+        st.markdown("**Unified Activation-Energy CSV**")
+        st.caption(
+            "Energy leg of reserves (aFRR/mFRR, up/down). Writes to the "
+            "activation_prices_{zone} cache + provenance sidecar; system-level "
+            "volumes stored as-is (capture share is applied later in the model)."
+        )
+        act_file = st.file_uploader(
+            "Upload unified activation CSV", type=["csv"], key="act_import_upload",
+        )
+        if act_file is not None and st.button(
+            "Parse & Import activation", key="act_import_btn",
+        ):
+            _parse_and_store_activation_upload(act_file, primary_zone_for_fetch)
 
     # ── Intraday (IDA) price upload ──────────────────────────────────────
     with st.sidebar.expander("Intraday (IDA) Prices"):

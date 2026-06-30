@@ -7,8 +7,9 @@ Cockpit path. Download the live templates from the dashboard sidebar
 
 > Status: the **IDA** and **reserve-capacity** import paths are live end-to-end
 > (upload → parse → SQLite + provenance → Data Trust → cockpit). The
-> **activation-energy** template + spec ship now (Step 3a); its parser +
-> persistence land in a follow-up increment (3b).
+> **activation-energy** import now parses + persists with per-stream provenance
+> and a sidebar uploader (Step 3b); its Data Trust coverage + cockpit replay
+> land in the next increment (3c).
 
 ## 1. IDA prices CSV (live)
 
