@@ -15,7 +15,7 @@ from src.config import (
     ANCILLARY_ENERGY_ACTIVATION_SHARE,
     HOURS_PER_YEAR,
 )
-from src.data_ingestion import DataSourceParseError
+from src.data_ingestion import DataSourceParseError, validate_import_zone
 from src.time_utils import (
     gb_settlement_period_to_utc,
     parse_regelleistung_time_block_start,
@@ -313,6 +313,21 @@ def _import_utc_index(timestamps, tz_col) -> pd.DatetimeIndex:
     return pd.DatetimeIndex(out)
 
 
+def _resolve_import_zone_cell(value: object, default_zone: str | None) -> str:
+    """Resolve a CSV zone cell to a stripped, table-name-safe zone.
+
+    Shared by both unified importers. A blank cell falls back to ``default_zone``
+    (or ``""`` when none — preserved so the persist layer can skip a zone-less
+    row). A non-empty value MUST be table-name safe (``validate_import_zone``) or
+    this raises ``DataSourceParseError``, so a malformed/malicious zone is
+    rejected at parse time before it can reach a SQLite table name.
+    """
+    zone_val = str(value).strip() or (default_zone or "")
+    if zone_val:
+        validate_import_zone(zone_val)
+    return zone_val
+
+
 def parse_capacity_import_csv(
     content: str, *, default_zone: str | None = None,
 ) -> pd.DataFrame:
@@ -364,9 +379,7 @@ def parse_capacity_import_csv(
     out = _initialise_output(pd.DatetimeIndex(index))
     out["product_type"] = [_canonical_capacity_product(p) for p in raw["product"]]
     out["direction"] = [_canonical_capacity_direction(d) for d in raw["direction"]]
-    out["zone"] = [
-        (str(z).strip() or (default_zone or "")) for z in raw["zone"]
-    ]
+    out["zone"] = [_resolve_import_zone_cell(z, default_zone) for z in raw["zone"]]
     out["capacity_price_eur_mw"] = price.to_numpy()
     return out
 
@@ -478,7 +491,7 @@ def parse_activation_import_csv(
     # (strict) rather than being silently dropped with the bad-data rows.
     out = pd.DataFrame(
         {
-            "zone": [(str(z).strip() or (default_zone or "")) for z in raw["zone"]],
+            "zone": [_resolve_import_zone_cell(z, default_zone) for z in raw["zone"]],
             "product_type": [_canonical_activation_product(p) for p in raw["product"]],
             "direction": [_canonical_activation_direction(d) for d in raw["direction"]],
             "activation_price_eur_mwh": price.to_numpy(),

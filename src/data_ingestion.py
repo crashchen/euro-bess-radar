@@ -2246,6 +2246,35 @@ def persist_intraday_frame(long_df: pd.DataFrame) -> list[dict[str, Any]]:
     return summaries
 
 
+# ── Import zone-name safety (shared by the unified capacity + activation imports)
+# Raw CSV ``zone`` values flow into per-zone SQLite table names
+# (``capacity_prices_{zone}`` / ``activation_prices_{zone}``), so validate they
+# are table-name safe BEFORE interpolation. This is deliberately NOT the
+# supported-bidding-zone check (``_validate_zone``): import-first may legitimately
+# ingest a zone code not yet wired into config, so we enforce only table-name
+# safety (letters/digits/underscore), not business support.
+_IMPORT_ZONE_SAFE_RE = re.compile(r"[A-Za-z0-9_]+")
+
+
+def validate_import_zone(zone: object) -> str:
+    """Return the stripped zone if table-name safe, else raise.
+
+    Safe = non-empty and only ASCII letters, digits, and underscores, so it can
+    be embedded in a ``{prefix}_{zone}`` SQLite table name without quoting or
+    injection risk. Raises ``DataSourceParseError`` on an empty or unsafe value.
+    Used by both unified importers' table-name helpers (the choke point) AND
+    their parsers (early, friendly error), so a malformed/malicious zone can
+    never reach raw SQL.
+    """
+    zone_str = str(zone).strip()
+    if not _IMPORT_ZONE_SAFE_RE.fullmatch(zone_str):
+        raise DataSourceParseError(
+            f"Invalid or unsafe import zone {zone!r}; a zone must be non-empty "
+            "and contain only letters, digits, and underscores."
+        )
+    return zone_str
+
+
 # ── Unified reserve-capacity cache + provenance (Step 2 / 6b) ──────────────────
 # Capacity parity with the IDA cache above: one table per zone holding all
 # (product, direction) streams, plus a provenance sidecar keyed per
@@ -2260,8 +2289,12 @@ _CAPACITY_SOURCE_TABLE = "capacity_price_sources"
 
 
 def _capacity_cache_table(zone: str) -> str:
-    """SQLite table name for one zone's reserve-capacity prices."""
-    return f"capacity_prices_{zone.lower()}"
+    """SQLite table name for one zone's reserve-capacity prices.
+
+    Validates the zone is table-name safe (the choke point that also guards a
+    caller bypassing the parser, e.g. ``persist_capacity_frame`` directly).
+    """
+    return f"capacity_prices_{validate_import_zone(zone).lower()}"
 
 
 def write_capacity_cache(
@@ -2465,8 +2498,12 @@ _ACTIVATION_SOURCE_TABLE = "activation_price_sources"
 
 
 def _activation_cache_table(zone: str) -> str:
-    """SQLite table name for one zone's activation-energy prices."""
-    return f"activation_prices_{zone.lower()}"
+    """SQLite table name for one zone's activation-energy prices.
+
+    Validates the zone is table-name safe (the choke point that also guards a
+    caller bypassing the parser, e.g. ``persist_activation_frame`` directly).
+    """
+    return f"activation_prices_{validate_import_zone(zone).lower()}"
 
 
 def write_activation_cache(

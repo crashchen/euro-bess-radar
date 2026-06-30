@@ -255,6 +255,16 @@ class TestCapacityImportParsing:
         with pytest.raises(DataSourceParseError, match="Could not parse"):
             parse_capacity_import_csv("# comments only\n# no data\n")
 
+    def test_unsafe_zone_raises(self) -> None:
+        # Raw zone flows into a SQLite table name; an unsafe value must be
+        # rejected at parse time, never interpolated into SQL.
+        csv_str = (
+            "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+            "2026-05-01T00:00:00Z,DE_LU;DROP TABLE x,FCR,symmetric,12.0\n"
+        )
+        with pytest.raises(DataSourceParseError, match="unsafe import zone"):
+            parse_capacity_import_csv(csv_str)
+
 
 class TestActivationImportParsing:
     """The unified zone-tagged activation-energy importer (Step 3 / 3b)."""
@@ -372,6 +382,12 @@ class TestActivationImportParsing:
     def test_empty_or_comment_only_csv_raises_project_parse_error(self) -> None:
         with pytest.raises(DataSourceParseError, match="Could not parse"):
             parse_activation_import_csv("# comments only\n# no data\n")
+
+    def test_unsafe_zone_raises(self) -> None:
+        # Raw zone flows into a SQLite table name; reject unsafe values at parse.
+        csv_str = self._HDR + "2026-05-01T00:00:00Z,DE_LU;DROP TABLE x,aFRR,up,85.0,100\n"
+        with pytest.raises(DataSourceParseError, match="unsafe import zone"):
+            parse_activation_import_csv(csv_str)
 
 
 # ── Parsing ──────────────────────────────────────────────────────────────────

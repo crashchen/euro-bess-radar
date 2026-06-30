@@ -2336,6 +2336,25 @@ class TestCapacityCache:
         assert back["direction"].iloc[0] == ""
         assert ("DE_LU", "FCR", "") in di.read_capacity_sources()
 
+    def test_persist_unsafe_zone_raises_bypassing_parser(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # Defense in depth: a caller bypassing the parser still cannot inject an
+        # unsafe zone into the SQLite table name.
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        frame = pd.DataFrame(
+            {
+                "zone": ["DE_LU;DROP TABLE x"],
+                "product_type": ["FCR"],
+                "direction": ["symmetric"],
+                "capacity_price_eur_mw": [12.5],
+            },
+            index=pd.DatetimeIndex(["2026-05-01T00:00:00Z"], name="timestamp"),
+        )
+        with pytest.raises(DataSourceParseError, match="unsafe import zone"):
+            di.persist_capacity_frame(frame, source="Manual CSV")
+
 
 class TestActivationCache:
     """Unified activation-energy persistence + provenance (Step 3 / 3b)."""
@@ -2438,3 +2457,23 @@ class TestActivationCache:
         monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
         assert di.read_activation_cache("DE_LU") is None
         assert di.read_activation_sources() == {}
+
+    def test_persist_unsafe_zone_raises_bypassing_parser(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # Defense in depth: a caller bypassing the parser still cannot inject an
+        # unsafe zone into the SQLite table name.
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        frame = pd.DataFrame(
+            {
+                "zone": ["DE_LU;DROP TABLE x"],
+                "product_type": ["aFRR"],
+                "direction": ["up"],
+                "activation_price_eur_mwh": [85.0],
+                "system_activated_volume_mw": [100.0],
+            },
+            index=pd.DatetimeIndex(["2026-05-01T00:00:00Z"], name="timestamp"),
+        )
+        with pytest.raises(DataSourceParseError, match="unsafe import zone"):
+            di.persist_activation_frame(frame, source="Manual CSV")
