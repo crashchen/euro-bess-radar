@@ -31,6 +31,7 @@ from src.ancillary import (
     parse_activation_import_csv,
     parse_ancillary_csv,
     parse_capacity_import_csv,
+    parse_imbalance_import_csv,
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
 from src.config import (
@@ -417,6 +418,88 @@ class TestActivationImportParsing:
         csv_str = self._HDR + "2026-05-01T00:00:00Z,DE_LU;DROP TABLE x,aFRR,up,85.0,100\n"
         with pytest.raises(DataSourceParseError, match="unsafe import zone"):
             parse_activation_import_csv(csv_str)
+
+
+class TestImbalanceImportParsing:
+    """The unified zone-tagged reBAP / imbalance importer (Step 4 / 4b)."""
+
+    _HDR = (
+        "timestamp,zone,imbalance_price_eur_mwh,system_imbalance_volume_mw\n"
+    )
+
+    def test_parses_multi_zone_cashflow_prices_and_system_volumes(self) -> None:
+        csv_str = (
+            self._HDR
+            + "2026-05-01T00:00:00Z,DE_LU,42.5,850\n"
+            + "2026-05-01T00:15:00Z,DE_LU,-18.2,-420\n"
+            + "2026-05-01T00:00:00Z,FR,65.0,1200\n"
+        )
+        df = parse_imbalance_import_csv(csv_str)
+        assert len(df) == 3
+        assert list(df["zone"]) == ["DE_LU", "DE_LU", "FR"]
+        assert df["imbalance_price_eur_mwh"].tolist() == [42.5, -18.2, 65.0]
+        assert df["system_imbalance_volume_mw"].tolist() == [850.0, -420.0, 1200.0]
+        assert str(df.index.tz) == "UTC"
+        assert df.index.name == "timestamp"
+
+    def test_template_round_trips_through_parser(self) -> None:
+        df = parse_imbalance_import_csv(generate_imbalance_import_template_csv())
+        assert (df["zone"] == "DE_LU").all()
+        assert df["imbalance_price_eur_mwh"].notna().all()
+        assert df["system_imbalance_volume_mw"].notna().all()
+        assert (df["imbalance_price_eur_mwh"] < 0).any()
+        assert (df["system_imbalance_volume_mw"] < 0).any()
+
+    def test_timezone_column_converts_local_to_utc(self) -> None:
+        csv_str = (
+            "timestamp,zone,imbalance_price_eur_mwh,"
+            "system_imbalance_volume_mw,timezone\n"
+            "2026-05-01 00:00,DE_LU,42.5,850,Europe/Berlin\n"
+        )
+        df = parse_imbalance_import_csv(csv_str)
+        # Berlin 00:00 in May (CEST, +2) -> 22:00 UTC the previous day.
+        assert str(df.index[0]) == "2026-04-30 22:00:00+00:00"
+
+    def test_cashflow_price_sign_and_system_volume_kept_as_imported(self) -> None:
+        # Red-line: no direction sign flip, no asset-share multiplication.
+        csv_str = self._HDR + "2026-05-01T00:00:00Z,DE_LU,-25.0,-333.5\n"
+        df = parse_imbalance_import_csv(csv_str)
+        assert df["imbalance_price_eur_mwh"].iloc[0] == -25.0
+        assert df["system_imbalance_volume_mw"].iloc[0] == -333.5
+
+    def test_default_zone_fallback(self) -> None:
+        csv_str = self._HDR + "2026-05-01T00:00:00Z,,42.5,850\n"
+        df = parse_imbalance_import_csv(csv_str, default_zone="FI")
+        assert df["zone"].iloc[0] == "FI"
+
+    def test_drops_unparseable_timestamp_price_and_volume_rows(self) -> None:
+        csv_str = (
+            self._HDR
+            + "2026-05-01T00:00:00Z,DE_LU,42.5,850\n"
+            + "not-a-time,DE_LU,9.0,100\n"
+            + "2026-05-01T00:15:00Z,DE_LU,not-a-price,100\n"
+            + "2026-05-01T00:30:00Z,DE_LU,9.0,not-a-volume\n"
+        )
+        df = parse_imbalance_import_csv(csv_str)
+        assert len(df) == 1
+        assert df["imbalance_price_eur_mwh"].iloc[0] == 42.5
+
+    def test_missing_required_column_raises(self) -> None:
+        csv_str = (
+            "timestamp,zone,imbalance_price_eur_mwh\n"
+            "2026-05-01T00:00:00Z,DE_LU,42.5\n"
+        )
+        with pytest.raises(DataSourceParseError, match="missing columns"):
+            parse_imbalance_import_csv(csv_str)
+
+    def test_empty_or_comment_only_csv_raises_project_parse_error(self) -> None:
+        with pytest.raises(DataSourceParseError, match="Could not parse"):
+            parse_imbalance_import_csv("# comments only\n# no data\n")
+
+    def test_unsafe_zone_raises(self) -> None:
+        csv_str = self._HDR + "2026-05-01T00:00:00Z,DE_LU;DROP TABLE x,42.5,850\n"
+        with pytest.raises(DataSourceParseError, match="unsafe import zone"):
+            parse_imbalance_import_csv(csv_str)
 
 
 # ── Parsing ──────────────────────────────────────────────────────────────────

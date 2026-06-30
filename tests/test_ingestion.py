@@ -2477,3 +2477,106 @@ class TestActivationCache:
         )
         with pytest.raises(DataSourceParseError, match="unsafe import zone"):
             di.persist_activation_frame(frame, source="Manual CSV")
+
+
+class TestImbalanceCache:
+    """Unified reBAP / imbalance persistence + provenance (Step 4 / 4b)."""
+
+    _HDR = "timestamp,zone,imbalance_price_eur_mwh,system_imbalance_volume_mw\n"
+
+    @classmethod
+    def _frame(cls, body: str) -> pd.DataFrame:
+        from src.ancillary import parse_imbalance_import_csv
+        return parse_imbalance_import_csv(cls._HDR + body)
+
+    def test_persist_and_read_back(self, tmp_path, monkeypatch) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        frame = self._frame(
+            "2026-05-01T00:00:00Z,DE_LU,42.5,850\n"
+            "2026-05-01T00:15:00Z,DE_LU,-18.2,-420\n"
+        )
+        summaries = di.persist_imbalance_frame(frame)
+        assert summaries == [{"zone": "DE_LU", "rows": 2, "source": "Manual CSV"}]
+        back = di.read_imbalance_cache("DE_LU")
+        assert len(back) == 2
+        assert back["imbalance_price_eur_mwh"].tolist() == [42.5, -18.2]
+        assert back["system_imbalance_volume_mw"].tolist() == [850.0, -420.0]
+        assert str(back.index.tz) == "UTC"
+
+    def test_provenance_is_per_zone(self, tmp_path, monkeypatch) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        di.persist_imbalance_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,42.5,850\n"),
+            source="Manual CSV",
+        )
+        di.persist_imbalance_frame(
+            self._frame("2026-05-01T00:00:00Z,FR,65.0,1200\n"),
+            source="TSO API",
+        )
+        sources = di.read_imbalance_sources()
+        assert sources["DE_LU"]["source"] == "Manual CSV"
+        assert sources["FR"]["source"] == "TSO API"
+
+    def test_keep_last_overwrite_refreshes_value_and_provenance(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # Red-line: re-importing the same timestamp must overwrite price,
+        # system volume, and provenance.
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        di.persist_imbalance_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,42.5,850\n"),
+            source="Manual CSV",
+        )
+        di.persist_imbalance_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,55.0,900\n"),
+            source="TSO API",
+        )
+        back = di.read_imbalance_cache("DE_LU")
+        assert len(back) == 1
+        assert back["imbalance_price_eur_mwh"].iloc[0] == 55.0
+        assert back["system_imbalance_volume_mw"].iloc[0] == 900.0
+        assert di.read_imbalance_sources()["DE_LU"]["source"] == "TSO API"
+
+    def test_mixed_sources_on_one_zone_labelled_mixed(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        di.persist_imbalance_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,42.5,850\n"),
+            source="Manual CSV",
+        )
+        di.persist_imbalance_frame(
+            self._frame("2026-05-01T00:15:00Z,DE_LU,50.0,900\n"),
+            source="TSO API",
+        )
+        sources = di.read_imbalance_sources()
+        assert sources["DE_LU"]["source"] == di.IMBALANCE_SOURCE_MIXED
+        assert sources["DE_LU"]["rows"] == 2
+
+    def test_read_empty_returns_none(self, tmp_path, monkeypatch) -> None:
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        assert di.read_imbalance_cache("DE_LU") is None
+        assert di.read_imbalance_sources() == {}
+
+    def test_persist_unsafe_zone_raises_bypassing_parser(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # Defense in depth: a caller bypassing the parser still cannot inject an
+        # unsafe zone into the SQLite table name.
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        frame = pd.DataFrame(
+            {
+                "zone": ["DE_LU;DROP TABLE x"],
+                "imbalance_price_eur_mwh": [42.5],
+                "system_imbalance_volume_mw": [850.0],
+            },
+            index=pd.DatetimeIndex(["2026-05-01T00:00:00Z"], name="timestamp"),
+        )
+        with pytest.raises(DataSourceParseError, match="unsafe import zone"):
+            di.persist_imbalance_frame(frame, source="Manual CSV")

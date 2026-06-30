@@ -303,6 +303,83 @@ def generate_imbalance_import_template_csv() -> str:
     return buf.getvalue()
 
 
+# Unified reBAP / imbalance-settlement parser (Step 4b). It returns a dedicated
+# imbalance frame because passive imbalance settlement is a separate stream from
+# reserve capacity and activation energy. ``system_imbalance_volume_mw`` is kept
+# SYSTEM/area-level exactly as imported; any asset/capture share is a later
+# replay-model assumption, never pre-mixed into the CSV or parser.
+_IMBALANCE_FRAME_COLUMNS = [
+    "zone", "imbalance_price_eur_mwh", "system_imbalance_volume_mw",
+]
+
+
+def _empty_imbalance_frame() -> pd.DataFrame:
+    """Empty imbalance frame with a UTC DatetimeIndex and standard columns."""
+    out = pd.DataFrame(columns=_IMBALANCE_FRAME_COLUMNS)
+    out.index = pd.DatetimeIndex([], name="timestamp", tz="UTC")
+    return out
+
+
+def parse_imbalance_import_csv(
+    content: str, *, default_zone: str | None = None,
+) -> pd.DataFrame:
+    """Parse the unified reBAP / imbalance CSV into an imbalance frame.
+
+    Schema (case-insensitive headers): ``timestamp, zone,
+    imbalance_price_eur_mwh, system_imbalance_volume_mw`` plus an optional
+    ``timezone`` column. Timestamps are UTC unless a per-row IANA ``timezone``
+    is given. ``imbalance_price_eur_mwh`` is treated as a published cash-flow
+    settlement price, so positive/negative signs are preserved and no direction
+    sign flip is applied. ``system_imbalance_volume_mw`` is kept SYSTEM/area
+    level exactly as imported. Rows with an unparseable timestamp, price, or
+    volume are dropped.
+
+    Returns a frame indexed by UTC ``timestamp`` with columns ``zone``,
+    ``imbalance_price_eur_mwh``, and ``system_imbalance_volume_mw``. Raises
+    ``DataSourceParseError`` on missing required columns or unsafe zones.
+    """
+    delimiter = _detect_delimiter(content)
+    try:
+        raw = pd.read_csv(
+            io.StringIO(content), sep=delimiter, comment="#",
+            dtype=str, keep_default_na=False,
+        )
+    except (pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+        raise DataSourceParseError(
+            f"Could not parse imbalance import CSV: {exc}"
+        ) from exc
+    raw.columns = [str(c).strip().lower() for c in raw.columns]
+    required = {
+        "timestamp", "zone",
+        "imbalance_price_eur_mwh", "system_imbalance_volume_mw",
+    }
+    missing = required - set(raw.columns)
+    if missing:
+        raise DataSourceParseError(
+            "Imbalance import CSV missing columns: " + ", ".join(sorted(missing))
+        )
+
+    price = pd.to_numeric(raw["imbalance_price_eur_mwh"], errors="coerce")
+    volume = pd.to_numeric(raw["system_imbalance_volume_mw"], errors="coerce")
+    tz_col = raw["timezone"] if "timezone" in raw.columns else None
+    index = _import_utc_index(raw["timestamp"], tz_col)
+    valid = price.notna().to_numpy() & volume.notna().to_numpy() & ~pd.isna(index)
+    raw, price, volume, index = raw[valid], price[valid], volume[valid], index[valid]
+    if raw.empty:
+        return _empty_imbalance_frame()
+
+    out = pd.DataFrame(
+        {
+            "zone": [_resolve_import_zone_cell(z, default_zone) for z in raw["zone"]],
+            "imbalance_price_eur_mwh": price.to_numpy(),
+            "system_imbalance_volume_mw": volume.to_numpy(),
+        },
+        index=pd.DatetimeIndex(index),
+    )
+    out.index.name = "timestamp"
+    return out
+
+
 _CAPACITY_PRODUCT_CANON = {"fcr": "FCR", "afrr": "aFRR", "mfrr": "mFRR"}
 _CAPACITY_DIRECTION_CANON = {
     "up": "up", "down": "down", "symmetric": "symmetric", "sym": "symmetric",
