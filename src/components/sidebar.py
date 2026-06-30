@@ -11,6 +11,7 @@ from src.ancillary import (
     ANCILLARY_TEMPLATES,
     generate_activation_import_template_csv,
     generate_capacity_import_template_csv,
+    generate_imbalance_import_template_csv,
     generate_template_csv,
     parse_activation_import_csv,
     parse_ancillary_csv,
@@ -431,6 +432,18 @@ def render_sidebar() -> dict:
             "fee. system_activated_volume_mw is system-level (the asset/capture "
             "share is a model assumption); historical replay only. See "
             "docs/import-templates.md."
+        )
+        st.download_button(
+            label="\U0001f4e5 Download reBAP / imbalance template",
+            data=generate_imbalance_import_template_csv(),
+            file_name="imbalance_settlement_import_template.csv",
+            mime="text/csv",
+            key="imbalance_import_tmpl_download",
+        )
+        st.caption(
+            "Passive imbalance/reBAP settlement stream (EUR/MWh, UTC), separate "
+            "from capacity fees and activation energy. Template/spec only for "
+            "now; parser and model integration land in a later increment."
         )
 
         st.markdown("**Unified Reserve Capacity CSV**")

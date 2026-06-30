@@ -256,6 +256,53 @@ def generate_activation_import_template_csv() -> str:
     return buf.getvalue()
 
 
+# Unified, zone-tagged reBAP / imbalance-settlement import format (Step 4a).
+# This is a PASSIVE imbalance-settlement stream, separate from reserve capacity
+# and activation energy. Parser/persistence land later; this template is the
+# stable data contract to request from TSOs / BRPs / aggregators.
+IMBALANCE_IMPORT_COLUMNS = (
+    "timestamp", "zone", "imbalance_price_eur_mwh", "system_imbalance_volume_mw",
+)
+
+
+def generate_imbalance_import_template_csv() -> str:
+    """Return the unified reBAP / imbalance-settlement import template.
+
+    The header pins the red-lines before any parser/model exists:
+    ``imbalance_price_eur_mwh`` is the published settlement cash-flow price
+    (negative values are valid and are not direction-flipped);
+    ``system_imbalance_volume_mw`` is a system/area quantity, not this asset's
+    imbalance; and this stream is separate from reserve capacity and activation
+    energy. It supports historical replay only, not live balancing dispatch.
+    """
+    buf = io.StringIO()
+    buf.write(
+        "# Unified reBAP / imbalance-settlement import template.\n"
+        "# Separate stream from reserve capacity fees and activation energy -- do not\n"
+        "#   sum blindly; imbalance settlement is a passive BRP/portfolio cashflow.\n"
+        "# Historical replay only; NOT live dispatch or aggregator balancing control.\n"
+        "# timestamp: UTC, ISO-8601 (e.g. 2026-05-01T00:00:00Z). If local market\n"
+        "#   time, convert to UTC OR add a 'timezone' column (IANA, e.g.\n"
+        "#   Europe/Berlin) and it is converted to UTC on import.\n"
+        "# zone: bidding-zone / settlement-area code (e.g. DE_LU, FI, FR).\n"
+        "# imbalance_price_eur_mwh: published imbalance/reBAP settlement price,\n"
+        "#   EUR/MWh. This is already a cash-flow price; negatives are valid and no\n"
+        "#   direction sign flip is applied later.\n"
+        "# system_imbalance_volume_mw: SYSTEM/area imbalance volume in the interval,\n"
+        "#   MW -- NOT this asset's imbalance. The asset imbalance/capture share is\n"
+        "#   a model assumption (audit panel), never pre-mixed into this file.\n"
+    )
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(IMBALANCE_IMPORT_COLUMNS)
+    writer.writerows([
+        ["2026-05-01T00:00:00Z", "DE_LU", "42.50", "850"],
+        ["2026-05-01T00:15:00Z", "DE_LU", "-18.20", "-420"],
+        ["2026-05-01T00:30:00Z", "DE_LU", "65.00", "1200"],
+        ["2026-05-01T00:45:00Z", "DE_LU", "8.10", "210"],
+    ])
+    return buf.getvalue()
+
+
 _CAPACITY_PRODUCT_CANON = {"fcr": "FCR", "afrr": "aFRR", "mfrr": "mFRR"}
 _CAPACITY_DIRECTION_CANON = {
     "up": "up", "down": "down", "symmetric": "symmetric", "sym": "symmetric",

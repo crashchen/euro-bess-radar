@@ -15,6 +15,7 @@ from src.ancillary import (
     CAPACITY_IMPORT_COLUMNS,
     CAPACITY_IMPORT_DIRECTIONS,
     CAPACITY_IMPORT_PRODUCTS,
+    IMBALANCE_IMPORT_COLUMNS,
     build_ancillary_dataset,
     calculate_ancillary_revenue,
     capacity_price_for_product,
@@ -22,6 +23,7 @@ from src.ancillary import (
     co_optimize_revenue_split,
     generate_activation_import_template_csv,
     generate_capacity_import_template_csv,
+    generate_imbalance_import_template_csv,
     generate_template_csv,
     list_capacity_products,
     merge_revenue_stack,
@@ -89,6 +91,33 @@ class TestTemplateGeneration:
             float(fields[5])  # system_activated_volume_mw
             assert fields[2] in ACTIVATION_IMPORT_PRODUCTS
             assert fields[3] in ACTIVATION_IMPORT_DIRECTIONS
+
+    def test_imbalance_import_template_pins_schema_and_redlines(self) -> None:
+        csv_str = generate_imbalance_import_template_csv()
+        # Uniform "\n" newlines (comment lines + csv.writer rows must match).
+        assert "\r\n" not in csv_str
+        # Header must pin cash-flow price semantics and stream separation.
+        assert "UTC" in csv_str
+        assert "EUR/MWh" in csv_str
+        assert "cash-flow price" in csv_str
+        assert "SYSTEM/area" in csv_str
+        assert "Separate stream" in csv_str
+        assert "Historical replay only" in csv_str
+        data_lines = [
+            line for line in csv_str.strip().splitlines() if not line.startswith("#")
+        ]
+        assert data_lines[0].split(",") == list(IMBALANCE_IMPORT_COLUMNS)
+        saw_negative_price = False
+        saw_negative_system_volume = False
+        for row in data_lines[1:]:
+            fields = row.split(",")
+            assert len(fields) == len(IMBALANCE_IMPORT_COLUMNS)
+            price = float(fields[2])  # imbalance_price_eur_mwh
+            volume = float(fields[3])  # system_imbalance_volume_mw
+            saw_negative_price = saw_negative_price or price < 0
+            saw_negative_system_volume = saw_negative_system_volume or volume < 0
+        assert saw_negative_price
+        assert saw_negative_system_volume
 
     def test_template_has_correct_headers(self) -> None:
         for key, tmpl in ANCILLARY_TEMPLATES.items():
