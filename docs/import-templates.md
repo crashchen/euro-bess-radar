@@ -72,6 +72,11 @@ the reserve, distinct from the standing capacity fee. Columns:
 - **Replay only**: with no forward activation signal this supports **historical
   replay** of what an asset *would have* earned, **not** live dispatch or
   aggregator activation-following.
+- **Regular interval series**: each row must be one settlement interval with
+  `system_activated_volume_mw` as the *average activated MW over that interval*.
+  The cockpit overlay infers the interval length from the timestamp spacing, so
+  upload a regular series — a sparse "activation event" feed (only non-zero
+  intervals) would understate the interval count and misstate energy.
 
 ## Where to source samples
 - **IDA1/2/3 prices** — power exchanges, not ENTSO-E (live IDA there is empty):
