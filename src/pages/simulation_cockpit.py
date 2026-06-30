@@ -9,6 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.activation_overlay import compute_activation_overlay
 from src.ancillary import (
     capacity_price_for_product,
     capacity_price_series_for_product,
@@ -16,7 +17,7 @@ from src.ancillary import (
 )
 from src.assumptions import CAPTURE_PARAM_LABEL
 from src.config import ANCILLARY_CAPACITY_AVAILABILITY
-from src.data_ingestion import read_capacity_cache
+from src.data_ingestion import read_activation_cache, read_capacity_cache
 from src.dispatch import solve_joint_capacity_batch
 from src.export import cockpit_tables_to_excel
 from src.reserve_forecast import RESERVE_VALUE_COL, compute_reserve_forecast_skill
@@ -231,6 +232,9 @@ def render(
     )
     _render_reserve_forecast_skill_section(
         anc_df=anc_df, zone_tz=zone_tz, chart_template=chart_template,
+    )
+    _render_activation_overlay_section(
+        primary_zone=primary_zone, dates=dates, zone_tz=zone_tz, power_mw=power_mw,
     )
 
     with st.expander("Simulation interval data", expanded=False):
@@ -1188,6 +1192,83 @@ def _render_reserve_forecast_skill_section(
             )
             fig.update_xaxes(title="Local 4h block")
             st.plotly_chart(fig, width="stretch")
+
+
+def _render_activation_overlay_section(
+    *, primary_zone: str | None, dates: list, zone_tz: str, power_mw: float,
+) -> None:
+    """Activation-energy replay overlay (Step 3c-2b).
+
+    Gated on imported activation data for the zone. The energy leg of reserves —
+    a historical REPLAY OVERLAY only: not co-optimized with DA/IDA/reserve, not
+    additive to the strategy-comparison total, no SoC coupling, not aggregator
+    dispatch. The capture-share knob is this asset's assumed slice of the SYSTEM
+    activated volume; the headline figure is windowed to the loaded dates.
+    """
+    if not primary_zone:
+        return
+    activation = read_activation_cache(primary_zone)
+    if activation is None or activation.empty:
+        return
+    with st.expander("Activation-energy overlay (historical replay)", expanded=False):
+        st.caption(
+            "Energy-leg cash flow if this asset had provided reserve and been "
+            "activated pro-rata to the SYSTEM activated volume in the imported "
+            "data. A historical REPLAY OVERLAY: NOT co-optimized with DA/IDA/"
+            "reserve, NOT additive to the strategy-comparison total, no SoC "
+            "coupling, not aggregator dispatch. Assumes a regular interval series "
+            "(each row = average activated MW for that interval)."
+        )
+        pct = st.slider(
+            "Activation capture share",
+            min_value=0.0, max_value=10.0, value=1.0, step=0.5, format="%.1f%%",
+            key="activation_capture_share_pct",
+            help=(
+                "This asset's assumed slice of the SYSTEM activated volume. "
+                "Default 1% — for a single-site BESS this is a small screening "
+                "assumption; raise it only for an aggregator/portfolio view. "
+                f"Delivered power is capped by the committed {power_mw:.0f} MW."
+            ),
+        )
+        capture_share = pct / 100.0
+        windowed = _slice_to_local_dates(activation, set(dates), zone_tz)
+        if windowed is None or windowed.empty:
+            st.info(
+                "No activation rows fall within the loaded simulation dates; the "
+                "imported activation data covers a different window."
+            )
+            return
+        result = compute_activation_overlay(
+            windowed, reserve_mw=power_mw, capture_share=capture_share,
+        )
+        c1, c2 = st.columns([1.0, 1.0])
+        c1.metric(
+            "Activation-energy overlay",
+            f"EUR {result['activation_energy_overlay_eur']:,.0f}",
+        )
+        c2.metric("Capture share", f"{capture_share:.1%}")
+        st.caption(
+            f"Over the loaded window, assuming the full {power_mw:.0f} MW could be "
+            "committed to reserve. A SEPARATE, non-additive estimate from the "
+            "strategy comparison above — not a strategy revenue row."
+        )
+        by_stream = result["by_stream"]
+        if not by_stream.empty:
+            st.dataframe(
+                by_stream,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "product": "Product",
+                    "direction": "Direction",
+                    "activated_mwh": st.column_config.NumberColumn(
+                        "Activated MWh", format="%.1f",
+                    ),
+                    "activation_overlay_eur": st.column_config.NumberColumn(
+                        "Overlay EUR", format="%.0f",
+                    ),
+                },
+            )
 
 
 def _render_forecast_policy_section(

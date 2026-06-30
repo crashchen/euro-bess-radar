@@ -34,14 +34,15 @@ def build_assumptions_table(
     deadband_eur_per_mw: float | None = None,
     forecast_mode: str | None = None,
     forecast_bucket: str | None = None,
+    activation_capture_share: float | None = None,
 ) -> pd.DataFrame:
     """Build one row per model assumption / haircut driving screening output.
 
     Runtime values (power / duration / efficiency / capture / capex / dispatch
     model) come from the sidebar; the rest are config / math constants. The
     interactive panel knobs (``rebid_share``, ``deadband_eur_per_mw``,
-    ``forecast_mode``, ``forecast_bucket``) are appended only when the caller
-    supplies them — they are chosen inside the Revenue / Cockpit panels and
+    ``forecast_mode``, ``forecast_bucket``, ``activation_capture_share``) are
+    appended only when the caller supplies them — they are chosen inside the Revenue / Cockpit panels and
     default there.
 
     Returns:
@@ -107,5 +108,24 @@ def build_assumptions_table(
         rows.append((
             "IDA forecast bucket", forecast_bucket, "", "Cockpit panel",
             "hour_of_day (robust) / hour_of_week (weekday-aware)",
+        ))
+    if activation_capture_share is not None:
+        rows.append((
+            "Activation capture share", f"{activation_capture_share:.2%}", "",
+            "Cockpit panel",
+            "Asset's assumed slice of SYSTEM activated volume in the "
+            "activation-energy overlay (single-site BESS = small)",
+        ))
+        rows.append((
+            "Activation data interpretation", "Regular interval series", "",
+            "Cockpit panel",
+            "Each activation row = average activated MW for that interval; the "
+            "overlay assumes a regular interval series, not a sparse event feed",
+        ))
+        rows.append((
+            "Activation overlay basis", "Replay overlay (non-additive)", "",
+            "Cockpit panel",
+            "NOT co-optimized, NOT additive to the strategy total, no SoC "
+            "coupling; historical replay only, not aggregator dispatch",
         ))
     return pd.DataFrame(rows, columns=ASSUMPTION_COLUMNS)

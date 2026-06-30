@@ -214,6 +214,10 @@ if fetch_btn or "zone_data" in st.session_state:
         "Hour-of-week": "hour_of_week",
         "Hour-of-day": "hour_of_day",
     }.get(st.session_state.get("forecast_policy_bucket"))
+    # The cockpit's activation-overlay capture-share slider is in percent units;
+    # convert to a fraction for the audit table (it formats as a percentage).
+    _act_pct = st.session_state.get("activation_capture_share_pct")
+    _act_capture_share = _act_pct / 100.0 if _act_pct is not None else None
     assumptions = build_assumptions_table(
         power_mw=power_mw,
         duration_hours=duration_hours,
@@ -225,6 +229,7 @@ if fetch_btn or "zone_data" in st.session_state:
         deadband_eur_per_mw=st.session_state.get("forecast_policy_deadband"),
         forecast_mode=_forecast_mode,
         forecast_bucket=_forecast_bucket,
+        activation_capture_share=_act_capture_share,
     )
 
     # ── Tabs ─────────────────────────────────────────────────────────────

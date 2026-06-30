@@ -70,6 +70,23 @@ def test_panel_knobs_appended_only_when_provided() -> None:
     assert knob_val["IDA rebid share (screening)"] == "25%"
 
 
+def test_activation_capture_share_appends_overlay_rows() -> None:
+    without = build_assumptions_table(**_base())
+    assert "Activation capture share" not in set(without["parameter"])
+
+    with_act = build_assumptions_table(**_base(), activation_capture_share=0.01)
+    params = set(with_act["parameter"])
+    assert "Activation capture share" in params
+    assert "Activation data interpretation" in params
+    assert "Activation overlay basis" in params
+    by_val = dict(zip(with_act["parameter"], with_act["value"], strict=True))
+    assert by_val["Activation capture share"] == "1.00%"
+    # The non-additive / no-SoC red-line must be spelled out in the audit.
+    basis = with_act[with_act["parameter"] == "Activation overlay basis"].iloc[0]
+    assert "not additive" in basis["affects"].lower()
+    assert "no soc" in basis["affects"].lower()
+
+
 # ── Cockpit export capture-row override ─────────────────────────────────────
 
 def test_cockpit_export_overrides_sidebar_capture_row() -> None:
