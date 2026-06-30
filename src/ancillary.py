@@ -243,7 +243,9 @@ def generate_activation_import_template_csv() -> str:
         "#   MW -- NOT this asset's output. The asset/capture share is a model\n"
         "#   assumption (audit panel), never pre-mixed into this file.\n"
     )
-    writer = csv.writer(buf)
+    # lineterminator="\n" so the csv.writer rows match the hand-written "\n"
+    # comment lines above -- a uniform-newline file to hand to a data provider.
+    writer = csv.writer(buf, lineterminator="\n")
     writer.writerow(ACTIVATION_IMPORT_COLUMNS)
     writer.writerows([
         ["2026-05-01T00:00:00Z", "DE_LU", "aFRR", "up", "85.40", "320"],

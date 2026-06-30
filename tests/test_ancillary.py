@@ -68,6 +68,8 @@ class TestTemplateGeneration:
 
     def test_activation_import_template_pins_schema_and_redlines(self) -> None:
         csv_str = generate_activation_import_template_csv()
+        # Uniform "\n" newlines (comment lines + csv.writer rows must match).
+        assert "\r\n" not in csv_str
         # Header must pin the energy unit, UTC, and the three red-lines.
         assert "UTC" in csv_str
         assert "EUR/MWh" in csv_str
