@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 
 from src.data_trust import (
+    build_activation_source_table,
     build_capacity_source_table,
     build_coverage_matrix,
     build_intraday_source_table,
@@ -66,9 +67,10 @@ def render(
         st.caption(
             "What is loaded per zone, before trusting any revenue/uplift number: "
             "DA = coverage% (valid/total intervals); IDA1-3 = provenance + cached "
-            "row count; Reserve = the primary zone's loaded capacity products. "
-            "Ancillary is not zone-tagged, so reserve coverage is attributed to "
-            "the primary zone only; a dash means the stream is not loaded/cached."
+            "row count; Reserve / Activation = imported capacity / activation-"
+            "energy products per zone (Reserve also falls back to the primary "
+            "zone's session ancillary when not zone-tagged). A dash means the "
+            "stream is not loaded/cached."
         )
         st.dataframe(
             matrix,
@@ -77,6 +79,7 @@ def render(
             column_config={
                 "zone": "Zone",
                 "reserve_capacity": "Reserve (capacity)",
+                "activation_energy": "Activation (energy)",
             },
         )
 
@@ -157,6 +160,38 @@ def render(
         )
         st.dataframe(
             capacity_sources,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "zone": "Zone",
+                "product": "Product",
+                "direction": "Direction",
+                "source": "Source",
+                "rows": st.column_config.NumberColumn("Rows", format="%d"),
+                "first_timestamp_utc": st.column_config.DatetimeColumn(
+                    "First UTC", format="YYYY-MM-DD HH:mm",
+                ),
+                "last_timestamp_utc": st.column_config.DatetimeColumn(
+                    "Last UTC", format="YYYY-MM-DD HH:mm",
+                ),
+                "imported_at": st.column_config.DatetimeColumn(
+                    "Imported (UTC)", format="YYYY-MM-DD HH:mm",
+                ),
+            },
+        )
+
+    activation_sources = build_activation_source_table()
+    if not activation_sources.empty:
+        st.markdown("**Activation-energy price sources**")
+        st.caption(
+            "Provenance of imported activation-energy prices, one row per "
+            "(zone, product, direction). This is the energy leg of reserves (paid "
+            "when activated), a separate stream from the capacity fee; 'Manual "
+            "CSV' rows came from an upload. Cockpit replay/consumption of these "
+            "prices arrives in a later increment."
+        )
+        st.dataframe(
+            activation_sources,
             width="stretch",
             hide_index=True,
             column_config={

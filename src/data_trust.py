@@ -7,6 +7,7 @@ import pandas as pd
 from src.ancillary import list_capacity_products
 from src.config import get_zone_timezone, is_elexon_zone
 from src.data_ingestion import (
+    read_activation_sources,
     read_capacity_sources,
     read_intraday_sources,
     summarize_price_data_quality,
@@ -24,12 +25,18 @@ INTRADAY_SOURCE_COLUMNS = [
     "first_timestamp_utc", "last_timestamp_utc", "imported_at",
 ]
 
-COVERAGE_MATRIX_COLUMNS = ["zone", "DA", "IDA1", "IDA2", "IDA3", "reserve_capacity"]
+COVERAGE_MATRIX_COLUMNS = [
+    "zone", "DA", "IDA1", "IDA2", "IDA3", "reserve_capacity", "activation_energy",
+]
 
 CAPACITY_SOURCE_COLUMNS = [
     "zone", "product", "direction", "source", "rows",
     "first_timestamp_utc", "last_timestamp_utc", "imported_at",
 ]
+
+# The activation provenance sidecar is keyed the same way (zone, product,
+# direction), so the audit table shares the capacity column shape.
+ACTIVATION_SOURCE_COLUMNS = list(CAPACITY_SOURCE_COLUMNS)
 
 # Displayed when a (zone, stream) cell has no loaded/cached data.
 _NO_DATA = "—"
@@ -72,6 +79,45 @@ def build_capacity_source_table(
     if not rows:
         return pd.DataFrame(columns=CAPACITY_SOURCE_COLUMNS)
     return pd.DataFrame(rows, columns=CAPACITY_SOURCE_COLUMNS)
+
+
+def build_activation_source_table(
+    sources: dict[tuple[str, str, str], dict] | None = None,
+) -> pd.DataFrame:
+    """Build an audit table of cached activation-energy provenance.
+
+    Mirrors :func:`build_capacity_source_table` at the same
+    ``(zone, product, direction)`` granularity, reading the durable
+    ``activation_price_sources`` sidecar (written by ``write_activation_cache``),
+    so each activation stream's source survives a restart and a re-import that
+    changes the source relabels that stream instead of leaving a stale label.
+
+    Args:
+        sources: Optional pre-built mapping ``(zone, product, direction) ->
+            {"source", "rows", "first", "last", "imported_at"}``. Read from the
+            database when None (the normal path; the argument exists for testing).
+
+    Returns:
+        One row per (zone, product, direction), sorted.
+    """
+    if sources is None:
+        sources = read_activation_sources()
+    rows: list[dict[str, object]] = []
+    for (zone, product, direction), meta in sorted((sources or {}).items()):
+        meta_dict = meta if isinstance(meta, dict) else {}
+        rows.append({
+            "zone": str(zone),
+            "product": str(product),
+            "direction": str(direction),
+            "source": meta_dict.get("source", "Manual CSV"),
+            "rows": int(meta_dict.get("rows", 0)),
+            "first_timestamp_utc": meta_dict.get("first", pd.NaT),
+            "last_timestamp_utc": meta_dict.get("last", pd.NaT),
+            "imported_at": meta_dict.get("imported_at"),
+        })
+    if not rows:
+        return pd.DataFrame(columns=ACTIVATION_SOURCE_COLUMNS)
+    return pd.DataFrame(rows, columns=ACTIVATION_SOURCE_COLUMNS)
 
 
 def build_intraday_source_table(
@@ -211,6 +257,7 @@ def build_coverage_matrix(
     intraday_sources: dict[tuple[str, int], dict] | None = None,
     ancillary_df: pd.DataFrame | None = None,
     capacity_sources: dict[tuple[str, str, str], dict] | None = None,
+    activation_sources: dict[tuple[str, str, str], dict] | None = None,
     primary_zone: str | None = None,
 ) -> pd.DataFrame:
     """Zone x data-stream coverage matrix for the Data Trust tab.
@@ -232,25 +279,36 @@ def build_coverage_matrix(
             (from ``read_capacity_sources``); read from the DB sidecar when
             omitted. This is the zone-tagged unified-import capacity, so the
             reserve column is shown PER zone, not just the primary.
+        activation_sources: ``(zone, product, direction) -> provenance`` mapping
+            (from ``read_activation_sources``); read from the DB sidecar when
+            omitted. The zone-tagged activation-energy import; shown PER zone in
+            the activation column. Import-only, so it has no session fallback.
         primary_zone: The zone whose session ancillary capacity products back the
             reserve cell when that zone has no persisted unified-import capacity.
 
     Returns:
         Wide DataFrame with columns ``COVERAGE_MATRIX_COLUMNS``; cells hold
-        ``DA`` coverage%, ``IDA{n}`` ``source (rows)``, a reserve product list,
-        or ``"—"`` when a stream is absent. Empty (with columns) when nothing
-        is loaded.
+        ``DA`` coverage%, ``IDA{n}`` ``source (rows)``, a reserve/activation
+        product list, or ``"—"`` when a stream is absent. Empty (with columns)
+        when nothing is loaded.
     """
     if intraday_sources is None:
         intraday_sources = read_intraday_sources()
     if capacity_sources is None:
         capacity_sources = read_capacity_sources()
+    if activation_sources is None:
+        activation_sources = read_activation_sources()
     zone_data = zone_data or {}
 
     # Zone-tagged unified-import capacity (persisted) -> products per zone.
     persisted_by_zone: dict[str, set[str]] = {}
     for (zone, product, _direction) in (capacity_sources or {}):
         persisted_by_zone.setdefault(str(zone), set()).add(str(product))
+    # Activation-energy import is zone-tagged too -> products per zone (no
+    # session fallback; activation is import-only).
+    activation_by_zone: dict[str, set[str]] = {}
+    for (zone, product, _direction) in (activation_sources or {}):
+        activation_by_zone.setdefault(str(zone), set()).add(str(product))
     # Session per-country / auto-fetch capacity is primary-zone only (fallback).
     session_products = list_capacity_products(ancillary_df)
 
@@ -258,6 +316,7 @@ def build_coverage_matrix(
         set(zone_data)
         | {z for (z, _seq) in (intraday_sources or {})}
         | set(persisted_by_zone)
+        | set(activation_by_zone)
     )
     if primary_zone and session_products:
         zones.add(primary_zone)
@@ -273,6 +332,8 @@ def build_coverage_matrix(
             reserve = ", ".join(session_products)
         else:
             reserve = _NO_DATA
+        act_products = sorted(activation_by_zone.get(zone, set()))
+        activation = ", ".join(act_products) if act_products else _NO_DATA
         rows.append({
             "zone": zone,
             "DA": _da_coverage_cell(zone_data.get(zone)),
@@ -280,5 +341,6 @@ def build_coverage_matrix(
             "IDA2": _intraday_cell(intraday_sources, zone, 2),
             "IDA3": _intraday_cell(intraday_sources, zone, 3),
             "reserve_capacity": reserve,
+            "activation_energy": activation,
         })
     return pd.DataFrame(rows, columns=COVERAGE_MATRIX_COLUMNS)

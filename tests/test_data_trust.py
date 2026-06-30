@@ -6,8 +6,10 @@ import pandas as pd
 import pytest
 
 from src.data_trust import (
+    ACTIVATION_SOURCE_COLUMNS,
     CAPACITY_SOURCE_COLUMNS,
     COVERAGE_MATRIX_COLUMNS,
+    build_activation_source_table,
     build_capacity_source_table,
     build_coverage_matrix,
     build_intraday_source_table,
@@ -117,6 +119,7 @@ def test_coverage_matrix_combines_da_ida_and_reserve_streams() -> None:
         },
         ancillary_df=_capacity_anc(),
         capacity_sources={},  # no persisted unified-import capacity -> session fallback
+        activation_sources={},
         primary_zone="DE_LU",
     )
     assert list(matrix.columns) == COVERAGE_MATRIX_COLUMNS
@@ -147,6 +150,7 @@ def test_coverage_matrix_shows_persisted_reserve_per_zone() -> None:
             ("DE_LU", "aFRR", "up"): {"source": "TSO API", "rows": 6},
             ("FR", "aFRR", "down"): {"source": "Manual CSV", "rows": 6},
         },
+        activation_sources={},
         primary_zone="DE_LU",
     )
     by_zone = dict(zip(matrix["zone"], matrix["reserve_capacity"], strict=True))
@@ -162,6 +166,7 @@ def test_coverage_matrix_persisted_capacity_overrides_session_fallback() -> None
         intraday_sources={},
         ancillary_df=_capacity_anc(),  # session products for DE_LU
         capacity_sources={("DE_LU", "mFRR", "up"): {"source": "TSO API", "rows": 6}},
+        activation_sources={},
         primary_zone="DE_LU",
     )
     assert matrix.iloc[0]["reserve_capacity"] == "mFRR"
@@ -174,6 +179,7 @@ def test_coverage_matrix_includes_ida_only_cached_zone() -> None:
         intraday_sources={("NL", 1): {"source": "ENTSO-E intraday auction", "rows": 24}},
         ancillary_df=None,
         capacity_sources={},
+        activation_sources={},
         primary_zone="DE_LU",
     )
     assert list(matrix["zone"]) == ["NL"]
@@ -185,6 +191,7 @@ def test_coverage_matrix_includes_ida_only_cached_zone() -> None:
 def test_coverage_matrix_empty_when_nothing_loaded() -> None:
     matrix = build_coverage_matrix(
         {}, intraday_sources={}, ancillary_df=None, capacity_sources={},
+        activation_sources={},
     )
     assert matrix.empty
     assert list(matrix.columns) == COVERAGE_MATRIX_COLUMNS
@@ -227,3 +234,82 @@ def test_capacity_source_table_tolerates_malformed_metadata() -> None:
 
 def test_capacity_source_table_empty_when_no_sources() -> None:
     assert build_capacity_source_table({}).empty
+
+
+def test_coverage_matrix_shows_activation_per_zone() -> None:
+    # The activation sidecar is zone-tagged, so the activation column is shown
+    # PER zone (deduped products, sorted), like the reserve column.
+    matrix = build_coverage_matrix(
+        {"DE_LU": _clean_da_frame(24), "FR": _clean_da_frame(12)},
+        intraday_sources={},
+        ancillary_df=None,
+        capacity_sources={},
+        activation_sources={
+            ("DE_LU", "aFRR", "up"): {"source": "Manual CSV", "rows": 6},
+            ("DE_LU", "mFRR", "down"): {"source": "Manual CSV", "rows": 6},
+            ("FR", "aFRR", "up"): {"source": "TSO API", "rows": 6},
+        },
+        primary_zone="DE_LU",
+    )
+    by_zone = dict(zip(matrix["zone"], matrix["activation_energy"], strict=True))
+    assert by_zone["DE_LU"] == "aFRR, mFRR"
+    assert by_zone["FR"] == "aFRR"
+    # Activation is a separate stream from reserve (empty here).
+    assert set(matrix["reserve_capacity"]) == {"—"}
+
+
+def test_coverage_matrix_includes_activation_only_zone() -> None:
+    # A zone present only in the activation sidecar still appears in the matrix.
+    matrix = build_coverage_matrix(
+        {},
+        intraday_sources={},
+        ancillary_df=None,
+        capacity_sources={},
+        activation_sources={
+            ("DE_LU", "aFRR", "up"): {"source": "Manual CSV", "rows": 6},
+        },
+        primary_zone=None,
+    )
+    assert list(matrix["zone"]) == ["DE_LU"]
+    assert matrix.iloc[0]["activation_energy"] == "aFRR"
+    assert matrix.iloc[0]["DA"] == "—"
+    assert matrix.iloc[0]["reserve_capacity"] == "—"
+
+
+def test_activation_source_table_from_sources() -> None:
+    table = build_activation_source_table({
+        ("DE_LU", "aFRR", "up"): {
+            "source": "Manual CSV", "rows": 6,
+            "first": pd.Timestamp("2026-05-01", tz="UTC"),
+            "last": pd.Timestamp("2026-05-01 20:00", tz="UTC"),
+            "imported_at": "2026-06-29T10:00:00+00:00",
+        },
+        ("FR", "mFRR", "down"): {
+            "source": "TSO API", "rows": 6,
+            "first": pd.NaT, "last": pd.NaT, "imported_at": None,
+        },
+    })
+    assert list(table.columns) == ACTIVATION_SOURCE_COLUMNS
+    # Sorted by (zone, product, direction): DE_LU/aFRR first.
+    assert list(table["zone"]) == ["DE_LU", "FR"]
+    assert table.iloc[0]["product"] == "aFRR"
+    assert table.iloc[0]["direction"] == "up"
+    assert table.iloc[0]["source"] == "Manual CSV"
+    assert table.iloc[0]["rows"] == 6
+    assert table.iloc[1]["source"] == "TSO API"
+
+
+def test_activation_source_table_tolerates_malformed_metadata() -> None:
+    table = build_activation_source_table({
+        ("DE_LU", "aFRR", "up"): None,
+    })
+    assert len(table) == 1
+    row = table.iloc[0]
+    assert row["zone"] == "DE_LU"
+    assert row["source"] == "Manual CSV"
+    assert row["rows"] == 0
+    assert pd.isna(row["first_timestamp_utc"])
+
+
+def test_activation_source_table_empty_when_no_sources() -> None:
+    assert build_activation_source_table({}).empty
