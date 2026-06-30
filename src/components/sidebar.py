@@ -9,6 +9,7 @@ import streamlit as st
 
 from src.ancillary import (
     ANCILLARY_TEMPLATES,
+    generate_activation_import_template_csv,
     generate_capacity_import_template_csv,
     generate_template_csv,
     parse_ancillary_csv,
@@ -378,6 +379,19 @@ def render_sidebar() -> dict:
             "Unified zone-tagged reserve-capacity format (EUR/MW/h, UTC) to "
             "request from exchanges/TSOs; one provenance/cache path for all "
             "zones. See docs/import-templates.md."
+        )
+        st.download_button(
+            label="\U0001f4e5 Download activation-energy template",
+            data=generate_activation_import_template_csv(),
+            file_name="activation_energy_import_template.csv",
+            mime="text/csv",
+            key="act_import_tmpl_download",
+        )
+        st.caption(
+            "Activation-ENERGY leg (EUR/MWh, UTC), separate from the capacity "
+            "fee. system_activated_volume_mw is system-level (the asset/capture "
+            "share is a model assumption); historical replay only. Parser lands "
+            "in a follow-up increment. See docs/import-templates.md."
         )
 
         st.markdown("**Unified Reserve Capacity CSV**")
