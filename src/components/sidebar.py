@@ -11,10 +11,12 @@ from src.ancillary import (
     ANCILLARY_TEMPLATES,
     generate_activation_import_template_csv,
     generate_capacity_import_template_csv,
+    generate_imbalance_import_template_csv,
     generate_template_csv,
     parse_activation_import_csv,
     parse_ancillary_csv,
     parse_capacity_import_csv,
+    parse_imbalance_import_csv,
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
 from src.config import ALL_ZONES
@@ -28,6 +30,7 @@ from src.data_ingestion import (
     parse_intraday_csv,
     persist_activation_frame,
     persist_capacity_frame,
+    persist_imbalance_frame,
     persist_intraday_frame,
     read_intraday_sources,
 )
@@ -234,6 +237,41 @@ def _parse_and_store_activation_upload(uploaded_file, default_zone: str) -> None
     )
 
 
+def _parse_and_store_imbalance_upload(uploaded_file, default_zone: str) -> None:
+    """Parse + persist an uploaded unified reBAP / imbalance CSV.
+
+    Writes to the ``imbalance_prices_{zone}`` SQLite tables + the
+    ``imbalance_price_sources`` provenance sidecar (via
+    ``persist_imbalance_frame`` -> ``write_imbalance_cache``). The published
+    settlement price and system/area imbalance volume are stored as-is; any
+    asset imbalance/capture share is a later replay-model assumption.
+    """
+    try:
+        content = uploaded_file.getvalue().decode("utf-8-sig")
+        parsed = parse_imbalance_import_csv(content, default_zone=default_zone)
+    except UnicodeDecodeError:
+        st.error("Parse error: the uploaded file is not valid UTF-8/CSV text.")
+        return
+    except DataSourceParseError as exc:
+        st.error(f"Imbalance import error: {exc}")
+        return
+
+    if parsed.empty:
+        st.warning("No valid imbalance-settlement rows found in the uploaded file.")
+        return
+    try:
+        summaries = persist_imbalance_frame(parsed, source="Manual CSV")
+    except (OSError, sqlite3.DatabaseError, ValueError) as exc:
+        st.error(f"Imbalance import persistence error: {exc}")
+        return
+    total = sum(s["rows"] for s in summaries)
+    zones = ", ".join(s["zone"] for s in summaries)
+    st.success(
+        f"Imported {total} reBAP/imbalance rows ({zones}). Published prices "
+        "and system-level volumes stored as-is; asset share is applied later."
+    )
+
+
 def _run_and_store_ancillary_fetch(zone: str, start: object, end: object) -> None:
     """Run the configured ancillary auto-fetchers and store successful results."""
     fetchers = get_available_fetchers(zone)
@@ -432,6 +470,18 @@ def render_sidebar() -> dict:
             "share is a model assumption); historical replay only. See "
             "docs/import-templates.md."
         )
+        st.download_button(
+            label="\U0001f4e5 Download reBAP / imbalance template",
+            data=generate_imbalance_import_template_csv(),
+            file_name="imbalance_settlement_import_template.csv",
+            mime="text/csv",
+            key="imbalance_import_tmpl_download",
+        )
+        st.caption(
+            "Passive imbalance/reBAP settlement stream (EUR/MWh, UTC), separate "
+            "from capacity fees and activation energy. Upload support writes to "
+            "SQLite/provenance; Data Trust/model integration lands next."
+        )
 
         st.markdown("**Unified Reserve Capacity CSV**")
         st.caption(
@@ -460,6 +510,20 @@ def render_sidebar() -> dict:
             "Parse & Import activation", key="act_import_btn",
         ):
             _parse_and_store_activation_upload(act_file, primary_zone_for_fetch)
+
+        st.markdown("**Unified reBAP / Imbalance CSV**")
+        st.caption(
+            "Passive imbalance-settlement stream. Writes published cash-flow "
+            "prices + system/area imbalance volumes to a separate cache; no "
+            "asset-share or revenue model is applied here."
+        )
+        imb_file = st.file_uploader(
+            "Upload unified imbalance CSV", type=["csv"], key="imb_import_upload",
+        )
+        if imb_file is not None and st.button(
+            "Parse & Import imbalance", key="imb_import_btn",
+        ):
+            _parse_and_store_imbalance_upload(imb_file, primary_zone_for_fetch)
 
     # ── Intraday (IDA) price upload ──────────────────────────────────────
     with st.sidebar.expander("Intraday (IDA) Prices"):

@@ -8,7 +8,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 - **Revenue estimation** for 1h, 2h, and 4h BESS using chronology-aware charge/discharge windows
 - **Inline revenue guidance** with sample-window annualisation notes and ancillary methodology help in the dashboard
 - **Renewables and BESS signal analysis** — quantify how renewable share affects prices and ordered spreads
-- **Ancillary services integration** — manual CSV upload + auto-fetch for DE, FI, GB, RO, SE_3, and Italian zones with per-product reserve lines, manual-over-auto product overrides, and preserved directional/system price fields; plus unified zone-tagged reserve-capacity **and** activation-energy CSV imports (the standby fee and the called-energy leg as separate streams), each with SQLite persistence and per-(zone, product, direction) provenance
+- **Ancillary services integration** — manual CSV upload + auto-fetch for DE, FI, GB, RO, SE_3, and Italian zones with per-product reserve lines, manual-over-auto product overrides, and preserved directional/system price fields; plus unified zone-tagged reserve-capacity, activation-energy, and reBAP/imbalance CSV imports as separate streams, each with SQLite persistence and provenance
 - **Intraday (IDA) price import** — manual CSV fallback for IDA1/2/3 prices when the ENTSO-E intraday-auction API returns no data, persisted to the same cache the live fetch uses and labelled `Manual CSV` in Data Trust
 - **Joint MILP co-optimization estimate** for DA arbitrage vs reserve-capacity power headroom
 - **Simulation Cockpit** for interval-level BESS dispatch replay, event tables, multi-day summaries with continuous-horizon SoC carry-over, a forecast-driven sequential DA+ID policy (vs perfect-foresight ceiling) with rebid deadband + forecast-skill report, an annualised strategy comparison (with optional DA + reserve-capacity co-optimisation, a cumulative DA + IDA1 + reserve perfect-foresight ceiling, and a Phase 9.2b forecast-driven realistic reserve-first row with a forecast-effect gap panel when ancillary capacity prices are loaded), an activation-energy replay overlay (a separate, non-additive screening estimate when activation prices are imported), and Excel export — plus SoC, revenue, throughput, and battery-health diagnostics
@@ -69,7 +69,7 @@ euro-bess-radar/
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   ├── activation_overlay.py # Activation-energy replay overlay (screening, non-additive)
 │   └── export.py             # Excel report generation
-├── tests/                    # 644 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 660 passing tests, heavily mocked; 2 PDF tests may skip
 ├── scripts/                  # Maintenance/demo scripts (e.g. seed_demo_9_2b.py)
 ├── samples/                  # Generated demo CSVs from seed_demo_9_2b.py (git-ignored)
 ├── docs/runbooks/            # Operator runbooks (e.g. validate-9-2b.md)

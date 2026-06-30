@@ -1,15 +1,15 @@
-# Import templates (IDA prices + reserve capacity + activation energy)
+# Import templates (IDA prices + reserve capacity + activation energy + imbalance)
 
 This is the spec to hand to an exchange / TSO / aggregator when requesting sample
 data. Each format flows through one provenance / cache / Data Trust / Simulation
 Cockpit path. Download the live templates from the dashboard sidebar
 (**Ancillary Services Data** and **Intraday (IDA) Prices** expanders).
 
-> Status: the **IDA** and **reserve-capacity** import paths are live end-to-end
-> (upload → parse → SQLite + provenance → Data Trust → cockpit). The
-> **activation-energy** import now parses + persists with per-stream provenance
-> and a sidebar uploader (Step 3b); its Data Trust coverage + cockpit replay
-> land in the next increment (3c).
+> Status: the **IDA**, **reserve-capacity**, and **activation-energy** import
+> paths are live end-to-end (upload → parse → SQLite + provenance → Data Trust
+> → cockpit where applicable). The **reBAP / imbalance-settlement** import is
+> at Step 4b: upload → parse → SQLite + provenance is live; Data Trust
+> visibility and replay-model integration land in later increments.
 
 ## 1. IDA prices CSV (live)
 
@@ -78,6 +78,38 @@ the reserve, distinct from the standing capacity fee. Columns:
   upload a regular series — a sparse "activation event" feed (only non-zero
   intervals) would understate the interval count and misstate energy.
 
+## 4. reBAP / imbalance settlement CSV (unified, zone-tagged)
+
+The passive imbalance-settlement stream — e.g. German reBAP or a national
+imbalance price — is distinct from both the reserve capacity fee and activated
+balancing-energy payments. Columns:
+
+| Column | Required | Notes |
+|---|---|---|
+| `timestamp` | yes | **UTC**, ISO-8601. If your export is local market time, convert to UTC **or** add a `timezone` column. |
+| `zone` | yes | Bidding-zone or settlement-area code (e.g. `DE_LU`, `FI`, `FR`). |
+| `imbalance_price_eur_mwh` | yes | Published imbalance/reBAP settlement price, EUR/MWh. Negatives are valid and kept. Treat this as a cash-flow price as published; do not sign-flip it by a separate direction field. |
+| `system_imbalance_volume_mw` | yes | **SYSTEM/area** imbalance volume in the interval, MW — **not** this asset's imbalance. |
+| `timezone` | no | IANA name (e.g. `Europe/Berlin`) if `timestamp` is local; converted to UTC on import. |
+
+Rows write to per-zone `imbalance_prices_{zone}` tables and a per-zone
+`imbalance_price_sources` sidecar. Re-importing the same timestamp keeps the
+last row and refreshes provenance. Data Trust surfacing and cockpit replay are
+intentionally later steps.
+
+### Four red-lines we pin
+- **Separate strategy**: imbalance settlement is a passive BRP/portfolio
+  settlement stream. It is not the reserve capacity fee (§2) and not the
+  activation-energy leg (§3). Do not blindly add it to reserve revenues.
+- **System vs asset**: `system_imbalance_volume_mw` is the TSO/system quantity.
+  Any asset imbalance volume, portfolio share, or passive-balancing capture
+  assumption belongs in the model/audit panel, never pre-mixed into the CSV.
+- **Cash-flow price**: `imbalance_price_eur_mwh` is the published settlement
+  price. It may be negative; the parser/model must not apply an additional
+  direction sign flip.
+- **Replay only**: this supports historical replay / diagnostics of a passive
+  imbalance strategy, not live BRP control or aggregator dispatch.
+
 ## Where to source samples
 - **IDA1/2/3 prices** — power exchanges, not ENTSO-E (live IDA there is empty):
   Nord Pool Data Services (Intraday Auctions; Nordic/Baltic + CWE), EPEX SPOT /
@@ -86,6 +118,10 @@ the reserve, distinct from the standing capacity fee. Columns:
   mFRR tender results), Fingrid Open Data (FI). Other countries: national TSO
   portals (Elia, RTE, Terna, REE, TenneT) — fields/licence/granularity vary.
 - **Activation energy** — TSO balancing-energy publications: `netztransparenz.de`
-  (DE activated aFRR/mFRR volumes + prices, reBAP), the ENTSO-E balancing platform
+  (DE activated aFRR/mFRR volumes + prices), the ENTSO-E balancing platform
   reports (PICASSO aFRR / MARI mFRR clearing), or national TSO portals. Take the
   *system/area* activated volume, not a pre-derived per-asset figure.
+- **reBAP / imbalance settlement** — `netztransparenz.de` (DE reBAP + system
+  imbalance volumes), national TSO imbalance-price publications, BRP settlement
+  exports, or aggregator back-office exports. Keep the settlement price and
+  system imbalance volume separate from any per-asset imbalance assumption.

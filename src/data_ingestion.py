@@ -2697,6 +2697,200 @@ def persist_activation_frame(
     return summaries
 
 
+# ── Unified reBAP / imbalance cache + provenance (Step 4 / 4b) ────────────────
+# Passive imbalance-settlement parity with the activation cache above: one table
+# per zone plus a provenance sidecar keyed by zone. ``system_imbalance_volume_mw``
+# is stored SYSTEM/area-level exactly as imported (red-line: asset imbalance /
+# capture share is a model assumption, never multiplied in at persistence).
+# Parser lives in ``ancillary.parse_imbalance_import_csv``.
+
+IMBALANCE_SOURCE_MANUAL = "Manual CSV"
+IMBALANCE_SOURCE_MIXED = "Mixed"
+IMBALANCE_SOURCE_LEGACY = "Unknown (pre-provenance cache)"
+_IMBALANCE_SOURCE_TABLE = "imbalance_price_sources"
+
+
+def _imbalance_cache_table(zone: str) -> str:
+    """SQLite table name for one zone's reBAP / imbalance prices.
+
+    Validates the zone is table-name safe (the choke point that also guards a
+    caller bypassing the parser, e.g. ``persist_imbalance_frame`` directly).
+    """
+    return f"imbalance_prices_{validate_import_zone(zone).lower()}"
+
+
+def write_imbalance_cache(
+    df: pd.DataFrame, zone: str, *, source: str = IMBALANCE_SOURCE_MANUAL,
+) -> None:
+    """Persist imbalance-settlement rows for one zone (keep-last on timestamp).
+
+    Key ``timestamp`` — re-importing the same settlement interval overwrites it
+    (``INSERT OR REPLACE``). The per-row ``source`` feeds the
+    ``imbalance_price_sources`` sidecar, re-derived AFTER the write so an
+    overwrite that changes the source refreshes provenance. ``df`` must carry
+    ``imbalance_price_eur_mwh`` and ``system_imbalance_volume_mw`` on a
+    timestamp index (the ``ancillary.parse_imbalance_import_csv`` output).
+    """
+    if df is None or df.empty:
+        return
+    needed = {"imbalance_price_eur_mwh", "system_imbalance_volume_mw"}
+    if not needed.issubset(df.columns):
+        return
+    rows = []
+    for ts, row in df.iterrows():
+        price = row["imbalance_price_eur_mwh"]
+        volume = row["system_imbalance_volume_mw"]
+        if pd.isna(price) or pd.isna(volume):
+            continue
+        rows.append((
+            ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+            float(price), float(volume), source,
+        ))
+    if not rows:
+        return
+    table = _imbalance_cache_table(zone)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            f'CREATE TABLE IF NOT EXISTS "{table}" '
+            "(timestamp TEXT PRIMARY KEY, "
+            "imbalance_price_eur_mwh REAL NOT NULL, "
+            "system_imbalance_volume_mw REAL NOT NULL, source TEXT)"
+        )
+        conn.executemany(
+            f'INSERT OR REPLACE INTO "{table}" '
+            "(timestamp, imbalance_price_eur_mwh, "
+            "system_imbalance_volume_mw, source) VALUES (?, ?, ?, ?)",
+            rows,
+        )
+        _record_imbalance_source(conn, table, zone)
+
+
+def _record_imbalance_source(
+    conn: sqlite3.Connection, table: str, zone: str,
+) -> None:
+    """Re-derive the imbalance provenance sidecar for one zone."""
+    conn.execute(
+        f'CREATE TABLE IF NOT EXISTS "{_IMBALANCE_SOURCE_TABLE}" '
+        "(zone TEXT PRIMARY KEY, source TEXT, rows INTEGER, "
+        "first_timestamp TEXT, last_timestamp TEXT, imported_at TEXT)"
+    )
+    row = conn.execute(
+        f'SELECT COUNT(*), MIN(timestamp), MAX(timestamp) FROM "{table}"'
+    ).fetchone()
+    if row is None:
+        return
+    n, first, last = row
+    if not n:
+        return
+    distinct = sorted(
+        r[0] for r in conn.execute(
+            f'SELECT DISTINCT source FROM "{table}"',
+        ) if r[0] is not None
+    )
+    if not distinct:
+        label = IMBALANCE_SOURCE_LEGACY
+    elif len(distinct) == 1:
+        label = distinct[0]
+    else:
+        label = IMBALANCE_SOURCE_MIXED
+    conn.execute(
+        f'INSERT OR REPLACE INTO "{_IMBALANCE_SOURCE_TABLE}" '
+        "(zone, source, rows, first_timestamp, last_timestamp, imported_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (zone, label, int(n), first, last, datetime.now(UTC).isoformat()),
+    )
+
+
+def read_imbalance_sources() -> dict[str, dict[str, Any]]:
+    """Return durable imbalance provenance keyed by zone.
+
+    Empty when the sidecar does not exist yet.
+    """
+    if not DB_PATH.exists():
+        return {}
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            recorded = conn.execute(
+                f'SELECT zone, source, rows, first_timestamp, last_timestamp, '
+                f'imported_at FROM "{_IMBALANCE_SOURCE_TABLE}"'
+            ).fetchall()
+    except sqlite3.DatabaseError:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for zone, source, rows, first, last, imported_at in recorded:
+        out[str(zone)] = {
+            "source": source,
+            "rows": int(rows),
+            "first": pd.to_datetime(first, utc=True, errors="coerce"),
+            "last": pd.to_datetime(last, utc=True, errors="coerce"),
+            "imported_at": imported_at,
+        }
+    return out
+
+
+def read_imbalance_cache(
+    zone: str, start: pd.Timestamp | None = None, end: pd.Timestamp | None = None,
+) -> pd.DataFrame | None:
+    """Return cached imbalance-settlement rows for a zone, or None when empty.
+
+    Columns ``imbalance_price_eur_mwh`` and ``system_imbalance_volume_mw`` on a
+    UTC timestamp index. ``[start, end)`` filters when both are given.
+    """
+    if not DB_PATH.exists():
+        return None
+    table = _imbalance_cache_table(zone)
+    query = (
+        f'SELECT timestamp, imbalance_price_eur_mwh, system_imbalance_volume_mw '
+        f'FROM "{table}"'
+    )
+    params: tuple = ()
+    if start is not None and end is not None:
+        query += " WHERE timestamp >= ? AND timestamp < ?"
+        params = (start.isoformat(), end.isoformat())
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            df = pd.read_sql_query(query, conn, params=params)
+    except (sqlite3.DatabaseError, pd.errors.DatabaseError):
+        return None
+    if df.empty:
+        return None
+    df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+    df = df.dropna(subset=["timestamp"]).set_index("timestamp").sort_index()
+    df.index.name = "timestamp"
+    return df
+
+
+def persist_imbalance_frame(
+    long_df: pd.DataFrame, *, source: str = IMBALANCE_SOURCE_MANUAL,
+) -> list[dict[str, Any]]:
+    """Write a parsed imbalance frame to SQLite, one table per zone.
+
+    Args:
+        long_df: Output of ``ancillary.parse_imbalance_import_csv`` (timestamp
+            index; ``zone``, ``imbalance_price_eur_mwh``,
+            ``system_imbalance_volume_mw`` columns).
+        source: Provenance label stored per row.
+
+    Returns:
+        One summary dict per zone written.
+    """
+    summaries: list[dict[str, Any]] = []
+    if long_df is None or long_df.empty or "zone" not in long_df.columns:
+        return summaries
+    for zone, grp in long_df.groupby("zone", sort=True):
+        zone_str = str(zone).strip()
+        if not zone_str:
+            continue
+        write_imbalance_cache(grp, zone_str, source=source)
+        summaries.append({
+            "zone": zone_str,
+            "rows": len(grp),
+            "source": source,
+        })
+    return summaries
+
+
 def fetch_intraday_prices(
     zone: str,
     start: pd.Timestamp,
