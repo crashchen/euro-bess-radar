@@ -362,6 +362,19 @@ def test_coverage_matrix_includes_imbalance_only_zone() -> None:
     assert matrix.iloc[0]["imbalance_settlement"] == "Manual CSV (96)"
 
 
+def test_coverage_matrix_coalesces_null_imbalance_metadata() -> None:
+    matrix = build_coverage_matrix(
+        {},
+        intraday_sources={},
+        ancillary_df=None,
+        capacity_sources={},
+        activation_sources={},
+        imbalance_sources={"DE_LU": {"source": None, "rows": None}},
+        primary_zone=None,
+    )
+    assert matrix.iloc[0]["imbalance_settlement"] == "? (0)"
+
+
 def test_imbalance_source_table_from_sources() -> None:
     table = build_imbalance_source_table({
         "DE_LU": {
@@ -390,6 +403,24 @@ def test_imbalance_source_table_tolerates_malformed_metadata() -> None:
     assert row["source"] == "Manual CSV"
     assert row["rows"] == 0
     assert pd.isna(row["first_timestamp_utc"])
+
+
+def test_imbalance_source_table_coalesces_null_metadata_values() -> None:
+    table = build_imbalance_source_table({
+        "DE_LU": {
+            "source": None,
+            "rows": None,
+            "first": None,
+            "last": None,
+            "imported_at": None,
+        },
+    })
+    assert len(table) == 1
+    row = table.iloc[0]
+    assert row["source"] == "Manual CSV"
+    assert row["rows"] == 0
+    assert pd.isna(row["first_timestamp_utc"])
+    assert pd.isna(row["last_timestamp_utc"])
 
 
 def test_imbalance_source_table_empty_when_no_sources() -> None:

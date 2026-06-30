@@ -49,6 +49,21 @@ IMBALANCE_SOURCE_COLUMNS = [
 _NO_DATA = "—"
 
 
+def _imbalance_metadata_rows(value: object) -> int:
+    """Defensive row-count coercion for imbalance sidecar metadata."""
+    try:
+        if value is None or pd.isna(value):
+            return 0
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _imbalance_metadata_timestamp(value: object) -> object:
+    """Return ``pd.NaT`` for explicitly-null imbalance timestamp metadata."""
+    return pd.NaT if value is None else value
+
+
 def build_capacity_source_table(
     sources: dict[tuple[str, str, str], dict] | None = None,
 ) -> pd.DataFrame:
@@ -151,10 +166,14 @@ def build_imbalance_source_table(
         meta_dict = meta if isinstance(meta, dict) else {}
         rows.append({
             "zone": str(zone),
-            "source": meta_dict.get("source", "Manual CSV"),
-            "rows": int(meta_dict.get("rows", 0)),
-            "first_timestamp_utc": meta_dict.get("first", pd.NaT),
-            "last_timestamp_utc": meta_dict.get("last", pd.NaT),
+            "source": meta_dict.get("source") or "Manual CSV",
+            "rows": _imbalance_metadata_rows(meta_dict.get("rows")),
+            "first_timestamp_utc": _imbalance_metadata_timestamp(
+                meta_dict.get("first"),
+            ),
+            "last_timestamp_utc": _imbalance_metadata_timestamp(
+                meta_dict.get("last"),
+            ),
             "imported_at": meta_dict.get("imported_at"),
         })
     if not rows:
@@ -389,8 +408,8 @@ def build_coverage_matrix(
         if imb_meta:
             meta_dict = imb_meta if isinstance(imb_meta, dict) else {}
             imbalance = (
-                f"{meta_dict.get('source', '?')} "
-                f"({int(meta_dict.get('rows', 0))})"
+                f"{meta_dict.get('source') or '?'} "
+                f"({_imbalance_metadata_rows(meta_dict.get('rows'))})"
             )
         else:
             imbalance = _NO_DATA
