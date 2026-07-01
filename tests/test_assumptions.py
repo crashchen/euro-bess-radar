@@ -90,6 +90,28 @@ def test_activation_capture_share_appends_overlay_rows() -> None:
     assert "no soc" in basis["affects"].lower()
 
 
+def test_imbalance_capture_share_appends_overlay_rows() -> None:
+    without = build_assumptions_table(**_base())
+    assert "Imbalance capture share" not in set(without["parameter"])
+
+    with_imb = build_assumptions_table(**_base(), imbalance_capture_share=0.01)
+    params = set(with_imb["parameter"])
+    assert "Imbalance capture share" in params
+    assert "Imbalance sign convention" in params
+    assert "Imbalance overlay basis" in params
+    assert "Imbalance power cap" in params
+    by_val = dict(zip(with_imb["parameter"], with_imb["value"], strict=True))
+    assert by_val["Imbalance capture share"] == "1.00%"
+    assert by_val["Imbalance sign convention"] == (
+        "positive system imbalance = system short"
+    )
+    assert by_val["Imbalance power cap"] == "Sidebar Power (MW)"
+    basis = with_imb[with_imb["parameter"] == "Imbalance overlay basis"].iloc[0]
+    assert "not additive" in basis["affects"].lower()
+    assert "no soc" in basis["affects"].lower()
+    assert "not live brp control" in basis["affects"].lower()
+
+
 # ── Cockpit export capture-row override ─────────────────────────────────────
 
 def test_cockpit_export_overrides_sidebar_capture_row() -> None:

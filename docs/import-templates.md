@@ -8,8 +8,8 @@ Cockpit path. Download the live templates from the dashboard sidebar
 > Status: the **IDA**, **reserve-capacity**, and **activation-energy** import
 > paths are live end-to-end (upload → parse → SQLite + provenance → Data Trust
 > → cockpit where applicable). The **reBAP / imbalance-settlement** import is
-> live through Data Trust, with the Step 4d-1 replay calculation layer added as
-> a non-additive overlay primitive; cockpit UI wiring lands separately.
+> live end-to-end as a non-additive historical replay overlay (upload → parse
+> → SQLite + provenance → Data Trust → cockpit overlay).
 
 ## 1. IDA prices CSV (live)
 
@@ -115,7 +115,7 @@ last row and refreshes provenance. Data Trust shows this as a per-zone
   direction sign flip.
 - **Replay only**: this supports historical replay / diagnostics of a passive
   imbalance strategy, not live BRP control or aggregator dispatch.
-- **Non-additive overlay**: the Step 4d-1 calculation uses
+- **Non-additive overlay**: the Step 4d calculation uses
   `asset_net_dispatch_mw = sign(system_imbalance_volume_mw) *
   min(power_mw, capture_share * abs(system_imbalance_volume_mw))` and
   `cashflow = asset_net_dispatch_mw * dt * imbalance_price_eur_mwh`. It ignores

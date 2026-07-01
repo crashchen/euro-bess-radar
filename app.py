@@ -31,6 +31,7 @@ from src.data_ingestion import (
     DataSourceParseError,
     build_zone_query_window,
     read_activation_cache,
+    read_imbalance_cache,
     read_intraday_cache,
 )
 from src.export import export_to_bytes, export_to_pdf_bytes
@@ -230,8 +231,23 @@ if fetch_btn or "zone_data" in st.session_state:
             _act_cache = read_activation_cache(primary_zone, _act_start, _act_end)
         except ValueError:
             _act_cache = None
-        if _act_cache is not None and not _act_cache.empty:
-            _act_capture_share = _act_pct / 100.0
+    if _act_cache is not None and not _act_cache.empty:
+        _act_capture_share = _act_pct / 100.0
+    # Same state-leak guard for the passive reBAP/imbalance overlay: the slider
+    # persists across zones, so only audit it when this zone/window has cached
+    # imbalance data and the cockpit panel can actually render.
+    _imb_pct = st.session_state.get("imbalance_capture_share_pct")
+    _imb_capture_share = None
+    if _imb_pct is not None:
+        try:
+            _imb_start, _imb_end = build_zone_query_window(
+                primary_zone, start_date, end_date,
+            )
+            _imb_cache = read_imbalance_cache(primary_zone, _imb_start, _imb_end)
+        except ValueError:
+            _imb_cache = None
+        if _imb_cache is not None and not _imb_cache.empty:
+            _imb_capture_share = _imb_pct / 100.0
     assumptions = build_assumptions_table(
         power_mw=power_mw,
         duration_hours=duration_hours,
@@ -244,6 +260,7 @@ if fetch_btn or "zone_data" in st.session_state:
         forecast_mode=_forecast_mode,
         forecast_bucket=_forecast_bucket,
         activation_capture_share=_act_capture_share,
+        imbalance_capture_share=_imb_capture_share,
     )
 
     # ── Tabs ─────────────────────────────────────────────────────────────

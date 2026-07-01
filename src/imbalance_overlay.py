@@ -21,8 +21,8 @@ Key semantics (validated against German Netztransparenz reBAP + NRV-Saldo CSVs):
   already. Do NOT apply a second sign flip. A helping position can still lose
   money when the published price sign makes that interval unattractive.
 
-The capture share is a global model assumption, to be surfaced by the consuming
-UI increment (4d-2); this module is a pure calculation.
+The capture share is a global model assumption surfaced by the consuming UI
+increment (4d-2); this module remains a pure calculation.
 """
 
 from __future__ import annotations
