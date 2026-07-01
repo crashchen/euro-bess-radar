@@ -35,6 +35,7 @@ _REQUIRED_COLUMNS = {"imbalance_price_eur_mwh", "system_imbalance_volume_mw"}
 _OVERLAY_COLUMNS = [
     "system_state", "asset_imbalance_mwh", "imbalance_overlay_eur",
 ]
+_SYSTEM_STATES = ["neutral", "system_long", "system_short"]
 
 
 def _interval_hours(index: pd.DatetimeIndex, default: float = 0.25) -> float:
@@ -118,7 +119,7 @@ def compute_imbalance_overlay(
         dt = 0.25
 
     magnitude = (capture_share * system_volume.abs()).clip(upper=power_mw)
-    direction = system_volume.apply(lambda v: 1.0 if v > 0 else (-1.0 if v < 0 else 0.0))
+    direction = (system_volume > 0).astype(float) - (system_volume < 0).astype(float)
     asset_mw = magnitude * direction
     asset_mwh = asset_mw * float(dt)
     cashflow = asset_mwh * price
@@ -132,11 +133,14 @@ def compute_imbalance_overlay(
         "imbalance_overlay_eur": cashflow,
     })
     by_state = (
-        work.groupby("system_state", sort=True, as_index=False)
+        work.groupby("system_state", sort=True)
         .agg({
             "asset_imbalance_mwh": "sum",
             "imbalance_overlay_eur": "sum",
         })
+        .reindex(_SYSTEM_STATES)
+        .fillna(0.0)
+        .reset_index()
         .reindex(columns=_OVERLAY_COLUMNS)
     )
     return {

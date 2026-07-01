@@ -20,6 +20,13 @@ def _frame(rows: list[tuple]) -> pd.DataFrame:
     )
 
 
+def _by_state(result: dict) -> dict:
+    return {
+        row.system_state: row
+        for row in result["by_system_state"].itertuples(index=False)
+    }
+
+
 def test_none_or_empty_returns_zero_overlay() -> None:
     out = compute_imbalance_overlay(None, power_mw=10, capture_share=0.01)
     assert out["imbalance_settlement_overlay_eur"] == 0.0
@@ -48,10 +55,12 @@ def test_positive_system_imbalance_means_short_and_discharge_helps() -> None:
         ("2026-05-01T00:15:00Z", 100.0, 1000.0),
     ])
     out = compute_imbalance_overlay(f, power_mw=10, capture_share=0.01)
-    row = out["by_system_state"].iloc[0]
+    by = _by_state(out)
+    row = by["system_short"]
     # min(10 MW, 1% * 1000 MW) = 10 MW; 0.25h * 2 rows = 5 MWh.
-    assert row["system_state"] == "system_short"
-    assert row["asset_imbalance_mwh"] == pytest.approx(5.0)
+    assert row.asset_imbalance_mwh == pytest.approx(5.0)
+    assert by["system_long"].asset_imbalance_mwh == 0.0
+    assert by["neutral"].asset_imbalance_mwh == 0.0
     assert out["imbalance_settlement_overlay_eur"] == pytest.approx(500.0)
 
 
@@ -63,9 +72,11 @@ def test_negative_system_imbalance_means_long_and_charge_helps() -> None:
         ("2026-05-01T00:15:00Z", 100.0, -1000.0),
     ])
     out = compute_imbalance_overlay(f, power_mw=10, capture_share=0.01)
-    row = out["by_system_state"].iloc[0]
-    assert row["system_state"] == "system_long"
-    assert row["asset_imbalance_mwh"] == pytest.approx(-5.0)
+    by = _by_state(out)
+    row = by["system_long"]
+    assert row.asset_imbalance_mwh == pytest.approx(-5.0)
+    assert by["system_short"].asset_imbalance_mwh == 0.0
+    assert by["neutral"].asset_imbalance_mwh == 0.0
     assert out["imbalance_settlement_overlay_eur"] == pytest.approx(-500.0)
 
 
@@ -87,8 +98,8 @@ def test_system_volume_exceeding_power_is_clipped() -> None:
     ])
     out = compute_imbalance_overlay(f, power_mw=7, capture_share=0.5)
     # capture_share*vol = 2500 MW, capped at 7 MW; 2 * 0.25h = 0.5h.
-    row = out["by_system_state"].iloc[0]
-    assert row["asset_imbalance_mwh"] == pytest.approx(3.5)
+    row = _by_state(out)["system_short"]
+    assert row.asset_imbalance_mwh == pytest.approx(3.5)
     assert out["imbalance_settlement_overlay_eur"] == pytest.approx(280.0)
 
 
@@ -99,14 +110,26 @@ def test_signed_states_aggregate_separately() -> None:
         ("2026-05-01T00:30:00Z", 100.0, 0.0),
     ])
     out = compute_imbalance_overlay(f, power_mw=10, capture_share=0.01)
-    by = {
-        row.system_state: row
-        for row in out["by_system_state"].itertuples(index=False)
-    }
+    by = _by_state(out)
     assert by["system_short"].asset_imbalance_mwh == pytest.approx(2.5)
     assert by["system_long"].asset_imbalance_mwh == pytest.approx(-2.5)
     assert by["neutral"].asset_imbalance_mwh == pytest.approx(0.0)
     assert out["imbalance_settlement_overlay_eur"] == pytest.approx(0.0)
+
+
+def test_by_system_state_always_contains_all_states() -> None:
+    f = _frame([
+        ("2026-05-01T00:00:00Z", 100.0, 1000.0),
+        ("2026-05-01T00:15:00Z", 100.0, 1000.0),
+    ])
+    out = compute_imbalance_overlay(f, power_mw=10, capture_share=0.01)
+    assert out["by_system_state"]["system_state"].tolist() == [
+        "neutral", "system_long", "system_short",
+    ]
+    by = _by_state(out)
+    assert by["neutral"].imbalance_overlay_eur == 0.0
+    assert by["system_long"].imbalance_overlay_eur == 0.0
+    assert by["system_short"].imbalance_overlay_eur == pytest.approx(500.0)
 
 
 def test_interval_hours_inferred_and_overridable() -> None:
