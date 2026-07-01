@@ -102,6 +102,8 @@ class TestTemplateGeneration:
         assert "EUR/MWh" in csv_str
         assert "cash-flow price" in csv_str
         assert "SYSTEM/area" in csv_str
+        assert "positive = system short" in csv_str
+        assert "negative =\n#   system long" in csv_str
         assert "Separate stream" in csv_str
         assert "Historical replay only" in csv_str
         data_lines = [
