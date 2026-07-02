@@ -1,7 +1,28 @@
 # Validate the reBAP / imbalance overlay with Netztransparenz CSVs
 
-This runbook validates the Step 4d passive imbalance-settlement overlay with
-real German Netztransparenz exports before a live fetcher is added.
+This runbook validates the passive imbalance-settlement overlay with real
+German Netztransparenz data, either through the live fetch button or through
+manual CSV exports converted to the unified import template.
+
+## Live fetch path
+
+The app can fetch German DE_LU reBAP/NRV data directly from the public
+Netztransparenz chart CSV handler.
+
+1. Run the app:
+
+   ```bash
+   streamlit run app.py
+   ```
+
+2. Select `DE_LU` and a date window, for example May 2026.
+3. Sidebar → **Ancillary Services Data** → **Unified reBAP / Imbalance CSV**.
+4. Click **Fetch Netztransparenz reBAP/imbalance**.
+5. Data Trust should show `Netztransparenz.de` in the
+   `reBAP / imbalance settlement sources` table.
+
+Use the manual path below when you need to reproduce a provider file exactly or
+when the public download handler is unavailable.
 
 ## Inputs
 
@@ -49,7 +70,7 @@ timestamp,zone,imbalance_price_eur_mwh,system_imbalance_volume_mw
   reBAP export.
 - The generated CSV is accepted by `parse_imbalance_import_csv`.
 
-## Upload and inspect
+## Upload and inspect the converted file
 
 1. Run the app:
 
@@ -61,7 +82,8 @@ timestamp,zone,imbalance_price_eur_mwh,system_imbalance_volume_mw
 3. Upload `samples/netztransparenz_imbalance_de_lu_2026-05.csv`.
 4. Data Trust tab:
    - Coverage matrix shows `imbalance_settlement` for `DE_LU`.
-   - `reBAP / imbalance settlement sources` shows a `Manual CSV` row.
+   - `reBAP / imbalance settlement sources` shows a `Manual CSV` row (or
+     `Mixed` if the same zone also contains live-fetched intervals).
 5. Simulation Cockpit:
    - Select a DE_LU date window overlapping May 2026.
    - Open **reBAP / imbalance overlay (historical replay)**.

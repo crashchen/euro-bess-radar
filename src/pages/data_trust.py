@@ -190,8 +190,9 @@ def render(
             "Provenance of imported activation-energy prices, one row per "
             "(zone, product, direction). This is the energy leg of reserves (paid "
             "when activated), a separate stream from the capacity fee; 'Manual "
-            "CSV' rows came from an upload. Cockpit replay/consumption of these "
-            "prices arrives in a later increment."
+            "CSV' rows came from an upload. When cached rows overlap the cockpit "
+            "window, they drive the separate, non-additive activation-energy "
+            "historical replay overlay."
         )
         st.dataframe(
             activation_sources,
@@ -221,8 +222,9 @@ def render(
         st.caption(
             "Provenance of imported passive imbalance-settlement prices, one "
             "row per zone. This is separate from reserve capacity fees and "
-            "activation energy; it is not consumed by a cockpit replay model in "
-            "this increment."
+            "activation energy; when cached rows overlap the cockpit window, "
+            "they drive the separate, non-additive reBAP/imbalance historical "
+            "replay overlay."
         )
         st.dataframe(
             imbalance_sources,
