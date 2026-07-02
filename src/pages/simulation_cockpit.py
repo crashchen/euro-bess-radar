@@ -17,9 +17,14 @@ from src.ancillary import (
 )
 from src.assumptions import CAPTURE_PARAM_LABEL
 from src.config import ANCILLARY_CAPACITY_AVAILABILITY
-from src.data_ingestion import read_activation_cache, read_capacity_cache
+from src.data_ingestion import (
+    read_activation_cache,
+    read_capacity_cache,
+    read_imbalance_cache,
+)
 from src.dispatch import solve_joint_capacity_batch
 from src.export import cockpit_tables_to_excel
+from src.imbalance_overlay import compute_imbalance_overlay
 from src.reserve_forecast import RESERVE_VALUE_COL, compute_reserve_forecast_skill
 from src.simulation import (
     available_local_dates,
@@ -234,6 +239,9 @@ def render(
         anc_df=anc_df, zone_tz=zone_tz, chart_template=chart_template,
     )
     _render_activation_overlay_section(
+        primary_zone=primary_zone, dates=dates, zone_tz=zone_tz, power_mw=power_mw,
+    )
+    _render_imbalance_overlay_section(
         primary_zone=primary_zone, dates=dates, zone_tz=zone_tz, power_mw=power_mw,
     )
 
@@ -1265,6 +1273,82 @@ def _render_activation_overlay_section(
                         "Activated MWh", format="%.1f",
                     ),
                     "activation_overlay_eur": st.column_config.NumberColumn(
+                        "Overlay EUR", format="%.0f",
+                    ),
+                },
+            )
+
+
+def _render_imbalance_overlay_section(
+    *, primary_zone: str | None, dates: list, zone_tz: str, power_mw: float,
+) -> None:
+    """Passive reBAP / imbalance-settlement replay overlay (Step 4d-2).
+
+    Gated on imported imbalance data for the zone. Historical replay only:
+    not co-optimized with DA/IDA/reserve, not additive to the strategy-comparison
+    total, no SoC/energy sustainability coupling, and not live BRP control.
+    """
+    if not primary_zone:
+        return
+    imbalance = read_imbalance_cache(primary_zone)
+    if imbalance is None or imbalance.empty:
+        return
+    with st.expander("reBAP / imbalance overlay (historical replay)", expanded=False):
+        st.caption(
+            "Passive imbalance-settlement cash flow if this asset/portfolio held "
+            "a small position that helps the SYSTEM imbalance. Uses the German "
+            "Netztransparenz convention: positive system imbalance = system short "
+            "(discharge helps), negative = system long (charge helps). A historical "
+            "REPLAY OVERLAY only: NOT co-optimized with DA/IDA/reserve, NOT "
+            "additive to the strategy-comparison total, ignores SoC/energy "
+            "sustainability, and is NOT live BRP control or aggregator dispatch."
+        )
+        pct = st.slider(
+            "Imbalance capture share",
+            min_value=0.0, max_value=10.0, value=1.0, step=0.5, format="%.1f%%",
+            key="imbalance_capture_share_pct",
+            help=(
+                "This asset/portfolio's assumed slice of the SYSTEM imbalance "
+                "magnitude. Default 1% — a conservative screening assumption. "
+                f"The signed position is capped by the BESS {power_mw:.0f} MW "
+                "power rating."
+            ),
+        )
+        capture_share = pct / 100.0
+        windowed = _slice_to_local_dates(imbalance, set(dates), zone_tz)
+        if windowed is None or windowed.empty:
+            st.info(
+                "No imbalance rows fall within the loaded simulation dates; the "
+                "imported reBAP/imbalance data covers a different window."
+            )
+            return
+        result = compute_imbalance_overlay(
+            windowed, power_mw=power_mw, capture_share=capture_share,
+        )
+        c1, c2 = st.columns([1.0, 1.0])
+        c1.metric(
+            "Imbalance settlement overlay",
+            f"EUR {result['imbalance_settlement_overlay_eur']:,.0f}",
+        )
+        c2.metric("Capture share", f"{capture_share:.1%}")
+        st.caption(
+            f"Over the loaded window, signed BESS net dispatch is capped by "
+            f"{power_mw:.0f} MW and priced at the published signed reBAP/"
+            "imbalance price. A SEPARATE, non-additive diagnostic — not a "
+            "strategy revenue row."
+        )
+        by_state = result["by_system_state"]
+        if not by_state.empty:
+            st.dataframe(
+                by_state,
+                width="stretch",
+                hide_index=True,
+                column_config={
+                    "system_state": "System state",
+                    "asset_imbalance_mwh": st.column_config.NumberColumn(
+                        "Asset imbalance MWh", format="%.1f",
+                    ),
+                    "imbalance_overlay_eur": st.column_config.NumberColumn(
                         "Overlay EUR", format="%.0f",
                     ),
                 },

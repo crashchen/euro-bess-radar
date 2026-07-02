@@ -291,6 +291,9 @@ def generate_imbalance_import_template_csv() -> str:
         "# system_imbalance_volume_mw: SYSTEM/area imbalance volume in the interval,\n"
         "#   MW -- NOT this asset's imbalance. The asset imbalance/capture share is\n"
         "#   a model assumption (audit panel), never pre-mixed into this file.\n"
+        "#   For the replay overlay, use the German Netztransparenz sign convention:\n"
+        "#   positive = system short/undercovered (discharge helps), negative =\n"
+        "#   system long/overcovered (charge helps).\n"
     )
     writer = csv.writer(buf, lineterminator="\n")
     writer.writerow(IMBALANCE_IMPORT_COLUMNS)

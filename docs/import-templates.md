@@ -8,8 +8,8 @@ Cockpit path. Download the live templates from the dashboard sidebar
 > Status: the **IDA**, **reserve-capacity**, and **activation-energy** import
 > paths are live end-to-end (upload → parse → SQLite + provenance → Data Trust
 > → cockpit where applicable). The **reBAP / imbalance-settlement** import is
-> at Step 4c: upload → parse → SQLite + provenance → Data Trust visibility is
-> live; replay-model integration lands in a later increment.
+> live end-to-end as a non-additive historical replay overlay (upload → parse
+> → SQLite + provenance → Data Trust → cockpit overlay).
 
 ## 1. IDA prices CSV (live)
 
@@ -89,7 +89,7 @@ balancing-energy payments. Columns:
 | `timestamp` | yes | **UTC**, ISO-8601. If your export is local market time, convert to UTC **or** add a `timezone` column. |
 | `zone` | yes | Bidding-zone or settlement-area code (e.g. `DE_LU`, `FI`, `FR`). |
 | `imbalance_price_eur_mwh` | yes | Published imbalance/reBAP settlement price, EUR/MWh. Negatives are valid and kept. Treat this as a cash-flow price as published; do not sign-flip it by a separate direction field. |
-| `system_imbalance_volume_mw` | yes | **SYSTEM/area** imbalance volume in the interval, MW — **not** this asset's imbalance. |
+| `system_imbalance_volume_mw` | yes | **SYSTEM/area** imbalance volume in the interval, MW — **not** this asset's imbalance. For the replay overlay, use the German Netztransparenz sign convention: positive = system short / undercovered (discharge helps), negative = system long / overcovered (charge helps). Convert other providers to this convention before using the overlay. |
 | `timezone` | no | IANA name (e.g. `Europe/Berlin`) if `timestamp` is local; converted to UTC on import. |
 
 Rows write to per-zone `imbalance_prices_{zone}` tables and a per-zone
@@ -104,11 +104,23 @@ last row and refreshes provenance. Data Trust shows this as a per-zone
 - **System vs asset**: `system_imbalance_volume_mw` is the TSO/system quantity.
   Any asset imbalance volume, portfolio share, or passive-balancing capture
   assumption belongs in the model/audit panel, never pre-mixed into the CSV.
+- **System sign convention**: for the German Netztransparenz NRV-Saldo/reBAP
+  path, positive system imbalance means system short / undercovered, so positive
+  BESS net dispatch (discharge / extra injection) helps; negative system
+  imbalance means system long / overcovered, so negative BESS net dispatch
+  (charge / less injection) helps. Other sources must be normalised to this
+  convention before the replay overlay is interpreted.
 - **Cash-flow price**: `imbalance_price_eur_mwh` is the published settlement
   price. It may be negative; the parser/model must not apply an additional
   direction sign flip.
 - **Replay only**: this supports historical replay / diagnostics of a passive
   imbalance strategy, not live BRP control or aggregator dispatch.
+- **Non-additive overlay**: the Step 4d calculation uses
+  `asset_net_dispatch_mw = sign(system_imbalance_volume_mw) *
+  min(power_mw, capture_share * abs(system_imbalance_volume_mw))` and
+  `cashflow = asset_net_dispatch_mw * dt * imbalance_price_eur_mwh`. It ignores
+  SoC/energy sustainability and is therefore an overlay diagnostic, not a
+  strategy-ladder revenue stream.
 
 ## Where to source samples
 - **IDA1/2/3 prices** — power exchanges, not ENTSO-E (live IDA there is empty):

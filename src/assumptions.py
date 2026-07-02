@@ -35,15 +35,16 @@ def build_assumptions_table(
     forecast_mode: str | None = None,
     forecast_bucket: str | None = None,
     activation_capture_share: float | None = None,
+    imbalance_capture_share: float | None = None,
 ) -> pd.DataFrame:
     """Build one row per model assumption / haircut driving screening output.
 
     Runtime values (power / duration / efficiency / capture / capex / dispatch
     model) come from the sidebar; the rest are config / math constants. The
     interactive panel knobs (``rebid_share``, ``deadband_eur_per_mw``,
-    ``forecast_mode``, ``forecast_bucket``, ``activation_capture_share``) are
-    appended only when the caller supplies them — they are chosen inside the Revenue / Cockpit panels and
-    default there.
+    ``forecast_mode``, ``forecast_bucket``, ``activation_capture_share``,
+    ``imbalance_capture_share``) are appended only when the caller supplies them
+    — they are chosen inside the Revenue / Cockpit panels and default there.
 
     Returns:
         DataFrame with columns ``[parameter, value, unit, source, affects]``.
@@ -133,5 +134,31 @@ def build_assumptions_table(
             "Overlay assumes the full BESS power is available as the reserve "
             "cap; delivered = min(power, capture_share x system volume), so "
             "power_mw bounds the overlay too, not just the capture share",
+        ))
+    if imbalance_capture_share is not None:
+        rows.append((
+            "Imbalance capture share", f"{imbalance_capture_share:.2%}", "",
+            "Cockpit panel",
+            "Asset/portfolio share of SYSTEM imbalance magnitude in the "
+            "passive reBAP imbalance overlay",
+        ))
+        rows.append((
+            "Imbalance sign convention",
+            "positive system imbalance = system short", "",
+            "Netztransparenz NRV-Saldo-Ampel + replay overlay",
+            "Positive BESS net dispatch (discharge / extra injection) helps "
+            "when the system is short; negative dispatch helps when long",
+        ))
+        rows.append((
+            "Imbalance overlay basis", "Replay overlay (non-additive)", "",
+            "Cockpit panel",
+            "NOT co-optimized, NOT additive to the strategy total, no SoC or "
+            "energy-sustainability coupling; historical passive-settlement "
+            "diagnostic only, not live BRP control",
+        ))
+        rows.append((
+            "Imbalance power cap", "Sidebar Power (MW)", "", "Cockpit panel",
+            "Asset imbalance position is capped at the BESS power: "
+            "min(power, capture_share x abs(system imbalance))",
         ))
     return pd.DataFrame(rows, columns=ASSUMPTION_COLUMNS)
