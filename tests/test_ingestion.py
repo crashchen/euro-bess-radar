@@ -1684,13 +1684,13 @@ class TestFetchNetztransparenzImbalance:
         assert parsed.tolist() == [100.55, -594.144, 1234.56, 122.73]
 
         with_missing = di._netztransparenz_numeric(
-            pd.Series(["100,55", "N.A."]),
+            pd.Series(["100,55", "N.A.", None, float("nan")]),
             column="value",
             source_name="sample",
             allow_missing=True,
         )
         assert with_missing.iloc[0] == 100.55
-        assert pd.isna(with_missing.iloc[1])
+        assert with_missing.iloc[1:].isna().all()
 
     @patch("src.data_ingestion._call_netztransparenz_csv")
     def test_fetch_returns_dedicated_imbalance_frame(

@@ -1946,7 +1946,9 @@ def _netztransparenz_numeric(
     text = values.astype("string").str.strip()
     normalized = text.str.replace("\u00a0", "", regex=False)
     normalized = normalized.str.replace(" ", "", regex=False)
-    missing = normalized.str.upper().isin(_NETZTRANSPARENZ_MISSING_TOKENS)
+    missing = normalized.isna() | normalized.str.upper().isin(
+        _NETZTRANSPARENZ_MISSING_TOKENS
+    )
     comma_decimal = normalized.str.contains(",", na=False)
     normalized = normalized.where(
         ~comma_decimal,
