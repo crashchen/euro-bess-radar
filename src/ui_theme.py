@@ -309,6 +309,41 @@ def inject_global_cockpit_theme() -> None:
         [data-testid="stSidebar"] button,
         [data-testid="stSidebar"] [role="button"] {
             color: #eaf3ff !important;
+            -webkit-text-fill-color: #eaf3ff !important;
+        }
+
+        [data-testid="stSidebar"] .stButton > button,
+        [data-testid="stSidebar"] .stDownloadButton > button,
+        [data-testid="stSidebar"] .stFormSubmitButton > button {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            background:
+                linear-gradient(135deg, rgba(255,45,149,0.96), rgba(184,77,255,0.82)) !important;
+            border: 1px solid rgba(255,255,255,0.24) !important;
+            box-shadow: 0 10px 24px rgba(255,45,149,0.22) !important;
+        }
+
+        [data-testid="stSidebar"] .stButton > button:hover,
+        [data-testid="stSidebar"] .stDownloadButton > button:hover,
+        [data-testid="stSidebar"] .stFormSubmitButton > button:hover {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border-color: rgba(255,255,255,0.42) !important;
+            filter: brightness(1.08);
+        }
+
+        [data-testid="stSidebar"] .stButton > button:disabled,
+        [data-testid="stSidebar"] .stDownloadButton > button:disabled,
+        [data-testid="stSidebar"] .stFormSubmitButton > button:disabled,
+        [data-testid="stSidebar"] .stButton > button[disabled],
+        [data-testid="stSidebar"] .stDownloadButton > button[disabled],
+        [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] {
+            color: rgba(234,243,255,0.88) !important;
+            -webkit-text-fill-color: rgba(234,243,255,0.88) !important;
+            background:
+                linear-gradient(135deg, rgba(35,51,72,0.98), rgba(28,38,58,0.98)) !important;
+            border-color: rgba(255,255,255,0.26) !important;
+            opacity: 1 !important;
         }
 
         [data-testid="stSidebar"] [data-testid="stNumberInput"] button {
@@ -386,6 +421,8 @@ def inject_global_cockpit_theme() -> None:
         }
 
         div[data-baseweb="popover"],
+        div[data-baseweb="tooltip"],
+        div[data-baseweb="tooltip"] > div,
         div[data-baseweb="popover"] > div,
         div[data-baseweb="popover"] [role="dialog"],
         div[data-baseweb="popover"] [data-baseweb="calendar"],
@@ -402,6 +439,7 @@ def inject_global_cockpit_theme() -> None:
         }
 
         div[data-baseweb="popover"] *,
+        div[data-baseweb="tooltip"] *,
         div[data-baseweb="calendar"] *,
         div[data-baseweb="menu"] *,
         ul[role="listbox"] *,
