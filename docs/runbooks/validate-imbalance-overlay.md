@@ -63,11 +63,18 @@ timestamp,zone,imbalance_price_eur_mwh,system_imbalance_volume_mw
 
 ## What the converter validates
 
+The script is a thin wrapper over the production converter shared with the
+live fetch button, so both paths have identical semantics:
+
 - German local `Datum` + `von` + `Zeitzone` timestamps convert cleanly to UTC.
-- NRV-Saldo and reBAP are regular 15-minute time series.
-- NRV-Saldo and reBAP timestamps align exactly.
-- `reBAP unterdeckt` and `reBAP ueberdeckt` are equal for the symmetric German
-  reBAP export.
+- NRV-Saldo and reBAP are regular 15-minute time series on their raw axes.
+- Official unavailable tokens (`N.A.` etc.) drop those intervals instead of
+  failing the conversion; the row-count line in the CLI output reflects the
+  published rows only.
+- Only timestamps published in both NRV-Saldo and reBAP are kept (inner join);
+  fully disjoint files are rejected.
+- `reBAP unterdeckt` and `reBAP ueberdeckt` are equal (within a small
+  tolerance) on published rows of the symmetric German reBAP export.
 - The generated CSV is accepted by `parse_imbalance_import_csv`.
 
 ## Upload and inspect the converted file
