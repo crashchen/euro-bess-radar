@@ -1672,6 +1672,26 @@ class TestFetchNetztransparenzImbalance:
         assert naive_payload["LocalFrom"] == "2026-05-01"
         assert naive_payload["LocalTo"] == "2026-06-01"
 
+    def test_numeric_parser_handles_wide_window_comma_decimal_strings(self) -> None:
+        from src import data_ingestion as di
+
+        parsed = di._netztransparenz_numeric(
+            pd.Series(["100,55", "-594,144", "1.234,56", "122.73"]),
+            column="value",
+            source_name="sample",
+        )
+
+        assert parsed.tolist() == [100.55, -594.144, 1234.56, 122.73]
+
+        with_missing = di._netztransparenz_numeric(
+            pd.Series(["100,55", "N.A."]),
+            column="value",
+            source_name="sample",
+            allow_missing=True,
+        )
+        assert with_missing.iloc[0] == 100.55
+        assert pd.isna(with_missing.iloc[1])
+
     @patch("src.data_ingestion._call_netztransparenz_csv")
     def test_fetch_returns_dedicated_imbalance_frame(
         self, mock_call: MagicMock,
@@ -1767,6 +1787,42 @@ class TestFetchNetztransparenzImbalance:
         ]
         assert out["imbalance_price_eur_mwh"].tolist() == [
             100.0, 105.0, 110.0, 115.0, 120.0, 125.0,
+        ]
+
+    def test_convert_drops_unpublished_nrv_rows(
+        self,
+    ) -> None:
+        from src import data_ingestion as di
+
+        nrv_with_tail = (
+            "Datum;Zeitzone;von;bis;Einheit;Deutschland\n"
+            "01.05.2026;CEST;00:00;00:15;MW;391,596\n"
+            "01.05.2026;CEST;00:15;00:30;MW;-37,672\n"
+            "01.05.2026;CEST;00:30;00:45;MW;230,720\n"
+            "01.05.2026;CEST;00:45;01:00;MW;N.A.\n"
+        )
+
+        out = di._convert_netztransparenz_imbalance_exports(
+            nrv_csv=nrv_with_tail, rebap_csv=self._REBAP,
+        )
+
+        assert len(out) == 3
+        assert out.index.astype(str).tolist() == [
+            "2026-04-30 22:00:00+00:00",
+            "2026-04-30 22:15:00+00:00",
+            "2026-04-30 22:30:00+00:00",
+        ]
+
+        nrv_with_hole = nrv_with_tail.replace(
+            "01.05.2026;CEST;00:15;00:30;MW;-37,672",
+            "01.05.2026;CEST;00:15;00:30;MW;N.A.",
+        )
+        out_with_hole = di._convert_netztransparenz_imbalance_exports(
+            nrv_csv=nrv_with_hole, rebap_csv=self._REBAP,
+        )
+        assert out_with_hole.index.astype(str).tolist() == [
+            "2026-04-30 22:00:00+00:00",
+            "2026-04-30 22:30:00+00:00",
         ]
 
 

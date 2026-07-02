@@ -1748,6 +1748,7 @@ NETZTRANSPARENZ_CSV_DOWNLOAD_ROUTE = (
 NETZTRANSPARENZ_IMBALANCE_ZONE = "DE_LU"
 IMBALANCE_SOURCE_NETZTRANSPARENZ = "Netztransparenz.de"
 _NETZTRANSPARENZ_REBAP_TOLERANCE_EUR_MWH = 1e-2
+_NETZTRANSPARENZ_MISSING_TOKENS = {"", "-", "—", "N.A.", "NA", "NAN", "NULL"}
 _NETZTRANSPARENZ_DOWNLOAD_BASE_SETTINGS: dict[str, Any] = {
     "DataType": 20,
     "CultureName": "de-DE",
@@ -1903,17 +1904,81 @@ def _netztransparenz_rebap_price(rebap: pd.DataFrame) -> pd.Series:
         raise DataSourceParseError(
             f"reBAP is missing required column(s): {sorted(missing)}",
         )
-    under = pd.to_numeric(rebap["reBAP unterdeckt"], errors="coerce")
-    over = pd.to_numeric(rebap["reBAP ueberdeckt"], errors="coerce")
-    if under.isna().any() or over.isna().any():
-        raise DataSourceParseError("reBAP file contains non-numeric price value(s)")
-    diff = float((under - over).abs().max())
+    under = _netztransparenz_numeric(
+        rebap["reBAP unterdeckt"], column="reBAP unterdeckt", source_name="reBAP",
+        allow_missing=True,
+    )
+    over = _netztransparenz_numeric(
+        rebap["reBAP ueberdeckt"], column="reBAP ueberdeckt", source_name="reBAP",
+        allow_missing=True,
+    )
+    if (under.isna() != over.isna()).any():
+        raise DataSourceParseError(
+            "reBAP unterdeckt and ueberdeckt have mismatched missing rows",
+        )
+    valid = under.notna() & over.notna()
+    diff = float((under[valid] - over[valid]).abs().max()) if valid.any() else 0.0
     if diff > _NETZTRANSPARENZ_REBAP_TOLERANCE_EUR_MWH + 1e-12:
         raise DataSourceParseError(
             "reBAP unterdeckt and ueberdeckt columns differ; expected the "
             f"symmetric German reBAP export (max diff {diff:g})",
         )
     return under
+
+
+def _netztransparenz_numeric(
+    values: pd.Series, *, column: str, source_name: str, allow_missing: bool = False,
+) -> pd.Series:
+    """Parse Netztransparenz numeric columns with German comma decimals.
+
+    ``pd.read_csv(decimal=",")`` infers floats for some small exports but object
+    strings for wider windows. Normalise explicitly so the live fetch behaves
+    identically across query ranges.
+    """
+    if pd.api.types.is_numeric_dtype(values):
+        numeric = pd.to_numeric(values, errors="coerce")
+        if numeric.isna().any() and not allow_missing:
+            raise DataSourceParseError(
+                f"{source_name} column {column!r} contains missing value(s)",
+            )
+        return numeric
+
+    text = values.astype("string").str.strip()
+    normalized = text.str.replace("\u00a0", "", regex=False)
+    normalized = normalized.str.replace(" ", "", regex=False)
+    missing = normalized.str.upper().isin(_NETZTRANSPARENZ_MISSING_TOKENS)
+    comma_decimal = normalized.str.contains(",", na=False)
+    normalized = normalized.where(
+        ~comma_decimal,
+        normalized.str.replace(".", "", regex=False).str.replace(",", ".", regex=False),
+    )
+    normalized = normalized.mask(missing, pd.NA)
+    numeric = pd.to_numeric(normalized, errors="coerce")
+    bad_mask = numeric.isna() & ~missing
+    if bad_mask.any():
+        bad = text[bad_mask].dropna().unique()[:5]
+        raise DataSourceParseError(
+            f"{source_name} column {column!r} contains non-numeric value(s): "
+            f"{list(bad)}",
+        )
+    if numeric.isna().any() and not allow_missing:
+        bad = text[numeric.isna()].dropna().unique()[:5]
+        raise DataSourceParseError(
+            f"{source_name} column {column!r} contains missing value(s): {list(bad)}",
+        )
+    return numeric
+
+
+def _drop_netztransparenz_missing_rows(
+    df: pd.DataFrame, *, value_col: str, source_name: str,
+) -> pd.DataFrame:
+    """Drop intervals explicitly marked unavailable by Netztransparenz."""
+    trimmed = df[df[value_col].notna()].copy()
+    if trimmed.empty:
+        raise DataSourceParseError(
+            f"{source_name} contains no published numeric {value_col!r} values",
+        )
+    return trimmed
 
 
 def _convert_netztransparenz_imbalance_exports(
@@ -1931,28 +1996,29 @@ def _convert_netztransparenz_imbalance_exports(
     rebap_ts = _netztransparenz_timestamp_utc(rebap, source_name="reBAP")
     _validate_netztransparenz_regular_15min(nrv_ts, source_name="NRV-Saldo")
     _validate_netztransparenz_regular_15min(rebap_ts, source_name="reBAP")
+    nrv_volume = _netztransparenz_numeric(
+        nrv["Deutschland"], column="Deutschland", source_name="NRV-Saldo",
+        allow_missing=True,
+    )
 
     nrv_work = pd.DataFrame({
         "timestamp": nrv_ts,
-        "system_imbalance_volume_mw": pd.to_numeric(
-            nrv["Deutschland"], errors="coerce",
-        ),
+        "system_imbalance_volume_mw": nrv_volume,
     })
     rebap_work = pd.DataFrame({
         "timestamp": rebap_ts,
         "imbalance_price_eur_mwh": _netztransparenz_rebap_price(rebap),
     })
-    if nrv_work["system_imbalance_volume_mw"].isna().any():
+    nrv_work = _drop_netztransparenz_missing_rows(
+        nrv_work, value_col="system_imbalance_volume_mw", source_name="NRV-Saldo",
+    )
+    rebap_work = _drop_netztransparenz_missing_rows(
+        rebap_work, value_col="imbalance_price_eur_mwh", source_name="reBAP",
+    )
+    merged = nrv_work.merge(rebap_work, on="timestamp", how="inner")
+    if merged.empty:
         raise DataSourceParseError(
-            "NRV-Saldo file contains non-numeric Deutschland value(s)",
-        )
-
-    merged = nrv_work.merge(rebap_work, on="timestamp", how="outer", indicator=True)
-    if not (merged["_merge"] == "both").all():
-        counts = merged["_merge"].value_counts().to_dict()
-        raise DataSourceParseError(
-            "NRV-Saldo and reBAP timestamps do not align exactly: "
-            f"{counts}",
+            "NRV-Saldo and reBAP have no overlapping published timestamps",
         )
     merged = merged.sort_values("timestamp")
     out = pd.DataFrame({
