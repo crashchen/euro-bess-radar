@@ -231,8 +231,8 @@ if fetch_btn or "zone_data" in st.session_state:
             _act_cache = read_activation_cache(primary_zone, _act_start, _act_end)
         except ValueError:
             _act_cache = None
-    if _act_cache is not None and not _act_cache.empty:
-        _act_capture_share = _act_pct / 100.0
+        if _act_cache is not None and not _act_cache.empty:
+            _act_capture_share = _act_pct / 100.0
     # Same state-leak guard for the passive reBAP/imbalance overlay: the slider
     # persists across zones, so only audit it when this zone/window has cached
     # imbalance data and the cockpit panel can actually render.
