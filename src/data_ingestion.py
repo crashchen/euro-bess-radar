@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import functools
 import io
 import itertools
+import json
 import logging
 import re
 import sqlite3
@@ -29,6 +31,7 @@ from src.config import (
     FINGRID_BASE_URL,
     GBP_EUR_YEARLY,
     MAX_SHORT_GAP_HOURS,
+    NETZTRANSPARENZ_BASE_URL,
     PRICE_CACHE_TTL_HOURS,
     REGELLEISTUNG_API_URL,
     get_api_key,
@@ -1734,6 +1737,262 @@ def fetch_regelleistung_results(
         len(result), product, date_range[0].date(), date_range[-1].date(),
     )
     return result
+
+
+# ── Netztransparenz.de (Germany reBAP / NRV-Saldo) ──────────────────────────
+
+NETZTRANSPARENZ_CSV_DOWNLOAD_ROUTE = (
+    f"{NETZTRANSPARENZ_BASE_URL}/DesktopModules/LotesCharts/"
+    "CsvDownloadHandler.ashx"
+)
+NETZTRANSPARENZ_IMBALANCE_ZONE = "DE_LU"
+IMBALANCE_SOURCE_NETZTRANSPARENZ = "Netztransparenz.de"
+_NETZTRANSPARENZ_REBAP_TOLERANCE_EUR_MWH = 1e-2
+_NETZTRANSPARENZ_DOWNLOAD_BASE_SETTINGS: dict[str, Any] = {
+    "DataType": 20,
+    "CultureName": "de-DE",
+    "DiagramType": "line",
+    "TimeInterval": 15,
+    "CsvColumns": ["50Hertz", "Amprion", "TenneT TSO", "TransnetBW"],
+    "TsoIds": [0],
+    "NrvDirection": 0,
+    "WebApiBaseUri": (
+        "https://lotes-UNB-svc-netzt.corp.transmission-it.de/StatistikApi/"
+    ),
+}
+_NETZTRANSPARENZ_NRV_SETTINGS: dict[str, Any] = {
+    **_NETZTRANSPARENZ_DOWNLOAD_BASE_SETTINGS,
+    "ProduktId": 6,
+    "Title": "NRV-Saldo qualitätsgesichert",
+    "DataUnit": "MW",
+    "WebApiRoute": "NrvSaldo/nrvsaldo/qualitaetsgesichert",
+}
+_NETZTRANSPARENZ_REBAP_SETTINGS: dict[str, Any] = {
+    **_NETZTRANSPARENZ_DOWNLOAD_BASE_SETTINGS,
+    "ProduktId": 10,
+    "Title": "reBAP unterdeckt",
+    "DataUnit": "EUR/MWh",
+    "WebApiRoute": "NrvSaldo/rebap/qualitaetsgesichert",
+}
+
+
+def _netztransparenz_local_date_bounds(
+    start: pd.Timestamp, end: pd.Timestamp,
+) -> tuple[str, str]:
+    """Return Berlin-local date bounds for the CSV handler's [from, to)."""
+    start_local = pd.Timestamp(start).tz_convert("Europe/Berlin")
+    end_local = pd.Timestamp(end).tz_convert("Europe/Berlin")
+    return start_local.strftime("%Y-%m-%d"), end_local.strftime("%Y-%m-%d")
+
+
+def _netztransparenz_download_request(
+    *, start: pd.Timestamp, end: pd.Timestamp, settings: dict[str, Any],
+) -> str:
+    """Base64 request payload consumed by Netztransparenz CsvDownloadHandler."""
+    local_from, local_to = _netztransparenz_local_date_bounds(start, end)
+    request = {
+        "LocalFrom": local_from,
+        "LocalTo": local_to,
+        # "cet" means the site's ME(S)Z option: local German time with CET/CEST
+        # labels in the returned CSV, which lets us disambiguate DST repeats.
+        "ResultTimeZone": "cet",
+        "Settings": settings,
+    }
+    return base64.b64encode(
+        json.dumps(request, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).decode("ascii")
+
+
+@retry(max_retries=3, backoff=2.0, exceptions=(requests.RequestException,))
+def _call_netztransparenz_csv(
+    *, start: pd.Timestamp, end: pd.Timestamp, settings: dict[str, Any],
+) -> str:
+    """Download one Netztransparenz CSV via the public chart download handler."""
+    encoded_request = _netztransparenz_download_request(
+        start=start, end=end, settings=settings,
+    )
+    resp = requests.get(
+        NETZTRANSPARENZ_CSV_DOWNLOAD_ROUTE,
+        params={"request": encoded_request},
+        timeout=30,
+    )
+    _raise_if_auth_failed(
+        resp,
+        "Netztransparenz",
+        "The public CSV endpoint may have changed.",
+    )
+    resp.raise_for_status()
+    content_type = resp.headers.get("content-type", "").lower()
+    text = resp.content.decode("utf-8-sig", errors="replace")
+    if "csv" not in content_type and "Datum;" not in text[:200]:
+        raise DataSourceParseError(
+            "Netztransparenz CSV download returned a non-CSV response.",
+        )
+    return text
+
+
+def _read_netztransparenz_csv_text(content: str, *, source_name: str) -> pd.DataFrame:
+    """Read a semicolon/comma-decimal Netztransparenz CSV string."""
+    try:
+        return pd.read_csv(io.StringIO(content), sep=";", decimal=",")
+    except (pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+        raise DataSourceParseError(
+            f"Could not parse Netztransparenz {source_name} CSV: {exc}"
+        ) from exc
+
+
+def _netztransparenz_timestamp_utc(
+    df: pd.DataFrame, *, source_name: str,
+) -> pd.Series:
+    """Build UTC timestamps from Netztransparenz Datum/von/Zeitzone columns."""
+    required = {"Datum", "Zeitzone", "von"}
+    missing = required - set(df.columns)
+    if missing:
+        raise DataSourceParseError(
+            f"{source_name} is missing required column(s): {sorted(missing)}"
+        )
+    zone_labels = df["Zeitzone"].astype(str).str.strip().str.upper()
+    unknown = set(zone_labels) - {"CET", "CEST"}
+    if unknown:
+        raise DataSourceParseError(
+            f"{source_name} has unsupported Zeitzone value(s): {sorted(unknown)}",
+        )
+    local_naive = pd.to_datetime(
+        df["Datum"].astype(str).str.strip() + " " + df["von"].astype(str).str.strip(),
+        format="%d.%m.%Y %H:%M",
+        errors="coerce",
+    )
+    if local_naive.isna().any():
+        raise DataSourceParseError(
+            f"{source_name} has {int(local_naive.isna().sum())} "
+            "unparseable timestamp row(s)",
+        )
+    is_dst = (zone_labels == "CEST").to_numpy()
+    try:
+        return local_naive.dt.tz_localize(
+            "Europe/Berlin", ambiguous=is_dst, nonexistent="raise",
+        ).dt.tz_convert("UTC")
+    except (ValueError, TypeError) as exc:
+        raise DataSourceParseError(
+            f"{source_name} has invalid Europe/Berlin local timestamp(s): {exc}"
+        ) from exc
+
+
+def _validate_netztransparenz_regular_15min(
+    ts: pd.Series, *, source_name: str,
+) -> None:
+    """Require a unique, regular 15-minute UTC time axis."""
+    ordered = pd.Series(pd.DatetimeIndex(ts).sort_values())
+    if ordered.duplicated().any():
+        raise DataSourceParseError(f"{source_name} contains duplicate timestamps")
+    if len(ordered) < 2:
+        raise DataSourceParseError(f"{source_name} needs at least two timestamps")
+    deltas = ordered.diff().dropna().dt.total_seconds()
+    bad = deltas[deltas != 900.0]
+    if not bad.empty:
+        raise DataSourceParseError(
+            f"{source_name} is not a regular 15-minute series; "
+            f"unexpected gap seconds: {sorted(set(bad.astype(int)))[:5]}",
+        )
+
+
+def _netztransparenz_rebap_price(rebap: pd.DataFrame) -> pd.Series:
+    """Return the validated signed German reBAP cash-flow price."""
+    missing = {"reBAP unterdeckt", "reBAP ueberdeckt"} - set(rebap.columns)
+    if missing:
+        raise DataSourceParseError(
+            f"reBAP is missing required column(s): {sorted(missing)}",
+        )
+    under = pd.to_numeric(rebap["reBAP unterdeckt"], errors="coerce")
+    over = pd.to_numeric(rebap["reBAP ueberdeckt"], errors="coerce")
+    if under.isna().any() or over.isna().any():
+        raise DataSourceParseError("reBAP file contains non-numeric price value(s)")
+    diff = float((under - over).abs().max())
+    if diff > _NETZTRANSPARENZ_REBAP_TOLERANCE_EUR_MWH + 1e-12:
+        raise DataSourceParseError(
+            "reBAP unterdeckt and ueberdeckt columns differ; expected the "
+            f"symmetric German reBAP export (max diff {diff:g})",
+        )
+    return under
+
+
+def _convert_netztransparenz_imbalance_exports(
+    *, nrv_csv: str, rebap_csv: str, zone: str = NETZTRANSPARENZ_IMBALANCE_ZONE,
+) -> pd.DataFrame:
+    """Convert raw Netztransparenz CSV text into the dedicated imbalance frame."""
+    nrv = _read_netztransparenz_csv_text(nrv_csv, source_name="NRV-Saldo")
+    rebap = _read_netztransparenz_csv_text(rebap_csv, source_name="reBAP")
+    if "Deutschland" not in nrv.columns:
+        raise DataSourceParseError(
+            "NRV-Saldo file is missing the 'Deutschland' MW column",
+        )
+
+    nrv_ts = _netztransparenz_timestamp_utc(nrv, source_name="NRV-Saldo")
+    rebap_ts = _netztransparenz_timestamp_utc(rebap, source_name="reBAP")
+    _validate_netztransparenz_regular_15min(nrv_ts, source_name="NRV-Saldo")
+    _validate_netztransparenz_regular_15min(rebap_ts, source_name="reBAP")
+
+    nrv_work = pd.DataFrame({
+        "timestamp": nrv_ts,
+        "system_imbalance_volume_mw": pd.to_numeric(
+            nrv["Deutschland"], errors="coerce",
+        ),
+    })
+    rebap_work = pd.DataFrame({
+        "timestamp": rebap_ts,
+        "imbalance_price_eur_mwh": _netztransparenz_rebap_price(rebap),
+    })
+    if nrv_work["system_imbalance_volume_mw"].isna().any():
+        raise DataSourceParseError(
+            "NRV-Saldo file contains non-numeric Deutschland value(s)",
+        )
+
+    merged = nrv_work.merge(rebap_work, on="timestamp", how="outer", indicator=True)
+    if not (merged["_merge"] == "both").all():
+        counts = merged["_merge"].value_counts().to_dict()
+        raise DataSourceParseError(
+            "NRV-Saldo and reBAP timestamps do not align exactly: "
+            f"{counts}",
+        )
+    merged = merged.sort_values("timestamp")
+    out = pd.DataFrame({
+        "zone": zone,
+        "imbalance_price_eur_mwh": merged["imbalance_price_eur_mwh"].astype(float),
+        "system_imbalance_volume_mw": merged[
+            "system_imbalance_volume_mw"
+        ].astype(float),
+    })
+    out.index = pd.DatetimeIndex(merged["timestamp"], name="timestamp")
+    return out
+
+
+def fetch_netztransparenz_imbalance(
+    zone: str,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> pd.DataFrame | None:
+    """Fetch German NRV-Saldo + reBAP from Netztransparenz into imbalance frame.
+
+    This is a keyless public CSV download for the DE_LU balancing area. The
+    returned frame is ready for ``persist_imbalance_frame(...,
+    source=IMBALANCE_SOURCE_NETZTRANSPARENZ)`` and therefore flows through the
+    same provenance/Data Trust/cockpit overlay path as manual uploads.
+    """
+    if zone != NETZTRANSPARENZ_IMBALANCE_ZONE:
+        return None
+    if pd.Timestamp(end) <= pd.Timestamp(start):
+        raise DataSourceParseError("Netztransparenz fetch end must be after start")
+    nrv_csv = _call_netztransparenz_csv(
+        start=start, end=end, settings=_NETZTRANSPARENZ_NRV_SETTINGS,
+    )
+    rebap_csv = _call_netztransparenz_csv(
+        start=start, end=end, settings=_NETZTRANSPARENZ_REBAP_SETTINGS,
+    )
+    return _convert_netztransparenz_imbalance_exports(
+        nrv_csv=nrv_csv,
+        rebap_csv=rebap_csv,
+        zone=zone,
+    )
 
 
 # ── Elexon System Prices (GB Balancing) ───────────────────────────────────────

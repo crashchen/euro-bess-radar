@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 
 import pandas as pd
+import requests
 import streamlit as st
 
 from src.ancillary import (
@@ -21,10 +22,12 @@ from src.ancillary import (
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
 from src.config import ALL_ZONES
 from src.data_ingestion import (
+    IMBALANCE_SOURCE_NETZTRANSPARENZ,
     DataSourceAuthError,
     DataSourceNetworkError,
     DataSourceParseError,
     build_zone_query_window,
+    fetch_netztransparenz_imbalance,
     fetch_prices,
     generate_intraday_template_csv,
     parse_intraday_csv,
@@ -272,6 +275,35 @@ def _parse_and_store_imbalance_upload(uploaded_file, default_zone: str) -> None:
     )
 
 
+def _fetch_and_store_netztransparenz_imbalance(
+    zone: str, start: object, end: object,
+) -> None:
+    """Fetch + persist official German Netztransparenz reBAP/NRV data."""
+    api_start, api_end = build_zone_query_window(zone, start, end)
+    try:
+        parsed = fetch_netztransparenz_imbalance(zone, api_start, api_end)
+    except (DataSourceNetworkError, DataSourceParseError, requests.RequestException) as exc:
+        st.error(f"Netztransparenz fetch error: {exc}")
+        return
+    if parsed is None or parsed.empty:
+        st.warning("No Netztransparenz reBAP/imbalance rows returned for this window.")
+        return
+    try:
+        summaries = persist_imbalance_frame(
+            parsed,
+            source=IMBALANCE_SOURCE_NETZTRANSPARENZ,
+        )
+    except (OSError, sqlite3.DatabaseError, ValueError) as exc:
+        st.error(f"Netztransparenz persistence error: {exc}")
+        return
+    total = sum(s["rows"] for s in summaries)
+    zones = ", ".join(s["zone"] for s in summaries)
+    st.success(
+        f"Fetched {total} Netztransparenz reBAP/imbalance rows ({zones}). "
+        "Published prices and system-level volumes stored as-is."
+    )
+
+
 def _run_and_store_ancillary_fetch(zone: str, start: object, end: object) -> None:
     """Run the configured ancillary auto-fetchers and store successful results."""
     fetchers = get_available_fetchers(zone)
@@ -480,7 +512,8 @@ def render_sidebar() -> dict:
         st.caption(
             "Passive imbalance/reBAP settlement stream (EUR/MWh, UTC), separate "
             "from capacity fees and activation energy. Upload support writes to "
-            "SQLite/provenance; Data Trust/model integration lands next."
+            "SQLite/provenance; cached rows feed Data Trust and the separate "
+            "historical replay overlay."
         )
 
         st.markdown("**Unified Reserve Capacity CSV**")
@@ -524,6 +557,24 @@ def render_sidebar() -> dict:
             "Parse & Import imbalance", key="imb_import_btn",
         ):
             _parse_and_store_imbalance_upload(imb_file, primary_zone_for_fetch)
+
+        if primary_zone_for_fetch == "DE_LU":
+            st.button(
+                "Fetch Netztransparenz reBAP/imbalance",
+                key="fetch_netztransparenz_imbalance",
+                help=(
+                    "Download official German NRV-Saldo + reBAP CSV data for "
+                    "the selected date window and write it to the same "
+                    "imbalance cache/provenance path as manual uploads."
+                ),
+                on_click=_fetch_and_store_netztransparenz_imbalance,
+                args=(primary_zone_for_fetch, start_date, end_date),
+            )
+        else:
+            st.caption(
+                "Live Netztransparenz reBAP/imbalance fetch is available for "
+                "DE_LU only; use the CSV uploader for other zones."
+            )
 
     # ── Intraday (IDA) price upload ──────────────────────────────────────
     with st.sidebar.expander("Intraday (IDA) Prices"):

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import sqlite3
 from pathlib import Path
@@ -37,6 +39,7 @@ from src.data_ingestion import (
     fetch_fingrid_fcr_prices,
     fetch_generation_data,
     fetch_intraday_prices,
+    fetch_netztransparenz_imbalance,
     fetch_prices,
     fetch_regelleistung_results,
     generate_intraday_template_csv,
@@ -1627,6 +1630,119 @@ class TestFetchEntsoeImbalancePrices:
                 pd.Timestamp("2025-01-01", tz="UTC"),
                 pd.Timestamp("2025-01-02", tz="UTC"),
             )
+
+
+class TestFetchNetztransparenzImbalance:
+    """German Netztransparenz NRV-Saldo + reBAP live CSV bridge."""
+
+    _NRV = (
+        "Datum;Zeitzone;von;bis;Einheit;Deutschland\n"
+        "01.05.2026;CEST;00:00;00:15;MW;391,596\n"
+        "01.05.2026;CEST;00:15;00:30;MW;-37,672\n"
+        "01.05.2026;CEST;00:30;00:45;MW;230,720\n"
+    )
+    _REBAP = (
+        "Datum;Zeitzone;von;bis;Einheit;reBAP unterdeckt;reBAP ueberdeckt\n"
+        "01.05.2026;CEST;00:00;00:15;EUR/MWh;122,73;122,73\n"
+        "01.05.2026;CEST;00:15;00:30;EUR/MWh;101,08;101,08\n"
+        "01.05.2026;CEST;00:30;00:45;EUR/MWh;111,31;111,31\n"
+    )
+
+    def test_download_request_uses_berlin_local_exclusive_bounds(self) -> None:
+        from src import data_ingestion as di
+
+        encoded = di._netztransparenz_download_request(
+            start=pd.Timestamp("2026-04-30T22:00:00Z"),
+            end=pd.Timestamp("2026-05-31T22:00:00Z"),
+            settings={"ProduktId": 6},
+        )
+        payload = json.loads(base64.b64decode(encoded).decode("utf-8"))
+
+        assert payload["LocalFrom"] == "2026-05-01"
+        assert payload["LocalTo"] == "2026-06-01"
+        assert payload["ResultTimeZone"] == "cet"
+        assert payload["Settings"] == {"ProduktId": 6}
+
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_fetch_returns_dedicated_imbalance_frame(
+        self, mock_call: MagicMock,
+    ) -> None:
+        mock_call.side_effect = [self._NRV, self._REBAP]
+
+        out = fetch_netztransparenz_imbalance(
+            "DE_LU",
+            pd.Timestamp("2026-04-30T22:00:00Z"),
+            pd.Timestamp("2026-05-01T22:00:00Z"),
+        )
+
+        assert out is not None
+        assert list(out.columns) == [
+            "zone", "imbalance_price_eur_mwh", "system_imbalance_volume_mw",
+        ]
+        assert out.index.astype(str).tolist() == [
+            "2026-04-30 22:00:00+00:00",
+            "2026-04-30 22:15:00+00:00",
+            "2026-04-30 22:30:00+00:00",
+        ]
+        assert out["zone"].tolist() == ["DE_LU", "DE_LU", "DE_LU"]
+        assert out["imbalance_price_eur_mwh"].tolist() == [122.73, 101.08, 111.31]
+        assert out["system_imbalance_volume_mw"].tolist() == [
+            391.596, -37.672, 230.72,
+        ]
+        assert [call.kwargs["settings"]["ProduktId"] for call in mock_call.call_args_list] == [
+            6, 10,
+        ]
+
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_unsupported_zone_returns_none_without_network(
+        self, mock_call: MagicMock,
+    ) -> None:
+        out = fetch_netztransparenz_imbalance(
+            "FR",
+            pd.Timestamp("2026-04-30T22:00:00Z"),
+            pd.Timestamp("2026-05-01T22:00:00Z"),
+        )
+
+        assert out is None
+        mock_call.assert_not_called()
+
+    def test_convert_handles_autumn_dst_repeat_and_rebap_tolerance(self) -> None:
+        from src import data_ingestion as di
+
+        nrv = (
+            "Datum;Zeitzone;von;bis;Einheit;Deutschland\n"
+            "25.10.2026;cest;02:00;02:15;MW;10,0\n"
+            "25.10.2026;CEST;02:15;02:30;MW;15,0\n"
+            "25.10.2026;CEST;02:30;02:45;MW;20,0\n"
+            "25.10.2026;CEST;02:45;03:00;MW;25,0\n"
+            "25.10.2026;CET;02:00;02:15;MW;30,0\n"
+            "25.10.2026;CET;02:15;02:30;MW;35,0\n"
+        )
+        rebap = (
+            "Datum;Zeitzone;von;bis;Einheit;reBAP unterdeckt;reBAP ueberdeckt\n"
+            "25.10.2026;cest;02:00;02:15;EUR/MWh;100,0;100,0\n"
+            "25.10.2026;CEST;02:15;02:30;EUR/MWh;105,0;105,0\n"
+            "25.10.2026;CEST;02:30;02:45;EUR/MWh;110,0;110,0\n"
+            "25.10.2026;CEST;02:45;03:00;EUR/MWh;115,0;115,0\n"
+            "25.10.2026;CET;02:00;02:15;EUR/MWh;120,0;119,99\n"
+            "25.10.2026;CET;02:15;02:30;EUR/MWh;125,0;125,0\n"
+        )
+
+        out = di._convert_netztransparenz_imbalance_exports(
+            nrv_csv=nrv, rebap_csv=rebap,
+        )
+
+        assert out.index.astype(str).tolist() == [
+            "2026-10-25 00:00:00+00:00",
+            "2026-10-25 00:15:00+00:00",
+            "2026-10-25 00:30:00+00:00",
+            "2026-10-25 00:45:00+00:00",
+            "2026-10-25 01:00:00+00:00",
+            "2026-10-25 01:15:00+00:00",
+        ]
+        assert out["imbalance_price_eur_mwh"].tolist() == [
+            100.0, 105.0, 110.0, 115.0, 120.0, 125.0,
+        ]
 
 
 # ── Test 14: ENTSO-E Intraday Auction prices (IDA1/2/3) ────────────────────
