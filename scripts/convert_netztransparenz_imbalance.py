@@ -39,6 +39,7 @@ _TIMEZONE_BY_LABEL = {
     "CET": "Europe/Berlin",
     "CEST": "Europe/Berlin",
 }
+_REBAP_EQUAL_TOLERANCE_EUR_MWH = 1e-2
 
 
 def _read_netztransparenz_csv(path: Path) -> pd.DataFrame:
@@ -55,7 +56,8 @@ def _timestamp_utc(df: pd.DataFrame, *, source_name: str) -> pd.Series:
     missing = required - set(df.columns)
     if missing:
         raise ValueError(f"{source_name} is missing required column(s): {sorted(missing)}")
-    zones = set(df["Zeitzone"].astype(str).str.strip())
+    zone_labels = df["Zeitzone"].astype(str).str.strip().str.upper()
+    zones = set(zone_labels)
     unknown = zones - set(_TIMEZONE_BY_LABEL)
     if unknown:
         raise ValueError(
@@ -70,10 +72,11 @@ def _timestamp_utc(df: pd.DataFrame, *, source_name: str) -> pd.Series:
     if local_naive.isna().any():
         bad = int(local_naive.isna().sum())
         raise ValueError(f"{source_name} has {bad} unparseable timestamp row(s)")
-    # If a file straddles DST labels, both CET and CEST are still Europe/Berlin;
-    # pandas handles nonexistent/ambiguous local times for the official series.
+    # Autumn DST repeats 02:00-03:00; the official Zeitzone column tells pandas
+    # which copy is daylight-saving time (CEST) and which is standard time (CET).
+    is_dst = (zone_labels == "CEST").to_numpy()
     return local_naive.dt.tz_localize(
-        "Europe/Berlin", ambiguous="raise", nonexistent="raise",
+        "Europe/Berlin", ambiguous=is_dst, nonexistent="raise",
     ).dt.tz_convert("UTC")
 
 
@@ -102,8 +105,8 @@ def _rebap_price(rebap: pd.DataFrame) -> pd.Series:
         over = pd.to_numeric(rebap["reBAP ueberdeckt"], errors="coerce")
         if under.isna().any() or over.isna().any():
             raise ValueError("reBAP file contains non-numeric price value(s)")
-        if not under.equals(over):
-            diff = (under - over).abs().max()
+        diff = float((under - over).abs().max())
+        if diff > _REBAP_EQUAL_TOLERANCE_EUR_MWH + 1e-12:
             raise ValueError(
                 "reBAP unterdeckt and ueberdeckt columns differ; this converter "
                 f"expects the symmetric German reBAP export (max diff {diff:g})",

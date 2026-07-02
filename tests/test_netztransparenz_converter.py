@@ -119,3 +119,47 @@ def test_cli_writes_upload_ready_file(tmp_path, monkeypatch, capsys) -> None:
     written = pd.read_csv(out)
     assert len(written) == 3
     assert "Wrote 3 unified imbalance rows" in capsys.readouterr().out
+
+
+def test_converter_handles_autumn_dst_repeat_and_rebap_tolerance(tmp_path) -> None:
+    nrv = _write(
+        tmp_path / "nrv.csv",
+        (
+            "Datum;Zeitzone;von;bis;Einheit;Deutschland\n"
+            "25.10.2026;cest;02:00;02:15;MW;10,0\n"
+            "25.10.2026;CEST;02:15;02:30;MW;15,0\n"
+            "25.10.2026;CEST;02:30;02:45;MW;20,0\n"
+            "25.10.2026;CEST;02:45;03:00;MW;25,0\n"
+            "25.10.2026;CET;02:00;02:15;MW;30,0\n"
+            "25.10.2026;CET;02:15;02:30;MW;35,0\n"
+        ),
+    )
+    rebap = _write(
+        tmp_path / "rebap.csv",
+        (
+            "Datum;Zeitzone;von;bis;Einheit;reBAP unterdeckt;reBAP ueberdeckt\n"
+            "25.10.2026;cest;02:00;02:15;EUR/MWh;100,0;100,0\n"
+            "25.10.2026;CEST;02:15;02:30;EUR/MWh;105,0;105,0\n"
+            "25.10.2026;CEST;02:30;02:45;EUR/MWh;110,0;110,0\n"
+            "25.10.2026;CEST;02:45;03:00;EUR/MWh;115,0;115,0\n"
+            "25.10.2026;CET;02:00;02:15;EUR/MWh;120,0;119,99\n"
+            "25.10.2026;CET;02:15;02:30;EUR/MWh;125,0;125,0\n"
+        ),
+    )
+
+    out = convert_netztransparenz_imbalance(nrv_path=nrv, rebap_path=rebap)
+
+    assert out["timestamp"].tolist() == [
+        "2026-10-25T00:00:00Z",
+        "2026-10-25T00:15:00Z",
+        "2026-10-25T00:30:00Z",
+        "2026-10-25T00:45:00Z",
+        "2026-10-25T01:00:00Z",
+        "2026-10-25T01:15:00Z",
+    ]
+    assert out["system_imbalance_volume_mw"].tolist() == [
+        10.0, 15.0, 20.0, 25.0, 30.0, 35.0,
+    ]
+    assert out["imbalance_price_eur_mwh"].tolist() == [
+        100.0, 105.0, 110.0, 115.0, 120.0, 125.0,
+    ]
