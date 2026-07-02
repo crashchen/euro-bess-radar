@@ -46,7 +46,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.ancillary import parse_imbalance_import_csv
 from src.data_ingestion import (
     NETZTRANSPARENZ_IMBALANCE_ZONE,
-    _convert_netztransparenz_imbalance_exports,
+    convert_netztransparenz_imbalance_exports,
 )
 
 DEFAULT_ZONE = NETZTRANSPARENZ_IMBALANCE_ZONE
@@ -54,10 +54,7 @@ DEFAULT_ZONE = NETZTRANSPARENZ_IMBALANCE_ZONE
 
 def _read_csv_text(path: Path) -> str:
     """Read one official export as text (utf-8-sig strips the BOM)."""
-    try:
-        return path.read_text(encoding="utf-8-sig")
-    except OSError as exc:
-        raise ValueError(f"Could not read Netztransparenz CSV {path}: {exc}") from exc
+    return path.read_text(encoding="utf-8-sig")
 
 
 def convert_netztransparenz_imbalance(
@@ -68,25 +65,23 @@ def convert_netztransparenz_imbalance(
 ) -> pd.DataFrame:
     """Convert official Netztransparenz exports to the unified imbalance CSV frame.
 
-    Delegates to ``data_ingestion._convert_netztransparenz_imbalance_exports``
+    Delegates to ``data_ingestion.convert_netztransparenz_imbalance_exports``
     (the exact converter the live fetcher uses), then reshapes the dedicated
     imbalance frame into the upload-ready CSV column layout.
     """
-    frame = _convert_netztransparenz_imbalance_exports(
+    frame = convert_netztransparenz_imbalance_exports(
         nrv_csv=_read_csv_text(nrv_path),
         rebap_csv=_read_csv_text(rebap_path),
         zone=zone,
     )
     out = pd.DataFrame({
-        "timestamp": frame.index.strftime("%Y-%m-%dT%H:%M:%SZ").to_numpy(),
-        "zone": frame["zone"].to_numpy(),
-        "imbalance_price_eur_mwh": frame["imbalance_price_eur_mwh"]
-        .astype(float)
-        .to_numpy(),
-        "system_imbalance_volume_mw": frame["system_imbalance_volume_mw"]
-        .astype(float)
-        .to_numpy(),
-    })
+        "timestamp": frame.index.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "zone": frame["zone"],
+        "imbalance_price_eur_mwh": frame["imbalance_price_eur_mwh"].astype(float),
+        "system_imbalance_volume_mw": frame[
+            "system_imbalance_volume_mw"
+        ].astype(float),
+    }).reset_index(drop=True)
     # Validate the output through the production parser before returning.
     parse_imbalance_import_csv(out.to_csv(index=False))
     return out

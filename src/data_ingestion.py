@@ -1983,7 +1983,7 @@ def _drop_netztransparenz_missing_rows(
     return trimmed
 
 
-def _convert_netztransparenz_imbalance_exports(
+def convert_netztransparenz_imbalance_exports(
     *, nrv_csv: str, rebap_csv: str, zone: str = NETZTRANSPARENZ_IMBALANCE_ZONE,
 ) -> pd.DataFrame:
     """Convert raw Netztransparenz CSV text into the dedicated imbalance frame."""
@@ -2058,7 +2058,7 @@ def fetch_netztransparenz_imbalance(
     rebap_csv = _call_netztransparenz_csv(
         start=start_utc, end=end_utc, settings=_NETZTRANSPARENZ_REBAP_SETTINGS,
     )
-    return _convert_netztransparenz_imbalance_exports(
+    return convert_netztransparenz_imbalance_exports(
         nrv_csv=nrv_csv,
         rebap_csv=rebap_csv,
         zone=zone,

@@ -1,7 +1,7 @@
 """Tests for the Netztransparenz reBAP/NRV conversion helper.
 
 The script is a thin wrapper over the production converter shared with the
-live fetch (``data_ingestion._convert_netztransparenz_imbalance_exports``),
+live fetch (``data_ingestion.convert_netztransparenz_imbalance_exports``),
 so these tests pin the shared semantics: official ``N.A.`` intervals drop,
 only timestamps published in both NRV-Saldo and reBAP survive (inner join),
 and semantic failures raise ``DataSourceParseError``.
@@ -21,7 +21,7 @@ from scripts.convert_netztransparenz_imbalance import (
 from src.ancillary import parse_imbalance_import_csv
 from src.data_ingestion import (
     DataSourceParseError,
-    _convert_netztransparenz_imbalance_exports,
+    convert_netztransparenz_imbalance_exports,
 )
 
 
@@ -146,7 +146,7 @@ def test_converter_matches_production_converter_exactly(tmp_path) -> None:
     rebap = _write(tmp_path / "rebap.csv", rebap_text)
 
     out = convert_netztransparenz_imbalance(nrv_path=nrv, rebap_path=rebap)
-    production = _convert_netztransparenz_imbalance_exports(
+    production = convert_netztransparenz_imbalance_exports(
         nrv_csv=nrv_text, rebap_csv=rebap_text,
     )
 
