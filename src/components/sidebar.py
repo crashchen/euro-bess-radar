@@ -559,7 +559,7 @@ def render_sidebar() -> dict:
             _parse_and_store_imbalance_upload(imb_file, primary_zone_for_fetch)
 
         if primary_zone_for_fetch == "DE_LU":
-            st.button(
+            if st.button(
                 "Fetch Netztransparenz reBAP/imbalance",
                 key="fetch_netztransparenz_imbalance",
                 help=(
@@ -567,9 +567,10 @@ def render_sidebar() -> dict:
                     "the selected date window and write it to the same "
                     "imbalance cache/provenance path as manual uploads."
                 ),
-                on_click=_fetch_and_store_netztransparenz_imbalance,
-                args=(primary_zone_for_fetch, start_date, end_date),
-            )
+            ):
+                _fetch_and_store_netztransparenz_imbalance(
+                    primary_zone_for_fetch, start_date, end_date,
+                )
         else:
             st.caption(
                 "Live Netztransparenz reBAP/imbalance fetch is available for "

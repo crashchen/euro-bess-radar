@@ -1663,6 +1663,15 @@ class TestFetchNetztransparenzImbalance:
         assert payload["ResultTimeZone"] == "cet"
         assert payload["Settings"] == {"ProduktId": 6}
 
+        naive_encoded = di._netztransparenz_download_request(
+            start=pd.Timestamp("2026-05-01 00:00"),
+            end=pd.Timestamp("2026-06-01 00:00"),
+            settings={"ProduktId": 10},
+        )
+        naive_payload = json.loads(base64.b64decode(naive_encoded).decode("utf-8"))
+        assert naive_payload["LocalFrom"] == "2026-05-01"
+        assert naive_payload["LocalTo"] == "2026-06-01"
+
     @patch("src.data_ingestion._call_netztransparenz_csv")
     def test_fetch_returns_dedicated_imbalance_frame(
         self, mock_call: MagicMock,
@@ -1692,6 +1701,22 @@ class TestFetchNetztransparenzImbalance:
         assert [call.kwargs["settings"]["ProduktId"] for call in mock_call.call_args_list] == [
             6, 10,
         ]
+
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_fetch_normalizes_naive_timestamps_to_utc(
+        self, mock_call: MagicMock,
+    ) -> None:
+        mock_call.side_effect = [self._NRV, self._REBAP]
+
+        fetch_netztransparenz_imbalance(
+            "DE_LU",
+            pd.Timestamp("2026-05-01 00:00"),
+            pd.Timestamp("2026-05-02 00:00"),
+        )
+
+        first_call = mock_call.call_args_list[0]
+        assert str(first_call.kwargs["start"]) == "2026-04-30 22:00:00+00:00"
+        assert str(first_call.kwargs["end"]) == "2026-05-01 22:00:00+00:00"
 
     @patch("src.data_ingestion._call_netztransparenz_csv")
     def test_unsupported_zone_returns_none_without_network(

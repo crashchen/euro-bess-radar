@@ -1780,8 +1780,8 @@ def _netztransparenz_local_date_bounds(
     start: pd.Timestamp, end: pd.Timestamp,
 ) -> tuple[str, str]:
     """Return Berlin-local date bounds for the CSV handler's [from, to)."""
-    start_local = pd.Timestamp(start).tz_convert("Europe/Berlin")
-    end_local = pd.Timestamp(end).tz_convert("Europe/Berlin")
+    start_local = _to_utc_timestamp(start).tz_convert("Europe/Berlin")
+    end_local = _to_utc_timestamp(end).tz_convert("Europe/Berlin")
     return start_local.strftime("%Y-%m-%d"), end_local.strftime("%Y-%m-%d")
 
 
@@ -1882,7 +1882,7 @@ def _validate_netztransparenz_regular_15min(
     ts: pd.Series, *, source_name: str,
 ) -> None:
     """Require a unique, regular 15-minute UTC time axis."""
-    ordered = pd.Series(pd.DatetimeIndex(ts).sort_values())
+    ordered = ts.sort_values().reset_index(drop=True)
     if ordered.duplicated().any():
         raise DataSourceParseError(f"{source_name} contains duplicate timestamps")
     if len(ordered) < 2:
@@ -1980,13 +1980,15 @@ def fetch_netztransparenz_imbalance(
     """
     if zone != NETZTRANSPARENZ_IMBALANCE_ZONE:
         return None
-    if pd.Timestamp(end) <= pd.Timestamp(start):
+    start_utc = _to_utc_timestamp(start)
+    end_utc = _to_utc_timestamp(end)
+    if end_utc <= start_utc:
         raise DataSourceParseError("Netztransparenz fetch end must be after start")
     nrv_csv = _call_netztransparenz_csv(
-        start=start, end=end, settings=_NETZTRANSPARENZ_NRV_SETTINGS,
+        start=start_utc, end=end_utc, settings=_NETZTRANSPARENZ_NRV_SETTINGS,
     )
     rebap_csv = _call_netztransparenz_csv(
-        start=start, end=end, settings=_NETZTRANSPARENZ_REBAP_SETTINGS,
+        start=start_utc, end=end_utc, settings=_NETZTRANSPARENZ_REBAP_SETTINGS,
     )
     return _convert_netztransparenz_imbalance_exports(
         nrv_csv=nrv_csv,
