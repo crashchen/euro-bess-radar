@@ -2065,6 +2065,309 @@ def fetch_netztransparenz_imbalance(
     )
 
 
+# ── Activated balancing energy (Step 5a: Netztransparenz volumes + ENTSO-E ───
+# prices). Pure fetch/convert layer — no persistence, no UI wiring (that is 5b).
+
+# Quality-assured activated aFRR/mFRR volumes from the same public chart CSV
+# handler as the reBAP/NRV fetch. The qualitaetsgesichert series lags roughly
+# one month behind delivery (the operational "betrieblich" variant is D+1 but
+# is deliberately NOT used here — historical replay wants the authoritative
+# series, matching the reBAP/NRV discipline). FCR / k*Delta f (ProduktId 7/8)
+# is deliberately absent: FCR has no separately-paid energy leg (red-line in
+# docs/import-templates.md §3).
+_NETZTRANSPARENZ_ACTIVATION_SETTINGS: dict[str, dict[str, Any]] = {
+    "aFRR": {
+        **_NETZTRANSPARENZ_DOWNLOAD_BASE_SETTINGS,
+        "ProduktId": 1,
+        "Title": "Aktivierte aFRR qualitätsgesichert",
+        "DataUnit": "MW",
+        "WebApiRoute": "NrvSaldo/aktiviertesrl/qualitaetsgesichert",
+    },
+    "mFRR": {
+        **_NETZTRANSPARENZ_DOWNLOAD_BASE_SETTINGS,
+        "ProduktId": 17,
+        "Title": "Aktivierte mFRR qualitätsgesichert",
+        "DataUnit": "MW",
+        "WebApiRoute": "NrvSaldo/aktiviertemrl/qualitaetsgesichert",
+    },
+}
+
+# Direction is a COLUMN SPLIT in the official export: down-regulation volumes
+# are published as non-negative magnitudes in the "(Negativ)" columns. The
+# Deutschland columns are the sum of the four TSO columns (verified on live
+# data 2026-07-03).
+_NETZTRANSPARENZ_ACTIVATION_VOLUME_COLUMNS: dict[str, str] = {
+    "up": "Deutschland (Positiv)",
+    "down": "Deutschland (Negativ)",
+}
+
+# The aFRR/mFRR activation price on the ENTSO-E Transparency Platform
+# (17.1.f, documentType A84, processType A16) is the Germany-wide
+# PICASSO/MARI marginal price republished per control area: DE_TENNET,
+# DE_50HZ and DE_TRANSNET return identical series (verified 2026-07-03),
+# while DE_AMPRION returns no data on the new API — do not depend on it.
+ENTSOE_ACTIVATION_PRICE_AREA = "DE_TENNET"
+_ENTSOE_ACTIVATION_PROCESS_TYPE = "A16"
+_ACTIVATION_PRICE_RESERVE_TYPES = {"afrr": "aFRR", "mfrr": "mFRR"}
+_ACTIVATION_PRICE_DIRECTIONS = {"up": "up", "down": "down"}
+
+# Mirrors ancillary._ACTIVATION_FRAME_COLUMNS (data_ingestion must not import
+# ancillary — the dependency runs the other way); a test asserts parity.
+_ACTIVATION_FETCH_FRAME_COLUMNS = [
+    "zone", "product_type", "direction",
+    "activation_price_eur_mwh", "system_activated_volume_mw",
+]
+
+
+def _convert_netztransparenz_activation_volumes(
+    csv_text: str, *, product: str,
+) -> pd.DataFrame:
+    """Convert one wide activated-volume CSV into long nonzero-activation rows.
+
+    Returns columns ``timestamp, product_type, direction,
+    system_activated_volume_mw`` with only rows whose Deutschland volume is
+    strictly positive: a zero volume means "no activation in this interval and
+    direction", and official ``N.A.`` unavailable intervals are dropped the
+    same way the reBAP/NRV fetch drops them. A negative volume raises — the
+    export publishes magnitudes, so a sign would mean the schema changed.
+    """
+    source_name = f"Aktivierte {product}"
+    df = _read_netztransparenz_csv_text(csv_text, source_name=source_name)
+    missing = set(_NETZTRANSPARENZ_ACTIVATION_VOLUME_COLUMNS.values()) - set(df.columns)
+    if missing:
+        raise DataSourceParseError(
+            f"{source_name} is missing required column(s): {sorted(missing)}"
+        )
+    ts = _netztransparenz_timestamp_utc(df, source_name=source_name)
+    _validate_netztransparenz_regular_15min(ts, source_name=source_name)
+
+    frames: list[pd.DataFrame] = []
+    for direction, column in _NETZTRANSPARENZ_ACTIVATION_VOLUME_COLUMNS.items():
+        volume = _netztransparenz_numeric(
+            df[column], column=column, source_name=source_name, allow_missing=True,
+        )
+        if (volume.dropna() < 0).any():
+            raise DataSourceParseError(
+                f"{source_name} column {column!r} contains negative volume(s); "
+                "the official export publishes non-negative magnitudes per "
+                "direction, so this looks like an upstream schema change."
+            )
+        work = pd.DataFrame({
+            "timestamp": ts,
+            "product_type": product,
+            "direction": direction,
+            "system_activated_volume_mw": volume,
+        })
+        work = work[work["system_activated_volume_mw"].notna()]
+        work = work[work["system_activated_volume_mw"] > 0]
+        frames.append(work)
+    return pd.concat(frames, ignore_index=True)
+
+
+def _normalize_entsoe_activation_prices(raw: object) -> pd.DataFrame:
+    """Normalise the entsoe-py 17.1.f long frame to joinable price rows.
+
+    Input columns: ``Direction`` (Up/Down), ``Price`` (EUR/MWh, signed
+    cash-flow — negatives are real and are NOT sign-flipped), ``ReserveType``
+    (aFRR/mFRR/...). Reserve types outside aFRR/mFRR (e.g. RR) are out of
+    scope and silently dropped; an unknown direction raises. Duplicate
+    (timestamp, product, direction) rows with identical prices are deduped;
+    conflicting prices raise rather than picking one silently.
+    """
+    # Typed empty frame so a no-price window still merges cleanly against the
+    # tz-aware volume timestamps (and then fails the explicit unpriced check,
+    # not a dtype error).
+    empty = pd.DataFrame({
+        "timestamp": pd.Series([], dtype="datetime64[ns, UTC]"),
+        "product_type": pd.Series([], dtype="object"),
+        "direction": pd.Series([], dtype="object"),
+        "activation_price_eur_mwh": pd.Series([], dtype="float64"),
+    })
+    if raw is None or not isinstance(raw, pd.DataFrame) or raw.empty:
+        return empty
+    missing = {"Direction", "Price", "ReserveType"} - set(raw.columns)
+    if missing:
+        raise DataSourceParseError(
+            "ENTSO-E activated balancing energy price frame is missing "
+            f"column(s): {sorted(missing)}"
+        )
+    reserve = raw["ReserveType"].astype(str).str.strip().str.lower()
+    keep = reserve.isin(_ACTIVATION_PRICE_RESERVE_TYPES).to_numpy()
+    work = raw[keep]
+    if work.empty:
+        return empty
+    direction = work["Direction"].astype(str).str.strip().str.lower()
+    unknown = sorted(set(direction) - set(_ACTIVATION_PRICE_DIRECTIONS))
+    if unknown:
+        raise DataSourceParseError(
+            f"ENTSO-E activation price frame has unsupported direction(s): {unknown}"
+        )
+    out = pd.DataFrame({
+        "timestamp": pd.DatetimeIndex(work.index).tz_convert("UTC"),
+        "product_type": reserve[keep].map(_ACTIVATION_PRICE_RESERVE_TYPES).to_numpy(),
+        "direction": direction.map(_ACTIVATION_PRICE_DIRECTIONS).to_numpy(),
+        "activation_price_eur_mwh": pd.to_numeric(
+            work["Price"], errors="coerce",
+        ).to_numpy(),
+    })
+    out = out[out["activation_price_eur_mwh"].notna()]
+    out = out.drop_duplicates()
+    key = ["timestamp", "product_type", "direction"]
+    conflicting = out.duplicated(subset=key, keep=False)
+    if conflicting.any():
+        examples = out.loc[conflicting, key].head(3).to_dict("records")
+        raise DataSourceParseError(
+            "ENTSO-E activation prices contain conflicting duplicate rows for "
+            f"the same interval/product/direction, e.g. {examples}"
+        )
+    return out
+
+
+def _fetch_entsoe_activation_prices(
+    start_utc: pd.Timestamp, end_utc: pd.Timestamp,
+) -> pd.DataFrame:
+    """Fetch DE activated balancing energy prices (17.1.f) via entsoe-py."""
+    try:
+        client = EntsoePandasClient(api_key=get_api_key())
+    except OSError as exc:
+        raise DataSourceAuthError(
+            "ENTSO-E API key missing or invalid for activated balancing "
+            "energy prices. Set ENTSOE_API_KEY in .env."
+        ) from exc
+    start_q = start_utc.tz_convert(DEFAULT_QUERY_TIMEZONE)
+    end_q = end_utc.tz_convert(DEFAULT_QUERY_TIMEZONE)
+    logger.info(
+        "Fetching ENTSO-E activated balancing energy prices for %s",
+        ENTSOE_ACTIVATION_PRICE_AREA,
+    )
+    try:
+        raw = client.query_activated_balancing_energy_prices(
+            ENTSOE_ACTIVATION_PRICE_AREA,
+            start=start_q,
+            end=end_q,
+            process_type=_ENTSOE_ACTIVATION_PROCESS_TYPE,
+        )
+    except _EntsoeNoMatchingDataError:
+        raw = None
+    except requests.RequestException as exc:
+        raise DataSourceNetworkError(
+            "ENTSO-E activated balancing energy price request failed: "
+            f"{_scrub_secrets(str(exc))}"
+        ) from exc
+    return _normalize_entsoe_activation_prices(raw)
+
+
+def fetch_activation_energy(
+    zone: str,
+    start: pd.Timestamp,
+    end: pd.Timestamp,
+) -> pd.DataFrame | None:
+    """Fetch German activated aFRR/mFRR energy into the activation frame.
+
+    Volumes come from the keyless Netztransparenz chart CSV handler
+    (quality-assured ``Aktivierte aFRR/mFRR``, Deutschland aggregate, ~1 month
+    publication lag) and prices from the ENTSO-E Transparency Platform 17.1.f
+    series. Rows are joined on (15-min interval, product, direction) after
+    filtering to strictly positive volumes.
+
+    Red-line (locked in scope review, calibrated on real data): a nonzero
+    activated volume with no published price is NEVER treated as "no
+    activation". Real months contain such gaps — 2026-05-20 15:00-19:30 UTC
+    had up to 648 MW activated aFRR with no 17.1.f price in ANY German
+    control area (verified upstream publication gap, likely a PICASSO
+    fallback episode) — so a hard raise would make every real month
+    unfetchable. Instead those rows are DROPPED WITH EXPLICIT ACCOUNTING:
+    a warning is logged and the returned frame carries
+    ``attrs["unpriced_nonzero_intervals"]`` (count) and
+    ``attrs["unpriced_max_volume_mw"]`` so the 5b persistence/Data Trust step
+    can surface the understatement. If EVERY nonzero-volume interval lacks a
+    price the fetch raises instead of returning an empty frame.
+
+    The returned frame matches ``ancillary.parse_activation_import_csv``
+    output (UTC ``timestamp`` index; ``zone, product_type, direction,
+    activation_price_eur_mwh, system_activated_volume_mw``) and is ready for
+    the 5b persistence step; prices stay signed cash-flow values (no
+    direction sign flip) and volumes stay SYSTEM-level (never multiplied by
+    any asset share here).
+    """
+    if zone != NETZTRANSPARENZ_IMBALANCE_ZONE:
+        return None
+    start_utc = _to_utc_timestamp(start)
+    end_utc = _to_utc_timestamp(end)
+    if end_utc <= start_utc:
+        raise DataSourceParseError("Activation energy fetch end must be after start")
+
+    volume_frames = [
+        _convert_netztransparenz_activation_volumes(
+            _call_netztransparenz_csv(
+                start=start_utc, end=end_utc, settings=settings,
+            ),
+            product=product,
+        )
+        for product, settings in _NETZTRANSPARENZ_ACTIVATION_SETTINGS.items()
+    ]
+    volumes = pd.concat(volume_frames, ignore_index=True)
+    if volumes.empty:
+        raise DataSourceParseError(
+            "Netztransparenz published no nonzero activated aFRR/mFRR volumes "
+            "in the requested window; note the quality-assured series lags "
+            "roughly one month behind delivery."
+        )
+
+    prices = _fetch_entsoe_activation_prices(start_utc, end_utc)
+    merged = volumes.merge(
+        prices, on=["timestamp", "product_type", "direction"], how="left",
+    )
+    unpriced = merged["activation_price_eur_mwh"].isna()
+    n_unpriced = int(unpriced.sum())
+    unpriced_max_volume = (
+        float(merged.loc[unpriced, "system_activated_volume_mw"].max())
+        if n_unpriced
+        else 0.0
+    )
+    if n_unpriced == len(merged):
+        raise DataSourceParseError(
+            f"All {n_unpriced} nonzero activated interval(s) lack a published "
+            "ENTSO-E activation price for the requested window; check "
+            "ENTSO-E 17.1.f availability before trusting any replay."
+        )
+    if n_unpriced:
+        examples = (
+            merged.loc[unpriced, ["timestamp", "product_type", "direction"]]
+            .head(3)
+            .to_dict("records")
+        )
+        logger.warning(
+            "Dropping %d activated interval(s) with nonzero volume but no "
+            "published ENTSO-E activation price (max volume %.1f MW, e.g. "
+            "%s); the replay will understate activated energy for these "
+            "intervals.",
+            n_unpriced, unpriced_max_volume, examples,
+        )
+        merged = merged[~unpriced]
+
+    merged = merged.sort_values(["timestamp", "product_type", "direction"])
+    out = pd.DataFrame({
+        "zone": zone,
+        "product_type": merged["product_type"].to_numpy(),
+        "direction": merged["direction"].to_numpy(),
+        "activation_price_eur_mwh": merged["activation_price_eur_mwh"]
+        .astype(float)
+        .to_numpy(),
+        "system_activated_volume_mw": merged["system_activated_volume_mw"]
+        .astype(float)
+        .to_numpy(),
+    })
+    out.index = pd.DatetimeIndex(merged["timestamp"], name="timestamp")
+    out = out[_ACTIVATION_FETCH_FRAME_COLUMNS]
+    # Explicit accounting for the dropped unpriced intervals (red-line): the
+    # 5b persistence/Data Trust step surfaces these so the understatement is
+    # never invisible.
+    out.attrs["unpriced_nonzero_intervals"] = n_unpriced
+    out.attrs["unpriced_max_volume_mw"] = unpriced_max_volume
+    return out
+
+
 # ── Elexon System Prices (GB Balancing) ───────────────────────────────────────
 
 ELEXON_SYSTEM_PRICES_ENDPOINT = (
