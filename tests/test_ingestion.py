@@ -7,6 +7,7 @@ import json
 import logging
 import sqlite3
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -27,6 +28,7 @@ from src.data_ingestion import (
     DataSourceParseError,
     build_zone_query_window,
     clean_prices,
+    fetch_activation_energy,
     fetch_elexon_generation,
     fetch_elexon_prices,
     fetch_elexon_system_prices,
@@ -1824,6 +1826,348 @@ class TestFetchNetztransparenzImbalance:
             "2026-04-30 22:00:00+00:00",
             "2026-04-30 22:30:00+00:00",
         ]
+
+
+class TestFetchActivationEnergy:
+    """Step 5a: Netztransparenz activated volumes + ENTSO-E 17.1.f prices."""
+
+    _HEADER = (
+        "Datum;Zeitzone;von;bis;Einheit;"
+        "50Hertz (Positiv);Amprion (Positiv);TenneT TSO (Positiv);"
+        "TransnetBW (Positiv);Deutschland (Positiv);"
+        "50Hertz (Negativ);Amprion (Negativ);TenneT TSO (Negativ);"
+        "TransnetBW (Negativ);Deutschland (Negativ);MOL-Abweichung"
+    )
+
+    @classmethod
+    def _volume_csv(cls, rows: list[tuple[str, str, str, object, object]]) -> str:
+        """Rows of (datum, von, bis, de_up, de_down); TSO columns zeroed."""
+        def cell(value: object) -> str:
+            return value if isinstance(value, str) else str(value).replace(".", ",")
+
+        out = [cls._HEADER]
+        for datum, von, bis, up, down in rows:
+            out.append(
+                f"{datum};CEST;{von};{bis};MW;0;0;0;0;{cell(up)};"
+                f"0;0;0;0;{cell(down)};0"
+            )
+        return "\n".join(out) + "\n"
+
+    @staticmethod
+    def _price_frame(rows: list[tuple[str, str, str, float]]) -> pd.DataFrame:
+        """Rows of (utc timestamp, ReserveType, Direction, Price)."""
+        index = pd.DatetimeIndex(
+            [pd.Timestamp(ts) for ts, *_ in rows]
+        ).tz_convert("Europe/Berlin")
+        return pd.DataFrame(
+            {
+                "Direction": [direction for _, _, direction, _ in rows],
+                "Price": [price for *_, price in rows],
+                "ReserveType": [reserve for _, reserve, *_ in rows],
+            },
+            index=index,
+        )
+
+    def _default_volume_csvs(self) -> list[str]:
+        afrr = self._volume_csv([
+            ("01.05.2026", "00:00", "00:15", 391.596, 4.364),
+            ("01.05.2026", "00:15", "00:30", 0, 2.0),
+            ("01.05.2026", "00:30", "00:45", "N.A.", 1.0),
+            ("01.05.2026", "00:45", "01:00", 230.72, 0),
+        ])
+        mfrr = self._volume_csv([
+            ("01.05.2026", "00:00", "00:15", 0, 0),
+            ("01.05.2026", "00:15", "00:30", 0, 0),
+            ("01.05.2026", "00:30", "00:45", 50.5, 0),
+            ("01.05.2026", "00:45", "01:00", 0, 0),
+        ])
+        return [afrr, mfrr]
+
+    _FULL_PRICES: ClassVar[list[tuple[str, str, str, float]]] = [
+        ("2026-04-30T22:00:00Z", "aFRR", "Up", 114.5),
+        ("2026-04-30T22:00:00Z", "aFRR", "Down", -12.5),
+        ("2026-04-30T22:15:00Z", "aFRR", "Down", 24.0),
+        ("2026-04-30T22:15:00Z", "aFRR", "Up", 87.0),  # zero-volume: dropped
+        ("2026-04-30T22:30:00Z", "aFRR", "Down", 0.0),
+        ("2026-04-30T22:30:00Z", "mFRR", "Up", 241.0),
+        ("2026-04-30T22:45:00Z", "aFRR", "Up", 95.0),
+        ("2026-04-30T22:45:00Z", "RR", "Up", 999.0),  # out of scope: dropped
+    ]
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_fetch_returns_activation_frame(
+        self, mock_call: MagicMock, _mock_key: MagicMock, mock_client: MagicMock,
+    ) -> None:
+        """Zero volumes filter, N.A. drops, signed prices join per direction."""
+        mock_call.side_effect = self._default_volume_csvs()
+        mock_client.return_value.query_activated_balancing_energy_prices.return_value = (
+            self._price_frame(self._FULL_PRICES)
+        )
+
+        out = fetch_activation_energy(
+            "DE_LU",
+            pd.Timestamp("2026-04-30T22:00:00Z"),
+            pd.Timestamp("2026-05-01T22:00:00Z"),
+        )
+
+        assert out is not None
+        from src.ancillary import _ACTIVATION_FRAME_COLUMNS
+
+        assert list(out.columns) == _ACTIVATION_FRAME_COLUMNS
+        assert out.index.name == "timestamp"
+        assert str(out.index.tz) == "UTC"
+        # Sorted by (timestamp, product, direction); zero-volume and N.A.
+        # intervals are absent; the negative down price is NOT sign-flipped.
+        assert [
+            (str(ts), row.product_type, row.direction,
+             row.activation_price_eur_mwh, row.system_activated_volume_mw)
+            for ts, row in out.iterrows()
+        ] == [
+            ("2026-04-30 22:00:00+00:00", "aFRR", "down", -12.5, 4.364),
+            ("2026-04-30 22:00:00+00:00", "aFRR", "up", 114.5, 391.596),
+            ("2026-04-30 22:15:00+00:00", "aFRR", "down", 24.0, 2.0),
+            ("2026-04-30 22:30:00+00:00", "aFRR", "down", 0.0, 1.0),
+            ("2026-04-30 22:30:00+00:00", "mFRR", "up", 241.0, 50.5),
+            ("2026-04-30 22:45:00+00:00", "aFRR", "up", 95.0, 230.72),
+        ]
+        assert out["zone"].unique().tolist() == ["DE_LU"]
+        # aFRR then mFRR ProduktIds, matching the scope mapping.
+        assert [
+            call.kwargs["settings"]["ProduktId"]
+            for call in mock_call.call_args_list
+        ] == [1, 17]
+        assert (
+            mock_client.return_value.query_activated_balancing_energy_prices
+            .call_args.kwargs["process_type"]
+        ) == "A16"
+        # No unpriced intervals in the happy path — the accounting says so.
+        assert out.attrs["unpriced_nonzero_intervals"] == 0
+        assert out.attrs["unpriced_max_volume_mw"] == 0.0
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_nonzero_volume_without_price_drops_with_accounting(
+        self, mock_call: MagicMock, _mock_key: MagicMock, mock_client: MagicMock,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Red-line: unpriced nonzero activation is never silent.
+
+        Real months contain upstream 17.1.f gaps (2026-05-20 had up to
+        648 MW activated aFRR with no price in ANY German control area), so
+        a hard raise would make real windows unfetchable; the locked
+        behaviour is drop + warning + attrs accounting.
+        """
+        mock_call.side_effect = self._default_volume_csvs()
+        prices = [
+            row for row in self._FULL_PRICES
+            if not (row[0] == "2026-04-30T22:45:00Z" and row[1] == "aFRR")
+        ]
+        mock_client.return_value.query_activated_balancing_energy_prices.return_value = (
+            self._price_frame(prices)
+        )
+
+        with caplog.at_level(logging.WARNING, logger="src.data_ingestion"):
+            out = fetch_activation_energy(
+                "DE_LU",
+                pd.Timestamp("2026-04-30T22:00:00Z"),
+                pd.Timestamp("2026-05-01T22:00:00Z"),
+            )
+
+        assert out is not None
+        # The unpriced (22:45, aFRR, up, 230.72 MW) row is dropped ...
+        assert len(out) == 5
+        assert not (
+            (out.index == pd.Timestamp("2026-04-30T22:45:00Z"))
+            & (out["product_type"] == "aFRR")
+        ).any()
+        # ... but never silently: attrs + warning carry the accounting.
+        assert out.attrs["unpriced_nonzero_intervals"] == 1
+        assert out.attrs["unpriced_max_volume_mw"] == 230.72
+        assert any(
+            "1 activated interval" in record.getMessage()
+            for record in caplog.records
+        )
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_no_price_data_at_all_raises(
+        self, mock_call: MagicMock, _mock_key: MagicMock, mock_client: MagicMock,
+    ) -> None:
+        """A fully unpriced window raises rather than returning empty."""
+        from entsoe.exceptions import NoMatchingDataError
+
+        mock_call.side_effect = self._default_volume_csvs()
+        mock_client.return_value.query_activated_balancing_energy_prices.side_effect = (
+            NoMatchingDataError()
+        )
+
+        with pytest.raises(
+            DataSourceParseError, match="All 6 nonzero activated interval",
+        ):
+            fetch_activation_energy(
+                "DE_LU",
+                pd.Timestamp("2026-04-30T22:00:00Z"),
+                pd.Timestamp("2026-05-01T22:00:00Z"),
+            )
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_entsoe_activation_price_query_retries_transient_network_error(
+        self,
+        mock_call: MagicMock,
+        _mock_key: MagicMock,
+        mock_client: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Transient ENTSO-E network errors retry before failing the fetch."""
+        from src import data_ingestion as di
+
+        mock_call.side_effect = self._default_volume_csvs()
+        monkeypatch.setattr(di.time, "sleep", lambda _seconds: None)
+        query = mock_client.return_value.query_activated_balancing_energy_prices
+        query.side_effect = [
+            requests.ConnectionError("temporary outage"),
+            self._price_frame(self._FULL_PRICES),
+        ]
+
+        out = fetch_activation_energy(
+            "DE_LU",
+            pd.Timestamp("2026-04-30T22:00:00Z"),
+            pd.Timestamp("2026-05-01T22:00:00Z"),
+        )
+
+        assert out is not None
+        assert len(out) == 6
+        assert query.call_count == 2
+
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_unsupported_zone_returns_none_without_network(
+        self, mock_call: MagicMock,
+    ) -> None:
+        out = fetch_activation_energy(
+            "FR",
+            pd.Timestamp("2026-04-30T22:00:00Z"),
+            pd.Timestamp("2026-05-01T22:00:00Z"),
+        )
+
+        assert out is None
+        mock_call.assert_not_called()
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_negative_volume_raises(
+        self, mock_call: MagicMock, _mock_key: MagicMock, mock_client: MagicMock,
+    ) -> None:
+        """The export publishes magnitudes; a sign means schema change."""
+        afrr = self._volume_csv([
+            ("01.05.2026", "00:00", "00:15", "-5,0", 0),
+            ("01.05.2026", "00:15", "00:30", 1.0, 0),
+        ])
+        mock_call.side_effect = [afrr]
+
+        with pytest.raises(DataSourceParseError, match="negative volume"):
+            fetch_activation_energy(
+                "DE_LU",
+                pd.Timestamp("2026-04-30T22:00:00Z"),
+                pd.Timestamp("2026-05-01T22:00:00Z"),
+            )
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_all_zero_volumes_raise_with_lag_hint(
+        self, mock_call: MagicMock, _mock_key: MagicMock, mock_client: MagicMock,
+    ) -> None:
+        zero = self._volume_csv([
+            ("01.05.2026", "00:00", "00:15", 0, 0),
+            ("01.05.2026", "00:15", "00:30", 0, 0),
+        ])
+        mock_call.side_effect = [zero, zero]
+
+        with pytest.raises(DataSourceParseError, match="lags"):
+            fetch_activation_energy(
+                "DE_LU",
+                pd.Timestamp("2026-04-30T22:00:00Z"),
+                pd.Timestamp("2026-05-01T22:00:00Z"),
+            )
+        mock_client.return_value.query_activated_balancing_energy_prices.assert_not_called()
+
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_autumn_dst_repeat_maps_to_utc(
+        self, mock_call: MagicMock, _mock_key: MagicMock, mock_client: MagicMock,
+    ) -> None:
+        """Repeated 02:00 local hour disambiguates via the Zeitzone column."""
+        afrr_rows = [
+            ("25.10.2026;CEST;02:00;02:15;MW;0;0;0;0;10,0;0;0;0;0;0;0"),
+            ("25.10.2026;CEST;02:15;02:30;MW;0;0;0;0;15,0;0;0;0;0;0;0"),
+            ("25.10.2026;CEST;02:30;02:45;MW;0;0;0;0;20,0;0;0;0;0;0;0"),
+            ("25.10.2026;CEST;02:45;03:00;MW;0;0;0;0;25,0;0;0;0;0;0;0"),
+            ("25.10.2026;CET;02:00;02:15;MW;0;0;0;0;30,0;0;0;0;0;0;0"),
+            ("25.10.2026;CET;02:15;02:30;MW;0;0;0;0;35,0;0;0;0;0;0;0"),
+        ]
+        afrr = self._HEADER + "\n" + "\n".join(afrr_rows) + "\n"
+        mfrr = self._HEADER + "\n" + "\n".join(
+            row.replace(";10,0;", ";0;").replace(";15,0;", ";0;")
+            .replace(";20,0;", ";0;").replace(";25,0;", ";0;")
+            .replace(";30,0;", ";0;").replace(";35,0;", ";0;")
+            for row in afrr_rows
+        ) + "\n"
+        mock_call.side_effect = [afrr, mfrr]
+        utc_times = pd.date_range("2026-10-25T00:00:00Z", periods=6, freq="15min")
+        mock_client.return_value.query_activated_balancing_energy_prices.return_value = (
+            self._price_frame([
+                (str(ts), "aFRR", "Up", 100.0 + i) for i, ts in enumerate(utc_times)
+            ])
+        )
+
+        out = fetch_activation_energy(
+            "DE_LU",
+            pd.Timestamp("2026-10-24T22:00:00Z"),
+            pd.Timestamp("2026-10-25T22:00:00Z"),
+        )
+
+        assert out is not None
+        assert out.index.astype(str).tolist() == [
+            str(ts).replace("T", " ").replace("Z", "+00:00") for ts in utc_times
+        ]
+        assert out["system_activated_volume_mw"].tolist() == [
+            10.0, 15.0, 20.0, 25.0, 30.0, 35.0,
+        ]
+
+    def test_conflicting_duplicate_prices_raise(self) -> None:
+        from src import data_ingestion as di
+
+        rows = [
+            ("2026-04-30T22:00:00Z", "aFRR", "Up", 114.5),
+            ("2026-04-30T22:00:00Z", "aFRR", "Up", 200.0),
+        ]
+        with pytest.raises(DataSourceParseError, match="conflicting duplicate"):
+            di._normalize_entsoe_activation_prices(self._price_frame(rows))
+
+        # Identical duplicates are deduped, not fatal.
+        deduped = di._normalize_entsoe_activation_prices(
+            self._price_frame([
+                ("2026-04-30T22:00:00Z", "aFRR", "Up", 114.5),
+                ("2026-04-30T22:00:00Z", "aFRR", "Up", 114.5),
+            ])
+        )
+        assert len(deduped) == 1
+
+    def test_fetch_frame_columns_match_import_parser(self) -> None:
+        from src import ancillary
+        from src import data_ingestion as di
+
+        assert (
+            di._ACTIVATION_FETCH_FRAME_COLUMNS == ancillary._ACTIVATION_FRAME_COLUMNS
+        )
 
 
 # ── Test 14: ENTSO-E Intraday Auction prices (IDA1/2/3) ────────────────────
