@@ -1773,7 +1773,7 @@ class TestFetchNetztransparenzImbalance:
             "25.10.2026;CET;02:15;02:30;EUR/MWh;125,0;125,0\n"
         )
 
-        out = di._convert_netztransparenz_imbalance_exports(
+        out = di.convert_netztransparenz_imbalance_exports(
             nrv_csv=nrv, rebap_csv=rebap,
         )
 
@@ -1802,7 +1802,7 @@ class TestFetchNetztransparenzImbalance:
             "01.05.2026;CEST;00:45;01:00;MW;N.A.\n"
         )
 
-        out = di._convert_netztransparenz_imbalance_exports(
+        out = di.convert_netztransparenz_imbalance_exports(
             nrv_csv=nrv_with_tail, rebap_csv=self._REBAP,
         )
 
@@ -1817,7 +1817,7 @@ class TestFetchNetztransparenzImbalance:
             "01.05.2026;CEST;00:15;00:30;MW;-37,672",
             "01.05.2026;CEST;00:15;00:30;MW;N.A.",
         )
-        out_with_hole = di._convert_netztransparenz_imbalance_exports(
+        out_with_hole = di.convert_netztransparenz_imbalance_exports(
             nrv_csv=nrv_with_hole, rebap_csv=self._REBAP,
         )
         assert out_with_hole.index.astype(str).tolist() == [
