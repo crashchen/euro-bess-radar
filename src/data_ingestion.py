@@ -2223,6 +2223,27 @@ def _normalize_entsoe_activation_prices(raw: object) -> pd.DataFrame:
     return out
 
 
+@retry(
+    max_retries=3, backoff=2.0,
+    auth_check=lambda exc: _looks_like_auth_error(exc),
+)
+def _call_entsoe_activation_prices(
+    client: EntsoePandasClient,
+    start_q: pd.Timestamp,
+    end_q: pd.Timestamp,
+) -> pd.DataFrame | None:
+    """Call entsoe-py 17.1.f activation prices with retry."""
+    try:
+        return client.query_activated_balancing_energy_prices(
+            ENTSOE_ACTIVATION_PRICE_AREA,
+            start=start_q,
+            end=end_q,
+            process_type=_ENTSOE_ACTIVATION_PROCESS_TYPE,
+        )
+    except _EntsoeNoMatchingDataError:
+        return None
+
+
 def _fetch_entsoe_activation_prices(
     start_utc: pd.Timestamp, end_utc: pd.Timestamp,
 ) -> pd.DataFrame:
@@ -2241,14 +2262,7 @@ def _fetch_entsoe_activation_prices(
         ENTSOE_ACTIVATION_PRICE_AREA,
     )
     try:
-        raw = client.query_activated_balancing_energy_prices(
-            ENTSOE_ACTIVATION_PRICE_AREA,
-            start=start_q,
-            end=end_q,
-            process_type=_ENTSOE_ACTIVATION_PROCESS_TYPE,
-        )
-    except _EntsoeNoMatchingDataError:
-        raw = None
+        raw = _call_entsoe_activation_prices(client, start_q, end_q)
     except requests.RequestException as exc:
         raise DataSourceNetworkError(
             "ENTSO-E activated balancing energy price request failed: "

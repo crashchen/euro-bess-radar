@@ -2014,6 +2014,37 @@ class TestFetchActivationEnergy:
                 pd.Timestamp("2026-05-01T22:00:00Z"),
             )
 
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_entsoe_activation_price_query_retries_transient_network_error(
+        self,
+        mock_call: MagicMock,
+        _mock_key: MagicMock,
+        mock_client: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Transient ENTSO-E network errors retry before failing the fetch."""
+        from src import data_ingestion as di
+
+        mock_call.side_effect = self._default_volume_csvs()
+        monkeypatch.setattr(di.time, "sleep", lambda _seconds: None)
+        query = mock_client.return_value.query_activated_balancing_energy_prices
+        query.side_effect = [
+            requests.ConnectionError("temporary outage"),
+            self._price_frame(self._FULL_PRICES),
+        ]
+
+        out = fetch_activation_energy(
+            "DE_LU",
+            pd.Timestamp("2026-04-30T22:00:00Z"),
+            pd.Timestamp("2026-05-01T22:00:00Z"),
+        )
+
+        assert out is not None
+        assert len(out) == 6
+        assert query.call_count == 2
+
     @patch("src.data_ingestion._call_netztransparenz_csv")
     def test_unsupported_zone_returns_none_without_network(
         self, mock_call: MagicMock,
