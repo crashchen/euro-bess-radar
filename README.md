@@ -62,6 +62,7 @@ euro-bess-radar/
 │   ├── dispatch.py           # MILP dispatch for multi-cycle daily arbitrage
 │   ├── simulation.py         # Interval-level dispatch replay + multi-day continuous-horizon carry-over
 │   ├── ida_forecast.py       # Hourly climatology IDA forecast for the sequential DA+ID policy
+│   ├── ida_scenarios.py      # error_resample IDA scenario generator (stochastic MILP Increment A)
 │   ├── reserve_forecast.py   # Block-of-day capacity-price forecast skill (Phase 9.2b prep)
 │   ├── da_forecast.py        # Screening DA-price climatology forecast (Phase 9.2b Stage-0 prep)
 │   ├── degradation.py        # Throughput-based degradation and lifetime metrics
@@ -70,7 +71,7 @@ euro-bess-radar/
 │   ├── activation_overlay.py # Activation-energy replay overlay (screening, non-additive)
 │   ├── imbalance_overlay.py  # reBAP/imbalance replay overlay primitive
 │   └── export.py             # Excel report generation
-├── tests/                    # 715 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 729 passing tests, heavily mocked; 2 PDF tests may skip
 ├── scripts/                  # Maintenance/demo scripts (seed + Netztransparenz converter)
 ├── samples/                  # Generated demo CSVs from seed_demo_9_2b.py (git-ignored)
 ├── docs/runbooks/            # Operator runbooks (9.2b + imbalance validation, manual UI smoke)
