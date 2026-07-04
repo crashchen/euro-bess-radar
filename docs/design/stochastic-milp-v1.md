@@ -37,17 +37,29 @@ that ignores the IDA opportunity entirely); the stochastic upgrade makes the
 Stage-1 DA commitment anticipate the IDA rebid opportunity across a
 **scenario set** of IDA price paths, under a finite rebid volume cap.
 
-The headline is a **two-way decomposition** at a common rebid cap, common
-reserve series, and common valid-day window:
+The **primary headline** is the robust realised policy value at a common rebid
+cap, reserve series, and valid-day window:
 
-- `co_opt_realised − sequential_realised` = value of a *non-myopic* Stage-1
-  commitment (the S=1 point-forecast co-optimisation — cheap, deterministic);
-- `stochastic_realised − co_opt_realised` = value of *distribution awareness*
-  on top (the scenario set proper).
+- `policy_value = stochastic_realised − myopic_realised` = the realised lift of
+  the scenario-aware policy over the deterministic myopic baseline
+  (`solve_daily_lp` DA-only Stage-1). Signed, MAY be negative, never clamped.
 
-Both deltas are signed and MAY be negative on bad windows — report them
-signed, never clamped. Everything stays screening-grade historical replay —
-not trading advice, not live dispatch.
+It also carries a **diagnostic attribution split** (Increment C1, revised after
+the Codex C1 review):
+
+- `commitment_value = co_opt_realised − myopic_realised` = value of a *non-myopic*
+  Stage-1 commitment (the S=1 point-forecast co-optimisation);
+- `distribution_value = stochastic_realised − co_opt_realised` = value of
+  *distribution awareness* on top.
+
+These sum to `policy_value`, but are **tie-sensitive**: the co-opt and stochastic
+Stage-1 are each one of several equal-optimal schedules, and when `realised ≠
+base` they settle to different money, so the SPLIT (unlike the robust total)
+carries Stage-1 multi-optimum noise and is NOT zero at `rebid_cap = ∞`. Treat the
+split as diagnostic attribution, not a bankable decomposition. A canonical
+Stage-1 selector (lexicographic MILP over the optimal face) would make the split
+robust but is v2 scope. Everything stays screening-grade historical replay — not
+trading advice, not live dispatch.
 
 ### Non-goals (v1 red-lines)
 
@@ -326,12 +338,20 @@ over the DA+ID valid days. Pinned identities / regression guards, in the
 house cross-validation discipline (naive-reference + random price paths
 BEFORE any merge of aggregation/attribution code):
 
-1. **Decoupling theorem**: at `rebid_cap_mw = ∞` the stochastic Stage-1
-   commitment equals the deterministic co-optimisation against the
-   scenario-mean path, and — **because the generator mean-centres the error
-   paths (§3)** — that path is the base forecast, so `stochastic − co_opt ≡
-   0` for any S. (Embraces the Gemini review's mathematical observation as a
-   test; the mean-centring premise is what makes the identity exact.)
+1. **Decoupling theorem (objective/optimal-set form — revised after the C1
+   review)**: at `rebid_cap_mw = ∞` the stochastic and point-forecast co-opt
+   Stage-1 problems share the SAME optimal objective and optimal SET (because
+   the generator mean-centres the error paths, §3, so the scenario mean is the
+   base forecast). This does NOT guarantee equality of the *realised
+   settlement*: when `realised ≠ base` the settlement functional is not
+   constant over the equal-optimal Stage-1 schedules, and two independent MILP
+   solves may select different members, so `stochastic_realised −
+   co_opt_realised ≠ 0` in general at `∞` cap. The regression guard is on the
+   **objective/optimal-set equivalence** (e.g. the B1 `test_decoupling_theorem
+   _at_infinite_cap` pins the Stage-1 *financial value*), NOT on a zero realised
+   split. Making the realised split exactly zero would require a canonical
+   Stage-1 selector (v2). The robust C1 headline is `stochastic_realised −
+   myopic_realised` (§1), which does not depend on the co-opt tie-break.
 2. **S=1 degeneracy**: S=1 with a zero error path ⇒ the deterministic
    point-forecast co-optimisation at the configured cap. This is
    **deliberately NOT equal to the myopic sequential row** — the co-opt
@@ -343,8 +363,15 @@ BEFORE any merge of aggregation/attribution code):
    (Stage-1 asserted only through settlement: MtM cancellation makes the
    Stage-1 schedule degenerate/multi-optimal, so schedule-level equality
    would need a lexicographic tie-breaker — out of scope for v1; the
-   assertion is on money, not schedules.) On a reserve day the collapse
-   target is the **capped myopic reserve baseline** (identical headroom and
+   assertion is on money, not schedules.) **This "money not schedules"
+   argument holds ONLY because the settlement price path makes every
+   degenerate schedule settle identically here** — `IDA == DA` makes the
+   Stage-1 MtM term cancel regardless of which optimal schedule is chosen. It
+   does NOT generalise to `realised ≠ base` (see identity 1): that is exactly
+   why the C1 `distribution_value` split is tie-sensitive and the robust
+   headline is `stochastic_realised − myopic_realised`. On a reserve day the
+   collapse target is the **capped myopic reserve baseline** (identical
+   headroom and
    capacity settlement), NOT the plain DA-only row.
 4. `stochastic_realised ≤ coopt_ceiling` on every day (§2.4, guaranteed by
    construction at matched cap/reserve). Gaps to the LEGACY 9.2a ceiling are

@@ -1497,8 +1497,9 @@ def _count_dispatch_blocks(net_dispatch: np.ndarray, threshold: float = 1e-6) ->
 
 _STOCH_COLUMNS = [
     "date", "da_only_eur", "myopic_realised_eur", "coopt_realised_eur",
-    "stochastic_realised_eur", "coopt_ceiling_eur", "commitment_value_eur",
-    "distribution_value_eur", "rebid", "n_scenarios", "coverage",
+    "stochastic_realised_eur", "coopt_ceiling_eur", "policy_value_eur",
+    "commitment_value_eur", "distribution_value_eur", "rebid", "n_scenarios",
+    "coverage",
 ]
 
 
@@ -1588,6 +1589,14 @@ def _stochastic_day(
         "coopt_realised_eur": coopt["realised_total_eur"],
         "stochastic_realised_eur": stoch["realised_total_eur"],
         "coopt_ceiling_eur": stoch["coopt_ceiling_eur"],
+        # Headline: robust policy value of the stochastic commitment over the
+        # deterministic myopic baseline. The commitment/distribution split below
+        # is an arithmetic decomposition of it (commitment + distribution ==
+        # policy_value), but is a TIE-SENSITIVE DIAGNOSTIC: the co-opt Stage-1 is
+        # one of several equal-optimal schedules and settles differently at a
+        # realised != base path, so the SPLIT carries multi-optimum noise even
+        # though the total does not (scope §1/§8-1, revised).
+        "policy_value_eur": stoch["realised_total_eur"] - myopic["realised_total_eur"],
         "commitment_value_eur": coopt["realised_total_eur"] - myopic["realised_total_eur"],
         "distribution_value_eur": stoch["realised_total_eur"] - coopt["realised_total_eur"],
         "rebid": bool(stoch["rebid"]),
@@ -1627,19 +1636,27 @@ def simulate_stochastic_da_id_batch(
     - **deterministic co-opt** — S=1 stochastic commit against the base forecast;
     - **stochastic** — S=N scenario-aware commit.
 
-    The two signed headline deltas isolate the sources of value:
-    ``commitment_value = co_opt_realised - myopic_realised`` (the worth of a
-    non-myopic DA commitment) and ``distribution_value = stochastic_realised -
-    co_opt_realised`` (the worth of anticipating the IDA *distribution* rather
-    than just its mean). Both may be negative. Each day is solved standalone
+    The **headline** is the robust ``policy_value = stochastic_realised -
+    myopic_realised`` — the realised lift of the scenario-aware policy over the
+    deterministic myopic baseline. It also carries a DIAGNOSTIC arithmetic split
+    ``commitment_value = co_opt_realised - myopic_realised`` (worth of a
+    non-myopic DA commitment) + ``distribution_value = stochastic_realised -
+    co_opt_realised`` (worth of anticipating the IDA distribution); these sum to
+    ``policy_value`` but are **tie-sensitive** — the co-opt Stage-1 is one of
+    several equal-optimal schedules and settles differently at a realised != base
+    path, so the split (unlike the total) carries multi-optimum noise and is NOT
+    zero at ``rebid_cap = inf`` (scope §8-1, revised: the decoupling theorem
+    gives equality of the Stage-1 optimal *set/objective*, not of the realised
+    settlement selected by two independent solves). Each day is solved standalone
     (per-day terminal-neutral), isolating commitment quality from multi-day SoC
     carry.
 
     Returns ``(per_day_df, summary)``. ``summary`` carries the window totals for
-    each policy, the two total deltas, the risk block (:func:`_risk_block`,
-    pooled per-day scenario dispersion — a diagnostic), and the scenario/forecast
-    metadata. At ``rebid_cap_mw = inf`` with no reserve the myopic policy ties
-    the 9.2b sequential row exactly.
+    each policy, the headline ``total_policy_value_eur`` (+ the diagnostic
+    split), the risk block (:func:`_risk_block`, pooled per-day scenario
+    dispersion — a diagnostic), and the scenario/forecast metadata. At
+    ``rebid_cap_mw = inf`` with no reserve the myopic policy ties the 9.2b
+    sequential row exactly (a robust regression anchor).
     """
     selected = dates or available_local_dates(da_prices, tz=tz)
     scenarios_by_date, scen_meta = build_ida_scenarios(
@@ -1697,6 +1714,9 @@ def _stochastic_summary(
         "total_coopt_realised_eur": _tot("coopt_realised_eur"),
         "total_stochastic_realised_eur": _tot("stochastic_realised_eur"),
         "total_coopt_ceiling_eur": _tot("coopt_ceiling_eur"),
+        # Headline robust metric; the two below are its tie-sensitive diagnostic
+        # split (they sum to it, but carry Stage-1 multi-optimum noise).
+        "total_policy_value_eur": _tot("policy_value_eur"),
         "total_commitment_value_eur": _tot("commitment_value_eur"),
         "total_distribution_value_eur": _tot("distribution_value_eur"),
         "risk_block": _risk_block(pooled),

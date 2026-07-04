@@ -35,6 +35,16 @@ class TestStochasticBatch:
         )
         assert summ["valid_days"] == 10
         assert summ["excluded_days"] == 0
+        # Headline: robust policy value = stochastic - myopic realised.
+        np.testing.assert_allclose(
+            summ["total_policy_value_eur"],
+            summ["total_stochastic_realised_eur"]
+            - summ["total_myopic_realised_eur"], atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            summ["total_policy_value_eur"], per_day["policy_value_eur"].sum(),
+            atol=1e-6,
+        )
         # Window deltas equal the sum of per-day deltas.
         np.testing.assert_allclose(
             summ["total_commitment_value_eur"],
@@ -44,7 +54,13 @@ class TestStochasticBatch:
             summ["total_distribution_value_eur"],
             per_day["distribution_value_eur"].sum(), atol=1e-6,
         )
-        # Per-day delta identities.
+        # The diagnostic split is an arithmetic decomposition of the headline
+        # (commitment + distribution == policy_value), even though the SPLIT is
+        # tie-sensitive under Stage-1 degeneracy while the total is not.
+        np.testing.assert_allclose(
+            per_day["commitment_value_eur"] + per_day["distribution_value_eur"],
+            per_day["policy_value_eur"], atol=1e-6,
+        )
         np.testing.assert_allclose(
             per_day["commitment_value_eur"],
             per_day["coopt_realised_eur"] - per_day["myopic_realised_eur"],
