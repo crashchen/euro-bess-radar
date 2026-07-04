@@ -98,8 +98,8 @@ class TestBuildIdaScenarios:
         target = date(2026, 5, 10)
         matching = date(2026, 5, 3)   # will share the target's gap
         mismatched = date(2026, 5, 6)  # same count, different gap
-        idx_dates = pd.DatetimeIndex(hist.index).date
-        hours = pd.DatetimeIndex(hist.index).hour
+        idx_dates = hist.index.date
+        hours = hist.index.hour
         drop = (
             ((idx_dates == target) & (hours == 5))       # target drops hour 5
             | ((idx_dates == matching) & (hours == 5))   # same gap -> shares grid
@@ -133,7 +133,7 @@ class TestBuildIdaScenarios:
         hist = _history(12, noise_seed=0)
         target = date(2026, 5, 6)
         spiked = hist.copy()
-        mask = pd.DatetimeIndex(spiked.index).date == target
+        mask = spiked.index.date == target
         spiked.loc[mask, IDA_VALUE_COL] += 1000.0
         base_clean = build_ida_scenarios(
             hist, target_dates=[target], n_scenarios=4, seed=0,

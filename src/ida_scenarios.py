@@ -123,9 +123,8 @@ def build_ida_scenarios(
     local = _to_local(ida_history[[value_col]].dropna(), tz).sort_index()
     if local.empty:
         return {}, meta
-    local_index = pd.DatetimeIndex(local.index)
     local = local.assign(
-        _bucket=_bucket_of(local_index, bucket), _date=local_index.date,
+        _bucket=_bucket_of(local.index, bucket), _date=local.index.date,
     )
 
     rng = np.random.default_rng(seed)
@@ -213,7 +212,7 @@ def _build_day_bundle(
         return None
 
     errors, with_replacement = _sample_errors(pool, n_scenarios, rng, mean_centered)
-    timestamps = pd.DatetimeIndex(day_rows.index).tz_convert("UTC")
+    timestamps = day_rows.index.tz_convert("UTC")
     timestamps.name = "timestamp"
     return {
         "base_forecast": pd.Series(base, index=timestamps, name=SCENARIO_BASE_COL),
@@ -248,7 +247,7 @@ def _shape_key(day: pd.DataFrame) -> tuple[tuple[int, int], ...]:
     Offset is deliberately NOT in the key: the climatology pools summer↔winter
     by local hour, so a CEST day is a valid error source for a CET target.
     """
-    idx = pd.DatetimeIndex(day.index)
+    idx = day.index
     return tuple(zip(idx.hour.tolist(), idx.minute.tolist(), strict=True))
 
 
