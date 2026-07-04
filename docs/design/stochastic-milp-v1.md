@@ -18,6 +18,11 @@ Revision log:
   (§2.4); the cap=∞ identity gains its missing premise via **mean-centred
   error paths** (§3); the deadband HOLD is **gated to no-reserve days**
   (holding a full-power Stage-1 schedule can violate reserve headroom, §5).
+- **r3** (Codex re-lock round 3): the capped MYOPIC baseline's Stage-1 is
+  solved without the Stage-2 constraints, so reserve + a sub-reserve cap can
+  empty its recourse set — v1 pins the feasibility domain
+  `rebid_cap_mw ≥ max reserve` (sufficient via a proportional-scaling
+  witness; default cap always satisfies it; below it the batch raises, §5).
 
 ## 1. Positioning
 
@@ -267,6 +272,25 @@ deterministic co-opt (S=1, zero error path), (iii) stochastic (S=N). At
 (regression pin) — the existing uncapped strategy-table rows are NOT
 modified by this feature.
 
+**Myopic-baseline feasibility domain (Codex re-lock r3 catch)**: policies
+(ii)/(iii) embed the Stage-2 constraints in their Stage-1 problem, so their
+executed pairs are coopt-ceiling-feasible by construction. Policy (i)'s
+Stage-1 is solved WITHOUT them, and with committed reserve a small cap can
+make its capped, headroom-feasible Stage-2 set EMPTY (full-power DA interval
+with `reserve = R` needs a deviation ≥ R to reach the headroom box). v1
+therefore requires `rebid_cap_mw ≥ max_t reserve_mw_t` on reserve days —
+**sufficient** by a proportional-scaling witness: scaling the myopic DA
+schedule by `(power − max_reserve) / power` gives a Stage-2 candidate with
+per-interval deviation `≤ |da_net|·max_reserve/power ≤ max_reserve ≤ cap`,
+headroom satisfied, and SoC/terminal-neutral feasibility preserved (SoC is
+linear in the flows, and a convex combination of the feasible original path
+with the flat-at-initial path stays in bounds). The default
+`rebid_cap_mw = power_mw` always satisfies the domain (reserve ≤ power by
+construction). Below the domain the batch RAISES a clear validation error —
+never a silent infeasibility; a recourse-feasible myopic Stage-1 (DA-only
+objective + Stage-2 feasibility constraints) is the v2 refinement if
+sub-reserve caps are ever needed.
+
 ## 6. Performance budget
 
 Extensive form multiplies Stage-2 binaries by S (~1,056 binaries for a
@@ -342,7 +366,9 @@ BEFORE any merge of aggregation/attribution code):
    solver-reuse implementation + `realised ≤ coopt_ceiling` and a case where
    the legacy ceiling is legitimately exceeded), deadband/hold semantics of
    §5 **including the no-reserve-only gating**, decoupling identity (§8-1),
-   IDA≡DA collapse (§8-3, both reserve variants). Ships measured solve
+   IDA≡DA collapse (§8-3, both reserve variants), and the myopic-baseline
+   feasibility domain (§5: `cap ≥ max reserve` validation raises below the
+   domain — finite-cap reserve counterexample test). Ships measured solve
    timings (§6).
 3. **Increment C — batch + strategy rows**
    (`simulate_stochastic_da_id_batch`, the three-policy comparison at a
