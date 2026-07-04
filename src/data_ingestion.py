@@ -2990,11 +2990,14 @@ def write_capacity_cache(
             "VALUES (?, ?, ?, ?, ?)",
             rows,
         )
-        _record_capacity_sources(conn, table, zone)
+        _record_capacity_sources(
+            conn, table, zone, touched={(r[1], r[2]) for r in rows},
+        )
 
 
 def _record_capacity_sources(
-    conn: sqlite3.Connection, table: str, zone: str,
+    conn: sqlite3.Connection, table: str, zone: str, *,
+    touched: set[tuple[str, str]] | None = None,
 ) -> None:
     """Re-derive the provenance sidecar per (zone, product, direction).
 
@@ -3002,6 +3005,11 @@ def _record_capacity_sources(
     a stream's label is the single source when uniform across its rows, else
     ``Mixed``. Re-deriving from the table after each write keeps provenance in
     lockstep with the (possibly overwritten) data.
+
+    ``imported_at`` is per-stream LAST-WRITE time: streams in ``touched`` get
+    this write's timestamp, untouched streams carry their previous value
+    forward (falling back to now only when no previous record exists — e.g.
+    the sidecar row is first derived for a pre-provenance table).
     """
     conn.execute(
         f'CREATE TABLE IF NOT EXISTS "{_CAPACITY_SOURCE_TABLE}" '
@@ -3010,6 +3018,14 @@ def _record_capacity_sources(
         "PRIMARY KEY (zone, product, direction))"
     )
     now = datetime.now(UTC).isoformat()
+    previous_imported = {
+        (str(product), str(direction)): imported_at
+        for product, direction, imported_at in conn.execute(
+            f'SELECT product, direction, imported_at '
+            f'FROM "{_CAPACITY_SOURCE_TABLE}" WHERE zone = ?',
+            (zone,),
+        )
+    }
     groups = conn.execute(
         f'SELECT product, direction, COUNT(*), MIN(timestamp), MAX(timestamp) '
         f'FROM "{table}" GROUP BY product, direction'
@@ -3028,11 +3044,16 @@ def _record_capacity_sources(
             label = distinct[0]
         else:
             label = CAPACITY_SOURCE_MIXED
+        stream = (str(product), str(direction))
+        if touched is None or stream in touched:
+            imported_at = now
+        else:
+            imported_at = previous_imported.get(stream) or now
         conn.execute(
             f'INSERT OR REPLACE INTO "{_CAPACITY_SOURCE_TABLE}" '
             "(zone, product, direction, source, rows, first_timestamp, "
             "last_timestamp, imported_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (zone, product, direction, label, int(n), first, last, now),
+            (zone, product, direction, label, int(n), first, last, imported_at),
         )
 
 
@@ -3257,7 +3278,10 @@ def _record_activation_sources(
     cannot be re-derived from the table (they count rows the fetch DROPPED),
     so streams in ``touched`` get this write's values (NULL when the write
     carries no accounting, e.g. manual CSV) and untouched streams carry their
-    previous values forward.
+    previous values forward. ``imported_at`` follows the same per-stream
+    LAST-WRITE semantics: touched streams get this write's timestamp,
+    untouched streams keep their previous one (falling back to now only when
+    no previous record exists).
     """
     conn.execute(
         f'CREATE TABLE IF NOT EXISTS "{_ACTIVATION_SOURCE_TABLE}" '
@@ -3269,11 +3293,11 @@ def _record_activation_sources(
     _migrate_activation_sources_schema(conn)
     now = datetime.now(UTC).isoformat()
     previous = {
-        (str(product), str(direction)): (u_int, u_max)
-        for product, direction, u_int, u_max in conn.execute(
+        (str(product), str(direction)): (u_int, u_max, imported_at)
+        for product, direction, u_int, u_max, imported_at in conn.execute(
             f'SELECT product, direction, unpriced_nonzero_intervals, '
-            f'unpriced_max_volume_mw FROM "{_ACTIVATION_SOURCE_TABLE}" '
-            "WHERE zone = ?",
+            f'unpriced_max_volume_mw, imported_at '
+            f'FROM "{_ACTIVATION_SOURCE_TABLE}" WHERE zone = ?',
             (zone,),
         )
     }
@@ -3295,17 +3319,24 @@ def _record_activation_sources(
             label = distinct[0]
         else:
             label = ACTIVATION_SOURCE_MIXED
-        if touched is not None and (str(product), str(direction)) in touched:
+        stream = (str(product), str(direction))
+        prev_u_int, prev_u_max, prev_imported = previous.get(
+            stream, (None, None, None),
+        )
+        if touched is not None and stream in touched:
             u_int, u_max = unpriced_nonzero_intervals, unpriced_max_volume_mw
+            imported_at = now
         else:
-            u_int, u_max = previous.get((str(product), str(direction)), (None, None))
+            u_int, u_max = prev_u_int, prev_u_max
+            imported_at = (prev_imported or now) if touched is not None else now
         conn.execute(
             f'INSERT OR REPLACE INTO "{_ACTIVATION_SOURCE_TABLE}" '
             "(zone, product, direction, source, rows, first_timestamp, "
             "last_timestamp, imported_at, unpriced_nonzero_intervals, "
             "unpriced_max_volume_mw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                zone, product, direction, label, int(n), first, last, now,
+                zone, product, direction, label, int(n), first, last,
+                imported_at,
                 None if u_int is None else int(u_int),
                 None if u_max is None else float(u_max),
             ),
