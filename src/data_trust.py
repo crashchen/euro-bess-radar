@@ -37,8 +37,13 @@ CAPACITY_SOURCE_COLUMNS = [
 ]
 
 # The activation provenance sidecar is keyed the same way (zone, product,
-# direction), so the audit table shares the capacity column shape.
-ACTIVATION_SOURCE_COLUMNS = list(CAPACITY_SOURCE_COLUMNS)
+# direction), so the audit table shares the capacity column shape, plus the
+# 5b live-fetch unpriced-accounting columns (window-global counts from the
+# stream's LAST write; blank = manual import with no accounting).
+ACTIVATION_SOURCE_COLUMNS = [
+    *CAPACITY_SOURCE_COLUMNS,
+    "unpriced_nonzero_intervals", "unpriced_max_volume_mw",
+]
 
 IMBALANCE_SOURCE_COLUMNS = [
     "zone", "source", "rows",
@@ -114,10 +119,19 @@ def build_activation_source_table(
     so each activation stream's source survives a restart and a re-import that
     changes the source relabels that stream instead of leaving a stale label.
 
+    The ``unpriced_nonzero_intervals`` / ``unpriced_max_volume_mw`` columns
+    surface the live fetch's dropped-unpriced-interval accounting (the 5a
+    red-line): counts are WINDOW-GLOBAL for the fetch that last wrote the
+    stream, not per-stream attributions; blank means the last write carried
+    no accounting (manual CSV). A nonzero count means the cached replay
+    understates activated energy for that window.
+
     Args:
         sources: Optional pre-built mapping ``(zone, product, direction) ->
-            {"source", "rows", "first", "last", "imported_at"}``. Read from the
-            database when None (the normal path; the argument exists for testing).
+            {"source", "rows", "first", "last", "imported_at",
+            "unpriced_nonzero_intervals", "unpriced_max_volume_mw"}``. Read
+            from the database when None (the normal path; the argument exists
+            for testing).
 
     Returns:
         One row per (zone, product, direction), sorted.
@@ -136,6 +150,10 @@ def build_activation_source_table(
             "first_timestamp_utc": meta_dict.get("first", pd.NaT),
             "last_timestamp_utc": meta_dict.get("last", pd.NaT),
             "imported_at": meta_dict.get("imported_at"),
+            "unpriced_nonzero_intervals": meta_dict.get(
+                "unpriced_nonzero_intervals"
+            ),
+            "unpriced_max_volume_mw": meta_dict.get("unpriced_max_volume_mw"),
         })
     if not rows:
         return pd.DataFrame(columns=ACTIVATION_SOURCE_COLUMNS)

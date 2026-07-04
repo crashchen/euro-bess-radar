@@ -192,7 +192,11 @@ def render(
             "when activated), a separate stream from the capacity fee; 'Manual "
             "CSV' rows came from an upload. When cached rows overlap the cockpit "
             "window, they drive the separate, non-additive activation-energy "
-            "historical replay overlay."
+            "historical replay overlay. 'Unpriced dropped' counts the live "
+            "fetch's nonzero-volume intervals with no published ENTSO-E price "
+            "(window-global for the fetch that last wrote the stream; blank = "
+            "manual import, no accounting) — a nonzero count means the replay "
+            "understates activated energy for that window."
         )
         st.dataframe(
             activation_sources,
@@ -212,6 +216,12 @@ def render(
                 ),
                 "imported_at": st.column_config.DatetimeColumn(
                     "Imported (UTC)", format="YYYY-MM-DD HH:mm",
+                ),
+                "unpriced_nonzero_intervals": st.column_config.NumberColumn(
+                    "Unpriced dropped", format="%d",
+                ),
+                "unpriced_max_volume_mw": st.column_config.NumberColumn(
+                    "Unpriced max MW", format="%.1f",
                 ),
             },
         )

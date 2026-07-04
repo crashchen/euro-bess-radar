@@ -308,6 +308,33 @@ def test_activation_source_table_from_sources() -> None:
     assert table.iloc[1]["source"] == "TSO API"
 
 
+def test_activation_source_table_surfaces_unpriced_accounting() -> None:
+    # 5b red-line: the live fetch's dropped-unpriced accounting must reach the
+    # audit table; manual rows without accounting stay blank (None), which is
+    # distinct from an accounted 0.
+    table = build_activation_source_table({
+        ("DE_LU", "aFRR", "up"): {
+            "source": "Netztransparenz.de + ENTSO-E 17.1.f", "rows": 4525,
+            "first": pd.Timestamp("2026-05-01", tz="UTC"),
+            "last": pd.Timestamp("2026-05-31 21:45", tz="UTC"),
+            "imported_at": "2026-07-03T10:00:00+00:00",
+            "unpriced_nonzero_intervals": 221,
+            "unpriced_max_volume_mw": 648.0,
+        },
+        ("DE_LU", "mFRR", "up"): {
+            "source": "Manual CSV", "rows": 6,
+            "first": pd.NaT, "last": pd.NaT, "imported_at": None,
+        },
+    })
+    assert list(table.columns) == ACTIVATION_SOURCE_COLUMNS
+    afrr = table.iloc[0]
+    assert afrr["unpriced_nonzero_intervals"] == 221
+    assert afrr["unpriced_max_volume_mw"] == 648.0
+    mfrr = table.iloc[1]
+    assert pd.isna(mfrr["unpriced_nonzero_intervals"])
+    assert pd.isna(mfrr["unpriced_max_volume_mw"])
+
+
 def test_activation_source_table_tolerates_malformed_metadata() -> None:
     table = build_activation_source_table({
         ("DE_LU", "aFRR", "up"): None,

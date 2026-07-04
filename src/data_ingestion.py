@@ -3140,6 +3140,10 @@ def persist_capacity_frame(
 ACTIVATION_SOURCE_MANUAL = "Manual CSV"
 ACTIVATION_SOURCE_MIXED = "Mixed"
 ACTIVATION_SOURCE_LEGACY = "Unknown (pre-provenance cache)"
+# Composite label for the Step-5 live fetch: the cached row is a JOIN of
+# Netztransparenz volumes and ENTSO-E 17.1.f prices, so provenance is one
+# stream, not two (price/volume cannot be re-attributed per row afterwards).
+ACTIVATION_SOURCE_NETZTRANSPARENZ_ENTSOE = "Netztransparenz.de + ENTSO-E 17.1.f"
 _ACTIVATION_SOURCE_TABLE = "activation_price_sources"
 
 
@@ -3154,6 +3158,8 @@ def _activation_cache_table(zone: str) -> str:
 
 def write_activation_cache(
     df: pd.DataFrame, zone: str, *, source: str = ACTIVATION_SOURCE_MANUAL,
+    unpriced_nonzero_intervals: int | None = None,
+    unpriced_max_volume_mw: float | None = None,
 ) -> None:
     """Persist activation-energy rows for one zone (keep-last on the key).
 
@@ -3164,6 +3170,12 @@ def write_activation_cache(
     ``df`` must carry ``product_type``, ``direction``, ``activation_price_eur_mwh``,
     ``system_activated_volume_mw`` on a timestamp index (the
     ``ancillary.parse_activation_import_csv`` output).
+
+    ``unpriced_nonzero_intervals`` / ``unpriced_max_volume_mw`` carry the live
+    fetch's dropped-unpriced-interval accounting (``fetch_activation_energy``
+    attrs; window-global, NOT per stream) into the sidecar for every stream
+    THIS write touches — ``None`` (the manual-CSV case) stores NULL, meaning
+    "no accounting available", distinct from an accounted 0.
     """
     if df is None or df.empty:
         return
@@ -3204,25 +3216,67 @@ def write_activation_cache(
             "system_activated_volume_mw, source) VALUES (?, ?, ?, ?, ?, ?)",
             rows,
         )
-        _record_activation_sources(conn, table, zone)
+        _record_activation_sources(
+            conn, table, zone,
+            touched={(r[1], r[2]) for r in rows},
+            unpriced_nonzero_intervals=unpriced_nonzero_intervals,
+            unpriced_max_volume_mw=unpriced_max_volume_mw,
+        )
+
+
+def _migrate_activation_sources_schema(conn: sqlite3.Connection) -> None:
+    """Add the 5b unpriced-accounting columns to a pre-5b sidecar in place."""
+    existing = {
+        row[1]
+        for row in conn.execute(f'PRAGMA table_info("{_ACTIVATION_SOURCE_TABLE}")')
+    }
+    for column, decl in (
+        ("unpriced_nonzero_intervals", "INTEGER"),
+        ("unpriced_max_volume_mw", "REAL"),
+    ):
+        if column not in existing:
+            conn.execute(
+                f'ALTER TABLE "{_ACTIVATION_SOURCE_TABLE}" '
+                f"ADD COLUMN {column} {decl}"
+            )
 
 
 def _record_activation_sources(
-    conn: sqlite3.Connection, table: str, zone: str,
+    conn: sqlite3.Connection, table: str, zone: str, *,
+    touched: set[tuple[str, str]] | None = None,
+    unpriced_nonzero_intervals: int | None = None,
+    unpriced_max_volume_mw: float | None = None,
 ) -> None:
     """Re-derive the activation provenance sidecar per (zone, product, direction).
 
     Same logic as ``_record_capacity_sources``: a stream's label is the single
     source when uniform, else ``Mixed``; re-derived from the table after each
     write so provenance stays in lockstep with overwritten data.
+
+    The unpriced-accounting columns describe the LAST WRITE to a stream: they
+    cannot be re-derived from the table (they count rows the fetch DROPPED),
+    so streams in ``touched`` get this write's values (NULL when the write
+    carries no accounting, e.g. manual CSV) and untouched streams carry their
+    previous values forward.
     """
     conn.execute(
         f'CREATE TABLE IF NOT EXISTS "{_ACTIVATION_SOURCE_TABLE}" '
         "(zone TEXT, product TEXT, direction TEXT, source TEXT, rows INTEGER, "
         "first_timestamp TEXT, last_timestamp TEXT, imported_at TEXT, "
+        "unpriced_nonzero_intervals INTEGER, unpriced_max_volume_mw REAL, "
         "PRIMARY KEY (zone, product, direction))"
     )
+    _migrate_activation_sources_schema(conn)
     now = datetime.now(UTC).isoformat()
+    previous = {
+        (str(product), str(direction)): (u_int, u_max)
+        for product, direction, u_int, u_max in conn.execute(
+            f'SELECT product, direction, unpriced_nonzero_intervals, '
+            f'unpriced_max_volume_mw FROM "{_ACTIVATION_SOURCE_TABLE}" '
+            "WHERE zone = ?",
+            (zone,),
+        )
+    }
     groups = conn.execute(
         f'SELECT product, direction, COUNT(*), MIN(timestamp), MAX(timestamp) '
         f'FROM "{table}" GROUP BY product, direction'
@@ -3241,36 +3295,68 @@ def _record_activation_sources(
             label = distinct[0]
         else:
             label = ACTIVATION_SOURCE_MIXED
+        if touched is not None and (str(product), str(direction)) in touched:
+            u_int, u_max = unpriced_nonzero_intervals, unpriced_max_volume_mw
+        else:
+            u_int, u_max = previous.get((str(product), str(direction)), (None, None))
         conn.execute(
             f'INSERT OR REPLACE INTO "{_ACTIVATION_SOURCE_TABLE}" '
             "(zone, product, direction, source, rows, first_timestamp, "
-            "last_timestamp, imported_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (zone, product, direction, label, int(n), first, last, now),
+            "last_timestamp, imported_at, unpriced_nonzero_intervals, "
+            "unpriced_max_volume_mw) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                zone, product, direction, label, int(n), first, last, now,
+                None if u_int is None else int(u_int),
+                None if u_max is None else float(u_max),
+            ),
         )
 
 
 def read_activation_sources() -> dict[tuple[str, str, str], dict[str, Any]]:
     """Return durable activation provenance keyed by (zone, product, direction).
-    Empty when the sidecar does not exist yet."""
+
+    Empty when the sidecar does not exist yet. Includes the 5b live-fetch
+    unpriced-accounting fields (``unpriced_nonzero_intervals`` /
+    ``unpriced_max_volume_mw``), ``None`` when the stream's last write carried
+    no accounting (manual CSV) or the sidecar predates 5b (read-only fallback,
+    no migration on read).
+    """
     if not DB_PATH.exists():
         return {}
     try:
         with sqlite3.connect(DB_PATH) as conn:
-            recorded = conn.execute(
-                f'SELECT zone, product, direction, source, rows, '
-                f'first_timestamp, last_timestamp, imported_at '
-                f'FROM "{_ACTIVATION_SOURCE_TABLE}"'
-            ).fetchall()
+            try:
+                recorded = conn.execute(
+                    f'SELECT zone, product, direction, source, rows, '
+                    f'first_timestamp, last_timestamp, imported_at, '
+                    f'unpriced_nonzero_intervals, unpriced_max_volume_mw '
+                    f'FROM "{_ACTIVATION_SOURCE_TABLE}"'
+                ).fetchall()
+            except sqlite3.OperationalError:
+                # Pre-5b sidecar without the unpriced columns.
+                recorded = [
+                    (*row, None, None)
+                    for row in conn.execute(
+                        f'SELECT zone, product, direction, source, rows, '
+                        f'first_timestamp, last_timestamp, imported_at '
+                        f'FROM "{_ACTIVATION_SOURCE_TABLE}"'
+                    ).fetchall()
+                ]
     except sqlite3.DatabaseError:
         return {}
     out: dict[tuple[str, str, str], dict[str, Any]] = {}
-    for zone, product, direction, source, rows, first, last, imported_at in recorded:
+    for (
+        zone, product, direction, source, rows, first, last, imported_at,
+        u_int, u_max,
+    ) in recorded:
         out[(str(zone), str(product), str(direction))] = {
             "source": source,
             "rows": int(rows),
             "first": pd.to_datetime(first, utc=True, errors="coerce"),
             "last": pd.to_datetime(last, utc=True, errors="coerce"),
             "imported_at": imported_at,
+            "unpriced_nonzero_intervals": None if u_int is None else int(u_int),
+            "unpriced_max_volume_mw": None if u_max is None else float(u_max),
         }
     return out
 
@@ -3316,7 +3402,12 @@ def persist_activation_frame(
     Args:
         long_df: Output of ``ancillary.parse_activation_import_csv`` (timestamp
             index; ``zone``, ``product_type``, ``direction``,
-            ``activation_price_eur_mwh``, ``system_activated_volume_mw`` columns).
+            ``activation_price_eur_mwh``, ``system_activated_volume_mw`` columns)
+            or of ``fetch_activation_energy`` (same frame; its
+            ``attrs["unpriced_nonzero_intervals"]`` /
+            ``attrs["unpriced_max_volume_mw"]`` accounting, when present, is
+            persisted into the provenance sidecar — parsed manual frames carry
+            no such attrs and store NULL).
         source: Provenance label stored per row.
 
     Returns:
@@ -3325,11 +3416,18 @@ def persist_activation_frame(
     summaries: list[dict[str, Any]] = []
     if long_df is None or long_df.empty or "zone" not in long_df.columns:
         return summaries
+    attrs = getattr(long_df, "attrs", {}) or {}
+    u_int = attrs.get("unpriced_nonzero_intervals")
+    u_max = attrs.get("unpriced_max_volume_mw")
     for zone, grp in long_df.groupby("zone", sort=True):
         zone_str = str(zone).strip()
         if not zone_str:
             continue
-        write_activation_cache(grp, zone_str, source=source)
+        write_activation_cache(
+            grp, zone_str, source=source,
+            unpriced_nonzero_intervals=None if u_int is None else int(u_int),
+            unpriced_max_volume_mw=None if u_max is None else float(u_max),
+        )
         for (product, direction), sub in grp.groupby(
             ["product_type", "direction"], sort=True,
         ):
