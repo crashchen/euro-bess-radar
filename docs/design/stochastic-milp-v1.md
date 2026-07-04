@@ -4,12 +4,20 @@ Status: **REVISED after joint scope review (Gemini + Codex), awaiting
 re-lock.** No solver code ships with this document; per the agreed ordering
 the solver core starts only after this contract is locked.
 
-Revision log: the first draft inherited the ceiling solver's pure-financial
-DA accounting, under which Stage 1 and Stage 2 decouple mathematically and
-the extensive form degenerates to a deterministic equivalent (Gemini catch,
-§2.1). This revision makes the **rebid volume cap** the load-bearing coupling,
-fixes the ceiling/window/deadband references to the reserve-aware 9.2b
-semantics (Codex catches), and pins scenario-resolution handling.
+Revision log:
+- **r1**: the first draft inherited the ceiling solver's pure-financial DA
+  accounting, under which Stage 1 and Stage 2 decouple mathematically and
+  the extensive form degenerates to a deterministic equivalent (Gemini
+  catch, §2.1). r1 made the **rebid volume cap** the load-bearing coupling,
+  fixed the ceiling/window/deadband references to the reserve-aware 9.2b
+  semantics (Codex catches), and pinned scenario-resolution handling.
+- **r2** (Codex re-lock round): the legacy 9.2a ceiling is NOT an upper
+  bound for the new co-opt/stochastic policy family (its Stage-1 is the
+  myopic DA-only schedule) — v1 gains a **same-cap perfect-foresight co-opt
+  ceiling** and demotes the 9.2a ceiling to a signed legacy comparator
+  (§2.4); the cap=∞ identity gains its missing premise via **mean-centred
+  error paths** (§3); the deadband HOLD is **gated to no-reserve days**
+  (holding a full-power Stage-1 schedule can violate reserve headroom, §5).
 
 ## 1. Positioning
 
@@ -81,14 +89,17 @@ scenario s.
 Economics: the implicit-MtM settlement assumes the whole DA-vs-physical gap
 can be unwound at the IDA1 print — infinite auction liquidity, an optimistic
 assumption. A finite cap makes large unwinds infeasible, so the per-scenario
-recourse value becomes a concave piecewise function of the Stage-1 position
-and the distribution (not just its mean) genuinely shapes the commitment.
+recourse value becomes a piecewise, scenario-dependent function of the
+Stage-1 position (concave in the LP relaxation / for a fixed binary pattern;
+the binary mode variables break global concavity) and the distribution (not
+just its mean) genuinely shapes the commitment.
 
 Pinned consequence (regression test, §8-1): at `rebid_cap_mw = ∞` the
 extensive form reduces exactly to the deterministic co-optimisation against
-the scenario-mean path — the stochastic value is identically zero. That is
-the decoupling theorem embraced as a test, and the reason v1 without a finite
-cap would be pointless.
+the **scenario-mean path**; because v1 mean-centres the sampled error paths
+(§3), that path IS the base forecast, so `stochastic − co_opt ≡ 0` holds
+exactly. That is the decoupling theorem embraced as a test, and the reason
+v1 without a finite cap would be pointless.
 
 `rebid_cap_mw` is a caller parameter, default `power_mw`, surfaced in the
 assumptions audit table. It is a liquidity proxy, not a market rule — the
@@ -117,12 +128,32 @@ end to end — not just the power cap:
   and `ANCILLARY_CAPACITY_AVAILABILITY` haircut as the 9.2b rows
   (`ancillary.capacity_price_series_for_product()` windowed to the valid
   days), added to `total_s` identically across scenarios.
-- Ceiling: the reserve-aware 9.2a ceiling
-  (`dispatch.solve_daily_da_id_reserve_dispatch` summed over the window —
-  the batch's `total_global_ceiling_eur`), NOT the plain DA+ID ceiling.
-
 With no reserve loaded, all of the above degrades to the plain DA+ID
-semantics and the plain `solve_daily_da_id_dispatch` ceiling.
+semantics.
+
+### 2.4 Ceiling family: the legacy 9.2a ceiling is NOT the new policies' bound
+
+The existing perfect-foresight ceilings (`solve_daily_da_id_dispatch`,
+reserve-aware `solve_daily_da_id_reserve_dispatch`) fix Stage 1 at the
+**myopic DA-only schedule** and grant perfect foresight only to Stage 2 —
+they bound the *myopic-commitment* policy family. The new co-opt/stochastic
+Stage-1 optimises the financial leg `da_net·(DA − IDA)` directly, which can
+legitimately exceed that bound (Codex re-lock catch). v1 therefore defines
+TWO ceiling roles:
+
+- **`coopt_ceiling_eur` (the binding upper bound)**: same-cap
+  perfect-foresight co-optimisation — Stage 1 AND Stage 2 optimised with the
+  realised IDA path known, under the SAME `rebid_cap_mw`, reserve headroom,
+  and capacity settlement as the policy being bounded. Implementation reuses
+  the stochastic solver itself with a single scenario ≡ the realised IDA path
+  and optimal (forecast-free, gate-free) execution. Every executed
+  (Stage-1, Stage-2) pair of the capped policies is feasible for this
+  problem, so `realised ≤ coopt_ceiling` is guaranteed by construction.
+- **Legacy 9.2a ceiling (signed comparator only)**: stays in the strategy
+  table unchanged, as the ceiling of the myopic family. The gap
+  `coopt_ceiling − legacy_ceiling` and any `realised − legacy_ceiling` are
+  **signed** — a co-opt policy beating the legacy ceiling is information
+  (the value of non-myopic commitment), not a violation.
 
 ## 3. Scenario generation contract (`ida_scenarios.build_ida_scenarios`)
 
@@ -144,6 +175,16 @@ Implementation pins:
   in v1 (it would fabricate flat sub-hour structure). When the same-resolution
   pool has fewer than S distinct days, the generator samples with replacement
   and reports degraded support — it does not silently widen the pool.
+- **Mean-centring (Codex re-lock catch — the cap=∞ identity's missing
+  premise)**: after sampling, the S error paths are re-centred by subtracting
+  their weighted sample-mean path, so the weighted scenario mean is EXACTLY
+  the base forecast per interval. Without this, a finite resample has a
+  nonzero mean-error path and the cap=∞ decoupled solution would equal the
+  *scenario-mean* co-opt, not the *base-forecast* co-opt (§8-1/§8-2 would
+  not line up). The shift is a per-interval constant across scenarios, so
+  cross-hour error correlation within each path is preserved; the centred
+  paths are no longer raw historical errors, which the metadata records
+  (`mean_centered=True`, default on).
 - **Determinism**: the generator accepts `seed`/`random_state` and reports it
   in metadata.
 - **Bundle contract**: the returned bundle carries the scenario paths, equal
@@ -171,15 +212,20 @@ Inputs: day frames (DA prices, realised IDA prices), the scenario bundle
   Stage-1 schedule — see §5; NOT equal to `da_only_revenue_eur` in general),
 - `forecast_uplift_eur` (the predicted uplift of the point-forecast rebid
   over holding the stochastic commitment — the deadband gate input),
-- `ceiling_total_eur` (reserve-aware when reserve is present, §2.3),
+- `coopt_ceiling_eur` (the binding same-cap perfect-foresight co-opt bound,
+  §2.4 — computed by reusing this solver with a single scenario ≡ the
+  realised IDA path and optimal execution),
+- `legacy_ceiling_eur` (the existing 9.2a/DA+ID ceiling, signed comparator
+  only, §2.4),
 - `expected_total_eur` (the in-solver objective value over scenarios —
   diagnostic only, never presented as realised revenue),
 - `captured_uplift_eur = realised − da_only` (MAY be negative; do not clamp),
-- `forecast_error_cost_eur = ceiling − realised ≥ 0`,
+- `forecast_error_cost_eur = coopt_ceiling − realised ≥ 0`,
 - per-scenario totals for the risk report (§7).
 
-Identity pinned by test: `captured + forecast_error == ceiling − da_only`
-(same as sequential, now with the reserve-aware ceiling when applicable).
+Identity pinned by test: `captured + forecast_error == coopt_ceiling −
+da_only` (decomposition as in the sequential solver, but against the new
+binding ceiling — the legacy ceiling appears in no ≥0 identity).
 
 ## 5. Execution / settlement semantics
 
@@ -200,6 +246,15 @@ one semantic rewrite forced by the new Stage 1:
   Both `stochastic_hold_eur` and `forecast_uplift_eur` are therefore output
   and audited (§4); `captured_uplift_eur` stays measured against the
   unchanged `da_only` baseline.
+- **The deadband gate applies on NO-RESERVE days only (Codex re-lock
+  catch)**: the Stage-1 DA schedule is full-power and may occupy intervals
+  where reserve headroom is committed, so "hold the Stage-1 schedule" can be
+  physically infeasible on reserve days. v1 resolves this by ALWAYS
+  re-dispatching Stage 2 when `reserve_mw > 0` anywhere in the day (the
+  Stage-2 problem is headroom-feasible by construction);
+  `min_rebid_uplift_eur` then has no effect on such days, which the batch
+  summary and audit rows must state. A reserve-feasible hold *projection* is
+  a possible v2 refinement, not v1 scope.
 - Settlement at the realised IDA uses the implicit-MtM identity, plus
   capacity revenue when reserve is present.
 - `min_rebid_uplift_eur = 0` reproduces the always-rebid variant, as today.
@@ -248,21 +303,27 @@ BEFORE any merge of aggregation/attribution code):
 
 1. **Decoupling theorem**: at `rebid_cap_mw = ∞` the stochastic Stage-1
    commitment equals the deterministic co-optimisation against the
-   scenario-mean path — `stochastic − co_opt ≡ 0` for any S. (Embraces the
-   Gemini review's mathematical observation as a test.)
+   scenario-mean path, and — **because the generator mean-centres the error
+   paths (§3)** — that path is the base forecast, so `stochastic − co_opt ≡
+   0` for any S. (Embraces the Gemini review's mathematical observation as a
+   test; the mean-centring premise is what makes the identity exact.)
 2. **S=1 degeneracy**: S=1 with a zero error path ⇒ the deterministic
    point-forecast co-optimisation at the configured cap. This is
    **deliberately NOT equal to the myopic sequential row** — the co-opt
    Stage-1 sees the forecast, the sequential Stage-1 does not; their signed
    difference is the first headline delta (§1).
-3. **IDA ≡ DA collapse (weakened form)**: with IDA scenarios and realised
-   prices all ≡ DA prices, the *realised stochastic row equals the DA-only
-   row under default execution*. (Stage-1 asserted only through settlement:
-   MtM cancellation makes the Stage-1 schedule degenerate/multi-optimal, so
-   schedule-level equality would need a lexicographic tie-breaker — out of
-   scope for v1; the assertion is on money, not schedules.)
-4. `stochastic_realised ≤ ceiling` on every day, with the reserve-aware
-   ceiling when reserve is present (§2.3).
+3. **IDA ≡ DA collapse (weakened form, no-reserve statement)**: with IDA
+   scenarios and realised prices all ≡ DA prices on a NO-RESERVE day, the
+   *realised stochastic row equals the DA-only row under default execution*.
+   (Stage-1 asserted only through settlement: MtM cancellation makes the
+   Stage-1 schedule degenerate/multi-optimal, so schedule-level equality
+   would need a lexicographic tie-breaker — out of scope for v1; the
+   assertion is on money, not schedules.) On a reserve day the collapse
+   target is the **capped myopic reserve baseline** (identical headroom and
+   capacity settlement), NOT the plain DA-only row.
+4. `stochastic_realised ≤ coopt_ceiling` on every day (§2.4, guaranteed by
+   construction at matched cap/reserve). Gaps to the LEGACY 9.2a ceiling are
+   **signed** and carry information — a co-opt policy may beat it.
 5. `expected_total_eur ≥` the myopic commitment's expected value under the
    SAME scenario set and cap (the stochastic solution cannot be worse
    in-sample than the commitment it generalises).
@@ -274,11 +335,15 @@ BEFORE any merge of aggregation/attribution code):
 
 1. **Increment A — scenario generator** (`ida_scenarios.py` + tests; no
    solver). Ships the bundle contract of §3 including `base_forecast`,
-   resolution partitioning, seed/metadata.
+   resolution partitioning, **mean-centring (with a scenario-mean ≡
+   base-forecast test)**, seed/metadata.
 2. **Increment B — solver core** (`solve_stochastic_da_id_dispatch` +
-   synthetic tiny-scenario tests). Pins FIRST: reserve-aware ceiling wiring,
-   deadband/hold semantics of §5, decoupling identity (§8-1), IDA≡DA
-   collapse (§8-3). Ships measured solve timings (§6).
+   synthetic tiny-scenario tests). Pins FIRST: the **coopt ceiling** (§2.4,
+   solver-reuse implementation + `realised ≤ coopt_ceiling` and a case where
+   the legacy ceiling is legitimately exceeded), deadband/hold semantics of
+   §5 **including the no-reserve-only gating**, decoupling identity (§8-1),
+   IDA≡DA collapse (§8-3, both reserve variants). Ships measured solve
+   timings (§6).
 3. **Increment C — batch + strategy rows**
    (`simulate_stochastic_da_id_batch`, the three-policy comparison at a
    common cap, risk block, timing report, 9.2b `triple_valid_days` window
