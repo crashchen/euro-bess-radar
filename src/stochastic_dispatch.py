@@ -59,6 +59,7 @@ from src.config import ANCILLARY_CAPACITY_AVAILABILITY
 from src.dispatch import (
     _REBID_UPLIFT_EPS_EUR,
     DISPATCH_VOM_COST_EUR_MWH,
+    _coerce_nonnegative_interval_vector,
     _schedule_value_at_prices,
     solve_daily_da_id_dispatch,
     solve_daily_lp,
@@ -581,12 +582,10 @@ def _capacity_revenue(
     """
     if reserve_price is None:
         return 0.0
-    rp = np.asarray(reserve_price, dtype=float).ravel()
-    if rp.size == 1:
-        rp = np.full(n, float(rp[0]))
-    elif rp.size != n:
-        raise ValueError(f"reserve_price must be scalar or length {n}, got {rp.size}")
-    rp = np.where(np.isfinite(rp), rp, 0.0)
+    # Same non-negative sanitisation as the 9.2b reserve dispatch: capacity
+    # prices are non-negative (you are not paid to hold reserve at a negative
+    # price), so a stray negative floors to 0 rather than subtracting income.
+    rp = _coerce_nonnegative_interval_vector(reserve_price, n=n)
     return float((rp * availability * reserve * dt).sum())
 
 

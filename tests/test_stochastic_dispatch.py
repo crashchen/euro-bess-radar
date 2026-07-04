@@ -343,19 +343,42 @@ class TestStochasticExecution:
         np.testing.assert_allclose(
             with_price["capacity_revenue_eur"], expected_cap, atol=1e-6,
         )
-        # Constant offset on the reserve-aware totals + ceiling.
-        np.testing.assert_allclose(
-            with_price["realised_total_eur"],
-            no_price["realised_total_eur"] + expected_cap, atol=1e-4,
-        )
-        np.testing.assert_allclose(
-            with_price["coopt_ceiling_eur"],
-            no_price["coopt_ceiling_eur"] + expected_cap, atol=1e-4,
-        )
+        # Constant offset on the reserve-aware totals + ceiling + hold.
+        for key in ("realised_total_eur", "coopt_ceiling_eur", "stochastic_hold_eur"):
+            np.testing.assert_allclose(
+                with_price[key], no_price[key] + expected_cap, atol=1e-4,
+            )
         # da_only / legacy are the no-reserve baselines, unchanged.
         assert with_price["da_only_revenue_eur"] == no_price["da_only_revenue_eur"]
         assert with_price["legacy_ceiling_eur"] == no_price["legacy_ceiling_eur"]
         assert with_price["realised_total_eur"] <= with_price["coopt_ceiling_eur"] + 1e-6
+        # The constant cancels in forecast_error_cost = coopt - realised.
+        np.testing.assert_allclose(
+            with_price["forecast_error_cost_eur"],
+            no_price["forecast_error_cost_eur"], atol=1e-4,
+        )
+
+    def test_negative_reserve_price_is_floored_to_zero(self) -> None:
+        # 9.2b convention: capacity prices are non-negative, so a stray negative
+        # floors to 0 rather than subtracting revenue.
+        da, scen, w, base, realised = self._case(n=16, seed=9)
+        reserve = np.full(16, 0.3)
+        base_kw = dict(
+            dt=1.0, power_mw=1.0, duration_hours=2.0, reserve_mw=reserve,
+            rebid_cap_mw=1.0,
+        )
+        neg = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised,
+            reserve_price_eur_mw_h=np.full(16, -12.0), **base_kw,
+        )
+        zero = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised,
+            reserve_price_eur_mw_h=np.zeros(16), **base_kw,
+        )
+        assert neg["capacity_revenue_eur"] == 0.0
+        np.testing.assert_allclose(
+            neg["realised_total_eur"], zero["realised_total_eur"], atol=1e-6,
+        )
 
     def test_negative_rebid_cap_raises(self) -> None:
         da, scen, w, base, realised = self._case(seed=5)
