@@ -1532,6 +1532,10 @@ def _align_day_scenarios(bundle: dict, index: pd.DatetimeIndex):
     ``index``. None when any merged timestamp is missing from the bundle (the
     scenario grid must cover the day being priced).
     """
+    # The merged day index is in the zone's LOCAL tz (from ``_select_local_day``),
+    # but the bundle timestamps are UTC — align to UTC before the lookup or every
+    # day is silently dropped on any real (tz-aware) zone.
+    index = index.tz_convert("UTC") if index.tz is not None else index.tz_localize("UTC")
     ts = bundle["timestamps"]
     pos = ts.get_indexer(index)
     if (pos < 0).any():
@@ -1567,12 +1571,25 @@ def _stochastic_day(
     base, scen = aligned
     da = merged["price_eur_mwh"].to_numpy(dtype=float)
     realised = merged[IDA_VALUE_COL].to_numpy(dtype=float)
-    dt = _infer_interval_hours(pd.DatetimeIndex(merged.index))
+    idx = pd.DatetimeIndex(merged.index)
+    dt = _infer_interval_hours(idx)
     weights = np.full(scen.shape[0], 1.0 / scen.shape[0])
+    # A window-indexed reserve Series (the loaded-capacity standard) is aligned
+    # to THIS day's intervals by (local date, 4h block) — the same helper the
+    # 9.2b batches use — so the batch's internal day loop can price real
+    # block-of-day reserve; a scalar / per-interval array passes through.
+    day_reserve_mw = (
+        align_reserve_price_to_index(reserve_mw, idx, tz)
+        if isinstance(reserve_mw, pd.Series) else reserve_mw
+    )
+    day_reserve_price = (
+        align_reserve_price_to_index(reserve_price_eur_mw_h, idx, tz)
+        if isinstance(reserve_price_eur_mw_h, pd.Series) else reserve_price_eur_mw_h
+    )
     common = dict(
         dt=dt, power_mw=power_mw, duration_hours=duration_hours,
-        efficiency=efficiency, rebid_cap_mw=rebid_cap_mw, reserve_mw=reserve_mw,
-        reserve_price_eur_mw_h=reserve_price_eur_mw_h, availability=availability,
+        efficiency=efficiency, rebid_cap_mw=rebid_cap_mw, reserve_mw=day_reserve_mw,
+        reserve_price_eur_mw_h=day_reserve_price, availability=availability,
         min_rebid_uplift_eur=min_rebid_uplift_eur,
     )
     myopic = solve_myopic_capped_da_id_dispatch(da, base, realised, **common)

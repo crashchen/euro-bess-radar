@@ -129,6 +129,38 @@ class TestStochasticBatch:
             <= with_res["total_coopt_ceiling_eur"] + 1e-6
         )
 
+    def test_local_timezone_does_not_exclude_all_days(self) -> None:
+        # Regression (Gemini catch): the merged day index is in the zone's local
+        # tz but scenario bundles are UTC; without aligning the lookup to UTC,
+        # get_indexer mismatches and every day is silently excluded on any real
+        # (tz-aware) zone.
+        da_df, ida_df = _history(seed=14)
+        _, summ = simulate_stochastic_da_id_batch(
+            da_df, ida_df, tz="Europe/Berlin", n_scenarios=6, seed=1, **_KW,
+        )
+        assert summ["valid_days"] >= 8  # boundary partial days may drop
+
+    def test_window_reserve_series_is_aligned_per_day(self) -> None:
+        # A window-indexed reserve Series (the loaded-capacity standard) is
+        # aligned per day by (local date, 4h block), so real block-of-day
+        # reserve prices/requirements flow through the batch's day loop.
+        da_df, ida_df = _history(seed=15)
+        rprice = pd.Series(12.0, index=da_df.index)
+        rmw = pd.Series(0.3, index=da_df.index)
+        no_res = simulate_stochastic_da_id_batch(
+            da_df, ida_df, n_scenarios=6, seed=2, **_KW,
+        )[1]
+        with_res = simulate_stochastic_da_id_batch(
+            da_df, ida_df, n_scenarios=6, seed=2, reserve_mw=rmw,
+            reserve_price_eur_mw_h=rprice, rebid_cap_mw=1.0, **_KW,
+        )[1]
+        assert with_res["valid_days"] == no_res["valid_days"] >= 1
+        # Capacity income lifts the reserve-aware total above the no-reserve run.
+        assert (
+            with_res["total_stochastic_realised_eur"]
+            > no_res["total_stochastic_realised_eur"]
+        )
+
     def test_seed_reproducible(self) -> None:
         da_df, ida_df = _history(seed=10)
         kw = dict(n_scenarios=8, seed=11, **_KW)
