@@ -28,13 +28,19 @@ from src.dispatch import (
 )
 from src.ida_forecast import (
     FORECAST_COL,
+    IDA_VALUE_COL,
     build_ida_forecast,
     compute_forecast_skill,
 )
+from src.ida_scenarios import build_ida_scenarios
 from src.reserve_forecast import (
     RESERVE_FORECAST_COL,
     RESERVE_VALUE_COL,
     build_reserve_price_forecast,
+)
+from src.stochastic_dispatch import (
+    solve_myopic_capped_da_id_dispatch,
+    solve_stochastic_da_id_dispatch,
 )
 
 DAYS_PER_YEAR = 365.25
@@ -1485,3 +1491,218 @@ def _count_dispatch_blocks(net_dispatch: np.ndarray, threshold: float = 1e-6) ->
             count += 1
         prev = sign
     return count
+
+
+# ── Stochastic DA+ID batch (stochastic MILP Increment C1) ─────────────────────
+
+_STOCH_COLUMNS = [
+    "date", "da_only_eur", "myopic_realised_eur", "coopt_realised_eur",
+    "stochastic_realised_eur", "coopt_ceiling_eur", "commitment_value_eur",
+    "distribution_value_eur", "rebid", "n_scenarios", "coverage",
+]
+
+
+def _risk_block(pooled: list[float]) -> dict[str, Any]:
+    """P10/P50/P90 + downside CVaR@90 of the pooled per-day scenario totals.
+
+    A dispersion DIAGNOSTIC (the objective stays risk-neutral, scope §7):
+    ``cvar90`` is the mean of the worst 10% of the pooled per-(day, scenario)
+    energy totals — the downside tail, never the upper tail. Pooling mixes
+    day-level and scenario-level variation, so read it as a spread indicator,
+    not a portfolio VaR.
+    """
+    if not pooled:
+        return {"p10": None, "p50": None, "p90": None, "cvar90": None, "n": 0}
+    arr = np.sort(np.asarray(pooled, dtype=float))
+    k = max(1, int(np.ceil(0.10 * arr.size)))
+    return {
+        "p10": float(np.percentile(arr, 10)),
+        "p50": float(np.percentile(arr, 50)),
+        "p90": float(np.percentile(arr, 90)),
+        "cvar90": float(arr[:k].mean()),  # mean of the worst 10%
+        "n": int(arr.size),
+    }
+
+
+def _align_day_scenarios(bundle: dict, index: pd.DatetimeIndex):
+    """Align a scenario bundle to a day's merged UTC index, or None if it can't.
+
+    Returns ``(base_forecast_arr, scenarios_arr)`` positionally matched to
+    ``index``. None when any merged timestamp is missing from the bundle (the
+    scenario grid must cover the day being priced).
+    """
+    ts = bundle["timestamps"]
+    pos = ts.get_indexer(index)
+    if (pos < 0).any():
+        return None
+    base = bundle["base_forecast"].to_numpy()[pos]
+    scen = bundle["scenarios"][:, pos]
+    return base, scen
+
+
+def _stochastic_day(
+    da_prices: pd.DataFrame, ida_prices: pd.DataFrame, bundle: dict | None,
+    *, local_date: date, tz: str | None, power_mw: float, duration_hours: float,
+    efficiency: float, rebid_cap_mw, reserve_mw, reserve_price_eur_mw_h,
+    availability: float, min_rebid_uplift_eur: float,
+) -> tuple[dict[str, Any], np.ndarray] | None:
+    """Solve one day's three-policy stochastic comparison, or None if unusable."""
+    if bundle is None:
+        return None
+    da_day = _select_local_day(da_prices, local_date, tz)
+    ida_day = _select_local_day(ida_prices, local_date, tz)
+    if da_day.empty or ida_day.empty or IDA_VALUE_COL not in ida_day.columns:
+        return None
+    merged = (
+        da_day[["price_eur_mwh"]]
+        .join(ida_day[[IDA_VALUE_COL]], how="inner")
+        .dropna()
+    )
+    if merged.empty or not _is_regular_utc_day(merged):
+        return None
+    aligned = _align_day_scenarios(bundle, pd.DatetimeIndex(merged.index))
+    if aligned is None:
+        return None
+    base, scen = aligned
+    da = merged["price_eur_mwh"].to_numpy(dtype=float)
+    realised = merged[IDA_VALUE_COL].to_numpy(dtype=float)
+    dt = _infer_interval_hours(pd.DatetimeIndex(merged.index))
+    weights = np.full(scen.shape[0], 1.0 / scen.shape[0])
+    common = dict(
+        dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency, rebid_cap_mw=rebid_cap_mw, reserve_mw=reserve_mw,
+        reserve_price_eur_mw_h=reserve_price_eur_mw_h, availability=availability,
+        min_rebid_uplift_eur=min_rebid_uplift_eur,
+    )
+    myopic = solve_myopic_capped_da_id_dispatch(da, base, realised, **common)
+    coopt = solve_stochastic_da_id_dispatch(
+        da, base[None, :], np.array([1.0]), base, realised, **common,
+    )
+    stoch = solve_stochastic_da_id_dispatch(da, scen, weights, base, realised, **common)
+    if not (myopic["success"] and coopt["success"] and stoch["success"]):
+        return None
+    row = {
+        "date": local_date,
+        "da_only_eur": stoch["da_only_revenue_eur"],
+        "myopic_realised_eur": myopic["realised_total_eur"],
+        "coopt_realised_eur": coopt["realised_total_eur"],
+        "stochastic_realised_eur": stoch["realised_total_eur"],
+        "coopt_ceiling_eur": stoch["coopt_ceiling_eur"],
+        "commitment_value_eur": coopt["realised_total_eur"] - myopic["realised_total_eur"],
+        "distribution_value_eur": stoch["realised_total_eur"] - coopt["realised_total_eur"],
+        "rebid": bool(stoch["rebid"]),
+        "n_scenarios": int(scen.shape[0]),
+        "coverage": float(bundle["base_coverage"]),
+    }
+    return row, np.asarray(stoch["scenario_total_eur"], dtype=float)
+
+
+def simulate_stochastic_da_id_batch(
+    da_prices: pd.DataFrame,
+    ida_prices: pd.DataFrame,
+    *,
+    dates: list[date] | None = None,
+    tz: str | None = None,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    n_scenarios: int = 10,
+    bucket: str = "hour_of_day",
+    forecast_mode: str = "loo",
+    seed: int | None = None,
+    rebid_cap_mw: float | None = None,
+    reserve_mw: float | np.ndarray | None = None,
+    reserve_price_eur_mw_h: float | np.ndarray | None = None,
+    availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
+    min_rebid_uplift_eur: float = 0.0,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Per-day three-policy stochastic DA+ID comparison at a COMMON rebid cap.
+
+    For each local day this builds a scenario bundle
+    (:func:`ida_scenarios.build_ida_scenarios`) and runs three policies under the
+    IDENTICAL ``rebid_cap_mw`` / reserve / window (scope §5):
+
+    - **capped myopic** — DA-only Stage-1 (ignores IDA) through the capped
+      execution (``solve_myopic_capped_da_id_dispatch``);
+    - **deterministic co-opt** — S=1 stochastic commit against the base forecast;
+    - **stochastic** — S=N scenario-aware commit.
+
+    The two signed headline deltas isolate the sources of value:
+    ``commitment_value = co_opt_realised - myopic_realised`` (the worth of a
+    non-myopic DA commitment) and ``distribution_value = stochastic_realised -
+    co_opt_realised`` (the worth of anticipating the IDA *distribution* rather
+    than just its mean). Both may be negative. Each day is solved standalone
+    (per-day terminal-neutral), isolating commitment quality from multi-day SoC
+    carry.
+
+    Returns ``(per_day_df, summary)``. ``summary`` carries the window totals for
+    each policy, the two total deltas, the risk block (:func:`_risk_block`,
+    pooled per-day scenario dispersion — a diagnostic), and the scenario/forecast
+    metadata. At ``rebid_cap_mw = inf`` with no reserve the myopic policy ties
+    the 9.2b sequential row exactly.
+    """
+    selected = dates or available_local_dates(da_prices, tz=tz)
+    scenarios_by_date, scen_meta = build_ida_scenarios(
+        ida_prices, target_dates=selected, n_scenarios=n_scenarios, tz=tz,
+        bucket=bucket, forecast_mode=forecast_mode, seed=seed,
+    )
+
+    rows: list[dict[str, Any]] = []
+    pooled: list[float] = []
+    excluded = 0
+    for local_date in selected:
+        result = _stochastic_day(
+            da_prices, ida_prices, scenarios_by_date.get(local_date),
+            local_date=local_date, tz=tz, power_mw=power_mw,
+            duration_hours=duration_hours, efficiency=efficiency,
+            rebid_cap_mw=rebid_cap_mw, reserve_mw=reserve_mw,
+            reserve_price_eur_mw_h=reserve_price_eur_mw_h,
+            availability=availability, min_rebid_uplift_eur=min_rebid_uplift_eur,
+        )
+        if result is None:
+            excluded += 1
+            continue
+        row, scen_totals = result
+        rows.append(row)
+        pooled.extend(scen_totals.tolist())
+
+    if not rows:
+        per_day = pd.DataFrame(columns=_STOCH_COLUMNS)
+    else:
+        per_day = (
+            pd.DataFrame(rows, columns=_STOCH_COLUMNS)
+            .sort_values("date").reset_index(drop=True)
+        )
+    summary = _stochastic_summary(
+        per_day, pooled, excluded, scen_meta, rebid_cap_mw, n_scenarios,
+        min_rebid_uplift_eur,
+    )
+    per_day.attrs["summary"] = summary
+    return per_day, summary
+
+
+def _stochastic_summary(
+    per_day: pd.DataFrame, pooled: list[float], excluded: int, scen_meta: dict,
+    rebid_cap_mw, n_scenarios: int, min_rebid_uplift_eur: float,
+) -> dict[str, Any]:
+    """Aggregate the per-day three-policy rows into window totals + risk block."""
+    def _tot(col: str) -> float:
+        return 0.0 if per_day.empty else float(per_day[col].sum())
+
+    return {
+        "valid_days": len(per_day),
+        "excluded_days": excluded,
+        "total_da_only_eur": _tot("da_only_eur"),
+        "total_myopic_realised_eur": _tot("myopic_realised_eur"),
+        "total_coopt_realised_eur": _tot("coopt_realised_eur"),
+        "total_stochastic_realised_eur": _tot("stochastic_realised_eur"),
+        "total_coopt_ceiling_eur": _tot("coopt_ceiling_eur"),
+        "total_commitment_value_eur": _tot("commitment_value_eur"),
+        "total_distribution_value_eur": _tot("distribution_value_eur"),
+        "risk_block": _risk_block(pooled),
+        "rebid_cap_mw": rebid_cap_mw,
+        "n_scenarios": n_scenarios,
+        "min_rebid_uplift_eur": min_rebid_uplift_eur,
+        "n_rebid_days": 0 if per_day.empty else int(per_day["rebid"].sum()),
+        "scenario_meta": scen_meta,
+    }

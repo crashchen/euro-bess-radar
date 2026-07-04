@@ -478,7 +478,8 @@ def _empty_dispatch_result(n: int) -> dict:
         "stochastic_hold_eur": 0.0, "capacity_revenue_eur": 0.0,
         "forecast_uplift_eur": 0.0,
         "coopt_ceiling_eur": 0.0, "legacy_ceiling_eur": 0.0,
-        "expected_total_eur": 0.0, "captured_uplift_eur": 0.0,
+        "expected_total_eur": 0.0, "scenario_total_eur": np.zeros(0),
+        "captured_uplift_eur": 0.0,
         "forecast_error_cost_eur": 0.0, "rebid": False,
         "da_p_charge": zeros, "da_p_discharge": zeros,
         "exec_p_charge": zeros, "exec_p_discharge": zeros,
@@ -662,6 +663,11 @@ def _execute_commitment(
         "coopt_ceiling_eur": round(coopt_ceiling, 6),
         "legacy_ceiling_eur": round(legacy_ceiling, 6),
         "expected_total_eur": round(commit["expected_total_eur"], 6),
+        # Per-scenario energy totals feed the batch risk block (P10/P50/P90 +
+        # downside CVaR) — a dispersion diagnostic, so it EXCLUDES the certain
+        # capacity constant (which only shifts location, not risk) and keeps
+        # ``expected_total == mean(scenario_total)`` as a clean invariant.
+        "scenario_total_eur": commit["scenario_total_eur"],
         "captured_uplift_eur": round(realised_total - da_only, 6),
         "forecast_error_cost_eur": round(forecast_error_cost, 6),
         "rebid": bool(rebid),
@@ -672,3 +678,70 @@ def _execute_commitment(
         "exec_soc": stage2_fc["soc"] if rebid else commit["da_soc"],
         "reserve_mw": reserve, "rebid_cap_mw": cap,
     }
+
+
+def solve_myopic_capped_da_id_dispatch(
+    da_prices: np.ndarray,
+    base_forecast: np.ndarray,
+    ida_realised: np.ndarray,
+    dt: float,
+    *,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    soc_init_frac: float = 0.5,
+    rebid_cap_mw: float | None = None,
+    reserve_mw: float | np.ndarray | None = None,
+    reserve_price_eur_mw_h: float | np.ndarray | None = None,
+    availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
+    min_rebid_uplift_eur: float = 0.0,
+) -> dict:
+    """Capped-myopic baseline: DA-only Stage-1 through the SAME capped execution.
+
+    Policy (i) of the three-way comparison (scope §5): the Stage-1 commitment is
+    the myopic DA-only MILP (``solve_daily_lp`` on the DA prices, ignoring IDA),
+    but it is then executed through the identical capped forecast-driven Stage-2
+    + deadband + reserve settlement as the stochastic policy, so the three
+    policies differ ONLY in how Stage 1 is chosen. At ``rebid_cap_mw = inf`` with
+    no reserve this reduces exactly to the 9.2b sequential row
+    (``solve_sequential_da_id_dispatch``) — the regression anchor. Returns the
+    same decomposition dict as :func:`solve_stochastic_da_id_dispatch` (with
+    ``expected_total_eur``/``scenario_total_eur`` NaN/empty — there is no
+    scenario set here).
+    """
+    if rebid_cap_mw is not None and rebid_cap_mw < 0:
+        raise ValueError(f"rebid_cap_mw must be >= 0, got {rebid_cap_mw}")
+    da_prices = np.asarray(da_prices, dtype=float).ravel()
+    base_forecast = np.asarray(base_forecast, dtype=float).ravel()
+    ida_realised = np.asarray(ida_realised, dtype=float).ravel()
+    n = da_prices.size
+    if (
+        n == 0 or base_forecast.size != n or ida_realised.size != n
+        or np.isnan(da_prices).any() or np.isnan(base_forecast).any()
+        or np.isnan(ida_realised).any()
+    ):
+        return _empty_dispatch_result(n)
+
+    reserve = _coerce_reserve(reserve_mw, n, power_mw)
+    cap = power_mw if rebid_cap_mw is None else float(rebid_cap_mw)
+    if reserve.max(initial=0.0) > cap + 1e-9:
+        raise ValueError(
+            "rebid_cap_mw must be >= max reserve on reserve days "
+            f"(cap={cap}, max_reserve={reserve.max():.4f})."
+        )
+    lp = solve_daily_lp(
+        da_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
+        efficiency=efficiency, soc_init_frac=soc_init_frac,
+    )
+    commit = {
+        "success": True, "rebid_cap_mw": cap, "reserve_mw": reserve,
+        "da_p_charge": lp["p_charge"], "da_p_discharge": lp["p_discharge"],
+        "da_soc": lp["soc"],
+        "expected_total_eur": float("nan"),
+        "scenario_total_eur": np.zeros(0),
+    }
+    return _execute_commitment(
+        commit, da_prices, base_forecast, ida_realised, dt, n, power_mw,
+        duration_hours, efficiency, soc_init_frac, min_rebid_uplift_eur,
+        reserve_price_eur_mw_h, availability,
+    )
