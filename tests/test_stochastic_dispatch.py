@@ -14,6 +14,7 @@ import pytest
 from src.dispatch import solve_daily_lp
 from src.stochastic_dispatch import (
     solve_stochastic_da_commitment,
+    solve_stochastic_da_id_dispatch,
     stochastic_coopt_ceiling,
 )
 
@@ -202,3 +203,215 @@ class TestStochasticCommitment:
         assert r["success"]
         assert r["solve_seconds"] > 0.0
         assert r["solve_seconds"] < 30.0
+
+
+class TestStochasticExecution:
+    """Increment B2: forecast-driven realised execution + decomposition."""
+
+    @staticmethod
+    def _case(n=12, s=6, seed=0, spread=5.0):
+        rng = np.random.default_rng(seed)
+        da = 50 + 20 * np.sin(np.arange(n) / n * 2 * np.pi)
+        base = da + spread
+        errs = rng.normal(0, 8, size=(s, n))
+        errs -= errs.mean(axis=0, keepdims=True)
+        scen = base[None, :] + errs
+        w = np.full(s, 1.0 / s)
+        realised = base + rng.normal(0, 6, n)
+        return da, scen, w, base, realised
+
+    def test_realised_at_most_coopt_ceiling(self) -> None:
+        # The key by-construction pin (§2.4/§8-4): the executed (Stage-1
+        # stochastic commit, Stage-2 forecast-optimal capped) schedule is
+        # feasible for the same-cap perfect-foresight co-opt, so realised
+        # cannot exceed it. Checked WITHOUT relying on the clamp.
+        for seed in range(6):
+            da, scen, w, base, realised = self._case(seed=seed)
+            r = solve_stochastic_da_id_dispatch(
+                da, scen, w, base, realised, dt=1.0, power_mw=1.0,
+                duration_hours=2.0,
+            )
+            assert r["success"]
+            assert r["realised_total_eur"] <= r["coopt_ceiling_eur"] + 1e-6
+
+    def test_decomposition_identities(self) -> None:
+        da, scen, w, base, realised = self._case(seed=1)
+        r = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised, dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        np.testing.assert_allclose(
+            r["captured_uplift_eur"],
+            r["realised_total_eur"] - r["da_only_revenue_eur"], atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            r["forecast_error_cost_eur"],
+            r["coopt_ceiling_eur"] - r["realised_total_eur"], atol=1e-6,
+        )
+        assert r["forecast_error_cost_eur"] >= -1e-9
+
+    def test_ida_equals_da_realised_collapses_to_da_only(self) -> None:
+        # Scope §8-3 (no-reserve, default execution): scenarios/forecast/
+        # realised all == DA -> realised == DA-only arbitrage.
+        n = 12
+        da = 50 + 20 * np.sin(np.arange(n) / n * 2 * np.pi)
+        scen = np.tile(da, (6, 1))
+        w = np.full(6, 1 / 6)
+        r = solve_stochastic_da_id_dispatch(
+            da, scen, w, da, da, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            rebid_cap_mw=np.inf,
+        )
+        da_only = solve_daily_lp(da, dt=1.0, power_mw=1.0, duration_hours=2.0)
+        np.testing.assert_allclose(
+            r["realised_total_eur"], da_only["revenue_eur"], atol=1e-4,
+        )
+
+    def test_deadband_hold_settles_to_stochastic_hold(self) -> None:
+        # A huge hurdle holds the committed schedule on a no-reserve day, and
+        # realised then equals stochastic_hold (NOT da_only in general, §5).
+        da, scen, w, base, realised = self._case(seed=2)
+        r = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            min_rebid_uplift_eur=1e9,
+        )
+        assert r["rebid"] is False
+        np.testing.assert_allclose(
+            r["realised_total_eur"], r["stochastic_hold_eur"], atol=1e-6,
+        )
+
+    def test_reserve_day_always_rebids(self) -> None:
+        # On a reserve day the deadband is inert (holding a full-power Stage-1
+        # can violate headroom), so it re-dispatches even at a huge hurdle.
+        da, scen, w, base, realised = self._case(n=16, seed=3)
+        reserve = np.where((np.arange(16) // 4) % 2 == 0, 0.3, 0.0)
+        r = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            reserve_mw=reserve, rebid_cap_mw=1.0, min_rebid_uplift_eur=1e9,
+        )
+        assert r["rebid"] is True
+        assert r["realised_total_eur"] <= r["coopt_ceiling_eur"] + 1e-6
+
+    def test_captured_uplift_not_clamped_when_forecast_misleads(self) -> None:
+        # captured_uplift may be negative when the forecast-driven rebid loses
+        # against DA-only; it must NOT be clamped to zero. Deterministic
+        # construction (solver-multi-optimum independent): flat DA so
+        # da_only == 0, and a forecast [0,100,0,100] that the realised path
+        # [100,0,100,0] exactly contradicts, so the rebid buys high / sells low
+        # and settles deeply negative (~-299, far from the zero boundary). inf
+        # cap lets the bad rebid execute fully.
+        da = np.array([50.0, 50.0, 50.0, 50.0])
+        base = np.array([0.0, 100.0, 0.0, 100.0])
+        realised = np.array([100.0, 0.0, 100.0, 0.0])
+        r = solve_stochastic_da_id_dispatch(
+            da, base[None, :], np.array([1.0]), base, realised, dt=1.0,
+            power_mw=1.0, duration_hours=1.0, rebid_cap_mw=np.inf,
+        )
+        assert r["captured_uplift_eur"] < 0
+        np.testing.assert_allclose(
+            r["captured_uplift_eur"],
+            r["realised_total_eur"] - r["da_only_revenue_eur"], atol=1e-6,
+        )
+
+    def test_coopt_ceiling_can_exceed_legacy_ceiling(self) -> None:
+        # Scope §2.4: the co-opt Stage-1 optimises the DA-vs-IDA spread, so the
+        # same-cap co-opt ceiling can legitimately beat the legacy DA+ID ceiling
+        # (whose Stage-1 is myopic DA-only). Not a violation — information.
+        da, scen, w, base, realised = self._case(seed=4)
+        r = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            rebid_cap_mw=np.inf,
+        )
+        assert r["coopt_ceiling_eur"] >= r["legacy_ceiling_eur"] - 1e-6
+
+    def test_reserve_capacity_settlement(self) -> None:
+        # Scope §2.3: with a reserve price, the committed reserve earns the same
+        # capacity fee as the 9.2b dispatch, added as a constant to the
+        # reserve-aware totals + coopt ceiling (da_only / legacy stay
+        # no-reserve). realised <= coopt still holds with capacity.
+        da, scen, w, base, realised = self._case(n=16, seed=8)
+        reserve = np.where((np.arange(16) // 4) % 2 == 0, 0.3, 0.0)
+        rprice = np.full(16, 12.0)
+        base_kw = dict(
+            dt=1.0, power_mw=1.0, duration_hours=2.0, reserve_mw=reserve,
+            rebid_cap_mw=1.0,
+        )
+        no_price = solve_stochastic_da_id_dispatch(da, scen, w, base, realised, **base_kw)
+        with_price = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised, reserve_price_eur_mw_h=rprice, **base_kw,
+        )
+        expected_cap = float((rprice * 0.95 * reserve * 1.0).sum())
+        assert no_price["capacity_revenue_eur"] == 0.0
+        np.testing.assert_allclose(
+            with_price["capacity_revenue_eur"], expected_cap, atol=1e-6,
+        )
+        # Constant offset on the reserve-aware totals + ceiling + hold.
+        for key in ("realised_total_eur", "coopt_ceiling_eur", "stochastic_hold_eur"):
+            np.testing.assert_allclose(
+                with_price[key], no_price[key] + expected_cap, atol=1e-4,
+            )
+        # da_only / legacy are the no-reserve baselines, unchanged.
+        assert with_price["da_only_revenue_eur"] == no_price["da_only_revenue_eur"]
+        assert with_price["legacy_ceiling_eur"] == no_price["legacy_ceiling_eur"]
+        assert with_price["realised_total_eur"] <= with_price["coopt_ceiling_eur"] + 1e-6
+        # The constant cancels in forecast_error_cost = coopt - realised.
+        np.testing.assert_allclose(
+            with_price["forecast_error_cost_eur"],
+            no_price["forecast_error_cost_eur"], atol=1e-4,
+        )
+
+    def test_negative_reserve_price_is_floored_to_zero(self) -> None:
+        # 9.2b convention: capacity prices are non-negative, so a stray negative
+        # floors to 0 rather than subtracting revenue.
+        da, scen, w, base, realised = self._case(n=16, seed=9)
+        reserve = np.full(16, 0.3)
+        base_kw = dict(
+            dt=1.0, power_mw=1.0, duration_hours=2.0, reserve_mw=reserve,
+            rebid_cap_mw=1.0,
+        )
+        neg = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised,
+            reserve_price_eur_mw_h=np.full(16, -12.0), **base_kw,
+        )
+        zero = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised,
+            reserve_price_eur_mw_h=np.zeros(16), **base_kw,
+        )
+        assert neg["capacity_revenue_eur"] == 0.0
+        np.testing.assert_allclose(
+            neg["realised_total_eur"], zero["realised_total_eur"], atol=1e-6,
+        )
+
+    def test_negative_rebid_cap_raises(self) -> None:
+        da, scen, w, base, realised = self._case(seed=5)
+        with pytest.raises(ValueError, match="rebid_cap_mw must be >= 0"):
+            solve_stochastic_da_id_dispatch(
+                da, scen, w, base, realised, dt=1.0, rebid_cap_mw=-0.5,
+            )
+
+    def test_expected_total_passed_through_from_commitment(self) -> None:
+        da, scen, w, base, realised = self._case(seed=6)
+        commit = solve_stochastic_da_commitment(
+            da, scen, w, dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        r = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised, dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        np.testing.assert_allclose(
+            r["expected_total_eur"], commit["expected_total_eur"], atol=1e-6,
+        )
+
+    def test_degenerate_inputs_return_gracefully(self) -> None:
+        da, scen, w, base, realised = self._case(seed=7)
+        # length mismatch on realised
+        assert not solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised[:-1], dt=1.0,
+        )["success"]
+        # NaN in forecast
+        bad = base.copy()
+        bad[0] = np.nan
+        assert not solve_stochastic_da_id_dispatch(
+            da, scen, w, bad, realised, dt=1.0,
+        )["success"]
+        # invalid commitment (weights don't sum to 1) propagates
+        assert not solve_stochastic_da_id_dispatch(
+            da, scen, np.full(6, 0.1), base, realised, dt=1.0,
+        )["success"]
