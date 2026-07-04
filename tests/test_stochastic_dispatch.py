@@ -44,6 +44,28 @@ class TestStochasticCommitment:
             r["expected_total_eur"], w @ r["scenario_total_eur"], atol=1e-6,
         )
 
+    def test_stage1_financial_direction_known_answer(self) -> None:
+        # Codex catch: the identity tests compare solver calls to each other, so
+        # a flipped Stage-1 objective sign could pass them. This is an ABSOLUTE
+        # ground-truth pin. With DA = [10, 90] and a flat mean IDA of 50, the
+        # rational Stage-1 charges the cheap hour and discharges the dear one:
+        #   financial = da_net·(DA - 50) = da_net[0]·(-40) + da_net[1]·(+40)
+        # maximised by da_net[0] < 0 (charge low) and da_net[1] > 0 (discharge
+        # high). A reversed sign would do the opposite and give a NEGATIVE
+        # financial value; the correct solver's optimum is strictly positive
+        # (doing nothing is always feasible at financial 0).
+        da = np.array([10.0, 90.0])
+        base = np.array([50.0, 50.0])  # single scenario == flat mean IDA
+        r = solve_stochastic_da_commitment(
+            da, base[None, :], np.array([1.0]), dt=1.0, power_mw=1.0,
+            duration_hours=1.0, rebid_cap_mw=np.inf,
+        )
+        da_net = r["da_p_discharge"] - r["da_p_charge"]
+        assert da_net[0] < -1e-6   # charge in the cheap hour
+        assert da_net[1] > 1e-6    # discharge in the dear hour
+        stage1_financial = float((da_net * (da - base)).sum())
+        assert stage1_financial > 1e-6
+
     def test_decoupling_theorem_at_infinite_cap(self) -> None:
         # Scope §8-1: at rebid_cap = inf the pure-financial DA accounting
         # decouples the stages, so the stochastic Stage-1 commitment equals the
@@ -161,6 +183,10 @@ class TestStochasticCommitment:
         da2 = _da_shape(6)
         assert not solve_stochastic_da_commitment(
             da2, np.tile(da2, (2, 1)), np.array([0.3, 0.3]), dt=1.0,
+        )["success"]
+        # negative weights (sum to 1 but break expected-value semantics)
+        assert not solve_stochastic_da_commitment(
+            da2, np.tile(da2, (2, 1)), np.array([1.2, -0.2]), dt=1.0,
         )["success"]
 
     def test_worst_case_15min_day_solves_within_budget(self) -> None:

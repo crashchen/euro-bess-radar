@@ -139,7 +139,7 @@ def solve_stochastic_da_commitment(
         da_prices: ``(N,)`` DA prices (EUR/MWh).
         scenarios: ``(S, N)`` IDA price scenario paths (from
             ``ida_scenarios.build_ida_scenarios``).
-        weights: ``(S,)`` scenario weights (summing to 1).
+        weights: ``(S,)`` non-negative scenario weights (summing to 1).
         dt: Interval duration in hours.
         power_mw, duration_hours, efficiency, soc_init_frac: BESS parameters.
         rebid_cap_mw: Per-interval rebid volume cap ``|stage2_net - da_net|``.
@@ -164,6 +164,7 @@ def solve_stochastic_da_commitment(
     if (
         n == 0 or scenarios.shape[1] != n or weights.size != s
         or np.isnan(da_prices).any() or np.isnan(scenarios).any()
+        or (weights < 0).any()  # negative weights break the expected-value sum
         or not math.isclose(float(weights.sum()), 1.0, abs_tol=1e-9)
     ):
         return _empty_commitment_result(n, s)
