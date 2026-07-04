@@ -2777,6 +2777,52 @@ class TestCapacityCache:
         assert set(back["product_type"]) == {"FCR", "aFRR"}
         assert str(back.index.tz) == "UTC"
 
+    def test_imported_at_is_per_stream_last_write(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # Pre-flight cleanup: the sidecar re-derives zone-wide after every
+        # write, but imported_at must mean "this stream's last write" — a
+        # write to a DIFFERENT stream must not refresh it, a re-write to the
+        # SAME stream must.
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+
+        class _Clock:
+            current = pd.Timestamp("2026-07-04T10:00:00+00:00")
+
+            @classmethod
+            def now(cls, tz=None):  # signature-compatible with datetime.now
+                return cls.current
+
+        monkeypatch.setattr(di, "datetime", _Clock)
+        hdr = "timestamp,zone,product,direction,capacity_price_eur_mw_h\n"
+        di.persist_capacity_frame(
+            self._frame(hdr + "2026-05-01T00:00:00Z,DE_LU,FCR,symmetric,12.5\n")
+        )
+        t0 = di.read_capacity_sources()[("DE_LU", "FCR", "symmetric")][
+            "imported_at"
+        ]
+        _Clock.current = pd.Timestamp("2026-07-04T11:00:00+00:00")
+        di.persist_capacity_frame(
+            self._frame(hdr + "2026-05-01T00:00:00Z,DE_LU,aFRR,up,8.2\n")
+        )
+        sources = di.read_capacity_sources()
+        assert sources[("DE_LU", "FCR", "symmetric")]["imported_at"] == t0
+        assert (
+            sources[("DE_LU", "aFRR", "up")]["imported_at"]
+            == "2026-07-04T11:00:00+00:00"
+        )
+        _Clock.current = pd.Timestamp("2026-07-04T12:00:00+00:00")
+        di.persist_capacity_frame(
+            self._frame(hdr + "2026-05-01T04:00:00Z,DE_LU,FCR,symmetric,13.0\n")
+        )
+        assert (
+            di.read_capacity_sources()[("DE_LU", "FCR", "symmetric")][
+                "imported_at"
+            ]
+            == "2026-07-04T12:00:00+00:00"
+        )
+
     def test_provenance_is_per_stream(self, tmp_path, monkeypatch) -> None:
         from src import data_ingestion as di
         monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
@@ -3098,6 +3144,41 @@ class TestActivationCache:
         assert afrr["unpriced_max_volume_mw"] == 250.0
         mfrr = sources[("DE_LU", "mFRR", "down")]
         assert mfrr["unpriced_nonzero_intervals"] is None
+
+    def test_imported_at_untouched_stream_carries_forward(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # imported_at follows the same per-stream LAST-WRITE semantics as the
+        # unpriced accounting: a later manual write to stream B must refresh
+        # neither stream A's timestamp nor its accounting.
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+
+        class _Clock:
+            current = pd.Timestamp("2026-07-04T10:00:00+00:00")
+
+            @classmethod
+            def now(cls, tz=None):
+                return cls.current
+
+        monkeypatch.setattr(di, "datetime", _Clock)
+        live = self._frame("2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.0,100\n")
+        live.attrs["unpriced_nonzero_intervals"] = 7
+        live.attrs["unpriced_max_volume_mw"] = 250.0
+        di.persist_activation_frame(
+            live, source=di.ACTIVATION_SOURCE_NETZTRANSPARENZ_ENTSOE,
+        )
+        _Clock.current = pd.Timestamp("2026-07-04T11:00:00+00:00")
+        di.persist_activation_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,mFRR,down,5.0,50\n"),
+            source="Manual CSV",
+        )
+        sources = di.read_activation_sources()
+        afrr = sources[("DE_LU", "aFRR", "up")]
+        assert afrr["imported_at"] == "2026-07-04T10:00:00+00:00"
+        assert afrr["unpriced_nonzero_intervals"] == 7
+        mfrr = sources[("DE_LU", "mFRR", "down")]
+        assert mfrr["imported_at"] == "2026-07-04T11:00:00+00:00"
 
     def test_pre_5b_sidecar_migrates_on_write_and_reads_none(
         self, tmp_path, monkeypatch,
