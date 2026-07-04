@@ -2999,6 +2999,149 @@ class TestActivationCache:
         assert di.read_activation_cache("DE_LU") is None
         assert di.read_activation_sources() == {}
 
+    def test_live_fetch_unpriced_accounting_persists_to_sidecar(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # 5b red-line: the fetch's transient attrs accounting must land in the
+        # provenance sidecar (window-global, stamped on every touched stream).
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        frame = self._frame(
+            "2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.4,320\n"
+            "2026-05-01T00:00:00Z,DE_LU,mFRR,down,5.0,90\n"
+        )
+        frame.attrs["unpriced_nonzero_intervals"] = 221
+        frame.attrs["unpriced_max_volume_mw"] = 648.0
+        di.persist_activation_frame(
+            frame, source=di.ACTIVATION_SOURCE_NETZTRANSPARENZ_ENTSOE,
+        )
+        sources = di.read_activation_sources()
+        for key in (("DE_LU", "aFRR", "up"), ("DE_LU", "mFRR", "down")):
+            assert sources[key]["source"] == (
+                di.ACTIVATION_SOURCE_NETZTRANSPARENZ_ENTSOE
+            )
+            assert sources[key]["unpriced_nonzero_intervals"] == 221
+            assert sources[key]["unpriced_max_volume_mw"] == 648.0
+
+    def test_manual_write_stores_null_unpriced_accounting(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # A parsed manual CSV carries no attrs -> NULL ("no accounting"),
+        # distinct from an accounted 0.
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        di.persist_activation_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.0,100\n")
+        )
+        meta = di.read_activation_sources()[("DE_LU", "aFRR", "up")]
+        assert meta["unpriced_nonzero_intervals"] is None
+        assert meta["unpriced_max_volume_mw"] is None
+
+    def test_zero_unpriced_accounting_stored_as_zero_not_null(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # A clean fetch (nothing dropped) stores an explicit accounted 0.
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        frame = self._frame("2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.0,100\n")
+        frame.attrs["unpriced_nonzero_intervals"] = 0
+        frame.attrs["unpriced_max_volume_mw"] = 0.0
+        di.persist_activation_frame(
+            frame, source=di.ACTIVATION_SOURCE_NETZTRANSPARENZ_ENTSOE,
+        )
+        meta = di.read_activation_sources()[("DE_LU", "aFRR", "up")]
+        assert meta["unpriced_nonzero_intervals"] == 0
+        assert meta["unpriced_max_volume_mw"] == 0.0
+
+    def test_manual_overwrite_clears_stale_unpriced_accounting(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # The unpriced columns describe the LAST write to a stream: a manual
+        # overwrite must not leave the previous fetch's counts on fresh data.
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        live = self._frame("2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.0,100\n")
+        live.attrs["unpriced_nonzero_intervals"] = 12
+        live.attrs["unpriced_max_volume_mw"] = 300.0
+        di.persist_activation_frame(
+            live, source=di.ACTIVATION_SOURCE_NETZTRANSPARENZ_ENTSOE,
+        )
+        di.persist_activation_frame(
+            self._frame("2026-05-01T04:00:00Z,DE_LU,aFRR,up,90.0,150\n"),
+            source="Manual CSV",
+        )
+        meta = di.read_activation_sources()[("DE_LU", "aFRR", "up")]
+        assert meta["source"] == di.ACTIVATION_SOURCE_MIXED
+        assert meta["unpriced_nonzero_intervals"] is None
+        assert meta["unpriced_max_volume_mw"] is None
+
+    def test_untouched_stream_carries_unpriced_accounting_forward(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # A later write to a DIFFERENT stream must not wipe the accounting on
+        # streams it did not touch (the sidecar is re-derived zone-wide).
+        from src import data_ingestion as di
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        live = self._frame("2026-05-01T00:00:00Z,DE_LU,aFRR,up,85.0,100\n")
+        live.attrs["unpriced_nonzero_intervals"] = 7
+        live.attrs["unpriced_max_volume_mw"] = 250.0
+        di.persist_activation_frame(
+            live, source=di.ACTIVATION_SOURCE_NETZTRANSPARENZ_ENTSOE,
+        )
+        di.persist_activation_frame(
+            self._frame("2026-05-01T00:00:00Z,DE_LU,mFRR,down,5.0,50\n"),
+            source="Manual CSV",
+        )
+        sources = di.read_activation_sources()
+        afrr = sources[("DE_LU", "aFRR", "up")]
+        assert afrr["unpriced_nonzero_intervals"] == 7
+        assert afrr["unpriced_max_volume_mw"] == 250.0
+        mfrr = sources[("DE_LU", "mFRR", "down")]
+        assert mfrr["unpriced_nonzero_intervals"] is None
+
+    def test_pre_5b_sidecar_migrates_on_write_and_reads_none(
+        self, tmp_path, monkeypatch,
+    ) -> None:
+        # A sidecar created before 5b lacks the unpriced columns: reads must
+        # not crash (fields None), and the next write migrates it in place.
+        import sqlite3 as sql
+
+        from src import data_ingestion as di
+        db = tmp_path / "bess.db"
+        monkeypatch.setattr(di, "DB_PATH", db)
+        with sql.connect(db) as conn:
+            conn.execute(
+                'CREATE TABLE "activation_price_sources" '
+                "(zone TEXT, product TEXT, direction TEXT, source TEXT, "
+                "rows INTEGER, first_timestamp TEXT, last_timestamp TEXT, "
+                "imported_at TEXT, PRIMARY KEY (zone, product, direction))"
+            )
+            conn.execute(
+                'INSERT INTO "activation_price_sources" VALUES '
+                "('DE_LU', 'aFRR', 'up', 'Manual CSV', 3, "
+                "'2026-05-01T00:00:00+00:00', '2026-05-01T02:00:00+00:00', "
+                "'2026-06-29T10:00:00+00:00')"
+            )
+        # Read-only path on the old schema: graceful fallback, no migration.
+        meta = di.read_activation_sources()[("DE_LU", "aFRR", "up")]
+        assert meta["source"] == "Manual CSV"
+        assert meta["unpriced_nonzero_intervals"] is None
+        # A write migrates the sidecar in place and stamps the touched stream.
+        frame = self._frame("2026-05-02T00:00:00Z,DE_LU,mFRR,up,15.0,40\n")
+        frame.attrs["unpriced_nonzero_intervals"] = 3
+        frame.attrs["unpriced_max_volume_mw"] = 120.0
+        di.persist_activation_frame(
+            frame, source=di.ACTIVATION_SOURCE_NETZTRANSPARENZ_ENTSOE,
+        )
+        sources = di.read_activation_sources()
+        assert sources[("DE_LU", "mFRR", "up")]["unpriced_nonzero_intervals"] == 3
+        # The pre-5b stream has no rows in the price table, so its sidecar row
+        # is preserved as-is by the write: old label, NULL accounting.
+        legacy = sources[("DE_LU", "aFRR", "up")]
+        assert legacy["source"] == "Manual CSV"
+        assert legacy["unpriced_nonzero_intervals"] is None
+        assert legacy["unpriced_max_volume_mw"] is None
+
     def test_persist_unsafe_zone_raises_bypassing_parser(
         self, tmp_path, monkeypatch,
     ) -> None:

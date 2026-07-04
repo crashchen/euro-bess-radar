@@ -22,11 +22,13 @@ from src.ancillary import (
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
 from src.config import ALL_ZONES
 from src.data_ingestion import (
+    ACTIVATION_SOURCE_NETZTRANSPARENZ_ENTSOE,
     IMBALANCE_SOURCE_NETZTRANSPARENZ,
     DataSourceAuthError,
     DataSourceNetworkError,
     DataSourceParseError,
     build_zone_query_window,
+    fetch_activation_energy,
     fetch_netztransparenz_imbalance,
     fetch_prices,
     generate_intraday_template_csv,
@@ -304,6 +306,58 @@ def _fetch_and_store_netztransparenz_imbalance(
     )
 
 
+def _fetch_and_store_activation_energy(
+    zone: str, start: object, end: object,
+) -> None:
+    """Fetch + persist live activated aFRR/mFRR energy (Step 5b).
+
+    Joins Netztransparenz quality-assured volumes with ENTSO-E 17.1.f prices
+    (``fetch_activation_energy``) and writes through the same activation
+    cache/provenance path as manual uploads. The fetch's unpriced-interval
+    accounting rides on the frame's attrs into the provenance sidecar and is
+    repeated in the success message so a lossy window is visible immediately.
+    """
+    api_start, api_end = build_zone_query_window(zone, start, end)
+    try:
+        parsed = fetch_activation_energy(zone, api_start, api_end)
+    except DataSourceAuthError as exc:
+        st.error(str(exc))
+        return
+    except (
+        DataSourceNetworkError, DataSourceParseError, requests.RequestException,
+    ) as exc:
+        st.error(f"Activation-energy fetch error: {exc}")
+        return
+    if parsed is None or parsed.empty:
+        st.warning("No activation-energy rows returned for this window.")
+        return
+    try:
+        summaries = persist_activation_frame(
+            parsed, source=ACTIVATION_SOURCE_NETZTRANSPARENZ_ENTSOE,
+        )
+    except (OSError, sqlite3.DatabaseError, ValueError) as exc:
+        st.error(f"Activation-energy persistence error: {exc}")
+        return
+    total = sum(s["rows"] for s in summaries)
+    streams = ", ".join(f"{s['product']} {s['direction']}" for s in summaries)
+    n_unpriced = int(parsed.attrs.get("unpriced_nonzero_intervals") or 0)
+    if n_unpriced:
+        max_mw = float(parsed.attrs.get("unpriced_max_volume_mw") or 0.0)
+        unpriced_note = (
+            f" Dropped {n_unpriced} nonzero interval(s) without a published "
+            f"ENTSO-E price (max {max_mw:.0f} MW) — the cached replay "
+            "understates activated energy for those intervals."
+        )
+    else:
+        unpriced_note = (
+            " All nonzero activated intervals carried a published price."
+        )
+    st.success(
+        f"Fetched {total} activation-energy rows ({streams})."
+        f"{unpriced_note}"
+    )
+
+
 def _run_and_store_ancillary_fetch(zone: str, start: object, end: object) -> None:
     """Run the configured ancillary auto-fetchers and store successful results."""
     fetchers = get_available_fetchers(zone)
@@ -543,6 +597,27 @@ def render_sidebar() -> dict:
             "Parse & Import activation", key="act_import_btn",
         ):
             _parse_and_store_activation_upload(act_file, primary_zone_for_fetch)
+
+        if primary_zone_for_fetch == "DE_LU":
+            if st.button(
+                "Fetch Netztransparenz + ENTSO-E activation energy",
+                key="fetch_activation_energy",
+                help=(
+                    "Quality-assured activated aFRR/mFRR volumes from "
+                    "Netztransparenz (~1 month publication lag) joined with "
+                    "ENTSO-E 17.1.f activation prices (needs ENTSOE_API_KEY) "
+                    "for the selected date window; writes to the same "
+                    "activation cache/provenance path as manual uploads."
+                ),
+            ):
+                _fetch_and_store_activation_energy(
+                    primary_zone_for_fetch, start_date, end_date,
+                )
+        else:
+            st.caption(
+                "Live activation-energy fetch is available for DE_LU only; "
+                "use the CSV uploader for other zones."
+            )
 
         st.markdown("**Unified reBAP / Imbalance CSV**")
         st.caption(
