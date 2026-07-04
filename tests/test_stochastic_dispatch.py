@@ -322,6 +322,41 @@ class TestStochasticExecution:
         )
         assert r["coopt_ceiling_eur"] >= r["legacy_ceiling_eur"] - 1e-6
 
+    def test_reserve_capacity_settlement(self) -> None:
+        # Scope §2.3: with a reserve price, the committed reserve earns the same
+        # capacity fee as the 9.2b dispatch, added as a constant to the
+        # reserve-aware totals + coopt ceiling (da_only / legacy stay
+        # no-reserve). realised <= coopt still holds with capacity.
+        da, scen, w, base, realised = self._case(n=16, seed=8)
+        reserve = np.where((np.arange(16) // 4) % 2 == 0, 0.3, 0.0)
+        rprice = np.full(16, 12.0)
+        base_kw = dict(
+            dt=1.0, power_mw=1.0, duration_hours=2.0, reserve_mw=reserve,
+            rebid_cap_mw=1.0,
+        )
+        no_price = solve_stochastic_da_id_dispatch(da, scen, w, base, realised, **base_kw)
+        with_price = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised, reserve_price_eur_mw_h=rprice, **base_kw,
+        )
+        expected_cap = float((rprice * 0.95 * reserve * 1.0).sum())
+        assert no_price["capacity_revenue_eur"] == 0.0
+        np.testing.assert_allclose(
+            with_price["capacity_revenue_eur"], expected_cap, atol=1e-6,
+        )
+        # Constant offset on the reserve-aware totals + ceiling.
+        np.testing.assert_allclose(
+            with_price["realised_total_eur"],
+            no_price["realised_total_eur"] + expected_cap, atol=1e-4,
+        )
+        np.testing.assert_allclose(
+            with_price["coopt_ceiling_eur"],
+            no_price["coopt_ceiling_eur"] + expected_cap, atol=1e-4,
+        )
+        # da_only / legacy are the no-reserve baselines, unchanged.
+        assert with_price["da_only_revenue_eur"] == no_price["da_only_revenue_eur"]
+        assert with_price["legacy_ceiling_eur"] == no_price["legacy_ceiling_eur"]
+        assert with_price["realised_total_eur"] <= with_price["coopt_ceiling_eur"] + 1e-6
+
     def test_negative_rebid_cap_raises(self) -> None:
         da, scen, w, base, realised = self._case(seed=5)
         with pytest.raises(ValueError, match="rebid_cap_mw must be >= 0"):

@@ -55,6 +55,7 @@ import numpy as np
 from scipy.optimize import linprog
 from scipy.sparse import csr_matrix
 
+from src.config import ANCILLARY_CAPACITY_AVAILABILITY
 from src.dispatch import (
     _REBID_UPLIFT_EPS_EUR,
     DISPATCH_VOM_COST_EUR_MWH,
@@ -473,7 +474,8 @@ def _empty_dispatch_result(n: int) -> dict:
     return {
         "success": False,
         "da_only_revenue_eur": 0.0, "realised_total_eur": 0.0,
-        "stochastic_hold_eur": 0.0, "forecast_uplift_eur": 0.0,
+        "stochastic_hold_eur": 0.0, "capacity_revenue_eur": 0.0,
+        "forecast_uplift_eur": 0.0,
         "coopt_ceiling_eur": 0.0, "legacy_ceiling_eur": 0.0,
         "expected_total_eur": 0.0, "captured_uplift_eur": 0.0,
         "forecast_error_cost_eur": 0.0, "rebid": False,
@@ -498,6 +500,8 @@ def solve_stochastic_da_id_dispatch(
     soc_init_frac: float = 0.5,
     rebid_cap_mw: float | None = None,
     reserve_mw: float | np.ndarray | None = None,
+    reserve_price_eur_mw_h: float | np.ndarray | None = None,
+    availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
     min_rebid_uplift_eur: float = 0.0,
 ) -> dict:
     """Forecast-driven realised execution of the stochastic DA commitment (B2).
@@ -517,15 +521,25 @@ def solve_stochastic_da_id_dispatch(
     Stage-1 schedule can violate committed headroom; ``min_rebid_uplift_eur`` is
     then inert.
 
+    Reserve capacity settlement (§2.3): when ``reserve_price_eur_mw_h`` is given,
+    the committed ``reserve_mw`` earns ``Σ price·availability·reserve_mw·dt`` —
+    the same convention as the 9.2b reserve dispatch. Because ``reserve_mw`` is
+    exogenous here, this is a CONSTANT added identically to ``realised_total``,
+    ``stochastic_hold`` and ``coopt_ceiling`` (so it never perturbs a dispatch
+    decision and cancels in ``forecast_error_cost``). ``da_only`` and
+    ``legacy_ceiling`` are the no-reserve baselines and do NOT include it, so
+    ``captured_uplift`` reflects the capacity income earned over DA-only.
+
     Returns the full §4 decomposition: ``da_only_revenue_eur`` (myopic DA-only
-    baseline), ``realised_total_eur`` (this policy at realised),
+    baseline), ``realised_total_eur`` (this policy at realised, incl. capacity),
     ``stochastic_hold_eur`` (settling the held Stage-1 schedule, NOT equal to
-    ``da_only`` in general), ``forecast_uplift_eur``, ``coopt_ceiling_eur`` (the
-    binding same-cap perfect-foresight bound), ``legacy_ceiling_eur`` (the plain
-    DA+ID ceiling, signed comparator), ``expected_total_eur`` (the in-solver
-    objective), ``captured_uplift_eur = realised - da_only`` (may be negative),
-    ``forecast_error_cost_eur = coopt_ceiling - realised >= 0``, ``rebid``, and
-    the committed / executed schedules.
+    ``da_only`` in general), ``capacity_revenue_eur`` (the reserve fee, 0 without
+    a reserve price), ``forecast_uplift_eur``, ``coopt_ceiling_eur`` (the binding
+    same-cap perfect-foresight bound, incl. capacity), ``legacy_ceiling_eur``
+    (the plain DA+ID ceiling, signed comparator, no reserve), ``expected_total_eur``
+    (the in-solver objective), ``captured_uplift_eur = realised - da_only`` (may
+    be negative), ``forecast_error_cost_eur = coopt_ceiling - realised >= 0``,
+    ``rebid``, and the committed / executed schedules.
     """
     if rebid_cap_mw is not None and rebid_cap_mw < 0:
         raise ValueError(f"rebid_cap_mw must be >= 0, got {rebid_cap_mw}")
@@ -552,16 +566,39 @@ def solve_stochastic_da_id_dispatch(
     return _execute_commitment(
         commit, da_prices, base_forecast, ida_realised, dt, n, power_mw,
         duration_hours, efficiency, soc_init_frac, min_rebid_uplift_eur,
+        reserve_price_eur_mw_h, availability,
     )
+
+
+def _capacity_revenue(
+    reserve_price: float | np.ndarray | None, reserve: np.ndarray,
+    availability: float, dt: float, n: int,
+) -> float:
+    """Constant reserve-capacity income ``Σ price·availability·reserve·dt`` (§2.3).
+
+    ``None`` (no reserve price loaded) yields 0. ``reserve`` is the committed,
+    exogenous headroom, so this is a constant independent of the dispatch.
+    """
+    if reserve_price is None:
+        return 0.0
+    rp = np.asarray(reserve_price, dtype=float).ravel()
+    if rp.size == 1:
+        rp = np.full(n, float(rp[0]))
+    elif rp.size != n:
+        raise ValueError(f"reserve_price must be scalar or length {n}, got {rp.size}")
+    rp = np.where(np.isfinite(rp), rp, 0.0)
+    return float((rp * availability * reserve * dt).sum())
 
 
 def _execute_commitment(
     commit, da_prices, base_forecast, ida_realised, dt, n, power_mw,
     duration_hours, efficiency, soc_init_frac, min_rebid_uplift_eur,
+    reserve_price, availability,
 ) -> dict:
     """Run the forecast-driven deadband execution + settlement for a commitment."""
     cap = commit["rebid_cap_mw"]
     reserve = commit["reserve_mw"]
+    capacity_revenue = _capacity_revenue(reserve_price, reserve, availability, dt, n)
     da_ch = commit["da_p_charge"]
     da_dis = commit["da_p_discharge"]
     da_net = da_dis - da_ch
@@ -607,9 +644,13 @@ def _execute_commitment(
     realised_value = _schedule_value_at_prices(
         executed["p_charge"], executed["p_discharge"], ida_realised, dt,
     )
-    realised_total = da_gross - implicit_mtm + realised_value
+    # Capacity income is a constant (exogenous reserve_mw) added identically to
+    # the reserve-aware totals and the co-opt ceiling (§2.3); da_only and the
+    # plain DA+ID legacy ceiling stay their no-reserve selves.
+    realised_total = da_gross - implicit_mtm + realised_value + capacity_revenue
     hold_realised = _schedule_value_at_prices(da_ch, da_dis, ida_realised, dt)
-    stochastic_hold = da_gross - implicit_mtm + hold_realised
+    stochastic_hold = da_gross - implicit_mtm + hold_realised + capacity_revenue
+    coopt_ceiling = coopt_ceiling + capacity_revenue
     forecast_error_cost = max(coopt_ceiling - realised_total, 0.0)
 
     return {
@@ -617,6 +658,7 @@ def _execute_commitment(
         "da_only_revenue_eur": round(da_only, 6),
         "realised_total_eur": round(realised_total, 6),
         "stochastic_hold_eur": round(stochastic_hold, 6),
+        "capacity_revenue_eur": round(capacity_revenue, 6),
         "forecast_uplift_eur": round(forecast_uplift, 6),
         "coopt_ceiling_eur": round(coopt_ceiling, 6),
         "legacy_ceiling_eur": round(legacy_ceiling, 6),
