@@ -1,8 +1,9 @@
 # Scenario-based stochastic MILP — v1 design contract (scope only)
 
-Status: **REVISED after joint scope review (Gemini + Codex), awaiting
-re-lock.** No solver code ships with this document; per the agreed ordering
-the solver core starts only after this contract is locked.
+Status: **LOCKED after joint scope review (Gemini + Codex, four rounds, PR
+#32 merged `2a46d80`).** Increment A (scenario generator) implements §3. The
+solver core (Increments B–D) follows this contract; propose a revision PR
+before deviating from it.
 
 Revision log:
 - **r1**: the first draft inherited the ceiling solver's pure-financial DA
