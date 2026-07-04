@@ -292,12 +292,24 @@ class TestStochasticExecution:
 
     def test_captured_uplift_not_clamped_when_forecast_misleads(self) -> None:
         # captured_uplift may be negative when the forecast-driven rebid loses
-        # against DA-only; it must NOT be clamped to zero.
-        da, scen, w, base, realised = self._case(seed=0)
+        # against DA-only; it must NOT be clamped to zero. Deterministic
+        # construction (solver-multi-optimum independent): flat DA so
+        # da_only == 0, and a forecast [0,100,0,100] that the realised path
+        # [100,0,100,0] exactly contradicts, so the rebid buys high / sells low
+        # and settles deeply negative (~-299, far from the zero boundary). inf
+        # cap lets the bad rebid execute fully.
+        da = np.array([50.0, 50.0, 50.0, 50.0])
+        base = np.array([0.0, 100.0, 0.0, 100.0])
+        realised = np.array([100.0, 0.0, 100.0, 0.0])
         r = solve_stochastic_da_id_dispatch(
-            da, scen, w, base, realised, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            da, base[None, :], np.array([1.0]), base, realised, dt=1.0,
+            power_mw=1.0, duration_hours=1.0, rebid_cap_mw=np.inf,
         )
-        assert r["captured_uplift_eur"] < 0  # this synthetic day misleads
+        assert r["captured_uplift_eur"] < 0
+        np.testing.assert_allclose(
+            r["captured_uplift_eur"],
+            r["realised_total_eur"] - r["da_only_revenue_eur"], atol=1e-6,
+        )
 
     def test_coopt_ceiling_can_exceed_legacy_ceiling(self) -> None:
         # Scope §2.4: the co-opt Stage-1 optimises the DA-vs-IDA spread, so the
