@@ -113,11 +113,16 @@ the binary mode variables break global concavity) and the distribution (not
 just its mean) genuinely shapes the commitment.
 
 Pinned consequence (regression test, §8-1): at `rebid_cap_mw = ∞` the
-extensive form reduces exactly to the deterministic co-optimisation against
-the **scenario-mean path**; because v1 mean-centres the sampled error paths
-(§3), that path IS the base forecast, so `stochastic − co_opt ≡ 0` holds
-exactly. That is the decoupling theorem embraced as a test, and the reason
-v1 without a finite cap would be pointless.
+extensive form separates, so the stochastic Stage-1 problem reduces to the
+deterministic co-optimisation against the **scenario-mean path**; because v1
+mean-centres the sampled error paths (§3), that path IS the base forecast, so
+the two share the same Stage-1 optimal *objective/optimal set*. This makes the
+finite cap the source of any distribution value: without it the distribution
+(beyond its mean) cannot shape the commitment. Note (C1 review): equal optimal
+*sets* do NOT imply equal *realised* settlement — when `realised ≠ base` two
+independent solves may pick different equal-optimal Stage-1 schedules that
+settle to different money, so the regression guard is objective/optimal-set
+equivalence, not `stochastic_realised − co_opt_realised ≡ 0` (§8-1).
 
 `rebid_cap_mw` is a caller parameter, default `power_mw`, surfaced in the
 assumptions audit table. It is a liquidity proxy, not a market rule — the
