@@ -220,7 +220,9 @@ def _solve_and_unpack(
         if couple:
             row = _append_rebid_coupling(trip, rhs, row, block * (1 + j), n, cap)
 
-    ub_r, ub_c, ub_v = zip(*trip, strict=True)
+    ub_r = [tr[0] for tr in trip]
+    ub_c = [tr[1] for tr in trip]
+    ub_v = [tr[2] for tr in trip]
     a_ub = csr_matrix((ub_v, (ub_r, ub_c)), shape=(len(rhs), n_vars))
     a_eq, b_eq = _terminal_equalities(n, s, block, dt, sqrt_eff)
     bounds = _variable_bounds(n, s, block, da_cap, s2_cap)
@@ -276,7 +278,9 @@ def _terminal_equalities(n, s, block, dt, sqrt_eff):
         for i in range(n):
             trip.append((j, base + i, sqrt_eff * dt))
             trip.append((j, base + n + i, -dt / sqrt_eff))
-    eq_r, eq_c, eq_v = zip(*trip, strict=True)
+    eq_r = [tr[0] for tr in trip]
+    eq_c = [tr[1] for tr in trip]
+    eq_v = [tr[2] for tr in trip]
     a_eq = csr_matrix((eq_v, (eq_r, eq_c)), shape=(1 + s, block * (1 + s)))
     return a_eq, np.zeros(1 + s)
 
