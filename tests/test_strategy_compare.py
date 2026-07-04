@@ -25,6 +25,7 @@ from src.pages.simulation_cockpit import (
 )
 from src.simulation import DAYS_PER_YEAR
 from src.strategy_compare import (
+    STOCHASTIC_POLICY_VALUE_LABEL,
     STRATEGY_COMPARE_COLUMNS,
     build_strategy_comparison,
 )
@@ -250,6 +251,132 @@ def test_six_row_layout_reserve_triple_realistic() -> None:
         "DA + IDA1 + FCR (co-opt ceiling)",
         "DA + IDA1 + FCR (forecast-driven realistic)",
     ]
+
+
+def test_policy_value_row_appended_with_default_label() -> None:
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        policy_value_total=18.0,
+    )
+    assert len(table) == 4  # 3 base + policy value (no reserve/triple here)
+    row = table.iloc[3]
+    assert row["strategy"] == STOCHASTIC_POLICY_VALUE_LABEL
+    # The DELTA itself is the window figure; annualised per-MW like every row.
+    assert row["window_revenue_eur"] == pytest.approx(18.0)
+    assert row["annualized_eur_per_mw"] == pytest.approx(
+        18.0 * DAYS_PER_YEAR / 10 / 2.0,
+    )
+    # A value delta has no DA baseline -> NaN uplift (rendered "-" by the UI).
+    assert math.isnan(row["uplift_vs_da_pct"])
+
+
+def test_policy_value_row_uses_its_own_valid_days() -> None:
+    # The stochastic batch can span a different window than the DA/IDA rows, so
+    # its policy value annualises over its OWN valid-day count, not the DA one.
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        policy_value_total=18.0,
+        policy_value_valid_days=9,
+    )
+    assert table.iloc[3]["annualized_eur_per_mw"] == pytest.approx(
+        18.0 * DAYS_PER_YEAR / 9 / 2.0,
+    )
+
+
+def test_policy_value_defaults_to_triple_window_for_9_2b_alignment() -> None:
+    # With a 9.2b triple window loaded and no explicit policy-value denominator,
+    # the policy value aligns to the triple window (not the DA/IDA window).
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        triple_joint_total=175.0,
+        triple_valid_days=8,
+        policy_value_total=16.0,
+    )
+    pv_row = table.iloc[-1]
+    assert pv_row["strategy"] == STOCHASTIC_POLICY_VALUE_LABEL
+    assert pv_row["annualized_eur_per_mw"] == pytest.approx(
+        16.0 * DAYS_PER_YEAR / 8 / 2.0,
+    )
+
+
+def test_policy_value_negative_delta_is_preserved() -> None:
+    # The scenario-aware commitment can realise BELOW the myopic baseline on an
+    # adverse path; that negative headline must not be silently dropped.
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        policy_value_total=-12.5,
+    )
+    assert len(table) == 4
+    assert table.iloc[3]["window_revenue_eur"] == pytest.approx(-12.5)
+    assert table.iloc[3]["annualized_eur_per_mw"] == pytest.approx(
+        -12.5 * DAYS_PER_YEAR / 10 / 2.0,
+    )
+
+
+def test_policy_value_row_dropped_when_non_finite() -> None:
+    for bad in (float("nan"), float("inf")):
+        table = build_strategy_comparison(
+            _summary(100.0, 130.0, 160.0, valid_days=10),
+            power_mw=2.0,
+            policy_value_total=bad,
+        )
+        assert len(table) == 3
+
+
+def test_policy_value_row_is_identifiable_by_public_label() -> None:
+    # Increment D excludes this delta row from the totals bar chart by matching
+    # STOCHASTIC_POLICY_VALUE_LABEL, so the emitted label must equal it exactly.
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        policy_value_total=18.0,
+    )
+    totals = table[table["strategy"] != STOCHASTIC_POLICY_VALUE_LABEL]
+    assert len(totals) == 3  # the delta row is the only one filtered out
+    assert STOCHASTIC_POLICY_VALUE_LABEL in set(table["strategy"])
+
+
+def test_policy_value_custom_label_honoured() -> None:
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        policy_value_total=18.0,
+        policy_value_label="Stochastic vs capped myopic value",
+    )
+    assert table.iloc[3]["strategy"] == "Stochastic vs capped myopic value"
+
+
+def test_full_seven_row_layout_with_policy_value() -> None:
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        reserve_coopt_total=120.0,
+        reserve_label="DA + FCR co-opt (headroom)",
+        triple_joint_total=175.0,
+        triple_joint_label="DA + IDA1 + FCR (co-opt ceiling)",
+        realistic_triple_total=150.0,
+        realistic_triple_label="DA + IDA1 + FCR (forecast-driven realistic)",
+        triple_valid_days=9,
+        triple_da_baseline=95.0,
+        policy_value_total=14.0,
+        policy_value_valid_days=9,
+    )
+    assert list(table["strategy"]) == [
+        "DA-only",
+        "DA + IDA1 (forecast-driven)",
+        "DA + IDA1 (perfect-foresight ceiling)",
+        "DA + FCR co-opt (headroom)",
+        "DA + IDA1 + FCR (co-opt ceiling)",
+        "DA + IDA1 + FCR (forecast-driven realistic)",
+        STOCHASTIC_POLICY_VALUE_LABEL,
+    ]
+    # The policy-value row is the only one without a finite DA uplift.
+    finite_uplift = [math.isfinite(v) for v in table["uplift_vs_da_pct"]]
+    assert finite_uplift == [True, True, True, True, True, True, False]
 
 
 def _price_frame(days: int = 4) -> pd.DataFrame:
