@@ -19,11 +19,13 @@ Three contract points from §3 of the design doc are load-bearing and tested:
   (§8-1) exact: without it a finite resample has a nonzero mean-error path and
   the decoupled solution would target the scenario-mean path, not the base
   forecast.
-- **Resolution partitioning**: error paths are sampled ONLY from history days
-  with the SAME interval count as the target day. This keeps a 60-min error
-  path off a 15-min day (DE_LU switched market time unit in Oct 2025) and,
-  because DST-short/long days have distinct interval counts, keeps those off a
-  normal day too — no interpolation, which would fabricate sub-hour structure.
+- **Resolution / grid partitioning**: error paths are sampled ONLY from
+  history days whose local ``(hour, minute)`` sequence matches the target day
+  (``_shape_key``). This keeps a 60-min error path off a 15-min day (DE_LU
+  switched market time unit in Oct 2025), keeps a DST-short/long day off a
+  normal day, AND keeps a sparse day (a normal day missing an hour, same COUNT
+  as a spring-forward day but a different grid) from being force-aligned — no
+  interpolation, which would fabricate sub-hour structure.
 - **Forecast-mode history discipline**: the error pool obeys the target day's
   ``forecast_mode`` allowed history exactly as :func:`ida_forecast.build_ida_forecast`
   does (``loo`` default excludes only the target day; ``walk_forward`` uses
@@ -92,11 +94,14 @@ def build_ida_scenarios(
         generated date to a dict with ``base_forecast`` (UTC-indexed Series),
         ``scenarios`` (``(S, n_intervals)`` ndarray), ``timestamps``
         (UTC DatetimeIndex), ``weights`` (``(S,)`` ndarray summing to 1),
-        ``pool_size`` (distinct same-shape error days available), and
-        ``sampled_with_replacement`` (True when ``pool_size < S``). ``metadata``
-        carries ``mode``, ``forecast_mode``, ``n_scenarios``, ``seed``,
-        ``mean_centered``, ``bucket``, ``n_target_days``, ``n_days_generated``,
-        ``min_pool_size``, and ``days_with_replacement``.
+        ``pool_size`` (distinct same-shape error days available),
+        ``sampled_with_replacement`` (True when ``pool_size < S``),
+        ``base_coverage`` (fraction of intervals whose base forecast is
+        bucket-backed vs global-mean fallback), and ``base_fallback_points``.
+        ``metadata`` carries ``mode``, ``forecast_mode``, ``n_scenarios``,
+        ``seed``, ``mean_centered``, ``bucket``, ``n_target_days``,
+        ``n_days_generated``, ``min_pool_size``, ``days_with_replacement``,
+        ``min_base_coverage``, and ``total_fallback_points``.
     """
     if bucket not in _VALID_BUCKETS:
         raise ValueError(f"bucket must be one of {_VALID_BUCKETS}, got {bucket!r}")
@@ -140,6 +145,10 @@ def build_ida_scenarios(
         meta["days_with_replacement"] = sum(
             b["sampled_with_replacement"] for b in out.values()
         )
+        meta["min_base_coverage"] = min(b["base_coverage"] for b in out.values())
+        meta["total_fallback_points"] = sum(
+            b["base_fallback_points"] for b in out.values()
+        )
     return out, meta
 
 
@@ -159,6 +168,8 @@ def _base_metadata(
         "n_days_generated": 0,
         "min_pool_size": 0,
         "days_with_replacement": 0,
+        "min_base_coverage": float("nan"),
+        "total_fallback_points": 0,
     }
 
 
@@ -180,8 +191,8 @@ def _build_day_bundle(
     """Assemble one target day's scenario bundle, or None when unsupported.
 
     Returns None when the day has no rows, no usable climatology, or no
-    same-interval-count error day in the allowed history (rather than
-    fabricating structure by upsampling a different-resolution day).
+    same-shape error day in the allowed history (rather than force-aligning a
+    day with a different interval grid).
     """
     day_rows = local[local["_date"] == target]
     if day_rows.empty:
@@ -191,11 +202,13 @@ def _build_day_bundle(
         return None
 
     bucket_mean = clim.groupby("_bucket")[value_col].mean()
+    bucket_count = clim.groupby("_bucket")[value_col].size()
     global_mean = float(clim[value_col].mean())
-    base = _bucket_forecast(day_rows["_bucket"].to_numpy(), bucket_mean, global_mean)
+    target_buckets = day_rows["_bucket"].to_numpy()
+    base = _bucket_forecast(target_buckets, bucket_mean, global_mean)
+    sample_counts = bucket_count.reindex(target_buckets).fillna(0).to_numpy(dtype=int)
 
-    n_intervals = len(day_rows)
-    pool = _error_pool(clim, bucket_mean, global_mean, value_col, n_intervals)
+    pool = _error_pool(clim, bucket_mean, global_mean, value_col, _shape_key(day_rows))
     if not pool:
         return None
 
@@ -209,6 +222,10 @@ def _build_day_bundle(
         "weights": np.full(n_scenarios, 1.0 / n_scenarios),
         "pool_size": len(pool),
         "sampled_with_replacement": with_replacement,
+        # Base-forecast bucket support (§3, build_ida_forecast style): a day
+        # whose base is mostly global-mean fallback is labelled downstream.
+        "base_coverage": float((sample_counts > 0).mean()),
+        "base_fallback_points": int((sample_counts == 0).sum()),
     }
 
 
@@ -220,20 +237,36 @@ def _bucket_forecast(
     return np.where(np.isnan(vals), global_mean, vals)
 
 
+def _shape_key(day: pd.DataFrame) -> tuple[tuple[int, int], ...]:
+    """Ordered local ``(hour, minute)`` sequence identifying a day's grid.
+
+    Two days share a key iff their intervals line up position-by-position in
+    local time — which is exactly the condition for a positional error-path
+    add to be valid. This subsumes resolution (15-min vs 60-min differ),
+    DST length (23-/25-hour days differ from 24-hour), AND sparse gaps (a
+    normal day missing an hour differs from a DST day of the same COUNT).
+    Offset is deliberately NOT in the key: the climatology pools summer↔winter
+    by local hour, so a CEST day is a valid error source for a CET target.
+    """
+    idx = pd.DatetimeIndex(day.index)
+    return tuple(zip(idx.hour.tolist(), idx.minute.tolist(), strict=True))
+
+
 def _error_pool(
     clim: pd.DataFrame, bucket_mean: pd.Series, global_mean: float,
-    value_col: str, n_intervals: int,
+    value_col: str, target_key: tuple[tuple[int, int], ...],
 ) -> list[np.ndarray]:
     """Whole-day error paths (realised - forecast) for same-shape days only.
 
-    Only history days whose interval count matches the target day contribute,
-    so a resolution or DST-length mismatch drops the day instead of being
-    force-aligned. Errors are positional within the day; same interval count
-    at one resolution means the same hour ordering.
+    Only history days whose local ``(hour, minute)`` sequence matches the
+    target day contribute (see :func:`_shape_key`), so a resolution, DST-length,
+    or sparse-gap mismatch drops the day instead of being force-aligned. Errors
+    are positional within the day, valid because the shared key guarantees the
+    same local-time ordering.
     """
     pool: list[np.ndarray] = []
     for _, day in clim.groupby("_date", sort=True):
-        if len(day) != n_intervals:
+        if _shape_key(day) != target_key:
             continue
         forecast = _bucket_forecast(day["_bucket"].to_numpy(), bucket_mean, global_mean)
         pool.append(day[value_col].to_numpy(dtype=float) - forecast)

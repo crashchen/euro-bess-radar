@@ -71,7 +71,7 @@ euro-bess-radar/
 │   ├── activation_overlay.py # Activation-energy replay overlay (screening, non-additive)
 │   ├── imbalance_overlay.py  # reBAP/imbalance replay overlay primitive
 │   └── export.py             # Excel report generation
-├── tests/                    # 729 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 731 passing tests, heavily mocked; 2 PDF tests may skip
 ├── scripts/                  # Maintenance/demo scripts (seed + Netztransparenz converter)
 ├── samples/                  # Generated demo CSVs from seed_demo_9_2b.py (git-ignored)
 ├── docs/runbooks/            # Operator runbooks (9.2b + imbalance validation, manual UI smoke)
@@ -94,7 +94,7 @@ Optimized for BESS investment screening in:
 
 ## Germany Balancing Data Roadmap
 
-Regelleistung.net remains the implemented German auto-fetch source for FCR/aFRR tender-result capacity prices. Netztransparenz.de is now wired for quarter-hourly DE_LU reBAP + NRV-Saldo downloads: the sidebar fetches the official CSV handler, persists rows into the same imbalance cache/provenance path as manual uploads, and feeds the non-additive cockpit imbalance overlay. Activated aFRR/mFRR energy has a fetch/convert layer that joins quality-assured Netztransparenz volumes with ENTSO-E 17.1.f prices; persistence and sidebar wiring are the next step.
+Regelleistung.net remains the implemented German auto-fetch source for FCR/aFRR tender-result capacity prices. Netztransparenz.de is now wired for quarter-hourly DE_LU reBAP + NRV-Saldo downloads: the sidebar fetches the official CSV handler, persists rows into the same imbalance cache/provenance path as manual uploads, and feeds the non-additive cockpit imbalance overlay. Activated aFRR/mFRR energy (Netztransparenz volumes joined with ENTSO-E 17.1.f prices) has the same treatment: a sidebar fetch persists into the activation cache/provenance path (with dropped-unpriced-interval accounting surfaced in Data Trust) and feeds the non-additive activation overlay.
 
 ## License
 

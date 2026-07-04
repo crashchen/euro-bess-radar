@@ -89,6 +89,44 @@ class TestBuildIdaScenarios:
         assert bundle["scenarios"].shape[1] == 96
         assert bundle["pool_size"] == 2
 
+    def test_same_count_different_grid_day_is_excluded(self) -> None:
+        # Codex catch: interval COUNT alone is unsafe. A sparse day with the
+        # same count as the target but a different (hour, minute) grid must NOT
+        # enter the pool (positional residual-add would misalign). Only a day
+        # sharing the exact grid contributes.
+        hist = _history(12, noise_seed=1)
+        target = date(2026, 5, 10)
+        matching = date(2026, 5, 3)   # will share the target's gap
+        mismatched = date(2026, 5, 6)  # same count, different gap
+        idx_dates = pd.DatetimeIndex(hist.index).date
+        hours = pd.DatetimeIndex(hist.index).hour
+        drop = (
+            ((idx_dates == target) & (hours == 5))       # target drops hour 5
+            | ((idx_dates == matching) & (hours == 5))   # same gap -> shares grid
+            | ((idx_dates == mismatched) & (hours == 8))  # count 23, other grid
+        )
+        hist = hist[~drop]
+        out, _ = build_ida_scenarios(
+            hist, target_dates=[target], n_scenarios=2, seed=0,
+        )
+        bundle = out[target]
+        assert bundle["scenarios"].shape[1] == 23
+        # Only the same-grid day pools; the equal-count mismatched day is out.
+        assert bundle["pool_size"] == 1
+
+    def test_bundle_and_metadata_report_base_coverage(self) -> None:
+        # §3: coverage/fallback reporting in the build_ida_forecast style.
+        hist = _history(15)
+        out, meta = build_ida_scenarios(
+            hist, target_dates=[date(2026, 5, 8)], n_scenarios=4, seed=0,
+        )
+        bundle = out[date(2026, 5, 8)]
+        # A dense multi-day history fully backs every hour-of-day bucket.
+        assert bundle["base_coverage"] == 1.0
+        assert bundle["base_fallback_points"] == 0
+        assert meta["min_base_coverage"] == 1.0
+        assert meta["total_fallback_points"] == 0
+
     def test_loo_does_not_leak_target_day_into_base(self) -> None:
         # Under LOO the base forecast excludes the target day, so a target-day
         # spike must not raise its own forecast.
