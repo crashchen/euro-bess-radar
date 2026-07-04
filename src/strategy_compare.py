@@ -21,6 +21,17 @@ they take their own ``triple_valid_days`` denominator and ``triple_da_baseline``
 uplift baseline (which may differ from the DA/IDA rows' window when walk-forward
 drops the earliest day) — keeping ``realistic <= ceiling`` and matching the
 cockpit's forecast-effect gap panel exactly.
+
+An optional seventh row is the **stochastic policy value** (stochastic MILP
+Increment C2): the robust ``policy_value = stochastic_realised -
+capped_myopic_realised`` from ``simulation.simulate_stochastic_da_id_batch``.
+Unlike the six rows above it is a value DELTA (the realised lift of the
+scenario-aware commitment over the deterministic myopic baseline at a COMMON
+rebid cap), NOT a strategy revenue total — so it carries no DA-baselined uplift
+(``uplift_vs_da_pct`` is ``NaN``) and the cockpit excludes it from the "revenue
+by strategy" bar chart. Its tie-sensitive commitment/distribution split is a
+diagnostic that belongs in the cockpit attribution subpanel, never as its own
+investment row.
 """
 
 from __future__ import annotations
@@ -41,6 +52,9 @@ _CEILING = "DA + IDA1 (perfect-foresight ceiling)"
 _RESERVE_DEFAULT = "DA + reserve co-opt (headroom)"
 _TRIPLE_DEFAULT = "DA + IDA1 + reserve (co-opt ceiling)"
 _REALISTIC_DEFAULT = "DA + IDA1 + reserve (forecast-driven realistic)"
+# Public: the cockpit (Increment D) imports this to identify the value-delta row
+# and exclude it from the totals "revenue by strategy" bar chart.
+STOCHASTIC_POLICY_VALUE_LABEL = "Stochastic policy value (vs capped myopic)"
 
 
 def build_strategy_comparison(
@@ -53,6 +67,9 @@ def build_strategy_comparison(
     realistic_triple_label: str | None = None,
     triple_valid_days: int | None = None,
     triple_da_baseline: float | None = None,
+    policy_value_total: float | None = None,
+    policy_value_valid_days: int | None = None,
+    policy_value_label: str | None = None,
 ) -> pd.DataFrame:
     """Reframe a sequential DA+ID batch summary as a strategy comparison.
 
@@ -94,6 +111,22 @@ def build_strategy_comparison(
         triple_da_baseline: DA-only baseline (EUR) for the triple ceiling and
             realistic rows' uplift%, matching their walk-forward window;
             defaults to ``summary["total_da_only_eur"]`` when omitted.
+        policy_value_total: Optional window total (EUR) for the stochastic
+            policy value — ``simulation.simulate_stochastic_da_id_batch``'s
+            ``total_policy_value_eur`` (``stochastic_realised -
+            capped_myopic_realised`` at a common rebid cap). When provided and
+            finite, adds a seventh row. This is a value DELTA, not a strategy
+            revenue total, so its ``uplift_vs_da_pct`` is ``NaN`` (no DA
+            baseline) and the cockpit excludes it from the revenue bar chart. A
+            negative value is kept, not dropped (the scenario-aware commitment
+            can realise below the myopic baseline on an adverse path).
+        policy_value_valid_days: Annualisation denominator for the policy-value
+            row — the stochastic batch's own ``valid_days``. Defaults to the
+            triple window (``triple_valid_days`` when supplied, else
+            ``summary["valid_days"]``) so the policy value aligns with the 9.2b
+            reserve rows.
+        policy_value_label: Display label for the policy-value row (defaults to
+            ``STOCHASTIC_POLICY_VALUE_LABEL``).
 
     Returns:
         One row per strategy with columns ``[strategy, window_revenue_eur,
@@ -147,5 +180,17 @@ def build_strategy_comparison(
         rows.append(
             (realistic_triple_label or _REALISTIC_DEFAULT, rt,
              annualized_per_mw(rt, t_days), uplift_pct(rt, t_base)),
+        )
+    # Seventh row: the stochastic policy value — a value DELTA (stochastic minus
+    # capped-myopic realised at a common cap), not a strategy revenue total. It
+    # has no DA-baselined uplift (NaN), annualises over the stochastic batch's
+    # own valid days (defaulting to the triple window for 9.2b alignment), and a
+    # negative value is preserved rather than dropped.
+    if policy_value_total is not None and math.isfinite(float(policy_value_total)):
+        pv = float(policy_value_total)
+        pv_days = int(policy_value_valid_days) if policy_value_valid_days else t_days
+        rows.append(
+            (policy_value_label or STOCHASTIC_POLICY_VALUE_LABEL, pv,
+             annualized_per_mw(pv, pv_days), float("nan")),
         )
     return pd.DataFrame(rows, columns=STRATEGY_COMPARE_COLUMNS)
