@@ -55,8 +55,10 @@ class TestStochasticBatch:
             per_day["distribution_value_eur"].sum(), atol=1e-6,
         )
         # The diagnostic split is an arithmetic decomposition of the headline
-        # (commitment + distribution == policy_value), even though the SPLIT is
-        # tie-sensitive under Stage-1 degeneracy while the total is not.
+        # (commitment + distribution == policy_value). Since the v2 canonical
+        # Stage-1 selector the split is tie-stable (see the dispatch-level
+        # test_distribution_value_is_zero_at_infinite_cap pin); this test holds
+        # the identity regardless.
         np.testing.assert_allclose(
             per_day["commitment_value_eur"] + per_day["distribution_value_eur"],
             per_day["policy_value_eur"], atol=1e-6,

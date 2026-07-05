@@ -1609,10 +1609,12 @@ def _stochastic_day(
         # Headline: robust policy value of the stochastic commitment over the
         # deterministic myopic baseline. The commitment/distribution split below
         # is an arithmetic decomposition of it (commitment + distribution ==
-        # policy_value), but is a TIE-SENSITIVE DIAGNOSTIC: the co-opt Stage-1 is
-        # one of several equal-optimal schedules and settles differently at a
-        # realised != base path, so the SPLIT carries multi-optimum noise even
-        # though the total does not (scope §1/§8-1, revised).
+        # policy_value). As of the v2 canonical Stage-1 selector
+        # (stochastic_dispatch._canonicalize_stage1) the co-opt and stochastic
+        # commitments break Stage-1 degeneracy identically (earliest-activity
+        # min-throughput tie-break), so the split is now tie-STABLE — it vanishes
+        # at rebid_cap = inf (the decoupling regime) and otherwise reflects the
+        # real value of the coupling, not multi-optimum noise (scope §1/§8-1).
         "policy_value_eur": stoch["realised_total_eur"] - myopic["realised_total_eur"],
         "commitment_value_eur": coopt["realised_total_eur"] - myopic["realised_total_eur"],
         "distribution_value_eur": stoch["realised_total_eur"] - coopt["realised_total_eur"],
@@ -1659,14 +1661,16 @@ def simulate_stochastic_da_id_batch(
     ``commitment_value = co_opt_realised - myopic_realised`` (worth of a
     non-myopic DA commitment) + ``distribution_value = stochastic_realised -
     co_opt_realised`` (worth of anticipating the IDA distribution); these sum to
-    ``policy_value`` but are **tie-sensitive** — the co-opt Stage-1 is one of
-    several equal-optimal schedules and settles differently at a realised != base
-    path, so the split (unlike the total) carries multi-optimum noise and is NOT
-    zero at ``rebid_cap = inf`` (scope §8-1, revised: the decoupling theorem
-    gives equality of the Stage-1 optimal *set/objective*, not of the realised
-    settlement selected by two independent solves). Each day is solved standalone
-    (per-day terminal-neutral), isolating commitment quality from multi-day SoC
-    carry.
+    ``policy_value``. As of the v2 canonical Stage-1 selector
+    (``stochastic_dispatch._canonicalize_stage1``) the co-opt and stochastic
+    commitments break Stage-1 degeneracy identically (earliest-activity
+    min-throughput tie-break), so the split is **tie-stable**: it vanishes at
+    ``rebid_cap = inf`` (the decoupling regime) and otherwise reflects the real
+    value of the coupling rather than multi-optimum noise (scope §8-1). The only
+    residual tie-noise is on the rare day where the time-limited tie-break falls
+    back to the pass-1 schedule; the robust ``policy_value`` headline never
+    depends on the split. Each day is solved standalone (per-day terminal-neutral),
+    isolating commitment quality from multi-day SoC carry.
 
     Returns ``(per_day_df, summary)``. ``summary`` carries the window totals for
     each policy, the headline ``total_policy_value_eur`` (+ the diagnostic
@@ -1731,8 +1735,10 @@ def _stochastic_summary(
         "total_coopt_realised_eur": _tot("coopt_realised_eur"),
         "total_stochastic_realised_eur": _tot("stochastic_realised_eur"),
         "total_coopt_ceiling_eur": _tot("coopt_ceiling_eur"),
-        # Headline robust metric; the two below are its tie-sensitive diagnostic
-        # split (they sum to it, but carry Stage-1 multi-optimum noise).
+        # Headline robust metric; the two below are its diagnostic split (they
+        # sum to it). The v2 canonical Stage-1 selector makes the split tie-stable
+        # (zero distribution at rebid_cap=inf); only a tie-break fallback day can
+        # reintroduce noise — the headline never depends on the split.
         "total_policy_value_eur": _tot("policy_value_eur"),
         "total_commitment_value_eur": _tot("commitment_value_eur"),
         "total_distribution_value_eur": _tot("distribution_value_eur"),
