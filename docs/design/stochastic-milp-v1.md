@@ -355,7 +355,7 @@ BEFORE any merge of aggregation/attribution code):
    **objective/optimal-set equivalence** (e.g. the B1 `test_decoupling_theorem
    _at_infinite_cap` pins the Stage-1 *financial value*), NOT on a zero realised
    split. Making the realised split exactly zero would require a canonical
-   Stage-1 selector (v2 — **implemented in the PR under review, see §11**). The
+   Stage-1 selector (v2 — **implemented, PR #41 `5461f6b`, see §11**). The
    robust C1 headline is
    `stochastic_realised − myopic_realised` (§1), which does not depend on the
    co-opt tie-break.
@@ -431,10 +431,10 @@ Each increment is a separate PR in the established review lane.
 ## 11. v2 update log
 
 Post-v1 refinements. They do not change the v1 decision structure, red-lines, or
-headline; they tighten what §8 flagged as deferred. **Status: IN REVIEW** — added
-by PR `feat/stochastic-canonical-stage1`, not yet merged.
+headline; they tighten what §8 flagged as deferred. **Status: LANDED** — PR #41
+(`5461f6b`).
 
-- **Canonical Stage-1 selector (resolves §8-1's deferred v2 item — in review).**
+- **Canonical Stage-1 selector (resolves §8-1's deferred v2 item).**
   `stochastic_dispatch._canonicalize_stage1` adds a lexicographic SECOND pass to
   `solve_stochastic_da_commitment`: pass 1 finds the optimal expected total
   `z*`; pass 2 fixes the objective at `z*` (tight `≤ z* + 1e-9·(1+|z*|)` bound,
