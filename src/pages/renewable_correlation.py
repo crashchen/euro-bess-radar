@@ -74,6 +74,12 @@ def render(
             if signal["correlation_renewable_price"] is not None
             else "N/A"
         ),
+        help=(
+            "Pearson correlation between the hourly renewable share and the "
+            "hourly price. More negative (toward -1) is more BESS-friendly: "
+            "high renewables push prices down (charge cheaply) and low "
+            "renewables let them rise (discharge into scarcity)."
+        ),
     )
     c2.metric(
         "Avg Price (High RE Hours)",
@@ -81,6 +87,10 @@ def render(
             f"\u20ac{signal['avg_price_high_renewable']:.1f}"
             if signal["avg_price_high_renewable"] is not None
             else "N/A"
+        ),
+        help=(
+            "Average price across the top-quartile renewable-share hours \u2014 a "
+            "proxy for the typical charging cost when wind/solar is abundant."
         ),
     )
     c3.metric(
@@ -90,6 +100,11 @@ def render(
             if signal["avg_price_low_renewable"] is not None
             else "N/A"
         ),
+        help=(
+            "Average price across the bottom-quartile renewable-share hours \u2014 a "
+            "proxy for the typical discharging value when renewables are scarce. "
+            "The gap over 'High RE Hours' is the renewable-driven price spread."
+        ),
     )
     c4.metric(
         "Spread Uplift (High RE Days vs Low RE Days)",
@@ -97,6 +112,11 @@ def render(
             f"\u20ac{signal['spread_uplift_high_vs_low_renewable']:.1f}/MWh"
             if signal["spread_uplift_high_vs_low_renewable"] is not None
             else "N/A"
+        ),
+        help=(
+            "How much wider the capturable ordered spread is on high-renewable "
+            "local days versus low-renewable ones. Positive means renewable-"
+            "heavy days offer a battery more arbitrage to capture."
         ),
     )
 
