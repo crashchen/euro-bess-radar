@@ -27,6 +27,7 @@ from src.export import cockpit_tables_to_excel
 from src.imbalance_overlay import compute_imbalance_overlay
 from src.reserve_forecast import RESERVE_VALUE_COL, compute_reserve_forecast_skill
 from src.simulation import (
+    DAYS_PER_YEAR,
     available_local_dates,
     build_dispatch_event_table,
     simulate_da_id_replay,
@@ -35,10 +36,19 @@ from src.simulation import (
     simulate_replay_batch,
     simulate_sequential_da_id_batch,
     simulate_sequential_da_id_reserve_batch,
+    simulate_stochastic_da_id_batch,
 )
-from src.strategy_compare import build_strategy_comparison
+from src.strategy_compare import (
+    STOCHASTIC_POLICY_VALUE_LABEL,
+    build_strategy_comparison,
+)
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+# Stochastic policy panel (Increment D): fixed scenario count + seed so the
+# opt-in run is reproducible; the load-bearing rebid cap is the one exposed knob.
+_STOCHASTIC_N_SCENARIOS = 10
+_STOCHASTIC_SEED = 0
 
 
 def _cockpit_export_assumptions(
@@ -1117,6 +1127,64 @@ def _append_realistic_triple_assumptions(
     return pd.concat([assumptions, rows], ignore_index=True)
 
 
+def _stochastic_rebid_cap_mw(cap_pct: float, power_mw: float) -> float:
+    """Convert the %-of-power rebid-cap slider to an absolute MW cap.
+
+    The stochastic panel is DA+IDA1 only (no committed reserve), so the batch's
+    ``rebid_cap >= max_reserve`` feasibility domain reduces to ``>= 0`` and the
+    cap is simply a non-negative fraction of power. Pure helper so the
+    conversion is unit-tested.
+    """
+    return max(0.0, float(cap_pct) / 100.0 * float(power_mw))
+
+
+def _append_stochastic_assumptions(
+    assumptions: pd.DataFrame | None, *, summary: dict,
+) -> pd.DataFrame | None:
+    """Append stochastic policy-value provenance to the export assumptions."""
+    if assumptions is None:
+        return None
+    cap = summary.get("rebid_cap_mw")
+    cap_txt = "inf" if cap is None or not math.isfinite(float(cap)) else f"{float(cap):.1f}"
+    rows = pd.DataFrame([
+        {
+            "parameter": "Stochastic policy value basis",
+            "value": "stochastic_realised - capped_myopic_realised",
+            "unit": "EUR (window)",
+            "source": "simulate_stochastic_da_id_batch",
+            "affects": (
+                "Robust headline DELTA (not a revenue total); common rebid cap, "
+                "same valid-day window; screening diagnostic, NOT bankable"
+            ),
+        },
+        {
+            "parameter": "Stochastic rebid cap",
+            "value": cap_txt,
+            "unit": "MW",
+            "source": "Cockpit stochastic panel (% of power)",
+            "affects": "|stage2_net - da_net| <= cap (the load-bearing coupling)",
+        },
+        {
+            "parameter": "Stochastic scenarios / seed",
+            "value": f"S={summary.get('n_scenarios', '')}, seed={_STOCHASTIC_SEED}",
+            "unit": "",
+            "source": "build_ida_scenarios error_resample",
+            "affects": "Scenario count + reproducible seed for the commitment MILP",
+        },
+        {
+            "parameter": "Commitment/distribution split",
+            "value": "tie-sensitive diagnostic",
+            "unit": "",
+            "source": "co-opt/stochastic Stage-1 multi-optima",
+            "affects": (
+                "Split settles differently at realised != base; read the "
+                "policy_value total, not the split"
+            ),
+        },
+    ])
+    return pd.concat([assumptions, rows], ignore_index=True)
+
+
 def _reserve_history_for_product(
     anc_df: pd.DataFrame | None, product: str,
 ) -> pd.DataFrame:
@@ -1445,6 +1513,32 @@ def _render_forecast_policy_section(
             )
             st.caption(f"Reserve capacity source: {capacity_source}.")
 
+        include_stochastic = st.checkbox(
+            "Include stochastic policy (scenario-aware DA commitment, slower)",
+            value=False,
+            key="forecast_policy_stochastic",
+            help=(
+                "Adds a Stochastic policy value row + attribution/risk panel: "
+                "the scenario-aware DA commitment (anticipates the IDA rebid "
+                "across a scenario set) vs the capped-myopic baseline, at a "
+                "common rebid cap. Runs an extra MILP per day (~1-2 s/day), so "
+                "it is opt-in."
+            ),
+        )
+        stochastic_cap_pct = 50
+        if include_stochastic:
+            stochastic_cap_pct = st.slider(
+                "IDA rebid cap (% of power)",
+                min_value=0, max_value=100, value=50, step=5,
+                key="forecast_policy_stochastic_cap",
+                help=(
+                    "The load-bearing coupling |stage2_net - da_net| <= cap. A "
+                    "finite cap is where the scenario-aware commitment earns its "
+                    "value; at 100% the rebid can largely undo the DA commit. "
+                    "DA+IDA1 only — reserve co-opt stays the separate triple rows."
+                ),
+            )
+
         run = st.button("Run forecast policy", key="forecast_policy_run")
         if not run:
             st.info("Choose a sample and click Run to compare against the ceiling.")
@@ -1529,6 +1623,40 @@ def _render_forecast_policy_section(
             f"DA + IDA1 + {reserve_product} (forecast-driven realistic)"
             if triple["realistic_total"] is not None else None
         )
+        # Opt-in stochastic policy value: run the 3-policy batch (capped-myopic
+        # / co-opt / stochastic) over the SAME valid-day window at a common rebid
+        # cap, then thread its robust policy_value into the comparison as ONE
+        # delta row. DA+IDA1 only (no reserve) — reserve cancels in the delta and
+        # is the separate triple rows. NO custom label: the default
+        # STOCHASTIC_POLICY_VALUE_LABEL is what excludes the row from the bar
+        # chart (see _strategy_chart_rows; Increment D guardrail).
+        stoch_per_day = None
+        stoch_summary = None
+        if include_stochastic:
+            with st.spinner(
+                f"Solving {len(valid_dates)} day(s) x 3 policies "
+                "(capped-myopic / co-opt / stochastic)..."
+            ):
+                stoch_per_day, stoch_summary = simulate_stochastic_da_id_batch(
+                    primary_df,
+                    intraday_df,
+                    dates=sorted(valid_dates),
+                    tz=zone_tz,
+                    power_mw=power_mw,
+                    duration_hours=duration_hours,
+                    efficiency=efficiency,
+                    n_scenarios=_STOCHASTIC_N_SCENARIOS,
+                    bucket=bucket,
+                    forecast_mode=forecast_mode,
+                    seed=_STOCHASTIC_SEED,
+                    rebid_cap_mw=_stochastic_rebid_cap_mw(stochastic_cap_pct, power_mw),
+                    min_rebid_uplift_eur=min_rebid_uplift_eur,
+                )
+        policy_value_total = None
+        policy_value_valid_days = None
+        if stoch_summary is not None and stoch_summary["valid_days"] > 0:
+            policy_value_total = stoch_summary["total_policy_value_eur"]
+            policy_value_valid_days = stoch_summary["valid_days"]
         comparison = build_strategy_comparison(
             summary,
             power_mw=power_mw,
@@ -1540,6 +1668,8 @@ def _render_forecast_policy_section(
             realistic_triple_label=realistic_label,
             triple_valid_days=triple["triple_valid_days"],
             triple_da_baseline=triple["triple_da_baseline"],
+            policy_value_total=policy_value_total,
+            policy_value_valid_days=policy_value_valid_days,
         )
         _render_strategy_comparison(
             comparison, chart_template,
@@ -1553,6 +1683,8 @@ def _render_forecast_policy_section(
                 "overlaps this comparison window, so it cannot be priced "
                 "co-temporally with the DA+ID rows."
             )
+        if stoch_summary is not None and stoch_summary["valid_days"] > 0:
+            _render_stochastic_attribution_panel(stoch_summary, power_mw=power_mw)
         if triple["seq_summary"] is not None:
             _render_reserve_gap_panel(
                 triple["seq_summary"], reserve_product, chart_template,
@@ -1578,9 +1710,15 @@ def _render_forecast_policy_section(
             export_assumptions = _append_triple_assumptions(export_assumptions)
         if triple["realistic_total"] is not None:
             export_assumptions = _append_realistic_triple_assumptions(export_assumptions)
+        if stoch_summary is not None and stoch_summary["valid_days"] > 0:
+            export_assumptions = _append_stochastic_assumptions(
+                export_assumptions, summary=stoch_summary,
+            )
         export_tables = {"Strategy comparison": comparison, "Sequential DA+ID": per_day}
         if triple["seq_per_day"] is not None and not triple["seq_per_day"].empty:
             export_tables["Sequential DA+ID+reserve"] = triple["seq_per_day"]
+        if stoch_per_day is not None and not stoch_per_day.empty:
+            export_tables["Stochastic policy (per day)"] = stoch_per_day
         _cockpit_download_button(
             export_tables,
             export_assumptions,
@@ -1655,6 +1793,22 @@ def _render_forecast_policy_kpis(summary: dict) -> None:
     )
 
 
+def _strategy_chart_rows(comparison: pd.DataFrame) -> pd.DataFrame:
+    """Rows to plot in the 'annualised revenue by strategy' bar chart.
+
+    The stochastic policy-value row is a value DELTA (stochastic minus
+    capped-myopic realised), NOT a revenue total, so it must never appear among
+    the annualised-revenue bars — a small delta plotted next to strategy totals
+    would misread as a tiny strategy. It stays in the table; the bar chart drops
+    it. When the delta row is absent the frame passes through unchanged.
+    """
+    if comparison is None or comparison.empty:
+        return comparison
+    return comparison[
+        comparison["strategy"] != STOCHASTIC_POLICY_VALUE_LABEL
+    ].reset_index(drop=True)
+
+
 def _render_strategy_comparison(
     comparison: pd.DataFrame, chart_template: str, *,
     has_reserve: bool = False, has_triple: bool = False,
@@ -1690,6 +1844,16 @@ def _render_strategy_comparison(
             "A reserve (FCR/aFRR) co-optimisation strategy adds further rows "
             "when ancillary capacity prices are loaded."
         )
+    has_policy_value = bool(
+        (comparison["strategy"] == STOCHASTIC_POLICY_VALUE_LABEL).any()
+    )
+    if has_policy_value:
+        notes.append(
+            "The Stochastic policy value row is a value DELTA (scenario-aware "
+            "commitment minus capped-myopic, at the common rebid cap over the "
+            "same valid days), NOT a revenue total — it has no DA uplift and is "
+            "excluded from the bar chart above; see the attribution & risk panel."
+        )
     window_note = (
         "DA/IDA rows use the forecast-policy window; reserve-first triple rows "
         "use their own walk-forward window. "
@@ -1701,15 +1865,16 @@ def _render_strategy_comparison(
         "days / power; uplift is vs the matching DA-only baseline. Raw solver "
         f"values (no capture haircut). {' '.join(notes)}"
     )
+    chart_rows = _strategy_chart_rows(comparison)
     palette = [_C_REVENUE, _C_PRICE_IDA, _C_DISCHARGE, _C_AVAIL, _C_SOC, _C_CHARGE]
-    colors = [palette[i % len(palette)] for i in range(len(comparison))]
+    colors = [palette[i % len(palette)] for i in range(len(chart_rows))]
     fig = go.Figure(go.Bar(
-        x=comparison["strategy"],
-        y=comparison["annualized_eur_per_mw"],
+        x=chart_rows["strategy"],
+        y=chart_rows["annualized_eur_per_mw"],
         marker_color=colors,
         text=[
             _fmt_strategy_bar_label(v)
-            for v in comparison["annualized_eur_per_mw"]
+            for v in chart_rows["annualized_eur_per_mw"]
         ],
         textposition="outside",
     ))
@@ -1782,6 +1947,67 @@ def _render_reserve_gap_panel(
         chart_template, height=240,
     )
     st.plotly_chart(fig, width="stretch")
+
+
+def _render_stochastic_attribution_panel(
+    summary: dict, *, power_mw: float,
+) -> None:
+    """Attribution + risk for the stochastic policy value (Increment D).
+
+    The headline ``policy_value`` (stochastic minus capped-myopic realised) is
+    robust. Its commitment/distribution split is a TIE-SENSITIVE diagnostic — the
+    co-opt and stochastic Stage-1 are equal-optimal schedules that settle
+    differently at a realised != base path — shown here as an attribution, never
+    as its own investment row. The risk block is a dispersion diagnostic over the
+    pooled per-(day, scenario) energy totals; the objective stays risk-neutral.
+    """
+    if summary is None or summary.get("valid_days", 0) <= 0:
+        return
+    pv = summary["total_policy_value_eur"]
+    days = int(summary["valid_days"])
+    cap = summary.get("rebid_cap_mw")
+    cap_txt = (
+        "inf" if cap is None or not math.isfinite(float(cap))
+        else f"{float(cap):,.1f} MW"
+    )
+    per_mw_yr = (
+        pv * DAYS_PER_YEAR / days / power_mw
+        if power_mw > 0 and days > 0 else float("nan")
+    )
+    st.markdown("**Stochastic policy value — attribution & risk**")
+    cols = st.columns(3)
+    cols[0].metric("Policy value (window)", f"EUR {pv:,.0f}")
+    cols[1].metric("Annualised", f"EUR {per_mw_yr:,.0f}/MW/yr")
+    cols[2].metric("Rebid cap", cap_txt)
+    st.caption(
+        f"Scenario-aware DA commitment minus capped-myopic realised, common "
+        f"rebid cap {cap_txt}, over {days} valid day(s). A screening diagnostic, "
+        "NOT a bankable co-optimised revenue. The split below is TIE-SENSITIVE "
+        "(Stage-1 multi-optima) — read the total, not the split. DA+IDA1 only "
+        "(reserve co-opt is the separate triple rows)."
+    )
+    split = st.columns(2)
+    split[0].metric(
+        "Commitment value (co-opt - myopic)",
+        f"EUR {summary['total_commitment_value_eur']:,.0f}",
+    )
+    split[1].metric(
+        "Distribution value (stochastic - co-opt)",
+        f"EUR {summary['total_distribution_value_eur']:,.0f}",
+    )
+    risk = summary.get("risk_block") or {}
+    if risk.get("n", 0) > 0:
+        rcols = st.columns(4)
+        rcols[0].metric("P10", f"EUR {risk['p10']:,.0f}")
+        rcols[1].metric("P50", f"EUR {risk['p50']:,.0f}")
+        rcols[2].metric("P90", f"EUR {risk['p90']:,.0f}")
+        rcols[3].metric("CVaR@90", f"EUR {risk['cvar90']:,.0f}")
+        st.caption(
+            f"Scenario risk pooled over {risk['n']:,} (day, scenario) energy "
+            "totals (excludes the certain reserve-capacity constant). Dispersion "
+            "diagnostic — the objective is risk-neutral; CVaR@90 is the downside "
+            "tail (mean of the worst 10%), not an upper bound."
+        )
 
 
 def _plot_forecast_policy(per_day: pd.DataFrame, chart_template: str) -> None:
