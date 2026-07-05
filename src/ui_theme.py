@@ -640,6 +640,121 @@ def inject_global_cockpit_theme() -> None:
             -webkit-text-fill-color: #ffffff !important;
         }
 
+        /*
+         * Streamlit/BaseWeb occasionally flips expanded headers and focused
+         * number-input surfaces back to a light default. Keep the main canvas
+         * controls readable in every state (sidebar has its own more specific
+         * rules above).
+         */
+        [data-testid="stExpander"] {
+            overflow: hidden !important;
+            color: var(--bp-text) !important;
+            background:
+                linear-gradient(180deg, rgba(17,25,37,0.96), rgba(8,12,18,0.96)) !important;
+        }
+
+        [data-testid="stExpander"] details,
+        [data-testid="stExpander"] summary,
+        [data-testid="stExpander"] summary *,
+        [data-testid="stExpander"] [data-testid="stExpanderDetails"],
+        [data-testid="stExpander"] [data-testid="stExpanderDetails"] * {
+            color: #eaf3ff !important;
+            -webkit-text-fill-color: #eaf3ff !important;
+        }
+
+        [data-testid="stExpander"] summary {
+            background:
+                linear-gradient(180deg, rgba(17,25,37,0.98), rgba(8,13,22,0.98)) !important;
+            border-bottom: 1px solid rgba(255,255,255,0.10) !important;
+            min-height: 3.05rem !important;
+        }
+
+        [data-testid="stExpander"] details[open] > summary,
+        [data-testid="stExpander"] summary:hover {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            background:
+                linear-gradient(180deg, rgba(22,34,50,0.99), rgba(10,17,29,0.99)) !important;
+        }
+
+        [data-testid="stExpander"] svg {
+            color: #eaf3ff !important;
+            fill: #eaf3ff !important;
+        }
+
+        [data-testid="stNumberInput"] div[data-baseweb="input"] > div,
+        [data-testid="stTextInput"] div[data-baseweb="input"] > div,
+        [data-testid="stDateInput"] div[data-baseweb="input"] > div,
+        div[data-baseweb="input"] > div,
+        div[data-baseweb="input"] > div > div {
+            color: #eaf3ff !important;
+            -webkit-text-fill-color: #eaf3ff !important;
+            background:
+                linear-gradient(180deg, rgba(17,25,37,0.98), rgba(8,13,22,0.98)) !important;
+            border-color: rgba(255,255,255,0.18) !important;
+            box-shadow: inset 0 1px 0 rgba(255,255,255,0.06) !important;
+        }
+
+        [data-testid="stNumberInput"] input,
+        [data-testid="stTextInput"] input,
+        [data-testid="stDateInput"] input,
+        div[data-baseweb="input"] input,
+        input {
+            color: #eaf3ff !important;
+            -webkit-text-fill-color: #eaf3ff !important;
+            caret-color: var(--bp-cyan) !important;
+            background: transparent !important;
+        }
+
+        [data-testid="stNumberInput"] div[data-baseweb="input"]:focus-within > div,
+        [data-testid="stTextInput"] div[data-baseweb="input"]:focus-within > div,
+        [data-testid="stDateInput"] div[data-baseweb="input"]:focus-within > div,
+        div[data-baseweb="input"]:focus-within > div {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            background:
+                linear-gradient(180deg, rgba(23,39,58,0.99), rgba(9,20,34,0.99)) !important;
+            border-color: rgba(0,205,255,0.46) !important;
+            box-shadow:
+                0 0 0 1px rgba(0,205,255,0.22),
+                0 12px 26px rgba(0,0,0,0.20) !important;
+        }
+
+        [data-testid="stNumberInput"] input::selection,
+        [data-testid="stTextInput"] input::selection,
+        [data-testid="stDateInput"] input::selection,
+        input::selection {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            background: rgba(0,163,255,0.42) !important;
+        }
+
+        [data-testid="stNumberInput"] button {
+            color: #eaf3ff !important;
+            -webkit-text-fill-color: #eaf3ff !important;
+            background:
+                linear-gradient(180deg, rgba(16,35,54,0.98), rgba(7,14,25,0.98)) !important;
+            border-color: rgba(255,255,255,0.14) !important;
+            opacity: 1 !important;
+        }
+
+        [data-testid="stNumberInput"] button:hover {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            border-color: rgba(0,205,255,0.36) !important;
+        }
+
+        button:disabled,
+        button[disabled],
+        [aria-disabled="true"][role="button"] {
+            color: rgba(234,243,255,0.78) !important;
+            -webkit-text-fill-color: rgba(234,243,255,0.78) !important;
+            background:
+                linear-gradient(180deg, rgba(35,42,54,0.98), rgba(22,28,39,0.98)) !important;
+            border-color: rgba(255,255,255,0.18) !important;
+            opacity: 1 !important;
+        }
+
         div[data-baseweb="select"] svg {
             color: var(--bp-muted);
         }

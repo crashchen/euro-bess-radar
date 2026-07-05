@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import plotly.io as pio
 
+import src.ui_theme as ui_theme
 from src.pages.simulation_cockpit import _health_metric, _kpi_card
 from src.ui_theme import cockpit_chart_template
 
@@ -49,3 +50,21 @@ def test_health_metric_escapes_user_visible_strings() -> None:
 
     assert "&lt;Delta&gt;" in html
     assert "&lt;0.01%" in html
+
+
+def test_global_theme_guards_expander_header_contrast() -> None:
+    css_source = ui_theme.inject_global_cockpit_theme.__code__.co_consts
+    css = "\n".join(str(part) for part in css_source if isinstance(part, str))
+
+    assert '[data-testid="stExpander"] summary' in css
+    assert '[data-testid="stExpander"] details[open] > summary' in css
+    assert "-webkit-text-fill-color: #eaf3ff" in css
+
+
+def test_global_theme_guards_number_input_contrast() -> None:
+    css_source = ui_theme.inject_global_cockpit_theme.__code__.co_consts
+    css = "\n".join(str(part) for part in css_source if isinstance(part, str))
+
+    assert '[data-testid="stNumberInput"] div[data-baseweb="input"] > div' in css
+    assert '[data-testid="stNumberInput"] div[data-baseweb="input"]:focus-within > div' in css
+    assert '[data-testid="stNumberInput"] button' in css
