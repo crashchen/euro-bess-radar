@@ -775,6 +775,11 @@ def inject_global_cockpit_theme() -> None:
             filter: brightness(1.08);
         }
 
+        [data-testid="stSidebar"] button:disabled,
+        [data-testid="stSidebar"] button[disabled],
+        [data-testid="stSidebar"] button[aria-disabled="true"],
+        [data-testid="stSidebar"] [data-testid^="stBaseButton"]:disabled,
+        [data-testid="stSidebar"] [data-testid^="stBaseButton"][disabled],
         [data-testid="stSidebar"] .stButton > button:disabled,
         [data-testid="stSidebar"] .stDownloadButton > button:disabled,
         [data-testid="stSidebar"] .stFormSubmitButton > button:disabled,
@@ -783,7 +788,8 @@ def inject_global_cockpit_theme() -> None:
         [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] {
             color: #dbeafe !important;
             -webkit-text-fill-color: #dbeafe !important;
-            background:
+            background-color: #172033 !important;
+            background-image:
                 linear-gradient(180deg, rgba(30,41,59,0.98), rgba(15,23,42,0.98)) !important;
             border: 1px solid rgba(148,163,184,0.45) !important;
             box-shadow: none !important;
@@ -791,6 +797,11 @@ def inject_global_cockpit_theme() -> None:
             filter: none !important;
         }
 
+        [data-testid="stSidebar"] button:disabled *,
+        [data-testid="stSidebar"] button[disabled] *,
+        [data-testid="stSidebar"] button[aria-disabled="true"] *,
+        [data-testid="stSidebar"] [data-testid^="stBaseButton"]:disabled *,
+        [data-testid="stSidebar"] [data-testid^="stBaseButton"][disabled] *,
         [data-testid="stSidebar"] .stButton > button:disabled *,
         [data-testid="stSidebar"] .stDownloadButton > button:disabled *,
         [data-testid="stSidebar"] .stFormSubmitButton > button:disabled *,
