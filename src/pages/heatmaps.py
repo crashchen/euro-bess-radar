@@ -40,6 +40,14 @@ def render(
     apply_cockpit_plot_theme(fig_phm)
     report_figures["price_heatmap"] = fig_phm
     st.plotly_chart(fig_phm, width="stretch")
+    st.caption(
+        "Each cell is the average day-ahead price for that local hour (rows) in "
+        "that calendar month (columns). Read it top-to-bottom for the daily "
+        "shape — dark low-price bands are the cheapest hours to charge, bright "
+        "high-price bands the best hours to discharge — and left-to-right for "
+        "seasonal drift. A strong vertical contrast between the daily low and "
+        "high bands is the arbitrage signal a battery monetises."
+    )
 
     spread_hm = build_spread_heatmap(
         primary_df, tz=zone_tz, duration_hours=duration_hours,
@@ -94,3 +102,11 @@ def render(
     )
     apply_cockpit_plot_theme(fig_freq)
     st.plotly_chart(fig_freq, width="stretch")
+    st.caption(
+        "For each local hour, the share of months in which the ordered-spread "
+        "model selected that hour for charging (pink) versus discharging (blue). "
+        "Tall, well-separated pink and blue clusters mean the charge/discharge "
+        "timing is consistent across the sample; overlap at the same hour means "
+        "the optimal timing shifts month to month. This is selection frequency, "
+        "not revenue."
+    )
