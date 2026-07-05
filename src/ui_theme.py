@@ -246,8 +246,8 @@ def inject_global_cockpit_theme() -> None:
 
         div[data-baseweb="select"] > div,
         div[data-baseweb="input"] > div,
-        input,
-        textarea {
+        div[data-baseweb="input"] input,
+        div[data-baseweb="textarea"] textarea {
             color: var(--bp-text) !important;
             background-color: rgba(255,255,255,0.06) !important;
             border-color: rgba(255,255,255,0.12) !important;
