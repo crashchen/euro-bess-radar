@@ -17,11 +17,14 @@ from src.ancillary import (
 from src.pages.simulation_cockpit import (
     _CAP_SOURCE_CACHE,
     _CAP_SOURCE_SESSION,
+    _append_stochastic_assumptions,
     _fmt_strategy_bar_label,
     _reserve_coopt_total,
     _reserve_triple_totals,
     _resolve_capacity_dataset,
     _slice_to_local_dates,
+    _stochastic_rebid_cap_mw,
+    _strategy_chart_rows,
 )
 from src.simulation import DAYS_PER_YEAR
 from src.strategy_compare import (
@@ -377,6 +380,82 @@ def test_full_seven_row_layout_with_policy_value() -> None:
     # The policy-value row is the only one without a finite DA uplift.
     finite_uplift = [math.isfinite(v) for v in table["uplift_vs_da_pct"]]
     assert finite_uplift == [True, True, True, True, True, True, False]
+
+
+# ── Increment D cockpit helpers (chart exclusion / cap / export) ──────────────
+
+
+def test_strategy_chart_rows_excludes_policy_value_delta() -> None:
+    # Increment D guardrail (Codex): the policy-value DELTA row must NEVER enter
+    # the "revenue by strategy" bar chart — it is a delta, not a revenue total.
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        policy_value_total=18.0,
+    )
+    chart = _strategy_chart_rows(table)
+    assert STOCHASTIC_POLICY_VALUE_LABEL in set(table["strategy"])
+    assert STOCHASTIC_POLICY_VALUE_LABEL not in set(chart["strategy"])
+    assert len(chart) == len(table) - 1
+    # Every total row survives the filter.
+    assert list(chart["strategy"]) == [
+        "DA-only",
+        "DA + IDA1 (forecast-driven)",
+        "DA + IDA1 (perfect-foresight ceiling)",
+    ]
+
+
+def test_strategy_chart_rows_passthrough_without_policy_value() -> None:
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10), power_mw=2.0,
+    )
+    chart = _strategy_chart_rows(table)
+    assert list(chart["strategy"]) == list(table["strategy"])
+
+
+def test_strategy_chart_rows_handles_empty() -> None:
+    empty = build_strategy_comparison(
+        _summary(0.0, 0.0, 0.0, valid_days=0), power_mw=1.0,
+    )
+    assert _strategy_chart_rows(empty).empty
+
+
+def test_stochastic_rebid_cap_mw_scales_and_floors() -> None:
+    assert _stochastic_rebid_cap_mw(50, 10.0) == pytest.approx(5.0)
+    assert _stochastic_rebid_cap_mw(100, 10.0) == pytest.approx(10.0)
+    assert _stochastic_rebid_cap_mw(0, 10.0) == pytest.approx(0.0)
+    # A slider value can never map to a negative cap.
+    assert _stochastic_rebid_cap_mw(-20, 10.0) == pytest.approx(0.0)
+
+
+def test_append_stochastic_assumptions_adds_rows() -> None:
+    base = pd.DataFrame([{
+        "parameter": "x", "value": "y", "unit": "", "source": "", "affects": "",
+    }])
+    out = _append_stochastic_assumptions(
+        base, summary={"rebid_cap_mw": 5.0, "n_scenarios": 10},
+    )
+    params = set(out["parameter"])
+    assert "Stochastic policy value basis" in params
+    assert "Stochastic rebid cap" in params
+    cap_row = out[out["parameter"] == "Stochastic rebid cap"].iloc[0]
+    assert cap_row["value"] == "5.0"
+    assert cap_row["unit"] == "MW"
+
+
+def test_append_stochastic_assumptions_none_passthrough() -> None:
+    assert _append_stochastic_assumptions(None, summary={}) is None
+
+
+def test_append_stochastic_assumptions_infinite_cap() -> None:
+    base = pd.DataFrame([{
+        "parameter": "x", "value": "y", "unit": "", "source": "", "affects": "",
+    }])
+    out = _append_stochastic_assumptions(
+        base, summary={"rebid_cap_mw": float("inf"), "n_scenarios": 10},
+    )
+    cap_row = out[out["parameter"] == "Stochastic rebid cap"].iloc[0]
+    assert cap_row["value"] == "inf"
 
 
 def _price_frame(days: int = 4) -> pd.DataFrame:
