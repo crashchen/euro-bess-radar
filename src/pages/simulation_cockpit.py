@@ -2129,7 +2129,12 @@ def _plot_weekday_heatmap(batch: pd.DataFrame, chart_template: str) -> None:
         z=pivot.values,
         x=list(pivot.columns),
         y=list(pivot.index),
-        colorscale="Magma",
+        colorscale=[
+            [0.0, "#132033"],
+            [0.35, "#0f766e"],
+            [0.7, "#22c55e"],
+            [1.0, "#facc15"],
+        ],
         colorbar=dict(title="EUR/day"),
         hovertemplate="%{y}, %{x}<br>EUR %{z:,.0f}<extra></extra>",
     ))

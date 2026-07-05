@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import plotly.io as pio
 
+import src.ui_theme as ui_theme
 from src.pages.simulation_cockpit import _health_metric, _kpi_card
 from src.ui_theme import cockpit_chart_template
 
@@ -49,3 +50,51 @@ def test_health_metric_escapes_user_visible_strings() -> None:
 
     assert "&lt;Delta&gt;" in html
     assert "&lt;0.01%" in html
+
+
+def _injected_theme_css(monkeypatch) -> str:
+    import streamlit as st
+
+    injected_css: list[str] = []
+    monkeypatch.setattr(
+        st, "markdown",
+        lambda body, **_kwargs: injected_css.append(str(body)),
+    )
+    ui_theme.inject_global_cockpit_theme()
+    return "\n".join(injected_css)
+
+
+def test_global_theme_guards_expander_header_contrast(monkeypatch) -> None:
+    css = _injected_theme_css(monkeypatch)
+
+    assert '[data-testid="stExpander"] summary' in css
+    assert '[data-testid="stExpander"] details[open] > summary' in css
+    assert "-webkit-text-fill-color: #eaf3ff" in css
+
+
+def test_global_theme_guards_number_input_contrast(monkeypatch) -> None:
+    css = _injected_theme_css(monkeypatch)
+
+    assert '[data-testid="stNumberInput"] div[data-baseweb="input"] > div' in css
+    assert '[data-testid="stNumberInput"] div[data-baseweb="input"]:focus-within > div' in css
+    assert '[data-testid="stNumberInput"] button' in css
+
+
+def test_global_theme_guards_sidebar_disabled_button_contrast(monkeypatch) -> None:
+    css = _injected_theme_css(monkeypatch)
+
+    assert '[data-testid="stSidebar"] button:disabled' in css
+    assert '[data-testid="stSidebar"] [data-testid^="stBaseButton"]:disabled' in css
+    assert '[data-testid="stSidebar"] .stButton > button:disabled' in css
+    assert '[data-testid="stSidebar"] .stDownloadButton > button:disabled' in css
+    assert '[data-testid="stSidebar"] button:disabled *' in css
+    assert "background-color: #172033" in css
+    assert "-webkit-text-fill-color: #dbeafe" in css
+
+
+def test_global_theme_styles_base_button_primary_as_brand_gradient(monkeypatch) -> None:
+    css = _injected_theme_css(monkeypatch)
+
+    assert '[data-testid="stBaseButton-primary"]' in css
+    assert '[data-testid="stSidebar"] [data-testid="stBaseButton-primary"]' in css
+    assert "linear-gradient(135deg, rgba(255,45,149,0.96)" in css
