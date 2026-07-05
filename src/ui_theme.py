@@ -775,6 +775,33 @@ def inject_global_cockpit_theme() -> None:
             filter: brightness(1.08);
         }
 
+        [data-testid="stSidebar"] .stButton > button:disabled,
+        [data-testid="stSidebar"] .stDownloadButton > button:disabled,
+        [data-testid="stSidebar"] .stFormSubmitButton > button:disabled,
+        [data-testid="stSidebar"] .stButton > button[disabled],
+        [data-testid="stSidebar"] .stDownloadButton > button[disabled],
+        [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] {
+            color: #dbeafe !important;
+            -webkit-text-fill-color: #dbeafe !important;
+            background:
+                linear-gradient(180deg, rgba(30,41,59,0.98), rgba(15,23,42,0.98)) !important;
+            border: 1px solid rgba(148,163,184,0.45) !important;
+            box-shadow: none !important;
+            opacity: 1 !important;
+            filter: none !important;
+        }
+
+        [data-testid="stSidebar"] .stButton > button:disabled *,
+        [data-testid="stSidebar"] .stDownloadButton > button:disabled *,
+        [data-testid="stSidebar"] .stFormSubmitButton > button:disabled *,
+        [data-testid="stSidebar"] .stButton > button[disabled] *,
+        [data-testid="stSidebar"] .stDownloadButton > button[disabled] *,
+        [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] * {
+            color: #dbeafe !important;
+            -webkit-text-fill-color: #dbeafe !important;
+            opacity: 1 !important;
+        }
+
         hr {
             border-color: rgba(255,255,255,0.12);
         }

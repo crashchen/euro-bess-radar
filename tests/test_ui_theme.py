@@ -78,3 +78,12 @@ def test_global_theme_guards_number_input_contrast(monkeypatch) -> None:
     assert '[data-testid="stNumberInput"] div[data-baseweb="input"] > div' in css
     assert '[data-testid="stNumberInput"] div[data-baseweb="input"]:focus-within > div' in css
     assert '[data-testid="stNumberInput"] button' in css
+
+
+def test_global_theme_guards_sidebar_disabled_button_contrast(monkeypatch) -> None:
+    css = _injected_theme_css(monkeypatch)
+
+    assert '[data-testid="stSidebar"] .stButton > button:disabled' in css
+    assert '[data-testid="stSidebar"] .stDownloadButton > button:disabled' in css
+    assert '[data-testid="stSidebar"] .stButton > button:disabled *' in css
+    assert "-webkit-text-fill-color: #dbeafe" in css
