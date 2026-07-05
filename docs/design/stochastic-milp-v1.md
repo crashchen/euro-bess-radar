@@ -355,8 +355,10 @@ BEFORE any merge of aggregation/attribution code):
    **objective/optimal-set equivalence** (e.g. the B1 `test_decoupling_theorem
    _at_infinite_cap` pins the Stage-1 *financial value*), NOT on a zero realised
    split. Making the realised split exactly zero would require a canonical
-   Stage-1 selector (v2). The robust C1 headline is `stochastic_realised −
-   myopic_realised` (§1), which does not depend on the co-opt tie-break.
+   Stage-1 selector (v2 — **implemented in the PR under review, see §11**). The
+   robust C1 headline is
+   `stochastic_realised − myopic_realised` (§1), which does not depend on the
+   co-opt tie-break.
 2. **S=1 degeneracy**: S=1 with a zero error path ⇒ the deterministic
    point-forecast co-optimisation at the configured cap. This is
    **deliberately NOT equal to the myopic sequential row** — the co-opt
@@ -425,3 +427,43 @@ Each increment is a separate PR in the established review lane.
 - The reserve red-line (headroom, not activation energy) and the
   system-vs-asset red-line are inherited unchanged from
   `docs/import-templates.md` and the cockpit captions.
+
+## 11. v2 update log
+
+Post-v1 refinements. They do not change the v1 decision structure, red-lines, or
+headline; they tighten what §8 flagged as deferred. **Status: IN REVIEW** — added
+by PR `feat/stochastic-canonical-stage1`, not yet merged.
+
+- **Canonical Stage-1 selector (resolves §8-1's deferred v2 item — in review).**
+  `stochastic_dispatch._canonicalize_stage1` adds a lexicographic SECOND pass to
+  `solve_stochastic_da_commitment`: pass 1 finds the optimal expected total
+  `z*`; pass 2 fixes the objective at `z*` (tight `≤ z* + 1e-9·(1+|z*|)` bound,
+  with a `> z* + 1e-6` backstop that falls back to the pass-1 solution) and
+  minimises **time-weighted Stage-1 DA throughput** `Σ_t (t+1)·(da_charge_t +
+  da_discharge_t)`. The strictly increasing `(t+1)` weight is load-bearing: a
+  flat `Σ(da_charge+da_discharge)` leaves the temporal PATTERN free when
+  `da − base` is near-constant across intervals (equal-throughput permutations),
+  so the co-opt (S=1) and stochastic (S=N) solves could still diverge;
+  `(t+1)` breaks it by preferring the earliest feasible placement. Empirically
+  the pick is unique and identical across S=1/S=N in every tested case (constant
+  AND varying premium, multiple seeds), so the C1 `distribution_value` split is
+  now **tie-stable** — it vanishes at `rebid_cap = ∞` (the decoupling regime,
+  new pin `test_distribution_value_is_zero_at_infinite_cap`) and otherwise
+  reflects the real value of the coupling rather than multi-optimum noise. The
+  objective, all v1 identities, and the robust `policy_value` headline are
+  unchanged (the tie-break never alters `z*`). Regression pins:
+  `test_canonical_stage1_selects_same_schedule_at_infinite_cap` (element-wise
+  `da_net` equality) and the distribution-value dispatch test above.
+
+  **Performance (§6 budget).** A naive full re-solve of the tie-break MILP is
+  pathological — the dense objective-cut row plus min-throughput integer
+  structure pushed the worst-case 15-min S=10 day to ~30s. Two measures keep it
+  in budget: (1) the per-scenario Stage-2 binary mode variables are FIXED to
+  their pass-1 values, stripping the `s·n` scenario integers (the bulk of the
+  branch-and-bound) and leaving only the `n` Stage-1 binaries free — exact in the
+  decoupled infinite-cap regime, guarded at finite cap by the objective backstop;
+  (2) the tie-break `linprog` carries an 8s HiGHS `time_limit`, and only a
+  PROVEN-optimal result (`status == 0`) is accepted — a rare hard instance hits
+  the limit and falls back to the deterministic pass-1 solution (losing only that
+  day's diagnostic-split tie-stability). Net worst case ≈ pass-1 (~2s) + ≤8s ≈
+  10s; typical canonical days solve in 4–7s.

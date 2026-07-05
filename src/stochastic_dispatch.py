@@ -53,7 +53,7 @@ import time
 
 import numpy as np
 from scipy.optimize import linprog
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, vstack
 
 from src.config import ANCILLARY_CAPACITY_AVAILABILITY
 from src.dispatch import (
@@ -66,6 +66,11 @@ from src.dispatch import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Wall-clock cap for the canonical Stage-1 tie-break MILP (§6 budget). Pass 1 (the
+# real optimisation) is uncapped; this bounds only the lexicographic second pass,
+# which falls back to the pass-1 solution if it cannot prove optimality in time.
+_CANONICAL_TIEBREAK_TIME_LIMIT_S = 8.0
 
 
 def _empty_commitment_result(n: int, s: int) -> dict:
@@ -239,26 +244,109 @@ def _solve_and_unpack(
     ub_c = [tr[1] for tr in trip]
     ub_v = [tr[2] for tr in trip]
     a_ub = csr_matrix((ub_v, (ub_r, ub_c)), shape=(len(rhs), n_vars))
+    b_ub = np.array(rhs)
     a_eq, b_eq = _terminal_equalities(n, s, block, dt, sqrt_eff)
     bounds = _variable_bounds(n, s, block, da_cap, s2_cap)
     integrality = _binary_mask(n, s, block)
 
     t0 = time.perf_counter()
     result = linprog(
-        c, A_ub=a_ub, b_ub=np.array(rhs), A_eq=a_eq, b_eq=b_eq,
+        c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
         bounds=bounds, integrality=integrality, method="highs",
     )
-    solve_seconds = time.perf_counter() - t0
     if not result.success:
+        solve_seconds = time.perf_counter() - t0
         logger.warning("stochastic commitment MILP failed: %s", result.message)
         out = _empty_commitment_result(n, s)
         out["solve_seconds"] = solve_seconds
         return out
 
-    return _unpack_solution(
-        result.x, da_prices, scenarios, weights, dt, n, s, block, sqrt_eff,
-        soc_init, cap, reserve, solve_seconds,
+    x = _canonicalize_stage1(
+        c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, s, block,
+        result.x, float(result.fun),
     )
+    solve_seconds = time.perf_counter() - t0
+    return _unpack_solution(
+        x if x is not None else result.x, da_prices, scenarios, weights, dt, n,
+        s, block, sqrt_eff, soc_init, cap, reserve, solve_seconds,
+    )
+
+
+def _canonicalize_stage1(
+    c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, s, block, x1, z_star,
+):
+    """Lexicographic second pass: pick the canonical (earliest-activity) Stage-1.
+
+    The Stage-1 DA net position is degenerate — many schedules achieve the same
+    optimal expected total, and the S=1 co-opt and S=N stochastic solves would
+    otherwise grab arbitrary (different) members, settling to different money at
+    a realised != base path (the tie-sensitive commitment/distribution split, v1
+    scope §8). This pass fixes the objective at the pass-1 optimum ``z_star`` and
+    minimises TIME-WEIGHTED Stage-1 DA throughput ``Σ_t (t+1)·(charge_t +
+    discharge_t)``, so co-opt and stochastic select the SAME canonical Stage-1
+    whenever they share the optimal set (``distribution_value ≈ 0`` at
+    ``rebid_cap = ∞``). The strictly increasing time weight is what makes the
+    pick unique: a flat ``Σ(charge+discharge)`` leaves the TEMPORAL PATTERN free
+    when ``da - base`` is (near-)constant across intervals (every permutation has
+    equal throughput), so the two solves could still diverge; ``(t+1)`` breaks
+    that by preferring the earliest feasible placement. The primary objective can
+    only reward larger ``|da_net|`` at the right intervals, so this never shrinks
+    a profitable position — it only canonicalises otherwise-arbitrary churn.
+
+    Performance: the per-scenario Stage-2 binary mode variables are FIXED to their
+    pass-1 values (``x1``), stripping the ``s·n`` scenario integers — the bulk of
+    the branch-and-bound cost — and leaving only the ``n`` Stage-1 binaries free
+    (the ones that must be canonicalised). This drops the worst-case 15-min S=10
+    tie-break from ~30s to a few seconds while staying exact in the decoupled
+    infinite-cap regime; at finite cap the objective-degradation backstop below
+    guards against the fixed Stage-2 pattern over-constraining the objective.
+
+    Returns the canonical solution vector, or ``None`` (keep the pass-1 solution)
+    if the tie-break solve fails or would degrade the objective.
+    """
+    n_vars = a_ub.shape[1]
+    # The objective-bound slack must only absorb solver rounding, NOT license a
+    # real objective/throughput trade: the pass-1 optimum itself is feasible, so
+    # a tiny cushion suffices. A loose tol here would let the tie-break give away
+    # a sliver of expected total to shave throughput (drift observed at 1e-6·|z*|).
+    tol = 1e-9 + 1e-9 * abs(z_star)
+    a_ub2 = vstack([a_ub, csr_matrix(c.reshape(1, -1))], format="csr")
+    b_ub2 = np.append(b_ub, z_star + tol)
+    c2 = np.zeros(n_vars)
+    time_weight = np.arange(1, n + 1, dtype=float)  # (t+1): earliest-activity pick
+    c2[:n] = time_weight            # da_charge
+    c2[n : 2 * n] = time_weight     # da_discharge
+    bnds = list(bounds)
+    for j in range(1, s + 1):       # fix each scenario's Stage-2 mode binaries
+        mode0 = block * j + 2 * n
+        for t in range(n):
+            v = round(float(x1[mode0 + t]))
+            bnds[mode0 + t] = (v, v)
+    result = linprog(
+        c2, A_ub=a_ub2, b_ub=b_ub2, A_eq=a_eq, b_eq=b_eq,
+        bounds=bnds, integrality=integrality, method="highs",
+        options={"time_limit": _CANONICAL_TIEBREAK_TIME_LIMIT_S},
+    )
+    # Accept only a PROVEN-optimal tie-break (status 0). MILP hardness is
+    # data-dependent, so a rare instance can hit the time limit (status 1) with a
+    # not-fully-canonicalised schedule — keeping the deterministic pass-1 solution
+    # is safer than a half-tie-broken one, and bounds total solve time to pass-1 +
+    # this cap. The affected days lose only the diagnostic split's tie-stability.
+    if result.status != 0 or not result.success:
+        logger.warning(
+            "canonical Stage-1 tie-break did not prove optimal (status=%s: %s); "
+            "keeping primary solution", result.status, result.message,
+        )
+        return None
+    # Backstop against MILP feasibility-tolerance noise: never return a schedule
+    # whose true objective degraded past a tight bound — keep the pass-1 optimum.
+    if float(c @ result.x) > z_star + 1e-6:
+        logger.warning(
+            "canonical Stage-1 pass degraded objective by %.2e; keeping primary",
+            float(c @ result.x) - z_star,
+        )
+        return None
+    return result.x
 
 
 def _append_rebid_coupling(

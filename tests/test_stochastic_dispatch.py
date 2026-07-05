@@ -91,6 +91,28 @@ class TestStochasticCommitment:
         )
         np.testing.assert_allclose(fin(r), fin(r_base), atol=1e-6)
 
+    def test_canonical_stage1_selects_same_schedule_at_infinite_cap(self) -> None:
+        # v2 canonical selector (docs/design §8): the decoupling theorem gives the
+        # stochastic (S=N) and co-opt (S=1, base) Stage-1 the same optimal SET at
+        # rebid_cap = inf, but v1 grabbed arbitrary (different) members, so the
+        # commitment/distribution split carried tie noise. The min-throughput
+        # lexicographic tie-break makes both solves pick the SAME least-churn
+        # Stage-1 — so da_net is element-wise equal, not just equal in objective.
+        da = _da_shape(12)
+        base = da + 5
+        scen, w = _mean_centred_scenarios(base, 6, 9.0, seed=7)
+        r = solve_stochastic_da_commitment(
+            da, scen, w, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            rebid_cap_mw=np.inf,
+        )
+        r_base = solve_stochastic_da_commitment(
+            da, base[None, :], np.array([1.0]), dt=1.0, power_mw=1.0,
+            duration_hours=2.0, rebid_cap_mw=np.inf,
+        )
+        net = r["da_p_discharge"] - r["da_p_charge"]
+        net_base = r_base["da_p_discharge"] - r_base["da_p_charge"]
+        np.testing.assert_allclose(net, net_base, atol=1e-6)
+
     def test_ida_equals_da_collapses_to_da_only(self) -> None:
         # Scope §8-3 (expected-level, no-reserve): with every scenario and the
         # realised path == DA, the stochastic total collapses to the DA-only
@@ -219,6 +241,30 @@ class TestStochasticExecution:
         w = np.full(s, 1.0 / s)
         realised = base + rng.normal(0, 6, n)
         return da, scen, w, base, realised
+
+    def test_distribution_value_is_zero_at_infinite_cap(self) -> None:
+        # v2 canonical selector: the batch's distribution_value is
+        # stochastic_realised - coopt_realised, where coopt is the S=1 base-
+        # forecast dispatch and stochastic is the S=N one. At rebid_cap = inf the
+        # decoupling theorem + canonical tie-break make both commit the SAME
+        # Stage-1, and they execute against the same base forecast and settle at
+        # the same realised path, so the realised split must vanish (v1 left it
+        # tie-noisy). This is the property that makes the split trustworthy.
+        for seed in range(4):
+            da, scen, w, base, realised = self._case(seed=seed)
+            common = dict(
+                dt=1.0, power_mw=1.0, duration_hours=2.0, rebid_cap_mw=np.inf,
+            )
+            coopt = solve_stochastic_da_id_dispatch(
+                da, base[None, :], np.array([1.0]), base, realised, **common,
+            )
+            stoch = solve_stochastic_da_id_dispatch(
+                da, scen, w, base, realised, **common,
+            )
+            assert coopt["success"] and stoch["success"]
+            np.testing.assert_allclose(
+                stoch["realised_total_eur"], coopt["realised_total_eur"], atol=1e-4,
+            )
 
     def test_realised_at_most_coopt_ceiling(self) -> None:
         # The key by-construction pin (§2.4/§8-4): the executed (Stage-1

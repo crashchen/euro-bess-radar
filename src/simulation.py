@@ -1609,10 +1609,12 @@ def _stochastic_day(
         # Headline: robust policy value of the stochastic commitment over the
         # deterministic myopic baseline. The commitment/distribution split below
         # is an arithmetic decomposition of it (commitment + distribution ==
-        # policy_value), but is a TIE-SENSITIVE DIAGNOSTIC: the co-opt Stage-1 is
-        # one of several equal-optimal schedules and settles differently at a
-        # realised != base path, so the SPLIT carries multi-optimum noise even
-        # though the total does not (scope §1/§8-1, revised).
+        # policy_value). As of the v2 canonical Stage-1 selector
+        # (stochastic_dispatch._canonicalize_stage1) the co-opt and stochastic
+        # commitments break Stage-1 degeneracy identically (earliest-activity
+        # min-throughput tie-break), so the split is now tie-STABLE — it vanishes
+        # at rebid_cap = inf (the decoupling regime) and otherwise reflects the
+        # real value of the coupling, not multi-optimum noise (scope §1/§8-1).
         "policy_value_eur": stoch["realised_total_eur"] - myopic["realised_total_eur"],
         "commitment_value_eur": coopt["realised_total_eur"] - myopic["realised_total_eur"],
         "distribution_value_eur": stoch["realised_total_eur"] - coopt["realised_total_eur"],
