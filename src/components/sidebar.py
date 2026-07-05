@@ -602,6 +602,7 @@ def render_sidebar() -> dict:
             if st.button(
                 "Fetch Netztransparenz + ENTSO-E activation energy",
                 key="fetch_activation_energy",
+                type="primary",
                 help=(
                     "Quality-assured activated aFRR/mFRR volumes from "
                     "Netztransparenz (~1 month publication lag) joined with "
@@ -637,6 +638,7 @@ def render_sidebar() -> dict:
             if st.button(
                 "Fetch Netztransparenz reBAP/imbalance",
                 key="fetch_netztransparenz_imbalance",
+                type="primary",
                 help=(
                     "Download official German NRV-Saldo + reBAP CSV data for "
                     "the selected date window and write it to the same "
