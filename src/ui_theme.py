@@ -314,7 +314,8 @@ def inject_global_cockpit_theme() -> None:
 
         [data-testid="stSidebar"] .stButton > button,
         [data-testid="stSidebar"] .stDownloadButton > button,
-        [data-testid="stSidebar"] .stFormSubmitButton > button {
+        [data-testid="stSidebar"] .stFormSubmitButton > button,
+        [data-testid="stSidebar"] [data-testid="stBaseButton-primary"] {
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
             background:
@@ -325,7 +326,8 @@ def inject_global_cockpit_theme() -> None:
 
         [data-testid="stSidebar"] .stButton > button:hover,
         [data-testid="stSidebar"] .stDownloadButton > button:hover,
-        [data-testid="stSidebar"] .stFormSubmitButton > button:hover {
+        [data-testid="stSidebar"] .stFormSubmitButton > button:hover,
+        [data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover {
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
             border-color: rgba(255,255,255,0.42) !important;
@@ -759,7 +761,8 @@ def inject_global_cockpit_theme() -> None:
 
         .stButton > button,
         .stDownloadButton > button,
-        .stFormSubmitButton > button {
+        .stFormSubmitButton > button,
+        [data-testid="stBaseButton-primary"] {
             color: #ffffff;
             border: 1px solid rgba(255,255,255,0.14);
             background: linear-gradient(135deg, rgba(255,45,149,0.96), rgba(184,77,255,0.78));
@@ -770,7 +773,8 @@ def inject_global_cockpit_theme() -> None:
 
         .stButton > button:hover,
         .stDownloadButton > button:hover,
-        .stFormSubmitButton > button:hover {
+        .stFormSubmitButton > button:hover,
+        [data-testid="stBaseButton-primary"]:hover {
             border-color: rgba(255,255,255,0.38);
             filter: brightness(1.08);
         }

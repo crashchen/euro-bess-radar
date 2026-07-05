@@ -90,3 +90,11 @@ def test_global_theme_guards_sidebar_disabled_button_contrast(monkeypatch) -> No
     assert '[data-testid="stSidebar"] button:disabled *' in css
     assert "background-color: #172033" in css
     assert "-webkit-text-fill-color: #dbeafe" in css
+
+
+def test_global_theme_styles_base_button_primary_as_brand_gradient(monkeypatch) -> None:
+    css = _injected_theme_css(monkeypatch)
+
+    assert '[data-testid="stBaseButton-primary"]' in css
+    assert '[data-testid="stSidebar"] [data-testid="stBaseButton-primary"]' in css
+    assert "linear-gradient(135deg, rgba(255,45,149,0.96)" in css
