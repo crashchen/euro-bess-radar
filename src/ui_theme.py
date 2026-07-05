@@ -698,8 +698,7 @@ def inject_global_cockpit_theme() -> None:
         [data-testid="stNumberInput"] input,
         [data-testid="stTextInput"] input,
         [data-testid="stDateInput"] input,
-        div[data-baseweb="input"] input,
-        input {
+        div[data-baseweb="input"] input {
             color: #eaf3ff !important;
             -webkit-text-fill-color: #eaf3ff !important;
             caret-color: var(--bp-cyan) !important;
@@ -722,8 +721,7 @@ def inject_global_cockpit_theme() -> None:
 
         [data-testid="stNumberInput"] input::selection,
         [data-testid="stTextInput"] input::selection,
-        [data-testid="stDateInput"] input::selection,
-        input::selection {
+        [data-testid="stDateInput"] input::selection {
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
             background: rgba(0,163,255,0.42) !important;

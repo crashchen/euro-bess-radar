@@ -52,18 +52,28 @@ def test_health_metric_escapes_user_visible_strings() -> None:
     assert "&lt;0.01%" in html
 
 
-def test_global_theme_guards_expander_header_contrast() -> None:
-    css_source = ui_theme.inject_global_cockpit_theme.__code__.co_consts
-    css = "\n".join(str(part) for part in css_source if isinstance(part, str))
+def _injected_theme_css(monkeypatch) -> str:
+    import streamlit as st
+
+    injected_css: list[str] = []
+    monkeypatch.setattr(
+        st, "markdown",
+        lambda body, **_kwargs: injected_css.append(str(body)),
+    )
+    ui_theme.inject_global_cockpit_theme()
+    return "\n".join(injected_css)
+
+
+def test_global_theme_guards_expander_header_contrast(monkeypatch) -> None:
+    css = _injected_theme_css(monkeypatch)
 
     assert '[data-testid="stExpander"] summary' in css
     assert '[data-testid="stExpander"] details[open] > summary' in css
     assert "-webkit-text-fill-color: #eaf3ff" in css
 
 
-def test_global_theme_guards_number_input_contrast() -> None:
-    css_source = ui_theme.inject_global_cockpit_theme.__code__.co_consts
-    css = "\n".join(str(part) for part in css_source if isinstance(part, str))
+def test_global_theme_guards_number_input_contrast(monkeypatch) -> None:
+    css = _injected_theme_css(monkeypatch)
 
     assert '[data-testid="stNumberInput"] div[data-baseweb="input"] > div' in css
     assert '[data-testid="stNumberInput"] div[data-baseweb="input"]:focus-within > div' in css
