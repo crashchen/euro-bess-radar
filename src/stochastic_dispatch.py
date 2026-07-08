@@ -1065,8 +1065,8 @@ def _solve_stage0_and_unpack(
         return out
 
     canonical_x = _canonicalize_stage0(
-        c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, s, block, r0,
-        result.x, float(result.fun),
+        c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, r0, n,
+        float(result.fun),
     )
     stable = canonical_x is not None
     x = canonical_x if stable else result.x
@@ -1104,7 +1104,7 @@ def _append_scenario_headroom(
 
 
 def _canonicalize_stage0(
-    c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, s, block, r0, x1, z_star,
+    c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, r0, n, z_star,
 ):
     """Canonical Stage-0 selector (§2.2) — three-pass lexicographic re-solve.
 
@@ -1145,23 +1145,18 @@ def _canonicalize_stage0(
     b_2a = np.append(b_ub, z_star + tol_z)
     c_2a = np.zeros(n_vars)
     c_2a[r0:r0 + n] = 1.0
-    # Performance (the v1 #41 lesson, applied to ALL mode binaries here): the
-    # tie-break target r is CONTINUOUS, so both passes fix every Stage-1' and
-    # per-scenario mode binary to its pass-1 value, turning the passes into
-    # LPs (a free-binary pass 2a times out on the worst-case 15-min S=10 day).
-    # The restriction is safe — the pass-1 solution stays feasible in the
-    # restricted slice, any accepted solution is a genuine MILP solution, and
-    # the degradation backstops below reject a slice that cannot hold z*/R* —
-    # at the cost that the minimised reserve levels are canonical WITHIN the
-    # pass-1 mode pattern (deterministic, since pass 1 is deterministic).
-    bnds = list(bounds)
-    for j in range(1 + s):
-        mode0 = block * j + 2 * n
-        for t in range(n):
-            v = round(float(x1[mode0 + t]))
-            bnds[mode0 + t] = (v, v)
+    # Deliberately NO v1-#41-style mode-binary fixing here: restricting the
+    # passes to the pass-1 mode pattern makes the selected r canonical only
+    # WITHIN that pattern, not over the full §2.2 optimal set (Codex math
+    # audit, PR #46 — a free pass can find the same z*/R* with an earlier
+    # canonical placement in a different equal-objective mode pattern), which
+    # silently weakens what stage0_tiebreak_stable=True promises for the v2
+    # HEADLINE. The passes therefore keep all binaries free (contract-exact);
+    # the cost is that a worst-case 15-min S=10 day can hit the shared
+    # deadline and fall back honestly (§8: a timeout degrades only
+    # tie-stability, never correctness or completion).
     x_2a = _solve_canonical_stage0_pass(
-        c_2a, a_2a, b_2a, a_eq, b_eq, bnds, integrality, deadline, "2a",
+        c_2a, a_2a, b_2a, a_eq, b_eq, bounds, integrality, deadline, "2a",
     )
     if x_2a is None:
         return None
@@ -1178,7 +1173,7 @@ def _canonicalize_stage0(
     c_2b = np.zeros(n_vars)
     c_2b[r0:r0 + n] = np.arange(1, n + 1, dtype=float)
     x_2b = _solve_canonical_stage0_pass(
-        c_2b, a_2b, b_2b, a_eq, b_eq, bnds, integrality, deadline, "2b",
+        c_2b, a_2b, b_2b, a_eq, b_eq, bounds, integrality, deadline, "2b",
     )
     if x_2b is None:
         return None

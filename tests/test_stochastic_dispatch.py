@@ -8,6 +8,7 @@ and the reserve feasibility domain.
 
 from __future__ import annotations
 
+import math
 from types import SimpleNamespace
 
 import numpy as np
@@ -727,6 +728,64 @@ class TestStochasticReserveCommitment:
         expected_at_myopic_r = fee_myopic + b1_at_myopic_r["expected_total_eur"]
         assert stoch["expected_objective_eur"] > expected_at_myopic_r + 10.0
 
+    def test_stage1_prime_financial_known_answer(self) -> None:
+        # Codex math-audit catch (PR #46): every other Stage-0 fixture has
+        # da_forecast == mean_ida, so a sign flip in the reduced Stage-1' term
+        # could slip through — and a symmetric fixture cannot catch it even at
+        # the objective level (the reversed position earns the mirrored value).
+        # ABSOLUTE hand-computed ground truth with the symmetry broken by
+        # soc_init: at soc_init_frac=0.9 the correct charge-cheap-then-
+        # discharge-dear plan is capped by the tiny SoC headroom
+        # (ch0 = 0.1/sqrt(eff)), while the flipped plan could discharge 0.9
+        # first — so the values differ by ~9x and the pin is one-sided.
+        #   stage1' = 40·ch0·(1+eff);  fee = price·0.95·2·dt;  scenarios flat
+        #   (Stage-2 idle under VOM), cap=inf (no coupling), r* = [1, 1].
+        eff = 0.88
+        ch0 = 0.1 / math.sqrt(eff)
+        expected = 40.0 * ch0 * (1.0 + eff) + 10.0 * 0.95 * 2.0
+        r = solve_stochastic_reserve_commitment(
+            np.array([10.0, 90.0]), np.array([[50.0, 50.0]]), np.array([1.0]),
+            1.0, reserve_price_forecast_eur_mw_h=10.0, power_mw=1.0,
+            duration_hours=1.0, efficiency=eff, soc_init_frac=0.9,
+            rebid_cap_mw=np.inf,
+        )
+        assert r["success"]
+        np.testing.assert_allclose(r["reserve_mw"], np.ones(2), atol=1e-6)
+        np.testing.assert_allclose(
+            r["expected_objective_eur"], expected, atol=1e-4,
+        )
+
+    def test_objective_at_r_star_matches_fee_plus_b1_finite_cap(self) -> None:
+        # Codex math-audit catch (PR #46): the infinite-cap cross-builder
+        # identity never exercises the Stage-0 rebid-coupling rows. Same
+        # identity at a FINITE cap with a nonzero DA-vs-base premium, so the
+        # coupling block and the Stage-1' term are both live in the Stage-0
+        # matrix being cross-checked against B1's independent assembly.
+        n = 8
+        da_fc = 50.0 + np.linspace(-10.0, 10.0, n)
+        base = da_fc + 5.0
+        pattern = np.where(np.arange(n) < n // 2, -1.0, 1.0) * 40.0
+        scenarios = np.stack([base + pattern, base - pattern])
+        weights = np.full(2, 0.5)
+        rprice = 15.0
+        cap = 0.6
+        stoch = solve_stochastic_reserve_commitment(
+            da_fc, scenarios, weights, 1.0,
+            reserve_price_forecast_eur_mw_h=rprice,
+            power_mw=1.0, duration_hours=2.0, rebid_cap_mw=cap,
+        )
+        assert stoch["success"]
+        assert stoch["reserve_mw"].max() <= cap + 1e-9
+        fee = float((rprice * 0.95 * stoch["reserve_mw"]).sum())
+        b1 = solve_stochastic_da_commitment(
+            da_fc, scenarios, weights, 1.0, power_mw=1.0, duration_hours=2.0,
+            rebid_cap_mw=cap, reserve_mw=stoch["reserve_mw"],
+        )
+        np.testing.assert_allclose(
+            stoch["expected_objective_eur"], fee + b1["expected_total_eur"],
+            atol=1e-4,
+        )
+
     def test_objective_at_r_star_matches_fee_plus_b1(self) -> None:
         # Cross-builder consistency: the Stage-0 extensive form at a FIXED r is
         # exactly the exogenous-reserve B1 problem plus the fee constant (the
@@ -880,11 +939,12 @@ class TestStochasticReserveCommitment:
         )["success"]
 
     def test_worst_case_15min_day_solves_within_budget(self) -> None:
-        # §8 Q2: pass-1 ~2s + the canonical passes under the shared 8s
-        # deadline. The mode-fixed passes bring the worst case to ~4s locally;
-        # the loose bound guards a scaling regression without flaking on a
-        # slow CI box (a deadline-driven fallback there degrades only
-        # tie-stability, never completion — so `stable` is not asserted).
+        # §8 Q2: pass-1 (~4s locally) + the contract-exact free-binary
+        # canonical passes under the shared 8s deadline, which THIS size can
+        # legitimately exhaust (worst case ~12s total, honest fallback). The
+        # loose bound guards a scaling regression without flaking on a slow CI
+        # box; a deadline-driven fallback degrades only tie-stability, never
+        # completion — so `stable` is deliberately not asserted.
         n = 96
         rng = np.random.default_rng(12)
         da = 50 + 25 * np.sin(np.arange(n) / n * 2 * np.pi) + rng.normal(0, 4, n)

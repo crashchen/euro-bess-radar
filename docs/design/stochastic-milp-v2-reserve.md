@@ -478,3 +478,22 @@ path and must not enshrine that waste).
 
 Each increment is its own PR with dual review; solver increments get the
 pre-merge math audit, per the v1 lane.
+
+## 10. Implementation notes (post-lock, contract unchanged)
+
+- **V2-A selector runs contract-exact free-binary passes.** A v1-#41-style
+  optimisation (fixing mode binaries to their pass-1 values so passes 2a/2b
+  become LPs) was tried and REVERTED after the Codex math audit on the V2-A
+  PR: the restriction makes ``r`` canonical only within the pass-1 mode
+  pattern, not over the full §2.2 optimal set (probe: a free pass found the
+  same ``z*``/``R*`` with an earlier canonical placement in a different
+  equal-objective mode pattern), silently weakening what
+  ``stage0_tiebreak_stable=True`` promises for the headline. Consequence per
+  §8: the worst-case 15-min S=10 day can exhaust the shared 8s deadline and
+  fall back honestly (~12s total, only tie-stability lost).
+- **Tolerance-crossing edge (both v1 #41 and the §2.2 constants).** The
+  objective-bound cushion ``1e-9·(1+|z*|)`` exceeds the fixed ``1e-6``
+  degradation backstop once ``|z*| ≳ 1e3``, so a pass-2 solution sitting at
+  the allowed bound can trip a BENIGN fallback (pass-1 kept, flag False).
+  Empirically observed at a 1000 EUR/MW/h fixture; core regression fixtures
+  keep ``|z*|`` in the hundreds, satisfying §2.2's zero-fallback requirement.
