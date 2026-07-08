@@ -15,6 +15,12 @@ single point forecast.
   print, with the full ``da_only``/``realised``/``coopt_ceiling`` decomposition.
   The ONLY behavioural change vs the 9.2b sequential row is the scenario-aware
   Stage 1.
+- **V2-A — Stage-0 reserve commitment** (`solve_stochastic_reserve_commitment`):
+  the v2 contract's scenario-aware reserve gate
+  (``docs/design/stochastic-milp-v2-reserve.md``) — reserve is sized against
+  the reserve-price forecast AND the expected IDA-scenario value of the
+  physical headroom it consumes, with the §2.2 canonical Stage-0 selector and
+  the §2 zero-price skip. Only ``r*`` is extracted.
 
 Two stages, one MILP (§2 of the contract):
 
@@ -376,8 +382,12 @@ def _append_rebid_coupling(
     return row
 
 
-def _terminal_equalities(n, s, block, dt, sqrt_eff):
-    """Terminal-neutral equality (final SoC == initial) for every battery block."""
+def _terminal_equalities(n, s, block, dt, sqrt_eff, n_vars: int | None = None):
+    """Terminal-neutral equality (final SoC == initial) for every battery block.
+
+    ``n_vars`` widens the matrix for problems with trailing extra variables
+    (the Stage-0 reserve vector); the equality rows never touch those columns.
+    """
     trip: list[tuple[int, int, float]] = []
     for j in range(1 + s):
         base = block * j
@@ -387,7 +397,8 @@ def _terminal_equalities(n, s, block, dt, sqrt_eff):
     eq_r = [tr[0] for tr in trip]
     eq_c = [tr[1] for tr in trip]
     eq_v = [tr[2] for tr in trip]
-    a_eq = csr_matrix((eq_v, (eq_r, eq_c)), shape=(1 + s, block * (1 + s)))
+    width = block * (1 + s) if n_vars is None else n_vars
+    a_eq = csr_matrix((eq_v, (eq_r, eq_c)), shape=(1 + s, width))
     return a_eq, np.zeros(1 + s)
 
 
@@ -840,3 +851,371 @@ def solve_myopic_capped_da_id_dispatch(
         duration_hours, efficiency, soc_init_frac, min_rebid_uplift_eur,
         reserve_price_eur_mw_h, availability,
     )
+
+
+# ── Increment V2-A: Stage-0 stochastic reserve commitment ─────────────────────
+#
+# The v2 contract (docs/design/stochastic-milp-v2-reserve.md) upgrades the 9.2b
+# Stage-0 reserve myopia: reserve is sized against the reserve-price forecast
+# AND the expected IDA-scenario value of the physical headroom it consumes
+# (§1.1: there is NO decoupling analog for the reserve decision — committed
+# reserve consumes physical Stage-2 headroom at ANY rebid cap). The extensive
+# form reuses the B1 battery blocks; the ONLY new machinery is the per-interval
+# reserve vector r_t with the §2.1 linear headroom rows (mutex big-M stays at
+# FIXED power — never `(power - r_t)`-scaled, which would be bilinear):
+#
+#   stage2_charge_{s,t}    <= power · b_{s,t}
+#   stage2_discharge_{s,t} <= power · (1 - b_{s,t})
+#   stage2_charge_{s,t} + stage2_discharge_{s,t} + r_t <= power     ∀ s, t
+#
+# Only r* is extracted; the internal Stage-1' DA schedule (priced at the DA
+# point forecast, walk-forward) exists solely to price the headroom competition
+# and is discarded, exactly as 9.2b's Stage-0 joint LP discards its DA schedule.
+
+# Backstop tolerance shared by every canonical-pass acceptance check (§2.2, the
+# v1 #41 discipline): a pass result whose bounded quantity degraded past this
+# is rejected and the arm keeps its pass-1 solution.
+_CANONICAL_DEGRADATION_EPS = 1e-6
+
+
+def _empty_reserve_commitment_result(n: int) -> dict:
+    """Degenerate return for empty / invalid Stage-0 inputs."""
+    return {
+        "success": False,
+        "skipped": False,
+        "reserve_mw": np.zeros(max(n, 0)),
+        "expected_objective_eur": float("nan"),
+        "stage0_tiebreak_stable": False,
+        "rebid_cap_mw": float("inf"),
+        "solve_seconds": 0.0,
+    }
+
+
+def _skipped_reserve_commitment_result(n: int, cap: float) -> dict:
+    """Zero-price skip (§2): r* ≡ 0 without solving, deterministically.
+
+    At an everywhere-nonpositive forecast capacity price any ``r > 0`` is only
+    weakly dominated, and a solver tie must not decide whether headroom gets
+    consumed. The skip is not a tie-break fallback, so ``stage0_tiebreak_stable``
+    stays True; the diagnostic objective is NaN because no solve happened.
+    """
+    return {
+        "success": True,
+        "skipped": True,
+        "reserve_mw": np.zeros(n),
+        "expected_objective_eur": float("nan"),
+        "stage0_tiebreak_stable": True,
+        "rebid_cap_mw": cap,
+        "solve_seconds": 0.0,
+    }
+
+
+def solve_stochastic_reserve_commitment(
+    da_forecast: np.ndarray,
+    scenarios: np.ndarray,
+    weights: np.ndarray,
+    dt: float,
+    *,
+    reserve_price_forecast_eur_mw_h: float | np.ndarray | None,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    soc_init_frac: float = 0.5,
+    rebid_cap_mw: float | None = None,
+    availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
+) -> dict:
+    """Solve the Stage-0 scenario-aware reserve commitment for one day (V2-A).
+
+    ONE extensive form (§2 of the v2 contract): per-interval reserve ``r_t``
+    (continuous, ``0 <= r_t <= min(power_mw, rebid_cap_mw)`` — the endogenous
+    form of the v1 feasibility domain, satisfied by construction), an internal
+    Stage-1' DA schedule against the DA POINT FORECAST (walk-forward, the 9.2b
+    convention — the reserve gate must not see realised DA or the target day),
+    and per-scenario Stage-2 schedules coupled by the rebid cap against the
+    Stage-1' forecast DA net. Objective: forecast reserve fee
+    ``Σ_t price_t · availability · r_t · dt`` plus the expected Stage-1'/Stage-2
+    energy value (v1 §2 accounting).
+
+    Args:
+        da_forecast: ``(N,)`` walk-forward DA point-forecast prices (EUR/MWh).
+        scenarios: ``(S, N)`` IDA scenario paths — the SAME walk-forward bundle
+            Stage 1 uses (built once per day, outside Stage 0; §2.3).
+        weights: ``(S,)`` non-negative scenario weights summing to 1.
+        dt: Interval duration in hours.
+        reserve_price_forecast_eur_mw_h: Forecast capacity price (scalar or
+            per-interval vector, EUR/MW per hour). ``None`` or everywhere
+            ``<= 0`` (after the non-negative floor) triggers the zero-price
+            SKIP: ``r* ≡ 0`` returned without solving and without validating
+            the scenario inputs (§2 skip-ordering — a day the v1 path can run
+            is never excluded by a Stage-0-only input).
+        power_mw, duration_hours, efficiency, soc_init_frac: BESS parameters.
+        rebid_cap_mw: Per-interval rebid volume cap. ``None`` defaults to
+            ``power_mw``; must be ``>= 0``.
+        availability: Reserve availability haircut on the fee (0.95 config
+            default, same convention as ``solve_daily_joint_capacity_lp``).
+
+    Returns:
+        Dict with ``reserve_mw`` (r*, the ONLY decision extracted — the
+        internal DA schedule is discarded), ``expected_objective_eur`` (the
+        Stage-0 expected objective, a DIAGNOSTIC per §2.4 — never a pinned
+        identity or a UI revenue number), ``skipped`` (zero-price skip taken),
+        ``stage0_tiebreak_stable`` (False when the §2.2 canonical selector
+        fell back to the pass-1 solution), ``rebid_cap_mw``, ``solve_seconds``
+        and ``success``.
+    """
+    da_forecast = np.asarray(da_forecast, dtype=float).ravel()
+    n = da_forecast.size
+    if n == 0:
+        return _empty_reserve_commitment_result(0)
+    if rebid_cap_mw is not None and rebid_cap_mw < 0:
+        raise ValueError(f"rebid_cap_mw must be >= 0, got {rebid_cap_mw}")
+    cap = power_mw if rebid_cap_mw is None else float(rebid_cap_mw)
+
+    # Zero-price skip BEFORE scenario validation (§2 skip-ordering).
+    if reserve_price_forecast_eur_mw_h is None:
+        return _skipped_reserve_commitment_result(n, cap)
+    try:
+        reserve_fc = _coerce_nonnegative_interval_vector(
+            reserve_price_forecast_eur_mw_h, n=n,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"reserve_price_forecast_eur_mw_h must be scalar or length {n}"
+        ) from exc
+    if reserve_fc.max(initial=0.0) <= 0.0:
+        return _skipped_reserve_commitment_result(n, cap)
+
+    scenarios = np.atleast_2d(np.asarray(scenarios, dtype=float))
+    weights = np.asarray(weights, dtype=float).ravel()
+    s = scenarios.shape[0]
+    if (
+        scenarios.shape[1] != n or weights.size != s
+        or np.isnan(da_forecast).any() or np.isnan(scenarios).any()
+        or (weights < 0).any()
+        or not math.isclose(float(weights.sum()), 1.0, abs_tol=1e-9)
+    ):
+        return _empty_reserve_commitment_result(n)
+
+    return _solve_stage0_and_unpack(
+        da_forecast, scenarios, weights, reserve_fc, dt, n, s, power_mw,
+        duration_hours, efficiency, soc_init_frac, cap, availability,
+    )
+
+
+def _solve_stage0_and_unpack(
+    da_forecast, scenarios, weights, reserve_fc, dt, n, s, power_mw,
+    duration_hours, efficiency, soc_init_frac, cap, availability,
+) -> dict:
+    """Assemble the Stage-0 extensive form, solve, canonicalise, extract r*."""
+    capacity_mwh = power_mw * duration_hours
+    soc_init = soc_init_frac * capacity_mwh
+    sqrt_eff = math.sqrt(efficiency)
+    block = 3 * n
+    r0 = block * (1 + s)                    # reserve vector offset
+    n_vars = r0 + n
+    full_cap = np.full(n, power_mw)         # §2.1: mutex big-M at FIXED power
+    r_ub = min(power_mw, cap)
+    couple = np.isfinite(cap) and cap < 2 * power_mw - 1e-12
+
+    c = np.zeros(n_vars)
+    mean_ida = weights @ scenarios          # == base forecast (mean-centred)
+    c[:n] = (da_forecast - mean_ida) * dt
+    c[n:2 * n] = -(da_forecast - mean_ida) * dt
+    for j in range(s):
+        o = block * (1 + j)
+        c[o:o + n] = weights[j] * (scenarios[j] + DISPATCH_VOM_COST_EUR_MWH) * dt
+        c[o + n:o + 2 * n] = -weights[j] * (scenarios[j] - DISPATCH_VOM_COST_EUR_MWH) * dt
+    c[r0:r0 + n] = -reserve_fc * availability * dt
+
+    trip: list[tuple[int, int, float]] = []
+    rhs: list[float] = []
+    row = _append_battery_block(
+        trip, rhs, 0, 0, n, dt, sqrt_eff, capacity_mwh, soc_init, full_cap,
+    )
+    for j in range(s):
+        base = block * (1 + j)
+        row = _append_battery_block(
+            trip, rhs, row, base, n, dt, sqrt_eff, capacity_mwh, soc_init, full_cap,
+        )
+        row = _append_scenario_headroom(trip, rhs, row, base, r0, n, power_mw)
+        if couple:
+            row = _append_rebid_coupling(trip, rhs, row, base, n, cap)
+
+    ub_r = [tr[0] for tr in trip]
+    ub_c = [tr[1] for tr in trip]
+    ub_v = [tr[2] for tr in trip]
+    a_ub = csr_matrix((ub_v, (ub_r, ub_c)), shape=(len(rhs), n_vars))
+    b_ub = np.array(rhs)
+    a_eq, b_eq = _terminal_equalities(n, s, block, dt, sqrt_eff, n_vars=n_vars)
+    bounds = _variable_bounds(n, s, block, full_cap, full_cap)
+    bounds += [(0.0, r_ub)] * n
+    integrality = np.concatenate([_binary_mask(n, s, block), np.zeros(n)])
+
+    t0 = time.perf_counter()
+    result = linprog(
+        c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+        bounds=bounds, integrality=integrality, method="highs",
+    )
+    if not result.success:
+        solve_seconds = time.perf_counter() - t0
+        logger.warning("Stage-0 reserve commitment MILP failed: %s", result.message)
+        out = _empty_reserve_commitment_result(n)
+        out["rebid_cap_mw"] = cap
+        out["solve_seconds"] = round(solve_seconds, 4)
+        return out
+
+    canonical_x = _canonicalize_stage0(
+        c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, s, block, r0,
+        result.x, float(result.fun),
+    )
+    stable = canonical_x is not None
+    x = canonical_x if stable else result.x
+    solve_seconds = time.perf_counter() - t0
+    return {
+        "success": True,
+        "skipped": False,
+        # r* is the only extracted decision (§2); clip solver noise to bounds.
+        "reserve_mw": np.clip(x[r0:r0 + n], 0.0, r_ub),
+        # Diagnostic only (§2.4): the maximisation value = -(minimisation optimum).
+        "expected_objective_eur": round(-float(c @ x), 6),
+        "stage0_tiebreak_stable": bool(stable),
+        "rebid_cap_mw": cap,
+        "solve_seconds": round(solve_seconds, 4),
+    }
+
+
+def _append_scenario_headroom(
+    trip: list, rhs: list, row0: int, base: int, r0: int, n: int, power_mw: float,
+) -> int:
+    """Append ``s2_charge + s2_dis + r <= power`` rows (§2.1 linear headroom).
+
+    The same additive form the 9.2b joint LP uses for its own reserve variable,
+    extended per scenario — NEVER a `(power - r_t)`-scaled big-M (bilinear).
+    """
+    ch, dis = base, base + n
+    row = row0
+    for t in range(n):
+        trip.append((row, ch + t, 1.0))
+        trip.append((row, dis + t, 1.0))
+        trip.append((row, r0 + t, 1.0))
+        rhs.append(power_mw)
+        row += 1
+    return row
+
+
+def _canonicalize_stage0(
+    c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, s, block, r0, x1, z_star,
+):
+    """Canonical Stage-0 selector (§2.2) — three-pass lexicographic re-solve.
+
+    Stage-0 ``r*`` can be degenerate (e.g. a flat capacity premium over
+    interchangeable intervals), and unlike the v1 Stage-1 ties this hits the
+    HEADLINE: equal-optimal reserve vectors settle to different realised
+    reserve revenue AND different realised headroom value. The selector picks
+    one canonical member of the optimal set:
+
+    - **pass 2a**: fix the objective at the pass-1 optimum ``z_star``
+      (solver-internal minimisation form; tight ``<= z* + 1e-9·(1+|z*|)``
+      bound) and minimise total reserve ``Σ_t r_t`` → ``R*`` (prefer
+      committing less);
+    - **pass 2b**: additionally fix ``Σ_t r_t <= R* + 1e-9·(1+R*)`` and
+      minimise time-weighted reserve ``Σ_t (t+1)·r_t`` (earliest placement
+      breaks the remaining temporal-permutation ties — the #41 lesson that
+      flat weights leave the pattern free). The levels are sequential
+      re-solves: with continuous ``r_t`` no single dominance weight can be
+      proven.
+
+    Both passes run under ONE monotonic wall-clock deadline
+    (``_CANONICAL_TIEBREAK_TIME_LIMIT_S``, §8 Q2) started when 2a begins — 2b
+    receives only the remaining time. The fallback is ALL-OR-NOTHING: an
+    expired deadline, a non-proven-optimal result (status != 0), or a
+    degradation-backstop trip in EITHER pass returns ``None`` and the caller
+    keeps the complete pass-1 solution (a 2a-only result is never accepted —
+    no partially-canonicalised vectors) with ``stage0_tiebreak_stable=False``.
+    The tie-break can never change ``z*``: the objective row keeps every
+    accepted solution inside the pass-1 optimal set.
+    """
+    deadline = time.monotonic() + _CANONICAL_TIEBREAK_TIME_LIMIT_S
+    n_vars = a_ub.shape[1]
+    # Objective fixed at the pass-1 optimum. Same tolerance discipline as the
+    # v1 Stage-1 selector: the cushion only absorbs solver rounding, never a
+    # real objective/reserve trade.
+    tol_z = 1e-9 + 1e-9 * abs(z_star)
+    a_2a = vstack([a_ub, csr_matrix(c.reshape(1, -1))], format="csr")
+    b_2a = np.append(b_ub, z_star + tol_z)
+    c_2a = np.zeros(n_vars)
+    c_2a[r0:r0 + n] = 1.0
+    # Performance (the v1 #41 lesson, applied to ALL mode binaries here): the
+    # tie-break target r is CONTINUOUS, so both passes fix every Stage-1' and
+    # per-scenario mode binary to its pass-1 value, turning the passes into
+    # LPs (a free-binary pass 2a times out on the worst-case 15-min S=10 day).
+    # The restriction is safe — the pass-1 solution stays feasible in the
+    # restricted slice, any accepted solution is a genuine MILP solution, and
+    # the degradation backstops below reject a slice that cannot hold z*/R* —
+    # at the cost that the minimised reserve levels are canonical WITHIN the
+    # pass-1 mode pattern (deterministic, since pass 1 is deterministic).
+    bnds = list(bounds)
+    for j in range(1 + s):
+        mode0 = block * j + 2 * n
+        for t in range(n):
+            v = round(float(x1[mode0 + t]))
+            bnds[mode0 + t] = (v, v)
+    x_2a = _solve_canonical_stage0_pass(
+        c_2a, a_2a, b_2a, a_eq, b_eq, bnds, integrality, deadline, "2a",
+    )
+    if x_2a is None:
+        return None
+    if float(c @ x_2a) > z_star + _CANONICAL_DEGRADATION_EPS:
+        logger.warning(
+            "canonical Stage-0 pass 2a degraded objective by %.2e; keeping primary",
+            float(c @ x_2a) - z_star,
+        )
+        return None
+    r_total = float(c_2a @ x_2a)
+
+    a_2b = vstack([a_2a, csr_matrix(c_2a.reshape(1, -1))], format="csr")
+    b_2b = np.append(b_2a, r_total + 1e-9 * (1.0 + r_total))
+    c_2b = np.zeros(n_vars)
+    c_2b[r0:r0 + n] = np.arange(1, n + 1, dtype=float)
+    x_2b = _solve_canonical_stage0_pass(
+        c_2b, a_2b, b_2b, a_eq, b_eq, bnds, integrality, deadline, "2b",
+    )
+    if x_2b is None:
+        return None
+    if (
+        float(c @ x_2b) > z_star + _CANONICAL_DEGRADATION_EPS
+        or float(c_2a @ x_2b) > r_total + _CANONICAL_DEGRADATION_EPS
+    ):
+        logger.warning(
+            "canonical Stage-0 pass 2b degraded a fixed level; keeping primary",
+        )
+        return None
+    return x_2b
+
+
+def _solve_canonical_stage0_pass(
+    c2, a_ub, b_ub, a_eq, b_eq, bounds, integrality, deadline, label,
+):
+    """One canonical Stage-0 pass under the shared monotonic deadline.
+
+    Returns the solution vector only when the solver PROVES optimality
+    (status 0) within the remaining time; anything else is a fallback signal.
+    """
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        logger.warning(
+            "canonical Stage-0 pass %s skipped: shared deadline expired", label,
+        )
+        return None
+    result = linprog(
+        c2, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+        bounds=bounds, integrality=integrality, method="highs",
+        options={"time_limit": remaining},
+    )
+    if result.status != 0 or not result.success:
+        logger.warning(
+            "canonical Stage-0 pass %s did not prove optimal (status=%s: %s); "
+            "keeping primary solution", label, result.status, result.message,
+        )
+        return None
+    return result.x

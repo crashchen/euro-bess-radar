@@ -14,11 +14,12 @@ import numpy as np
 import pytest
 
 import src.stochastic_dispatch as stochastic_dispatch
-from src.dispatch import solve_daily_lp
+from src.dispatch import solve_daily_joint_capacity_lp, solve_daily_lp
 from src.stochastic_dispatch import (
     solve_myopic_capped_da_id_dispatch,
     solve_stochastic_da_commitment,
     solve_stochastic_da_id_dispatch,
+    solve_stochastic_reserve_commitment,
     stochastic_coopt_ceiling,
 )
 
@@ -528,3 +529,375 @@ class TestStochasticExecution:
         assert not solve_stochastic_da_id_dispatch(
             da, scen, np.full(6, 0.1), base, realised, dt=1.0,
         )["success"]
+
+
+def _force_stage0_pass_failure(
+    monkeypatch: pytest.MonkeyPatch, fail_on_calls: set[int],
+) -> None:
+    """Force specific canonical Stage-0 passes to time out.
+
+    Only the canonical passes carry a ``time_limit`` option (pass 1 does not),
+    so counting those calls addresses pass 2a (1st) and pass 2b (2nd).
+    """
+    original_linprog = stochastic_dispatch.linprog
+    calls = {"n": 0}
+
+    def patched(c, *args, **kwargs):
+        options = kwargs.get("options") or {}
+        if "time_limit" in options:
+            calls["n"] += 1
+            if calls["n"] in fail_on_calls:
+                return SimpleNamespace(
+                    success=False, status=1, message="forced Stage-0 pass timeout",
+                )
+        return original_linprog(c, *args, **kwargs)
+
+    monkeypatch.setattr(stochastic_dispatch, "linprog", patched)
+
+
+class TestStochasticReserveCommitment:
+    """Increment V2-A: Stage-0 reserve commitment + canonical selector.
+
+    Pins §6-4/5/7/10 of the locked v2 contract
+    (docs/design/stochastic-milp-v2-reserve.md). Fixtures keep |z*| well below
+    ~1e3 so the contract's fixed 1e-6 degradation backstop stays strictly wider
+    than the 1e-9·(1+|z*|) objective-bound cushion (above that scale a pass-2
+    solution sitting at the allowed bound can trip the backstop — a benign
+    fallback, but core fixtures must have ZERO Stage-0 fallback per §2.2).
+    """
+
+    @staticmethod
+    def _dispersed_case(n: int = 8, amp: float = 40.0):
+        """Flat DA forecast + two mean-centred, high-dispersion IDA scenarios.
+
+        The myopic joint LP sees zero DA arbitrage (flat prices, VOM kills any
+        churn), so it commits full reserve at any positive fee; the scenario
+        set carries a large intra-day spread that makes physical headroom
+        valuable — the §1.1 anti-decoupling geometry. Also maximally degenerate
+        in WHICH interval carries reserve (flat premium), exercising §6-10.
+        """
+        da_fc = np.full(n, 50.0)
+        pattern = np.where(np.arange(n) < n // 2, -1.0, 1.0) * amp
+        scenarios = np.stack([da_fc + pattern, da_fc - pattern])
+        weights = np.full(2, 0.5)
+        return da_fc, scenarios, weights
+
+    def test_zero_price_skip_on_missing_forecast(self) -> None:
+        da = _da_shape(8)
+        scen = np.tile(da, (2, 1))
+        r = solve_stochastic_reserve_commitment(
+            da, scen, np.full(2, 0.5), 1.0, reserve_price_forecast_eur_mw_h=None,
+        )
+        assert r["success"] and r["skipped"]
+        np.testing.assert_array_equal(r["reserve_mw"], np.zeros(8))
+        assert r["stage0_tiebreak_stable"] is True  # a skip is not a fallback
+        assert np.isnan(r["expected_objective_eur"])
+
+    def test_zero_price_skip_on_nonpositive_forecast(self) -> None:
+        # Negative prices floor to 0 (the shared capacity-price sanitisation),
+        # so an everywhere-nonpositive forecast is the zero-price skip: at zero
+        # fee any r > 0 is only weakly dominated and a solver tie must not
+        # decide whether headroom gets consumed (§2).
+        da = _da_shape(8)
+        scen = np.tile(da, (2, 1))
+        for price in (0.0, -5.0, np.full(8, -2.0)):
+            r = solve_stochastic_reserve_commitment(
+                da, scen, np.full(2, 0.5), 1.0,
+                reserve_price_forecast_eur_mw_h=price,
+            )
+            assert r["skipped"]
+            np.testing.assert_array_equal(r["reserve_mw"], np.zeros(8))
+
+    def test_skip_decided_before_scenario_validation(self) -> None:
+        # §2 skip-ordering: the skip must not require any input the v1 path
+        # does not need, so a no-reserve-forecast day skips even when the
+        # scenario bundle would fail validation.
+        da = _da_shape(8)
+        r = solve_stochastic_reserve_commitment(
+            da, np.full((2, 8), np.nan), np.full(2, 0.5), 1.0,
+            reserve_price_forecast_eur_mw_h=None,
+        )
+        assert r["success"] and r["skipped"]
+
+    def test_pure_fee_day_commits_full_reserve(self) -> None:
+        # Scenarios == flat DA forecast -> zero energy value, so a positive fee
+        # fills reserve to the bound in every interval (unique optimum).
+        da_fc = np.full(8, 50.0)
+        scen = np.tile(da_fc, (2, 1))
+        r = solve_stochastic_reserve_commitment(
+            da_fc, scen, np.full(2, 0.5), 1.0,
+            reserve_price_forecast_eur_mw_h=10.0,
+            power_mw=1.0, duration_hours=2.0,
+        )
+        assert r["success"] and not r["skipped"]
+        np.testing.assert_allclose(r["reserve_mw"], np.ones(8), atol=1e-6)
+        assert r["stage0_tiebreak_stable"] is True
+
+    def test_collapse_objective_matches_joint_lp(self) -> None:
+        # §6-5 (objective half): with every scenario == the DA forecast there
+        # is no rebid opportunity, so the Stage-0 optimum equals the myopic
+        # joint LP's total. KNOWN-ANSWER anchor against the INDEPENDENT
+        # dispatch.py implementation (the B1 lesson: identity tests must not
+        # be self-referential). Holds at any cap >= power (the r-bound
+        # tightening is vacuous there); pinned at inf and at the default.
+        da = _da_shape(8, seed=11)
+        rprice = np.array([30.0, 30.0, 5.0, 5.0, 30.0, 30.0, 5.0, 5.0])
+        joint = solve_daily_joint_capacity_lp(
+            da, 1.0, rprice, power_mw=1.0, duration_hours=2.0,
+        )
+        for cap in (np.inf, None):
+            r = solve_stochastic_reserve_commitment(
+                da, np.tile(da, (3, 1)), np.full(3, 1 / 3), 1.0,
+                reserve_price_forecast_eur_mw_h=rprice,
+                power_mw=1.0, duration_hours=2.0, rebid_cap_mw=cap,
+            )
+            assert r["success"] and r["stage0_tiebreak_stable"]
+            np.testing.assert_allclose(
+                r["expected_objective_eur"], joint["total_revenue_eur"], atol=1e-5,
+            )
+
+    def test_collapse_elementwise_r_matches_s1(self) -> None:
+        # §6-5 (element-wise half) + §6-10(b): on the collapse fixture the
+        # S=N-identical and S=1 problems have IDENTICAL objectives, so the
+        # canonical selector must pick the same r* element-wise. (The
+        # cross-check against a selector-governed cap-constrained myopic
+        # joint LP arm lands with V2-C, which owns that arm.)
+        da = _da_shape(8, seed=11)
+        rprice = np.array([30.0, 30.0, 5.0, 5.0, 30.0, 30.0, 5.0, 5.0])
+        kw = dict(
+            reserve_price_forecast_eur_mw_h=rprice, power_mw=1.0,
+            duration_hours=2.0, rebid_cap_mw=np.inf,
+        )
+        r1 = solve_stochastic_reserve_commitment(
+            da, da[None, :], np.array([1.0]), 1.0, **kw,
+        )
+        r3 = solve_stochastic_reserve_commitment(
+            da, np.tile(da, (3, 1)), np.full(3, 1 / 3), 1.0, **kw,
+        )
+        assert r1["stage0_tiebreak_stable"] and r3["stage0_tiebreak_stable"]
+        np.testing.assert_allclose(r1["reserve_mw"], r3["reserve_mw"], atol=1e-8)
+
+    def test_identical_scenarios_match_s1_on_degenerate_fixture(self) -> None:
+        # §6-10(a): an S=N run whose scenarios are all IDENTICAL to the base
+        # forecast selects the same r* element-wise as the S=1 run — identical
+        # objectives, one optimal set, one canonical member. NOT a claim about
+        # genuinely different scenario sets (reserve never decouples, §1.1).
+        da_fc, scenarios, _ = self._dispersed_case()
+        base = scenarios.mean(axis=0)  # == da_fc (mean-centred)
+        kw = dict(
+            reserve_price_forecast_eur_mw_h=15.0, power_mw=1.0,
+            duration_hours=2.0, rebid_cap_mw=np.inf,
+        )
+        r1 = solve_stochastic_reserve_commitment(
+            da_fc, base[None, :], np.array([1.0]), 1.0, **kw,
+        )
+        r5 = solve_stochastic_reserve_commitment(
+            da_fc, np.tile(base, (5, 1)), np.full(5, 0.2), 1.0, **kw,
+        )
+        assert r1["stage0_tiebreak_stable"] and r5["stage0_tiebreak_stable"]
+        np.testing.assert_allclose(r1["reserve_mw"], r5["reserve_mw"], atol=1e-8)
+
+    def test_anti_decoupling_expectation(self) -> None:
+        # §6-4 (in-model expectation test, §1.1): at rebid_cap = inf the
+        # scenario-aware Stage 0 commits a DIFFERENT r* than the myopic joint
+        # LP and achieves a strictly higher Stage-0 EXPECTED objective — the
+        # mathematical reason v2 exists (reserve consumes PHYSICAL headroom,
+        # so there is no decoupling analog). The expected objective at the
+        # myopic r is evaluated through the exogenous-reserve B1 solver plus
+        # the fee constant (a cross-builder evaluation, not a re-run of the
+        # Stage-0 form).
+        da_fc, scenarios, weights = self._dispersed_case()
+        rprice = 15.0
+        stoch = solve_stochastic_reserve_commitment(
+            da_fc, scenarios, weights, 1.0,
+            reserve_price_forecast_eur_mw_h=rprice,
+            power_mw=1.0, duration_hours=2.0, rebid_cap_mw=np.inf,
+        )
+        myopic = solve_daily_joint_capacity_lp(
+            da_fc, 1.0, rprice, power_mw=1.0, duration_hours=2.0,
+        )
+        # Flat DA + VOM -> the myopic arm sees zero arbitrage and fills reserve.
+        np.testing.assert_allclose(myopic["reserve_mw"], np.ones(8), atol=1e-6)
+        assert np.abs(stoch["reserve_mw"] - myopic["reserve_mw"]).max() > 0.1
+        fee_myopic = float((rprice * 0.95 * myopic["reserve_mw"]).sum())
+        b1_at_myopic_r = solve_stochastic_da_commitment(
+            da_fc, scenarios, weights, 1.0, power_mw=1.0, duration_hours=2.0,
+            rebid_cap_mw=np.inf, reserve_mw=myopic["reserve_mw"],
+        )
+        expected_at_myopic_r = fee_myopic + b1_at_myopic_r["expected_total_eur"]
+        assert stoch["expected_objective_eur"] > expected_at_myopic_r + 10.0
+
+    def test_objective_at_r_star_matches_fee_plus_b1(self) -> None:
+        # Cross-builder consistency: the Stage-0 extensive form at a FIXED r is
+        # exactly the exogenous-reserve B1 problem plus the fee constant (the
+        # additive headroom row collapses to B1's power-cap bounds when r is
+        # constant), so the reported diagnostic objective must equal
+        # fee(r*) + B1(reserve_mw=r*). Guards the sparse assembly end-to-end.
+        da_fc, scenarios, weights = self._dispersed_case()
+        rprice = 15.0
+        stoch = solve_stochastic_reserve_commitment(
+            da_fc, scenarios, weights, 1.0,
+            reserve_price_forecast_eur_mw_h=rprice,
+            power_mw=1.0, duration_hours=2.0, rebid_cap_mw=np.inf,
+        )
+        fee = float((rprice * 0.95 * stoch["reserve_mw"]).sum())
+        b1 = solve_stochastic_da_commitment(
+            da_fc, scenarios, weights, 1.0, power_mw=1.0, duration_hours=2.0,
+            rebid_cap_mw=np.inf, reserve_mw=stoch["reserve_mw"],
+        )
+        np.testing.assert_allclose(
+            stoch["expected_objective_eur"], fee + b1["expected_total_eur"],
+            atol=1e-4,
+        )
+
+    def test_domain_r_never_exceeds_min_power_cap(self) -> None:
+        # §6-7: r* <= min(power, rebid_cap) BY CONSTRUCTION (endogenous
+        # bounds), even under a fee that dominates every energy trade.
+        da_fc, scenarios, weights = self._dispersed_case()
+        for cap, expected_ub in ((0.4, 0.4), (1.0, 1.0), (np.inf, 1.0)):
+            r = solve_stochastic_reserve_commitment(
+                da_fc, scenarios, weights, 1.0,
+                reserve_price_forecast_eur_mw_h=50.0,
+                power_mw=1.0, duration_hours=2.0, rebid_cap_mw=cap,
+            )
+            assert r["success"]
+            assert r["reserve_mw"].max() <= expected_ub + 1e-9
+            assert r["reserve_mw"].min() >= 0.0
+
+    def test_negative_rebid_cap_raises(self) -> None:
+        da_fc, scenarios, weights = self._dispersed_case()
+        with pytest.raises(ValueError, match="rebid_cap_mw must be >= 0"):
+            solve_stochastic_reserve_commitment(
+                da_fc, scenarios, weights, 1.0,
+                reserve_price_forecast_eur_mw_h=10.0, rebid_cap_mw=-0.5,
+            )
+
+    def test_reserve_price_shape_mismatch_raises(self) -> None:
+        da_fc, scenarios, weights = self._dispersed_case(n=8)
+        with pytest.raises(ValueError, match="scalar or length 8"):
+            solve_stochastic_reserve_commitment(
+                da_fc, scenarios, weights, 1.0,
+                reserve_price_forecast_eur_mw_h=np.full(5, 10.0),
+            )
+
+    def test_repeated_solve_is_deterministic(self) -> None:
+        # §6-10(e): fixed-scenario repeated-solve determinism on a degenerate
+        # fixture (flat capacity premium over interchangeable intervals) —
+        # the SAME Stage-0 problem solved twice yields the identical r*
+        # element-wise. NOT seed-independence: different scenario sets are
+        # different objectives the selector cannot and must not reconcile.
+        da_fc, scenarios, weights = self._dispersed_case()
+        kw = dict(
+            reserve_price_forecast_eur_mw_h=15.0, power_mw=1.0,
+            duration_hours=2.0, rebid_cap_mw=np.inf,
+        )
+        first = solve_stochastic_reserve_commitment(
+            da_fc, scenarios, weights, 1.0, **kw,
+        )
+        second = solve_stochastic_reserve_commitment(
+            da_fc, scenarios, weights, 1.0, **kw,
+        )
+        assert first["stage0_tiebreak_stable"] and second["stage0_tiebreak_stable"]
+        np.testing.assert_array_equal(first["reserve_mw"], second["reserve_mw"])
+
+    def test_forced_fallback_flags_unstable_without_changing_objective(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # §6-10(c)+(d): the tie-break never changes z*, and a canonical-pass
+        # failure falls back to the complete pass-1 solution with
+        # stage0_tiebreak_stable = False.
+        da_fc, scenarios, weights = self._dispersed_case()
+        kw = dict(
+            reserve_price_forecast_eur_mw_h=15.0, power_mw=1.0,
+            duration_hours=2.0, rebid_cap_mw=np.inf,
+        )
+        normal = solve_stochastic_reserve_commitment(
+            da_fc, scenarios, weights, 1.0, **kw,
+        )
+        assert normal["stage0_tiebreak_stable"] is True
+
+        _force_stage0_pass_failure(monkeypatch, {1})  # pass 2a times out
+        fallback = solve_stochastic_reserve_commitment(
+            da_fc, scenarios, weights, 1.0, **kw,
+        )
+        assert fallback["success"]
+        assert fallback["stage0_tiebreak_stable"] is False
+        np.testing.assert_allclose(
+            fallback["expected_objective_eur"], normal["expected_objective_eur"],
+            atol=1e-6,
+        )
+
+    def test_fallback_is_all_or_nothing(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # §2.2: a 2a-only result is NOT accepted. Failing only pass 2b must
+        # return the SAME (pass-1) reserve vector as failing pass 2a outright
+        # — no partially-canonicalised vectors.
+        da_fc, scenarios, weights = self._dispersed_case()
+        kw = dict(
+            reserve_price_forecast_eur_mw_h=15.0, power_mw=1.0,
+            duration_hours=2.0, rebid_cap_mw=np.inf,
+        )
+        _force_stage0_pass_failure(monkeypatch, {1})
+        fail_2a = solve_stochastic_reserve_commitment(
+            da_fc, scenarios, weights, 1.0, **kw,
+        )
+        monkeypatch.undo()
+        _force_stage0_pass_failure(monkeypatch, {2})
+        fail_2b = solve_stochastic_reserve_commitment(
+            da_fc, scenarios, weights, 1.0, **kw,
+        )
+        assert fail_2a["stage0_tiebreak_stable"] is False
+        assert fail_2b["stage0_tiebreak_stable"] is False
+        np.testing.assert_array_equal(fail_2b["reserve_mw"], fail_2a["reserve_mw"])
+
+    def test_degenerate_inputs_return_gracefully(self) -> None:
+        da_fc, scenarios, weights = self._dispersed_case()
+        price = 10.0
+        # empty
+        assert not solve_stochastic_reserve_commitment(
+            np.array([]), np.empty((1, 0)), np.array([1.0]), 1.0,
+            reserve_price_forecast_eur_mw_h=price,
+        )["success"]
+        # NaN in the DA forecast
+        bad_da = da_fc.copy()
+        bad_da[3] = np.nan
+        assert not solve_stochastic_reserve_commitment(
+            bad_da, scenarios, weights, 1.0,
+            reserve_price_forecast_eur_mw_h=price,
+        )["success"]
+        # NaN in a scenario
+        bad_scen = scenarios.copy()
+        bad_scen[0, 0] = np.nan
+        assert not solve_stochastic_reserve_commitment(
+            da_fc, bad_scen, weights, 1.0,
+            reserve_price_forecast_eur_mw_h=price,
+        )["success"]
+        # weights not summing to 1
+        assert not solve_stochastic_reserve_commitment(
+            da_fc, scenarios, np.array([0.3, 0.3]), 1.0,
+            reserve_price_forecast_eur_mw_h=price,
+        )["success"]
+
+    def test_worst_case_15min_day_solves_within_budget(self) -> None:
+        # §8 Q2: pass-1 ~2s + the canonical passes under the shared 8s
+        # deadline. The mode-fixed passes bring the worst case to ~4s locally;
+        # the loose bound guards a scaling regression without flaking on a
+        # slow CI box (a deadline-driven fallback there degrades only
+        # tie-stability, never completion — so `stable` is not asserted).
+        n = 96
+        rng = np.random.default_rng(12)
+        da = 50 + 25 * np.sin(np.arange(n) / n * 2 * np.pi) + rng.normal(0, 4, n)
+        base = da + 3
+        errs = rng.normal(0, 10, size=(10, n))
+        errs -= errs.mean(axis=0, keepdims=True)
+        scen = base[None, :] + errs
+        rprice = np.where((np.arange(n) // 16) % 2 == 0, 12.0, 4.0)
+        r = solve_stochastic_reserve_commitment(
+            da, scen, np.full(10, 0.1), 0.25,
+            reserve_price_forecast_eur_mw_h=rprice,
+            power_mw=1.0, duration_hours=2.0, rebid_cap_mw=0.5,
+        )
+        assert r["success"]
+        assert isinstance(r["stage0_tiebreak_stable"], bool)
+        assert r["solve_seconds"] < 30.0

@@ -1,9 +1,10 @@
 # Stochastic MILP v2 — endogenous reserve co-optimisation (design contract, scope only)
 
-Status: **r4 — Codex round-4 verdict "LOCK AFTER REVISIONS", the listed
-revisions applied. Formal lock = merge of the design PR (Gemini/user review on
-the PR).** No solver code lands until this contract is locked, mirroring the
-v1 process (`docs/design/stochastic-milp-v1.md`, four review rounds before
+Status: **LOCKED (design PR #45 merged 2026-07-08 after four Codex review
+rounds, verdict "LOCK AFTER REVISIONS" with the listed revisions applied).**
+Increment progress: **V2-A landed** (`solve_stochastic_reserve_commitment` +
+canonical Stage-0 selector + pins §6-4/5/7/10). The lock mirrored the v1
+process (`docs/design/stochastic-milp-v1.md`, four review rounds before
 Increment A).
 
 Revision log:
