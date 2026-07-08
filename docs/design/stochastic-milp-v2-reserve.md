@@ -192,9 +192,13 @@ myopic joint LP):
 
 - **pass 1**: optimal objective `z*`;
 - **pass 2a**: fix the objective at `z*` (v1 #41 tolerance discipline:
-  `≤ z* + 1e-9·(1+|z*|)` bound, `> z* + 1e-6` degradation backstop) and
-  minimise **total reserve** `Σ_t r_t` → optimum `R*` (prefer committing
-  less);
+  `≤ z* + 1e-9·(1+|z*|)` bound, `> z* + 1e-6` degradation backstop — sign
+  convention note: these are written in the SOLVER'S internal minimisation
+  form, where `z*` is the scipy `linprog` optimum of the NEGATED revenue
+  objective, exactly as `_canonicalize_stage1` implements the v1 #41 pass; in
+  the mathematical maximisation formulation of §2 the inequalities invert to
+  `≥ z* − tol` / `< z* − 1e-6`) and minimise **total reserve** `Σ_t r_t` →
+  optimum `R*` (prefer committing less);
 - **pass 2b**: fix the objective at `z*` AND total reserve at
   `Σ_t r_t ≤ R* + 1e-9·(1+R*)` (same backstop discipline on both) and
   minimise **time-weighted reserve** `Σ_t (t+1)·r_t` (earliest placement
