@@ -8,11 +8,15 @@ and the reserve feasibility domain.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
+import src.stochastic_dispatch as stochastic_dispatch
 from src.dispatch import solve_daily_lp
 from src.stochastic_dispatch import (
+    solve_myopic_capped_da_id_dispatch,
     solve_stochastic_da_commitment,
     solve_stochastic_da_id_dispatch,
     stochastic_coopt_ceiling,
@@ -32,7 +36,62 @@ def _da_shape(n: int, seed: int = 0) -> np.ndarray:
     return 50 + 25 * np.sin(np.arange(n) / n * 2 * np.pi) + rng.normal(0, 4, n)
 
 
+def _force_canonical_tiebreak_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force only the canonical pass-2 solve to time out."""
+    original_linprog = stochastic_dispatch.linprog
+
+    def linprog_with_forced_pass2_timeout(c, *args, **kwargs):
+        options = kwargs.get("options") or {}
+        if "time_limit" in options:
+            return SimpleNamespace(
+                success=False,
+                status=1,
+                message="forced canonical tie-break timeout",
+            )
+        return original_linprog(c, *args, **kwargs)
+
+    monkeypatch.setattr(stochastic_dispatch, "linprog", linprog_with_forced_pass2_timeout)
+
+
 class TestStochasticCommitment:
+    def test_default_path_reports_canonical_tiebreak_applied(self) -> None:
+        da = _da_shape(8)
+        scen, w = _mean_centred_scenarios(da + 5, 3, 4.0, seed=31)
+        r = solve_stochastic_da_commitment(
+            da, scen, w, dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        assert r["success"]
+        assert r["canonical_tiebreak_applied"] is True
+
+    def test_forced_tiebreak_fallback_preserves_objective(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        da = _da_shape(8)
+        base = da + 5
+        scen, w = _mean_centred_scenarios(base, 3, 4.0, seed=32)
+        realised = base + np.linspace(-2.0, 2.0, da.size)
+        normal = solve_stochastic_da_commitment(
+            da, scen, w, dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        assert normal["canonical_tiebreak_applied"] is True
+
+        _force_canonical_tiebreak_fallback(monkeypatch)
+        fallback = solve_stochastic_da_commitment(
+            da, scen, w, dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        assert fallback["success"]
+        assert fallback["canonical_tiebreak_applied"] is False
+        np.testing.assert_allclose(
+            fallback["expected_total_eur"], normal["expected_total_eur"], atol=1e-6,
+        )
+
+        dispatch = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised, dt=1.0, power_mw=1.0,
+            duration_hours=2.0,
+        )
+        assert dispatch["success"]
+        assert dispatch["canonical_tiebreak_applied"] is False
+
     def test_expected_total_matches_weighted_scenario_totals(self) -> None:
         da = _da_shape(12)
         scen, w = _mean_centred_scenarios(da + 5, 4, 8.0, seed=1)
@@ -444,6 +503,14 @@ class TestStochasticExecution:
         np.testing.assert_allclose(
             r["expected_total_eur"], commit["expected_total_eur"], atol=1e-6,
         )
+
+    def test_myopic_capped_reports_tiebreak_not_applicable(self) -> None:
+        da, _, _, base, realised = self._case(seed=10)
+        r = solve_myopic_capped_da_id_dispatch(
+            da, base, realised, dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        assert r["success"]
+        assert r["canonical_tiebreak_applied"] is None
 
     def test_degenerate_inputs_return_gracefully(self) -> None:
         da, scen, w, base, realised = self._case(seed=7)

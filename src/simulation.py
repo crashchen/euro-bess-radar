@@ -1499,7 +1499,7 @@ _STOCH_COLUMNS = [
     "date", "da_only_eur", "myopic_realised_eur", "coopt_realised_eur",
     "stochastic_realised_eur", "coopt_ceiling_eur", "policy_value_eur",
     "commitment_value_eur", "distribution_value_eur", "rebid", "n_scenarios",
-    "coverage",
+    "coverage", "tiebreak_stable",
 ]
 
 
@@ -1611,16 +1611,19 @@ def _stochastic_day(
         # is an arithmetic decomposition of it (commitment + distribution ==
         # policy_value). As of the v2 canonical Stage-1 selector
         # (stochastic_dispatch._canonicalize_stage1) the co-opt and stochastic
-        # commitments break Stage-1 degeneracy identically (earliest-activity
-        # min-throughput tie-break), so the split is now tie-STABLE — it vanishes
-        # at rebid_cap = inf (the decoupling regime) and otherwise reflects the
-        # real value of the coupling, not multi-optimum noise (scope §1/§8-1).
+        # commitments break Stage-1 degeneracy identically when both canonical
+        # tie-breaks are accepted. Fallback days retain the robust headline but
+        # make this diagnostic split tie-sensitive again.
         "policy_value_eur": stoch["realised_total_eur"] - myopic["realised_total_eur"],
         "commitment_value_eur": coopt["realised_total_eur"] - myopic["realised_total_eur"],
         "distribution_value_eur": stoch["realised_total_eur"] - coopt["realised_total_eur"],
         "rebid": bool(stoch["rebid"]),
         "n_scenarios": int(scen.shape[0]),
         "coverage": float(bundle["base_coverage"]),
+        "tiebreak_stable": (
+            coopt.get("canonical_tiebreak_applied") is True
+            and stoch.get("canonical_tiebreak_applied") is True
+        ),
     }
     return row, np.asarray(stoch["scenario_total_eur"], dtype=float)
 
@@ -1742,6 +1745,9 @@ def _stochastic_summary(
         "total_policy_value_eur": _tot("policy_value_eur"),
         "total_commitment_value_eur": _tot("commitment_value_eur"),
         "total_distribution_value_eur": _tot("distribution_value_eur"),
+        "n_tiebreak_fallback_days": (
+            0 if per_day.empty else int((~per_day["tiebreak_stable"]).sum())
+        ),
         "risk_block": _risk_block(pooled),
         "rebid_cap_mw": rebid_cap_mw,
         "n_scenarios": n_scenarios,

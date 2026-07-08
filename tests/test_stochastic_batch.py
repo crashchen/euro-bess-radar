@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import pytest
 
+import src.stochastic_dispatch as stochastic_dispatch
 from src.simulation import (
     simulate_sequential_da_id_batch,
     simulate_stochastic_da_id_batch,
@@ -27,6 +30,23 @@ def _history(days: int = 10, seed: int = 0, ida_sigma: float = 8.0):
 _KW = dict(power_mw=1.0, duration_hours=2.0)
 
 
+def _force_canonical_tiebreak_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force only the canonical pass-2 solve to time out."""
+    original_linprog = stochastic_dispatch.linprog
+
+    def linprog_with_forced_pass2_timeout(c, *args, **kwargs):
+        options = kwargs.get("options") or {}
+        if "time_limit" in options:
+            return SimpleNamespace(
+                success=False,
+                status=1,
+                message="forced canonical tie-break timeout",
+            )
+        return original_linprog(c, *args, **kwargs)
+
+    monkeypatch.setattr(stochastic_dispatch, "linprog", linprog_with_forced_pass2_timeout)
+
+
 class TestStochasticBatch:
     def test_batch_aggregates_and_deltas(self) -> None:
         da_df, ida_df = _history()
@@ -35,6 +55,8 @@ class TestStochasticBatch:
         )
         assert summ["valid_days"] == 10
         assert summ["excluded_days"] == 0
+        assert summ["n_tiebreak_fallback_days"] == 0
+        assert per_day["tiebreak_stable"].all()
         # Headline: robust policy value = stochastic - myopic realised.
         np.testing.assert_allclose(
             summ["total_policy_value_eur"],
@@ -71,6 +93,36 @@ class TestStochasticBatch:
         np.testing.assert_allclose(
             per_day["distribution_value_eur"],
             per_day["stochastic_realised_eur"] - per_day["coopt_realised_eur"],
+            atol=1e-6,
+        )
+
+    def test_tiebreak_fallback_days_counted_and_headline_unchanged(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        da_df, ida_df = _history(days=3, seed=23)
+        kw = dict(n_scenarios=3, seed=17, **_KW)
+        normal_per_day, normal = simulate_stochastic_da_id_batch(da_df, ida_df, **kw)
+        assert normal["n_tiebreak_fallback_days"] == 0
+        assert normal_per_day["tiebreak_stable"].all()
+
+        _force_canonical_tiebreak_fallback(monkeypatch)
+        fallback_per_day, fallback = simulate_stochastic_da_id_batch(
+            da_df, ida_df, **kw,
+        )
+        assert fallback["valid_days"] == normal["valid_days"] > 0
+        assert fallback["n_tiebreak_fallback_days"] == fallback["valid_days"]
+        assert not fallback_per_day["tiebreak_stable"].any()
+        # Headline equality is NOT guaranteed in general: fallback keeps the
+        # pass-1 Stage-1 schedule, which is equal-OBJECTIVE but not necessarily
+        # equal-settlement to the canonical one at realised != base (the C1
+        # multi-optimum mechanism). It holds here because this fixture's Stage-1
+        # optimum is non-degenerate (pass-1 == canonical). The guaranteed
+        # invariant — fallback never changes the objective — is pinned at the
+        # solver level in test_stochastic_dispatch. If a solver upgrade breaks
+        # this line, relax it rather than treating fallback as a money bug.
+        np.testing.assert_allclose(
+            fallback["total_policy_value_eur"],
+            normal["total_policy_value_eur"],
             atol=1e-6,
         )
 
