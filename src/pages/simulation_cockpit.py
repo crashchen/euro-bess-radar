@@ -1173,12 +1173,12 @@ def _append_stochastic_assumptions(
         },
         {
             "parameter": "Commitment/distribution split",
-            "value": "tie-sensitive diagnostic",
+            "value": "diagnostic; stability reported per day",
             "unit": "",
-            "source": "co-opt/stochastic Stage-1 multi-optima",
+            "source": "canonical_tiebreak_applied / tiebreak_stable",
             "affects": (
-                "Split settles differently at realised != base; read the "
-                "policy_value total, not the split"
+                "Use the tiebreak_stable result column; fallback days make only "
+                "the split tie-sensitive, not the policy_value total"
             ),
         },
     ])
@@ -1955,11 +1955,11 @@ def _render_stochastic_attribution_panel(
     """Attribution + risk for the stochastic policy value (Increment D).
 
     The headline ``policy_value`` (stochastic minus capped-myopic realised) is
-    robust. Its commitment/distribution split is a TIE-SENSITIVE diagnostic — the
-    co-opt and stochastic Stage-1 are equal-optimal schedules that settle
-    differently at a realised != base path — shown here as an attribution, never
-    as its own investment row. The risk block is a dispersion diagnostic over the
-    pooled per-(day, scenario) energy totals; the objective stays risk-neutral.
+    robust. Its commitment/distribution split is reliable only on days where the
+    S=1 co-opt and S=N stochastic commitments both accepted the canonical
+    Stage-1 tie-break; fallback days are flagged below. The risk block is a
+    dispersion diagnostic over the pooled per-(day, scenario) energy totals; the
+    objective stays risk-neutral.
     """
     if summary is None or summary.get("valid_days", 0) <= 0:
         return
@@ -1982,10 +1982,12 @@ def _render_stochastic_attribution_panel(
     st.caption(
         f"Scenario-aware DA commitment minus capped-myopic realised, common "
         f"rebid cap {cap_txt}, over {days} valid day(s). A screening diagnostic, "
-        "NOT a bankable co-optimised revenue. The split below is TIE-SENSITIVE "
-        "(Stage-1 multi-optima) — read the total, not the split. DA+IDA1 only "
-        "(reserve co-opt is the separate triple rows)."
+        "NOT a bankable co-optimised revenue. The split below is an attribution "
+        "diagnostic; trust it only on tie-stable days. DA+IDA1 only (reserve "
+        "co-opt is the separate triple rows)."
     )
+    fallback_days = int(summary.get("n_tiebreak_fallback_days", 0) or 0)
+    stable_days = max(days - fallback_days, 0)
     split = st.columns(2)
     split[0].metric(
         "Commitment value (co-opt - myopic)",
@@ -1995,6 +1997,14 @@ def _render_stochastic_attribution_panel(
         "Distribution value (stochastic - co-opt)",
         f"EUR {summary['total_distribution_value_eur']:,.0f}",
     )
+    st.caption(f"Split tie-stable on {stable_days}/{days} days")
+    if fallback_days > 0:
+        st.warning(
+            "Commitment/distribution split is tie-SENSITIVE on "
+            f"{fallback_days}/{days} day(s): canonical tie-break fell back to "
+            "the pass-1 solution. Trust only the robust policy-value headline "
+            "for those days."
+        )
     risk = summary.get("risk_block") or {}
     if risk.get("n", 0) > 0:
         rcols = st.columns(4)

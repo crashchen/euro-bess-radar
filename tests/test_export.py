@@ -66,6 +66,19 @@ def test_cockpit_tables_to_excel_truncates_long_sheet_name() -> None:
     assert wb.sheetnames == [long_name[:31]]
 
 
+def test_stochastic_policy_per_day_export_includes_tiebreak_stable() -> None:
+    per_day = pd.DataFrame({
+        "date": ["2026-01-01"],
+        "policy_value_eur": [12.0],
+        "tiebreak_stable": [False],
+    })
+    data = cockpit_tables_to_excel({"Stochastic policy (per day)": per_day})
+    wb = load_workbook(BytesIO(data))
+    ws = wb["Stochastic policy (per day)"]
+    headers = [cell.value for cell in ws[1]]
+    assert "tiebreak_stable" in headers
+
+
 def _render_or_skip(fig) -> bytes:
     """Render a Plotly figure only in explicit Kaleido integration runs.
 

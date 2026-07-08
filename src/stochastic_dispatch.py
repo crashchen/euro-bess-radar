@@ -86,6 +86,7 @@ def _empty_commitment_result(n: int, s: int) -> dict:
         "scenario_total_eur": np.zeros(max(s, 0)),
         "reserve_mw": zeros_n,
         "rebid_cap_mw": float("inf"),
+        "canonical_tiebreak_applied": False,
         "solve_seconds": 0.0,
     }
 
@@ -261,14 +262,16 @@ def _solve_and_unpack(
         out["solve_seconds"] = solve_seconds
         return out
 
-    x = _canonicalize_stage1(
+    canonical_x = _canonicalize_stage1(
         c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, s, block,
         result.x, float(result.fun),
     )
+    canonical_tiebreak_applied = canonical_x is not None
     solve_seconds = time.perf_counter() - t0
     return _unpack_solution(
-        x if x is not None else result.x, da_prices, scenarios, weights, dt, n,
-        s, block, sqrt_eff, soc_init, cap, reserve, solve_seconds,
+        canonical_x if canonical_x is not None else result.x, da_prices, scenarios,
+        weights, dt, n, s, block, sqrt_eff, soc_init, cap, reserve, solve_seconds,
+        canonical_tiebreak_applied,
     )
 
 
@@ -417,7 +420,7 @@ def _reconstruct_soc(charge, discharge, dt, sqrt_eff, soc_init):
 
 def _unpack_solution(
     x, da_prices, scenarios, weights, dt, n, s, block, sqrt_eff, soc_init,
-    cap, reserve, solve_seconds,
+    cap, reserve, solve_seconds, canonical_tiebreak_applied: bool,
 ) -> dict:
     """Slice the solution vector into schedules and recompute per-scenario cash."""
     da_ch = x[:n]
@@ -449,6 +452,7 @@ def _unpack_solution(
         "scenario_total_eur": scenario_total,
         "reserve_mw": reserve,
         "rebid_cap_mw": cap,
+        "canonical_tiebreak_applied": bool(canonical_tiebreak_applied),
         "solve_seconds": round(solve_seconds, 4),
     }
 
@@ -573,6 +577,7 @@ def _empty_dispatch_result(n: int) -> dict:
         "exec_p_charge": zeros, "exec_p_discharge": zeros,
         "da_soc": np.zeros(max(n, 0) + 1), "exec_soc": np.zeros(max(n, 0) + 1),
         "reserve_mw": zeros, "rebid_cap_mw": float("inf"),
+        "canonical_tiebreak_applied": False,
     }
 
 
@@ -765,6 +770,7 @@ def _execute_commitment(
         "da_soc": commit["da_soc"],
         "exec_soc": stage2_fc["soc"] if rebid else commit["da_soc"],
         "reserve_mw": reserve, "rebid_cap_mw": cap,
+        "canonical_tiebreak_applied": commit.get("canonical_tiebreak_applied"),
     }
 
 
@@ -827,6 +833,7 @@ def solve_myopic_capped_da_id_dispatch(
         "da_soc": lp["soc"],
         "expected_total_eur": float("nan"),
         "scenario_total_eur": np.zeros(0),
+        "canonical_tiebreak_applied": None,
     }
     return _execute_commitment(
         commit, da_prices, base_forecast, ida_realised, dt, n, power_mw,
