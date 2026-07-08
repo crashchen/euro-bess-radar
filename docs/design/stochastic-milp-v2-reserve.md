@@ -8,6 +8,26 @@ Increment A).
 
 Revision log:
 - **r0**: initial draft (CC-authored, 2026-07-08).
+- **r1** (Codex round 1 — verdict "needs another round", three blockers, all
+  probe-verified): (1) the capped-myopic baseline's Stage 0 is now
+  **cap-constrained** (`r ≤ min(power, rebid_cap)`) so all three arms share one
+  feasible set — the unconstrained 9.2b joint LP can commit `r_myopic >
+  rebid_cap` and make the capped executor raise (§3); (2) in v2 reserve mode
+  the **deadband is inert on ALL days for ALL arms** — 9.2b reserve-first
+  always re-dispatches even on zero-reserve days, so a deadband hold breaks
+  the cap=∞ anchor (§3, §6-6); (3) Stage-0 `r*` degeneracy hits the
+  **HEADLINE**, not just the split (equal-optimal reserve vectors settle to
+  different realised reserve revenue and headroom value), so a **canonical
+  Stage-0 selector is IN v2.0 scope**, applied symmetrically to every arm's
+  Stage 0, plus a `stage0_tiebreak_stable` flag on the PR #43 pattern (§2.2,
+  §3). Also: all Stage-0 inputs INCLUDING the IDA scenario bundle are forced
+  walk-forward in reserve mode (§2.3); the Stage-2 headroom constraint is
+  written in explicitly linear form (no `(power − r_t)`-big-M bilinearity,
+  §2.1); the Stage-0 expected objective is demoted to a diagnostic — realised
+  identities anchor strictly post-execution (§2.4); the v1-collapse pin gains
+  valid-day + scenario-RNG equality requirements (§6-1); §6-4 is phrased as an
+  in-model expectation test; §8 Q1 (per-interval) and Q3 (canonical selector)
+  are resolved and closed.
 - **r2** (Codex round 2 — all ten round-1 findings verified resolved; two NEW
   blockers introduced by the r1 fixes, both accepted): (1) the §6-1 v1-collapse
   pin contradicted §2.3's forced walk-forward (the v1 batch may run LOO with a
@@ -51,26 +71,6 @@ Revision log:
   adverse-geometry headline pins are batch-level (V2-C). Codex confirms the
   contract now meets the #41 standard: implementable with no further design
   decisions.
-- **r1** (Codex round 1 — verdict "needs another round", three blockers, all
-  probe-verified): (1) the capped-myopic baseline's Stage 0 is now
-  **cap-constrained** (`r ≤ min(power, rebid_cap)`) so all three arms share one
-  feasible set — the unconstrained 9.2b joint LP can commit `r_myopic >
-  rebid_cap` and make the capped executor raise (§3); (2) in v2 reserve mode
-  the **deadband is inert on ALL days for ALL arms** — 9.2b reserve-first
-  always re-dispatches even on zero-reserve days, so a deadband hold breaks
-  the cap=∞ anchor (§3, §6-6); (3) Stage-0 `r*` degeneracy hits the
-  **HEADLINE**, not just the split (equal-optimal reserve vectors settle to
-  different realised reserve revenue and headroom value), so a **canonical
-  Stage-0 selector is IN v2.0 scope**, applied symmetrically to every arm's
-  Stage 0, plus a `stage0_tiebreak_stable` flag on the PR #43 pattern (§2.2,
-  §3). Also: all Stage-0 inputs INCLUDING the IDA scenario bundle are forced
-  walk-forward in reserve mode (§2.3); the Stage-2 headroom constraint is
-  written in explicitly linear form (no `(power − r_t)`-big-M bilinearity,
-  §2.1); the Stage-0 expected objective is demoted to a diagnostic — realised
-  identities anchor strictly post-execution (§2.4); the v1-collapse pin gains
-  valid-day + scenario-RNG equality requirements (§6-1); §6-4 is phrased as an
-  in-model expectation test; §8 Q1 (per-interval) and Q3 (canonical selector)
-  are resolved and closed.
 
 ## 1. Positioning
 
