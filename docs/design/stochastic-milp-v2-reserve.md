@@ -1,8 +1,10 @@
 # Stochastic MILP v2 — endogenous reserve co-optimisation (design contract, scope only)
 
-Status: **DRAFT r3 — under joint scope review (Gemini + Codex), not yet locked.**
-No solver code lands until this contract is locked, mirroring the v1 process
-(`docs/design/stochastic-milp-v1.md`, four review rounds before Increment A).
+Status: **r4 — Codex round-4 verdict "LOCK AFTER REVISIONS", the listed
+revisions applied. Formal lock = merge of the design PR (Gemini/user review on
+the PR).** No solver code lands until this contract is locked, mirroring the
+v1 process (`docs/design/stochastic-milp-v1.md`, four review rounds before
+Increment A).
 
 Revision log:
 - **r0**: initial draft (CC-authored, 2026-07-08).
@@ -37,6 +39,18 @@ Revision log:
   `capacity_price_series_for_product` + `_slice_to_local_dates` rule the
   triple rows use, with an out-of-window-only fixture), and the 2a/2b budget
   is one monotonic deadline per solve (2b gets only remaining time).
+- **r4** (Codex round 4 — verdict **LOCK AFTER REVISIONS**, three exact
+  revisions, all applied): (1) §4/§8 contradiction on the ceiling — the
+  `coopt_ceiling_v2` solve is objective-only, canonical selectors are
+  objective-preserving, so NO selector or tie-stability flag applies to it
+  (and v2 must not enshrine v1's current waste of a canonical pass inside
+  `stochastic_coopt_ceiling`); (2) §8 canonical-window count corrected six →
+  FIVE (Stage-0 × 3 arms + Stage-1 × 2 stochastic solves), pathological bound
+  ~53s → **~45s**; (3) §9 pin ownership split — the §6-1.1 routing spy is
+  cockpit wiring (V2-D), the §6-1.2 constrained collapse and §6-9
+  adverse-geometry headline pins are batch-level (V2-C). Codex confirms the
+  contract now meets the #41 standard: implementable with no further design
+  decisions.
 - **r1** (Codex round 1 — verdict "needs another round", three blockers, all
   probe-verified): (1) the capped-myopic baseline's Stage 0 is now
   **cap-constrained** (`r ≤ min(power, rebid_cap)`) so all three arms share one
@@ -299,6 +313,14 @@ co-opt ceiling (`r = 0`) and `≥` the fixed-`r_myopic` ceiling (feasible by the
 §3 cap constraint) — both pinned. The 9.2a global triple ceiling remains a
 separate UNCAPPED comparator (signed), exactly as the legacy ceiling is in v1.
 
+**Objective-only, selector-disabled**: the ceiling solve reads ONLY the pass-1
+optimum objective; canonical selectors are objective-preserving, so neither
+the Stage-0 nor the Stage-1 canonical selector runs for `coopt_ceiling_v2`
+and no tie-stability flag attaches to it (r4 — v1's current
+`stochastic_coopt_ceiling` wastes a canonical pass by calling the
+unconditional `solve_stochastic_da_commitment`; v2 uses a selector-disabled
+path and must not enshrine that waste).
+
 ## 5. Cockpit / UI surface (increment V2-D)
 
 - The existing **Include stochastic policy** checkbox: reserve mode is active
@@ -414,18 +436,18 @@ separate UNCAPPED comparator (signed), exactly as the legacy ceiling is in v1.
   Budget structure, per worst-case 15-min S=10 day:
   - **Per-solve canonical deadline**: every canonical tie-break (Stage-0
     2a+2b under ONE monotonic deadline, §2.2; Stage-1's existing #41 pass)
-    carries an **8s** cap. Six canonical windows exist per day at most —
+    carries an **8s** cap. FIVE canonical windows exist per day at most —
     Stage-0 × 3 arms (myopic joint-LP, S=1, S=N) + Stage-1 × 2 stochastic
     solves (S=1, S=N; the myopic arm's Stage 1 is a plain `solve_daily_lp`,
-    no canonical pass) + the ceiling solve's Stage-1 pass — but the myopic
-    and S=1 problems are LP-sized/small and in practice finish in
-    milliseconds; only the S=N Stage-0/Stage-1 passes meaningfully approach
-    the cap.
+    no canonical pass, and the ceiling solve is objective-only /
+    selector-disabled per §4) — but the myopic and S=1 problems are
+    LP-sized/small and in practice finish in milliseconds; only the S=N
+    Stage-0/Stage-1 passes meaningfully approach the cap.
   - **Pass-1 solves**: Stage-0 extensive S=10 ~2s, Stage-1 B1 S=10 ~2s,
     S=1/myopic/execution/ceiling LPs ~1–2s combined.
   - **Committed targets**: TYPICAL worst-case day ≤ **15s**; PATHOLOGICAL
-    hard bound = pass-1 total + the sum of canonical caps (~5s + 6×8s ≈
-    **53s**), reachable only if every canonical window times out — and every
+    hard bound = pass-1 total + the sum of canonical caps (~5s + 5×8s ≈
+    **45s**), reachable only if every canonical window times out — and every
     timeout degrades ONLY tie-stability via the all-or-nothing fallback
     (§2.2), never correctness or completion, so the day always finishes.
   - If pass-1 itself blows the budget on real data, cut S before touching
@@ -440,11 +462,14 @@ separate UNCAPPED comparator (signed), exactly as the legacy ceiling is in v1.
 - **V2-A**: `solve_stochastic_reserve_commitment()` (linear form §2.1,
   zero-price skip, canonical Stage-0 selector §2.2) + pins §6-4/5/7/10.
 - **V2-B**: day wrapper (`solve_stochastic_triple_dispatch()`: Stage 0 → B1 →
-  B2 + realised reserve settlement + `coopt_ceiling_v2`) + pins §6-1/2/3/9.
+  B2 + realised reserve settlement + `coopt_ceiling_v2` selector-disabled per
+  §4) + pins §6-2/3.
 - **V2-C**: batch (3 policies, common cap, cap-constrained myopic Stage 0,
-  deadband-inert) + anchor §6-6 + §6-8 + summary/risk block + both tie-break
-  flags.
-- **V2-D**: cockpit/export wiring per §5 + label guardrail test.
+  deadband-inert) + pins §6-1.2 (constrained collapse) / §6-6 (anchor) /
+  §6-8 / §6-9 (adverse-geometry headline — a batch-level `policy_value_v2`
+  quantity) + summary/risk block + both tie-break flags.
+- **V2-D**: cockpit/export wiring per §5 + pin §6-1.1 (routing spy) + the
+  label guardrail test.
 
 Each increment is its own PR with dual review; solver increments get the
 pre-merge math audit, per the v1 lane.
