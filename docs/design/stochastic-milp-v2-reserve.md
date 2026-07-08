@@ -1,6 +1,6 @@
 # Stochastic MILP v2 — endogenous reserve co-optimisation (design contract, scope only)
 
-Status: **DRAFT r2 — under joint scope review (Gemini + Codex), not yet locked.**
+Status: **DRAFT r3 — under joint scope review (Gemini + Codex), not yet locked.**
 No solver code lands until this contract is locked, mirroring the v1 process
 (`docs/design/stochastic-milp-v1.md`, four review rounds before Increment A).
 
@@ -24,6 +24,19 @@ Revision log:
   9.2b row; Stage-0 fallback is escalated to a HEADLINE-level warning with
   zero-fallback required in core fixtures; §8 Q2 (performance budget) is
   committed and closed — no open questions remain.
+- **r3** (Codex round 3 — all eight round-2 findings verified resolved; two
+  precision blockers in the r2 text): (1) §6-10(e)'s "seed-independent `r*`"
+  overreached — different seeds draw different scenario sets, hence different
+  Stage-0 objectives the selector cannot reconcile; replaced by
+  fixed-scenario repeated-solve determinism; (2) the Q2 "≤25s end-to-end"
+  arithmetic ignored that ALL THREE arms run Stage-0 canonicalisation —
+  rewritten with per-SOLVE canonical deadlines, an honest pathological
+  per-day bound (the sum of caps, completion guaranteed by fallback), and a
+  typical-day target. Also: the §5 reserve-mode routing predicate is now
+  exact (windowed per-product series non-empty, the same
+  `capacity_price_series_for_product` + `_slice_to_local_dates` rule the
+  triple rows use, with an out-of-window-only fixture), and the 2a/2b budget
+  is one monotonic deadline per solve (2b gets only remaining time).
 - **r1** (Codex round 1 — verdict "needs another round", three blockers, all
   probe-verified): (1) the capped-myopic baseline's Stage 0 is now
   **cap-constrained** (`r ≤ min(power, rebid_cap)`) so all three arms share one
@@ -175,13 +188,16 @@ myopic joint LP):
   weights leave the pattern free). A single weighted objective is NOT
   acceptable: with continuous `r_t` no dominance weight can be proven, so the
   levels must be sequential re-solves;
-- **all-or-nothing fallback**: each of 2a/2b must be proven-optimal
-  (`status == 0`) within a shared time budget (§8 Q2); if EITHER fails, the
-  arm keeps its pass-1 solution (no partially-canonicalised vectors) and the
-  day sets `stage0_tiebreak_stable = False` on the PR #43 pattern (solver →
-  batch per-day column → summary count → cockpit warning). Because Stage-0
-  ties hit the HEADLINE (not just the split), the fallback warning attaches
-  to the policy-value metric itself (§5), and the core regression fixtures
+- **all-or-nothing fallback under ONE monotonic deadline per solve**: passes
+  2a and 2b share a single wall-clock deadline (§8 Q2) started when 2a
+  begins — 2b receives only the REMAINING time, and an expired deadline at
+  any point (or a non-proven-optimal `status != 0` result in either pass)
+  means the arm keeps its pass-1 solution (no partially-canonicalised
+  vectors; a 2a-only result is NOT accepted) and the day sets
+  `stage0_tiebreak_stable = False` on the PR #43 pattern (solver → batch
+  per-day column → summary count → cockpit warning). Because Stage-0 ties
+  hit the HEADLINE (not just the split), the fallback warning attaches to
+  the policy-value metric itself (§5), and the core regression fixtures
   REQUIRE zero Stage-0 fallback days (a fixture that trips the fallback is a
   broken fixture, not a tolerated path).
 
@@ -285,10 +301,15 @@ separate UNCAPPED comparator (signed), exactly as the legacy ceiling is in v1.
 
 ## 5. Cockpit / UI surface (increment V2-D)
 
-- The existing **Include stochastic policy** checkbox: when in-window capacity
-  prices exist (same `_reserve_triple_totals` window rule as the 5th/6th
-  rows), the panel runs the v2 batch INSTEAD of the v1 DA+IDA1-only batch;
-  with no in-window capacity prices the v1 path runs unchanged.
+- The existing **Include stochastic policy** checkbox: reserve mode is active
+  **iff** the selected `reserve_product`'s per-interval capacity series is
+  non-empty AFTER windowing to the valid dates — the EXACT rule the 5th/6th
+  rows already use (`capacity_price_series_for_product(window_anc, product)`
+  where `window_anc = _slice_to_local_dates(...)`), NOT the full-sample
+  `list_capacity_products()` availability check. When active the panel runs
+  the v2 batch INSTEAD of the v1 DA+IDA1-only batch; otherwise (including a
+  zone whose capacity rows exist only OUTSIDE the window — a pinned fixture)
+  the LITERAL v1 path runs and no v2 machinery is invoked (§6-1 routing pin).
   **Mandatory disclosure** (a user with a deadband set must not lose it
   silently): visible text near the checkbox states that reserve-mode
   stochastic IGNORES `min_rebid_uplift_eur` (re-dispatches on all days, §3)
@@ -314,10 +335,13 @@ separate UNCAPPED comparator (signed), exactly as the legacy ceiling is in v1.
 1. **v1 collapse — TWO pins, not one** (the r1 single pin contradicted §2.3:
    the v1 batch may run LOO with a live deadband, under which element-wise
    equality with a forced-walk-forward, deadband-inert v2 is false):
-   1. **Routing pin**: with NO in-window capacity prices the panel executes
-      the LITERAL v1 code path (`simulate_stochastic_da_id_batch`, user's own
-      LOO/deadband settings) — equality is by routing, not by numerics, and
-      the test pins the dispatch (v2 machinery not invoked).
+   1. **Routing pin**: when the §5 predicate is false (no in-window capacity
+      series for the selected product — including the capacity-rows-exist-
+      only-out-of-window fixture) the panel executes the LITERAL v1 code path
+      (`simulate_stochastic_da_id_batch`, user's own LOO/deadband settings) —
+      equality is by routing, not by numerics, and the test pins the dispatch
+      (v2 entry point not called; assertable via a spy/monkeypatch on the v2
+      batch function).
    2. **Constrained collapse pin**: in reserve mode with forecast AND realised
       reserve price ≡ 0, `r* ≡ 0` for every policy and the v2 batch equals the
       v1 batch element-wise WHEN the v1 comparator is run under the reserve-
@@ -361,9 +385,12 @@ separate UNCAPPED comparator (signed), exactly as the legacy ceiling is in v1.
     the same `r*` element-wise as the S=1 run (identical objectives); (b) the
     §6-5 collapse fixture's element-wise equality; (c) the tie-break never
     changes `z*`; (d) fallback sets `stage0_tiebreak_stable = False` without
-    changing `z*`; (e) a degenerate-fixture pin (flat capacity premium with
-    interchangeable intervals) where the selector yields a deterministic,
-    seed-independent `r*`.
+    changing `z*`; (e) **fixed-scenario repeated-solve determinism**: on a
+    degenerate fixture (flat capacity premium with interchangeable
+    intervals), solving the SAME Stage-0 problem (same scenario set, same
+    objective) twice yields the identical `r*` element-wise. NOT
+    seed-independence — different seeds draw different scenario sets, hence
+    different objectives the selector cannot and must not reconcile (§2.2).
 
 ## 7. Red-lines (inherited + new)
 
@@ -382,17 +409,27 @@ separate UNCAPPED comparator (signed), exactly as the legacy ceiling is in v1.
 
 - ~~Q1 — granularity~~ **RESOLVED (r1)**: per-interval locked for v2.0, 9.2b
   parity; block-constant later only as a symmetric all-arms knob (§2).
-- ~~Q2 — performance budget~~ **RESOLVED (r2, committed)**: worst-case 15-min
-  S=10 day budget is **≤ 25s** end-to-end, composed of: Stage-0 pass 1 (one
-  B1-sized extensive form, +n continuous vars, no new integers, ~2s) +
-  Stage-0 canonical passes 2a+2b under a SHARED 8s time limit (scenario
-  Stage-2 binaries fixed to pass-1 values, the v1 #41 trick) + the unchanged
-  v1 Stage-1 budget (~10s incl. its canonical pass) + execution/ceiling LPs.
-  The fallback POLICY is the budget enforcement mechanism: any canonical pass
-  missing its limit falls back to pass-1 with the stability flag (§2.2), so
-  the budget degrades tie-stability, never correctness or completion. If
-  pass-1 itself blows the budget on real data, cut S before touching the
-  binaries (v1 §6 precedent).
+- ~~Q2 — performance budget~~ **RESOLVED (r3, committed; the r2 "≤25s
+  end-to-end" ignored that all three arms canonicalise their Stage 0)**.
+  Budget structure, per worst-case 15-min S=10 day:
+  - **Per-solve canonical deadline**: every canonical tie-break (Stage-0
+    2a+2b under ONE monotonic deadline, §2.2; Stage-1's existing #41 pass)
+    carries an **8s** cap. Six canonical windows exist per day at most —
+    Stage-0 × 3 arms (myopic joint-LP, S=1, S=N) + Stage-1 × 2 stochastic
+    solves (S=1, S=N; the myopic arm's Stage 1 is a plain `solve_daily_lp`,
+    no canonical pass) + the ceiling solve's Stage-1 pass — but the myopic
+    and S=1 problems are LP-sized/small and in practice finish in
+    milliseconds; only the S=N Stage-0/Stage-1 passes meaningfully approach
+    the cap.
+  - **Pass-1 solves**: Stage-0 extensive S=10 ~2s, Stage-1 B1 S=10 ~2s,
+    S=1/myopic/execution/ceiling LPs ~1–2s combined.
+  - **Committed targets**: TYPICAL worst-case day ≤ **15s**; PATHOLOGICAL
+    hard bound = pass-1 total + the sum of canonical caps (~5s + 6×8s ≈
+    **53s**), reachable only if every canonical window times out — and every
+    timeout degrades ONLY tie-stability via the all-or-nothing fallback
+    (§2.2), never correctness or completion, so the day always finishes.
+  - If pass-1 itself blows the budget on real data, cut S before touching
+    the binaries (v1 §6 precedent).
 - ~~Q3 — Stage-0 tie-break~~ **RESOLVED (r1)**: canonical Stage-0 selector is
   IN v2.0 scope (§2.2) — Codex round 1 showed the tie hits the headline, not
   just the split, which was the v1 rationale for deferring; that rationale
