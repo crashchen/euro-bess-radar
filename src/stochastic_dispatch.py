@@ -1389,8 +1389,16 @@ def solve_stochastic_triple_dispatch(
     """
     da = np.asarray(da_prices, dtype=float).ravel()
     n = da.size
+    da_fc = np.asarray(da_forecast, dtype=float).ravel()
+    # Shape guard (graceful, the B1/B2 empty-result convention): Stage 0 sizes
+    # r* on da_forecast's grid, and a mismatched grid would otherwise raise
+    # deep inside the execution layer's reserve coercion. This is a malformed-
+    # input guard, NOT the §2 skip-ordering (bad VALUES in a Stage-0-only
+    # input still skip cleanly when there is no reserve forecast to act on).
+    if n == 0 or da_fc.size != n:
+        return _empty_triple_result(n)
     stage0 = solve_stochastic_reserve_commitment(
-        da_forecast, scenarios, weights, dt,
+        da_fc, scenarios, weights, dt,
         reserve_price_forecast_eur_mw_h=reserve_price_forecast_eur_mw_h,
         power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
         soc_init_frac=soc_init_frac, rebid_cap_mw=rebid_cap_mw,

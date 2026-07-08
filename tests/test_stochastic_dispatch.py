@@ -1192,6 +1192,15 @@ class TestStochasticTripleDispatch:
             reserve_price_forecast_eur_mw_h=10.0,
         )
         assert not bad2["success"]
+        # da_forecast grid mismatch -> graceful empty, NOT a deep raise from
+        # the execution layer's reserve coercion (Gemini review, PR #47) —
+        # even when the skip path would produce a wrong-length r* of zeros.
+        for price in (10.0, None):
+            bad3 = solve_stochastic_triple_dispatch(
+                da, scen, w, base, realised, 1.0, da_forecast=da_fc[:-1],
+                reserve_price_forecast_eur_mw_h=price,
+            )
+            assert not bad3["success"]
 
     def test_ceiling_v2_is_selector_disabled(
         self, monkeypatch: pytest.MonkeyPatch,
