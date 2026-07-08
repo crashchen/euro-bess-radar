@@ -21,8 +21,29 @@ from src.stochastic_dispatch import (
     solve_stochastic_da_commitment,
     solve_stochastic_da_id_dispatch,
     solve_stochastic_reserve_commitment,
+    solve_stochastic_triple_dispatch,
     stochastic_coopt_ceiling,
+    stochastic_coopt_ceiling_v2,
 )
+
+
+def _count_canonical_passes(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Count linprog calls that carry a time_limit option (canonical passes).
+
+    Pass-1 solves never set ``time_limit``; every canonical tie-break pass
+    (Stage-0 2a/2b and the Stage-1 #41 pass) does — so the counter observes
+    exactly the selector activity of whatever runs while it is installed.
+    """
+    original_linprog = stochastic_dispatch.linprog
+    calls = {"n": 0}
+
+    def counting(c, *args, **kwargs):
+        if "time_limit" in (kwargs.get("options") or {}):
+            calls["n"] += 1
+        return original_linprog(c, *args, **kwargs)
+
+    monkeypatch.setattr(stochastic_dispatch, "linprog", counting)
+    return calls
 
 
 def _mean_centred_scenarios(base: np.ndarray, s: int, sigma: float, seed: int):
@@ -93,6 +114,25 @@ class TestStochasticCommitment:
         )
         assert dispatch["success"]
         assert dispatch["canonical_tiebreak_applied"] is False
+
+    def test_canonicalize_false_preserves_objective(self) -> None:
+        # v2 §4 plumbing: the canonical Stage-1 pass is objective-preserving,
+        # so skipping it (the ceilings' objective-only path) must return the
+        # same expected total; canonical_tiebreak_applied is False and carries
+        # no fallback meaning on that path.
+        da = _da_shape(10)
+        scen, w = _mean_centred_scenarios(da + 5, 3, 6.0, seed=41)
+        kw = dict(dt=1.0, power_mw=1.0, duration_hours=2.0)
+        with_pass = solve_stochastic_da_commitment(da, scen, w, **kw)
+        without = solve_stochastic_da_commitment(
+            da, scen, w, canonicalize=False, **kw,
+        )
+        assert without["success"]
+        assert without["canonical_tiebreak_applied"] is False
+        np.testing.assert_allclose(
+            without["expected_total_eur"], with_pass["expected_total_eur"],
+            atol=1e-6,
+        )
 
     def test_expected_total_matches_weighted_scenario_totals(self) -> None:
         da = _da_shape(12)
@@ -961,3 +1001,214 @@ class TestStochasticReserveCommitment:
         assert r["success"]
         assert isinstance(r["stage0_tiebreak_stable"], bool)
         assert r["solve_seconds"] < 30.0
+
+
+class TestStochasticTripleDispatch:
+    """Increment V2-B: triple day wrapper + endogenous-reserve co-opt ceiling.
+
+    Pins §6-2/§6-3 of the locked v2 contract plus the wrapper conventions
+    (deadband inert, commit-under-forecast/settle-at-realised, skip-ordering,
+    selector-disabled ceilings per §4).
+    """
+
+    @staticmethod
+    def _case(n: int = 8, seed: int = 0):
+        rng = np.random.default_rng(seed)
+        da = 50 + 20 * np.sin(np.arange(n) / n * 2 * np.pi) + rng.normal(0, 4, n)
+        da_fc = da + rng.normal(0, 3, n)   # imperfect walk-forward DA forecast
+        base = da + 5
+        errs = rng.normal(0, 8, size=(4, n))
+        errs -= errs.mean(axis=0, keepdims=True)
+        scen = base[None, :] + errs
+        w = np.full(4, 0.25)
+        realised = base + rng.normal(0, 6, n)
+        return da, da_fc, scen, w, base, realised
+
+    _RP_FC = np.array([30.0, 30.0, 5.0, 5.0, 30.0, 30.0, 5.0, 5.0])
+    _RP_REAL = _RP_FC * 0.8   # realised fee != forecast fee (settle-at-realised)
+
+    def _triple(self, seed: int = 0, **overrides) -> dict:
+        da, da_fc, scen, w, base, realised = self._case(seed=seed)
+        kw = dict(
+            da_forecast=da_fc,
+            reserve_price_forecast_eur_mw_h=self._RP_FC,
+            reserve_price_realised_eur_mw_h=self._RP_REAL,
+            power_mw=1.0, duration_hours=2.0, rebid_cap_mw=0.8,
+        )
+        kw.update(overrides)
+        return solve_stochastic_triple_dispatch(
+            da, scen, w, base, realised, 1.0, **kw,
+        )
+
+    def test_realised_at_most_coopt_ceiling_v2(self) -> None:
+        # §6-2: every executed (r*, Stage-1, Stage-2) triple is feasible for
+        # the endogenous-reserve perfect-foresight problem, so realised can
+        # never exceed coopt_ceiling_v2. RAW inequality — deliberately not via
+        # the clamped forecast_error_cost_v2_eur.
+        for seed in range(6):
+            t = self._triple(seed=seed)
+            assert t["success"]
+            assert (
+                t["realised_total_eur"] <= t["coopt_ceiling_v2_eur"] + 1e-6
+            ), f"seed {seed}"
+
+    def test_ceiling_v2_dominates_v1_and_fixed_myopic(self) -> None:
+        # §6-3: endogenous-r optimisation dominates any fixed feasible r —
+        # >= the v1 co-opt ceiling (r = 0; STRICT here because the fee is
+        # positive) and >= the fixed-r_myopic ceiling (r from the myopic joint
+        # LP, feasible at cap = power where the §3 tightening is vacuous).
+        da, _, _, _, _, realised = self._case(seed=1)
+        kw = dict(power_mw=1.0, duration_hours=2.0, rebid_cap_mw=1.0)
+        ceil_v2 = stochastic_coopt_ceiling_v2(
+            da, realised, 1.0,
+            reserve_price_realised_eur_mw_h=self._RP_REAL, **kw,
+        )
+        v1_r0 = stochastic_coopt_ceiling(da, realised, 1.0, **kw)
+        assert ceil_v2 > v1_r0 + 1.0  # strict: reserve fee is real income here
+        joint = solve_daily_joint_capacity_lp(
+            da, 1.0, self._RP_REAL, power_mw=1.0, duration_hours=2.0,
+        )
+        r_myopic = joint["reserve_mw"]
+        fixed_myopic = float(
+            (self._RP_REAL * 0.95 * r_myopic).sum()
+        ) + stochastic_coopt_ceiling(
+            da, realised, 1.0, reserve_mw=r_myopic, **kw,
+        )
+        assert ceil_v2 >= fixed_myopic - 1e-6
+
+    def test_ceiling_v2_equals_v1_at_zero_reserve_price(self) -> None:
+        # §6-3 boundary: at a zero realised fee, r = 0 is weakly optimal and
+        # the v2 ceiling collapses to the v1 energy-only co-opt ceiling.
+        da, _, _, _, _, realised = self._case(seed=2)
+        kw = dict(power_mw=1.0, duration_hours=2.0, rebid_cap_mw=1.0)
+        ceil_v2 = stochastic_coopt_ceiling_v2(
+            da, realised, 1.0, reserve_price_realised_eur_mw_h=0.0, **kw,
+        )
+        v1_r0 = stochastic_coopt_ceiling(da, realised, 1.0, **kw)
+        np.testing.assert_allclose(ceil_v2, v1_r0, atol=1e-4)
+
+    def test_collapse_to_v1_execution_when_no_reserve_prices(self) -> None:
+        # No reserve forecast -> Stage-0 skip (r* = 0) and the wrapper settles
+        # exactly like the v1 B2 dispatch run under the reserve-mode
+        # conventions (always_rebid, no capacity). Element-level comparator
+        # for the batch-level §6-1.2 constrained-collapse pin (V2-C).
+        da, da_fc, scen, w, base, realised = self._case(seed=3)
+        t = solve_stochastic_triple_dispatch(
+            da, scen, w, base, realised, 1.0, da_forecast=da_fc,
+            reserve_price_forecast_eur_mw_h=None,
+            reserve_price_realised_eur_mw_h=None,
+            power_mw=1.0, duration_hours=2.0, rebid_cap_mw=0.8,
+        )
+        b2 = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised, 1.0, power_mw=1.0, duration_hours=2.0,
+            rebid_cap_mw=0.8, always_rebid=True,
+        )
+        assert t["success"] and t["stage0_skipped"]
+        np.testing.assert_array_equal(t["reserve_mw"], np.zeros(8))
+        assert np.isnan(t["stage0_expected_objective_eur"])
+        for key in (
+            "realised_total_eur", "stochastic_hold_eur", "da_only_revenue_eur",
+            "capacity_revenue_eur", "expected_total_eur",
+        ):
+            np.testing.assert_allclose(t[key], b2[key], atol=1e-6)
+
+    def test_capacity_settles_at_realised_price(self) -> None:
+        # Commit under forecast, settle at realised (9.2b convention, §2):
+        # a high forecast fee commits r* > 0, but a zero realised fee pays 0.
+        t = self._triple(
+            seed=4, reserve_price_forecast_eur_mw_h=20.0,
+            reserve_price_realised_eur_mw_h=0.0,
+        )
+        assert t["reserve_mw"].max() > 0.1
+        assert t["capacity_revenue_eur"] == 0.0
+        # Converse: no forecast -> skip -> r* = 0 earns nothing even at a
+        # positive realised fee (there is nothing committed to settle).
+        t2 = self._triple(
+            seed=4, reserve_price_forecast_eur_mw_h=None,
+            reserve_price_realised_eur_mw_h=20.0,
+        )
+        assert t2["stage0_skipped"]
+        assert t2["capacity_revenue_eur"] == 0.0
+
+    def test_skip_ordering_survives_bad_stage0_inputs(self) -> None:
+        # §2 skip-ordering through the wrapper: a day the v1 path can run is
+        # never excluded by a Stage-0-only input (here an all-NaN DA forecast)
+        # when there is no reserve forecast to act on.
+        da, _, scen, w, base, realised = self._case(seed=5)
+        t = solve_stochastic_triple_dispatch(
+            da, scen, w, base, realised, 1.0,
+            da_forecast=np.full(8, np.nan),
+            reserve_price_forecast_eur_mw_h=None,
+            power_mw=1.0, duration_hours=2.0, rebid_cap_mw=0.8,
+        )
+        assert t["success"] and t["stage0_skipped"]
+        # ...but with a live reserve forecast the bad Stage-0 input is fatal.
+        t2 = solve_stochastic_triple_dispatch(
+            da, scen, w, base, realised, 1.0,
+            da_forecast=np.full(8, np.nan),
+            reserve_price_forecast_eur_mw_h=10.0,
+            power_mw=1.0, duration_hours=2.0, rebid_cap_mw=0.8,
+        )
+        assert not t2["success"]
+
+    def test_reserve_respects_cap_through_execution(self) -> None:
+        # §6-7 threading: r* <= min(power, cap) by construction, so the B2
+        # execution layer's cap >= max reserve domain check can never raise
+        # from inside the wrapper.
+        t = self._triple(seed=0, rebid_cap_mw=0.5)
+        assert t["success"]
+        assert t["reserve_mw"].max() <= 0.5 + 1e-9
+        assert t["realised_total_eur"] <= t["coopt_ceiling_v2_eur"] + 1e-6
+
+    def test_forecast_error_cost_v2_is_clamped_gap(self) -> None:
+        t = self._triple(seed=1)
+        np.testing.assert_allclose(
+            t["forecast_error_cost_v2_eur"],
+            max(t["coopt_ceiling_v2_eur"] - t["realised_total_eur"], 0.0),
+            atol=1e-6,
+        )
+
+    def test_stage0_diagnostic_passthrough(self) -> None:
+        t = self._triple(seed=2)
+        assert np.isfinite(t["stage0_expected_objective_eur"])
+        assert t["stage0_tiebreak_stable"] is True
+
+    def test_negative_rebid_cap_raises(self) -> None:
+        with pytest.raises(ValueError, match="rebid_cap_mw must be >= 0"):
+            self._triple(seed=0, rebid_cap_mw=-0.5)
+
+    def test_degenerate_inputs_return_gracefully(self) -> None:
+        da, da_fc, scen, w, base, realised = self._case(seed=6)
+        # weights not summing to 1 -> Stage-0 fails -> empty triple with keys
+        bad = solve_stochastic_triple_dispatch(
+            da, scen, np.full(4, 0.1), base, realised, 1.0, da_forecast=da_fc,
+            reserve_price_forecast_eur_mw_h=10.0,
+        )
+        assert not bad["success"]
+        assert "coopt_ceiling_v2_eur" in bad and "stage0_skipped" in bad
+        # realised-IDA length mismatch -> execution fails -> empty triple
+        bad2 = solve_stochastic_triple_dispatch(
+            da, scen, w, base, realised[:-1], 1.0, da_forecast=da_fc,
+            reserve_price_forecast_eur_mw_h=10.0,
+        )
+        assert not bad2["success"]
+
+    def test_ceiling_v2_is_selector_disabled(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # §4: the ceiling solve is objective-only — neither the Stage-0 nor
+        # the Stage-1 canonical selector may run (canonical passes are
+        # objective-preserving, so running one is pure waste). Also covers the
+        # r4 note that v1's stochastic_coopt_ceiling must stop wasting a
+        # canonical pass.
+        da, _, _, _, _, realised = self._case(seed=0)
+        calls = _count_canonical_passes(monkeypatch)
+        stochastic_coopt_ceiling_v2(
+            da, realised, 1.0, reserve_price_realised_eur_mw_h=self._RP_REAL,
+            power_mw=1.0, duration_hours=2.0,
+        )
+        assert calls["n"] == 0
+        stochastic_coopt_ceiling(
+            da, realised, 1.0, power_mw=1.0, duration_hours=2.0,
+        )
+        assert calls["n"] == 0

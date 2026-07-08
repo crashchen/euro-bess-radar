@@ -3,7 +3,9 @@
 Status: **LOCKED (design PR #45 merged 2026-07-08 after four Codex review
 rounds, verdict "LOCK AFTER REVISIONS" with the listed revisions applied).**
 Increment progress: **V2-A landed** (`solve_stochastic_reserve_commitment` +
-canonical Stage-0 selector + pins §6-4/5/7/10). The lock mirrored the v1
+canonical Stage-0 selector + pins §6-4/5/7/10); **V2-B landed**
+(`solve_stochastic_triple_dispatch` day wrapper + selector-disabled
+`stochastic_coopt_ceiling_v2` + pins §6-2/3). The lock mirrored the v1
 process (`docs/design/stochastic-milp-v1.md`, four review rounds before
 Increment A).
 

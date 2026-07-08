@@ -21,6 +21,12 @@ single point forecast.
   the reserve-price forecast AND the expected IDA-scenario value of the
   physical headroom it consumes, with the §2.2 canonical Stage-0 selector and
   the §2 zero-price skip. Only ``r*`` is extracted.
+- **V2-B — triple day wrapper** (`solve_stochastic_triple_dispatch`): one v2
+  reserve-mode policy day — Stage 0 (reserve gate, walk-forward forecasts) →
+  Stage 1 (unchanged B1 with ``r*`` exogenous) → Stage 2 (unchanged B2 capped
+  execution, deadband inert per v2 §3, capacity settled at the REALISED
+  reserve price) — plus `stochastic_coopt_ceiling_v2` (endogenous-reserve
+  same-cap perfect-foresight bound, objective-only / selector-disabled, §4).
 
 Two stages, one MILP (§2 of the contract):
 
@@ -159,6 +165,7 @@ def solve_stochastic_da_commitment(
     soc_init_frac: float = 0.5,
     rebid_cap_mw: float | None = None,
     reserve_mw: float | np.ndarray | None = None,
+    canonicalize: bool = True,
 ) -> dict:
     """Solve the two-stage extensive-form DA-commitment MILP for one day.
 
@@ -175,6 +182,13 @@ def solve_stochastic_da_commitment(
         reserve_mw: Per-interval reserve headroom the Stage-2 physical schedule
             must leave free. Requires ``rebid_cap_mw >= max(reserve_mw)`` (the
             feasibility domain, §5) else raises ``ValueError``.
+        canonicalize: When False, skip the canonical Stage-1 tie-break pass.
+            ONLY for objective-only callers (the co-opt ceilings, v2 §4):
+            canonical passes are objective-preserving, so a ceiling solve that
+            reads nothing but ``expected_total_eur`` wastes one. The returned
+            ``canonical_tiebreak_applied`` is False and NOT meaningful then —
+            schedules from a non-canonicalised solve must not be compared
+            across problems.
 
     Returns:
         Dict with ``expected_total_eur`` (the objective), Stage-1 arrays
@@ -207,13 +221,13 @@ def solve_stochastic_da_commitment(
 
     return _solve_and_unpack(
         da_prices, scenarios, weights, dt, n, s, power_mw, duration_hours,
-        efficiency, soc_init_frac, cap, reserve,
+        efficiency, soc_init_frac, cap, reserve, canonicalize,
     )
 
 
 def _solve_and_unpack(
     da_prices, scenarios, weights, dt, n, s, power_mw, duration_hours,
-    efficiency, soc_init_frac, cap, reserve,
+    efficiency, soc_init_frac, cap, reserve, canonicalize=True,
 ) -> dict:
     """Assemble the sparse MILP, solve it, and unpack the schedules + cash."""
     capacity_mwh = power_mw * duration_hours
@@ -268,9 +282,13 @@ def _solve_and_unpack(
         out["solve_seconds"] = solve_seconds
         return out
 
-    canonical_x = _canonicalize_stage1(
-        c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, s, block,
-        result.x, float(result.fun),
+    canonical_x = (
+        _canonicalize_stage1(
+            c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, s, block,
+            result.x, float(result.fun),
+        )
+        if canonicalize
+        else None
     )
     canonical_tiebreak_applied = canonical_x is not None
     solve_seconds = time.perf_counter() - t0
@@ -488,12 +506,19 @@ def stochastic_coopt_ceiling(
     executed ``(Stage-1, Stage-2)`` pair of a capped policy is feasible for this
     problem, so it upper-bounds the realised value by construction (the legacy
     9.2a ceiling, whose Stage 1 is myopic DA-only, is NOT this bound).
+
+    Objective-only, selector-disabled (v2 §4): a ceiling reads nothing but the
+    optimum, canonical passes are objective-preserving, so ``canonicalize=False``
+    skips the Stage-1 tie-break this call previously wasted (the r4 note on the
+    v2 contract) — same value within the tie-break's objective tolerance, one
+    MILP pass cheaper.
     """
     realised = np.asarray(realised_ida, dtype=float).ravel()
     res = solve_stochastic_da_commitment(
         da_prices, realised[None, :], np.array([1.0]), dt,
         power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
         soc_init_frac=soc_init_frac, rebid_cap_mw=rebid_cap_mw, reserve_mw=reserve_mw,
+        canonicalize=False,
     )
     return res["expected_total_eur"]
 
@@ -609,6 +634,7 @@ def solve_stochastic_da_id_dispatch(
     reserve_price_eur_mw_h: float | np.ndarray | None = None,
     availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
     min_rebid_uplift_eur: float = 0.0,
+    always_rebid: bool = False,
 ) -> dict:
     """Forecast-driven realised execution of the stochastic DA commitment (B2).
 
@@ -625,7 +651,11 @@ def solve_stochastic_da_id_dispatch(
     the forecast-predicted rebid uplift clears ``min_rebid_uplift_eur`` (scope
     §5). On reserve days it ALWAYS re-dispatches, because holding a full-power
     Stage-1 schedule can violate committed headroom; ``min_rebid_uplift_eur`` is
-    then inert.
+    then inert. ``always_rebid=True`` makes the re-dispatch unconditional on
+    ALL days — the v2 reserve-mode convention (v2 §3: 9.2b reserve-first
+    re-dispatches even on zero-reserve days, so the deadband is inert for every
+    arm; a deadband hold on a zero-reserve day would break the anchor). The v1
+    DA+IDA1 path keeps the default False and its deadband semantics untouched.
 
     Reserve capacity settlement (§2.3): when ``reserve_price_eur_mw_h`` is given,
     the committed ``reserve_mw`` earns ``Σ price·availability·reserve_mw·dt`` —
@@ -672,7 +702,7 @@ def solve_stochastic_da_id_dispatch(
     return _execute_commitment(
         commit, da_prices, base_forecast, ida_realised, dt, n, power_mw,
         duration_hours, efficiency, soc_init_frac, min_rebid_uplift_eur,
-        reserve_price_eur_mw_h, availability,
+        reserve_price_eur_mw_h, availability, always_rebid,
     )
 
 
@@ -697,7 +727,7 @@ def _capacity_revenue(
 def _execute_commitment(
     commit, da_prices, base_forecast, ida_realised, dt, n, power_mw,
     duration_hours, efficiency, soc_init_frac, min_rebid_uplift_eur,
-    reserve_price, availability,
+    reserve_price, availability, always_rebid=False,
 ) -> dict:
     """Run the forecast-driven deadband execution + settlement for a commitment."""
     cap = commit["rebid_cap_mw"]
@@ -738,8 +768,10 @@ def _execute_commitment(
     forecast_uplift = max(rebid_fc - hold_fc, 0.0)
 
     has_reserve = bool(reserve.max(initial=0.0) > 0.0)
-    if has_reserve:
-        rebid = True  # holding a full-power Stage-1 can violate headroom (§5)
+    if has_reserve or always_rebid:
+        # Reserve day: holding a full-power Stage-1 can violate headroom (§5).
+        # always_rebid: v2 reserve-mode convention — deadband inert on ALL days.
+        rebid = True
     else:
         rebid = forecast_uplift > max(min_rebid_uplift_eur, _REBID_UPLIFT_EPS_EUR)
     executed = stage2_fc if rebid else {"p_charge": da_ch, "p_discharge": da_dis}
@@ -800,6 +832,7 @@ def solve_myopic_capped_da_id_dispatch(
     reserve_price_eur_mw_h: float | np.ndarray | None = None,
     availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
     min_rebid_uplift_eur: float = 0.0,
+    always_rebid: bool = False,
 ) -> dict:
     """Capped-myopic baseline: DA-only Stage-1 through the SAME capped execution.
 
@@ -812,7 +845,8 @@ def solve_myopic_capped_da_id_dispatch(
     (``solve_sequential_da_id_dispatch``) — the regression anchor. Returns the
     same decomposition dict as :func:`solve_stochastic_da_id_dispatch` (with
     ``expected_total_eur``/``scenario_total_eur`` NaN/empty — there is no
-    scenario set here).
+    scenario set here). ``always_rebid`` has the same v2 reserve-mode meaning
+    as on the stochastic dispatch (deadband inert on all days, v2 §3).
     """
     if rebid_cap_mw is not None and rebid_cap_mw < 0:
         raise ValueError(f"rebid_cap_mw must be >= 0, got {rebid_cap_mw}")
@@ -849,7 +883,7 @@ def solve_myopic_capped_da_id_dispatch(
     return _execute_commitment(
         commit, da_prices, base_forecast, ida_realised, dt, n, power_mw,
         duration_hours, efficiency, soc_init_frac, min_rebid_uplift_eur,
-        reserve_price_eur_mw_h, availability,
+        reserve_price_eur_mw_h, availability, always_rebid,
     )
 
 
@@ -1005,8 +1039,16 @@ def solve_stochastic_reserve_commitment(
 def _solve_stage0_and_unpack(
     da_forecast, scenarios, weights, reserve_fc, dt, n, s, power_mw,
     duration_hours, efficiency, soc_init_frac, cap, availability,
+    canonicalize=True,
 ) -> dict:
-    """Assemble the Stage-0 extensive form, solve, canonicalise, extract r*."""
+    """Assemble the Stage-0 extensive form, solve, canonicalise, extract r*.
+
+    ``canonicalize=False`` is the objective-only ceiling path (v2 §4): the
+    canonical selector is objective-preserving, so a caller that reads nothing
+    but ``expected_objective_eur`` skips it; the returned ``reserve_mw`` is
+    then an arbitrary optimal member and ``stage0_tiebreak_stable`` (True — no
+    instability was introduced, nothing was attempted) carries no meaning.
+    """
     capacity_mwh = power_mw * duration_hours
     soc_init = soc_init_frac * capacity_mwh
     sqrt_eff = math.sqrt(efficiency)
@@ -1064,12 +1106,16 @@ def _solve_stage0_and_unpack(
         out["solve_seconds"] = round(solve_seconds, 4)
         return out
 
-    canonical_x = _canonicalize_stage0(
-        c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, r0, n,
-        float(result.fun),
+    canonical_x = (
+        _canonicalize_stage0(
+            c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, r0, n,
+            float(result.fun),
+        )
+        if canonicalize
+        else None
     )
-    stable = canonical_x is not None
-    x = canonical_x if stable else result.x
+    stable = canonical_x is not None if canonicalize else True
+    x = canonical_x if canonical_x is not None else result.x
     solve_seconds = time.perf_counter() - t0
     return {
         "success": True,
@@ -1214,3 +1260,173 @@ def _solve_canonical_stage0_pass(
         )
         return None
     return result.x
+
+
+# ── Increment V2-B: triple day wrapper + endogenous-reserve co-opt ceiling ─────
+
+def _empty_triple_result(n: int) -> dict:
+    """Degenerate return for empty / invalid triple-dispatch inputs."""
+    out = _empty_dispatch_result(n)
+    out.update({
+        "stage0_skipped": False,
+        "stage0_tiebreak_stable": False,
+        "stage0_expected_objective_eur": float("nan"),
+        "coopt_ceiling_v2_eur": 0.0,
+        "forecast_error_cost_v2_eur": 0.0,
+    })
+    return out
+
+
+def stochastic_coopt_ceiling_v2(
+    da_prices: np.ndarray,
+    realised_ida: np.ndarray,
+    dt: float,
+    *,
+    reserve_price_realised_eur_mw_h: float | np.ndarray | None = None,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    soc_init_frac: float = 0.5,
+    rebid_cap_mw: float | None = None,
+    availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
+) -> float:
+    """Same-cap perfect-foresight ceiling with ENDOGENOUS reserve (v2 §4).
+
+    Solver reuse of the Stage-0 extensive form with a single scenario equal to
+    the realised IDA path, the realised DA as the (perfectly-foresighted) DA
+    leg, and the REALISED reserve price on the fee term — Stage 1/2 collapse
+    into it, one solve. Every executed ``(r, Stage-1, Stage-2)`` triple of a §3
+    policy is feasible for this problem (all arms share the cap-constrained
+    feasible set), so ``realised_v2 <= coopt_ceiling_v2`` by construction, and
+    endogenous-``r`` optimisation dominates any fixed feasible ``r``
+    (``>= `` the v1 co-opt ceiling at ``r = 0`` and ``>=`` any fixed-``r``
+    ceiling — pinned §6-3).
+
+    Objective-only, selector-DISABLED (§4): canonical selectors are
+    objective-preserving, so neither the Stage-0 nor the Stage-1 selector runs
+    here and no tie-stability flag attaches to the ceiling. There is no
+    zero-price skip either — the skip exists to keep the POLICY ``r*``
+    deterministic, whereas a ceiling reads only the optimum, which is
+    well-defined at any fee (including zero, where it equals the v1 energy
+    ceiling at ``r = 0``).
+    """
+    if rebid_cap_mw is not None and rebid_cap_mw < 0:
+        raise ValueError(f"rebid_cap_mw must be >= 0, got {rebid_cap_mw}")
+    da = np.asarray(da_prices, dtype=float).ravel()
+    realised = np.asarray(realised_ida, dtype=float).ravel()
+    n = da.size
+    if n == 0 or realised.size != n or np.isnan(da).any() or np.isnan(realised).any():
+        return 0.0
+    cap = power_mw if rebid_cap_mw is None else float(rebid_cap_mw)
+    if reserve_price_realised_eur_mw_h is None:
+        reserve_price = np.zeros(n)
+    else:
+        try:
+            reserve_price = _coerce_nonnegative_interval_vector(
+                reserve_price_realised_eur_mw_h, n=n,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"reserve_price_realised_eur_mw_h must be scalar or length {n}"
+            ) from exc
+    res = _solve_stage0_and_unpack(
+        da, realised[None, :], np.array([1.0]), reserve_price, dt, n, 1,
+        power_mw, duration_hours, efficiency, soc_init_frac, cap, availability,
+        canonicalize=False,
+    )
+    return res["expected_objective_eur"] if res["success"] else 0.0
+
+
+def solve_stochastic_triple_dispatch(
+    da_prices: np.ndarray,
+    scenarios: np.ndarray,
+    weights: np.ndarray,
+    base_forecast: np.ndarray,
+    ida_realised: np.ndarray,
+    dt: float,
+    *,
+    da_forecast: np.ndarray,
+    reserve_price_forecast_eur_mw_h: float | np.ndarray | None,
+    reserve_price_realised_eur_mw_h: float | np.ndarray | None = None,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    soc_init_frac: float = 0.5,
+    rebid_cap_mw: float | None = None,
+    availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
+) -> dict:
+    """One v2 reserve-mode policy day: Stage 0 → Stage 1 → Stage 2 (V2-B).
+
+    The layered sequential policy of the v2 contract (§2), commit-under-
+    forecast / settle-at-realised on BOTH the reserve and IDA legs:
+
+    - **Stage 0**: :func:`solve_stochastic_reserve_commitment` sizes ``r*``
+      against ``da_forecast`` (walk-forward DA point forecast — the reserve
+      gate closes before the DA auction and must not see realised DA) and
+      ``reserve_price_forecast_eur_mw_h``, scenario-aware about IDA through
+      the SAME bundle Stage 1 uses. Zero-price skip ⇒ ``r* ≡ 0``.
+    - **Stage 1**: the unchanged v1 B1 commitment on the realised DA prices
+      with ``reserve_mw = r*`` exogenous (canonical Stage-1 tie-break and all
+      v1 identities intact).
+    - **Stage 2**: the unchanged v1 B2 capped execution against
+      ``base_forecast``, settled at ``ida_realised`` — with the deadband INERT
+      (``always_rebid=True``): v2 reserve mode re-dispatches on ALL days for
+      all arms (§3), so ``min_rebid_uplift_eur`` is deliberately not a
+      parameter here. Capacity settles at ``reserve_price_realised_eur_mw_h``
+      on the committed ``r*`` (a forecast-committed reserve earns the realised
+      fee, which can be zero — the 9.2b convention).
+
+    Returns the B2 decomposition dict (``realised_total_eur`` includes the
+    realised-price capacity revenue on ``r*``; ``coopt_ceiling_eur`` stays
+    B2's FIXED-``r*`` perfect-foresight bound) plus the Stage-0 fields
+    (``reserve_mw`` = ``r*``, ``stage0_skipped``, ``stage0_tiebreak_stable``,
+    ``stage0_expected_objective_eur`` — a §2.4 DIAGNOSTIC, never an identity)
+    and the v2 ceiling family: ``coopt_ceiling_v2_eur`` (the §4 binding bound
+    with endogenous reserve; ``realised_total_eur <= coopt_ceiling_v2_eur`` by
+    construction, pinned §6-2) and ``forecast_error_cost_v2_eur``
+    (``= max(coopt_ceiling_v2 - realised, 0)``; the §6-2 pin checks the raw
+    inequality without this clamp).
+    """
+    da = np.asarray(da_prices, dtype=float).ravel()
+    n = da.size
+    stage0 = solve_stochastic_reserve_commitment(
+        da_forecast, scenarios, weights, dt,
+        reserve_price_forecast_eur_mw_h=reserve_price_forecast_eur_mw_h,
+        power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
+        soc_init_frac=soc_init_frac, rebid_cap_mw=rebid_cap_mw,
+        availability=availability,
+    )
+    if not stage0["success"]:
+        return _empty_triple_result(n)
+
+    executed = solve_stochastic_da_id_dispatch(
+        da, scenarios, weights, base_forecast, ida_realised, dt,
+        power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
+        soc_init_frac=soc_init_frac, rebid_cap_mw=rebid_cap_mw,
+        reserve_mw=stage0["reserve_mw"],
+        reserve_price_eur_mw_h=reserve_price_realised_eur_mw_h,
+        availability=availability,
+        always_rebid=True,  # deadband inert on all days in reserve mode (§3)
+    )
+    if not executed["success"]:
+        return _empty_triple_result(n)
+
+    ceiling_v2 = stochastic_coopt_ceiling_v2(
+        da, ida_realised, dt,
+        reserve_price_realised_eur_mw_h=reserve_price_realised_eur_mw_h,
+        power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
+        soc_init_frac=soc_init_frac, rebid_cap_mw=rebid_cap_mw,
+        availability=availability,
+    )
+
+    out = dict(executed)
+    out.update({
+        "stage0_skipped": bool(stage0["skipped"]),
+        "stage0_tiebreak_stable": bool(stage0["stage0_tiebreak_stable"]),
+        "stage0_expected_objective_eur": stage0["expected_objective_eur"],
+        "coopt_ceiling_v2_eur": round(float(ceiling_v2), 6),
+        "forecast_error_cost_v2_eur": round(
+            max(float(ceiling_v2) - executed["realised_total_eur"], 0.0), 6,
+        ),
+    })
+    return out
