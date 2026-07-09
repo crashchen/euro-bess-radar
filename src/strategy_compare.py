@@ -55,6 +55,15 @@ _REALISTIC_DEFAULT = "DA + IDA1 + reserve (forecast-driven realistic)"
 # Public: the cockpit (Increment D) imports this to identify the value-delta row
 # and exclude it from the totals "revenue by strategy" bar chart.
 STOCHASTIC_POLICY_VALUE_LABEL = "Stochastic policy value (vs capped myopic)"
+# v2 reserve-mode variant (contract §5): the delta row's baseline is the
+# cap-feasible myopic RESERVE-FIRST policy, a DIFFERENT number from both the
+# v1 capped-myopic and the panel's uncapped 9.2b sixth row — the label must
+# name it distinctly so the panel never shows two disagreeing "9.2b" numbers.
+# One delta row at a time; the label switches with the routing (§6-1.1), and
+# the chart exclusion covers BOTH labels.
+STOCHASTIC_POLICY_VALUE_RESERVE_LABEL = (
+    "Stochastic policy value (vs capped 9.2b reserve-first)"
+)
 
 
 def build_strategy_comparison(

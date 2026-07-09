@@ -22,6 +22,7 @@ from src.pages.simulation_cockpit import (
     _reserve_coopt_total,
     _reserve_triple_totals,
     _resolve_capacity_dataset,
+    _run_stochastic_policy_batch,
     _slice_to_local_dates,
     _stochastic_rebid_cap_mw,
     _strategy_chart_rows,
@@ -29,6 +30,7 @@ from src.pages.simulation_cockpit import (
 from src.simulation import DAYS_PER_YEAR
 from src.strategy_compare import (
     STOCHASTIC_POLICY_VALUE_LABEL,
+    STOCHASTIC_POLICY_VALUE_RESERVE_LABEL,
     STRATEGY_COMPARE_COLUMNS,
     build_strategy_comparison,
 )
@@ -713,3 +715,160 @@ def test_cache_capacity_window_slicing_excludes_out_of_window(
     out, _ = _resolve_capacity_dataset("DE_LU", None)
     window = _slice_to_local_dates(out, {date(2026, 6, 2), date(2026, 6, 3)}, "Europe/Berlin")
     assert capacity_price_for_product(window, "FCR") == pytest.approx(10.0)
+
+
+# ── Increment V2-D cockpit wiring (routing / labels / export) ─────────────────
+
+
+def _install_batch_spies(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Spy on both stochastic batch entry points in the cockpit namespace."""
+    import src.pages.simulation_cockpit as cockpit
+
+    calls: dict = {"v1": [], "v2": []}
+    sentinel = (pd.DataFrame(), {"valid_days": 0})
+
+    def v1_spy(*args, **kwargs):
+        calls["v1"].append({"args": args, **kwargs})
+        return sentinel
+
+    def v2_spy(*args, **kwargs):
+        calls["v2"].append({"args": args, **kwargs})
+        return sentinel
+
+    monkeypatch.setattr(cockpit, "simulate_stochastic_da_id_batch", v1_spy)
+    monkeypatch.setattr(cockpit, "simulate_stochastic_triple_batch", v2_spy)
+    return calls
+
+
+_ROUTER_KW = dict(
+    valid_dates={date(2026, 5, 2)}, tz="UTC", power_mw=2.0,
+    duration_hours=2.0, efficiency=0.88, bucket="hour_of_day",
+    forecast_mode="loo", rebid_cap_mw=1.0, min_rebid_uplift_eur=25.0,
+)
+
+
+def _capacity_frame(day: str) -> pd.DataFrame:
+    """Standard ancillary capacity frame covering one UTC day."""
+    idx = pd.date_range(day, periods=24, freq="h", tz="UTC")
+    return pd.DataFrame(
+        {
+            "product_type": "FCR",
+            "direction": "symmetric",
+            "capacity_price_eur_mw": 12.0,
+        },
+        index=idx,
+    )
+
+
+def test_routing_pin_v1_path_when_no_windowed_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # §6-1.1 routing pin THROUGH the real predicate production chain (Codex
+    # review, PR #49): the router itself windows the capacity frame and
+    # derives the per-product series, so a zone whose capacity rows exist
+    # only OUTSIDE the valid-date window (here: rows on May 20, window on
+    # May 2 — the pinned §5 fixture) routes to the LITERAL v1 path and the
+    # v2 entry point is never called. The user's own LOO/deadband settings
+    # are forwarded. None / empty frames route identically.
+    calls = _install_batch_spies(monkeypatch)
+    out_of_window = _capacity_frame("2026-05-20")
+    for capacity_df in (None, pd.DataFrame(), out_of_window):
+        calls["v1"].clear()
+        calls["v2"].clear()
+        _, _, reserve_mode = _run_stochastic_policy_batch(
+            pd.DataFrame(), pd.DataFrame(), capacity_df, "FCR", **_ROUTER_KW,
+        )
+        assert reserve_mode is False
+        assert len(calls["v2"]) == 0, "v2 machinery must not be invoked"
+        assert len(calls["v1"]) == 1
+        assert calls["v1"][0]["forecast_mode"] == "loo"
+        assert calls["v1"][0]["min_rebid_uplift_eur"] == 25.0
+
+
+def test_routing_pin_v2_path_when_capacity_in_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # §5: reserve mode active iff the WINDOWED series is non-empty — same
+    # frame as the out-of-window test, dated inside the window, through the
+    # same real chain. The v2 batch receives NEITHER the forecast-mode toggle
+    # NOR the deadband — walk-forward and the inert deadband are enforced by
+    # its construction (§2.3/§3) — and its reserve series is the windowed
+    # per-interval product series, not the raw frame.
+    calls = _install_batch_spies(monkeypatch)
+    _, _, reserve_mode = _run_stochastic_policy_batch(
+        pd.DataFrame(), pd.DataFrame(), _capacity_frame("2026-05-02"), "FCR",
+        **_ROUTER_KW,
+    )
+    assert reserve_mode is True
+    assert len(calls["v1"]) == 0, "the v1 path must not also run"
+    assert len(calls["v2"]) == 1
+    v2_kwargs = calls["v2"][0]
+    assert "forecast_mode" not in v2_kwargs
+    assert "min_rebid_uplift_eur" not in v2_kwargs
+    assert v2_kwargs["rebid_cap_mw"] == 1.0
+    # The v2 batch receives the WINDOWED per-interval product series (24
+    # hourly FCR rows), not the raw ancillary frame.
+    reserve_series = v2_kwargs["args"][2]
+    assert isinstance(reserve_series, pd.Series)
+    assert len(reserve_series) == 24
+    # A different product with no rows routes v1 (per-product predicate).
+    calls["v1"].clear()
+    calls["v2"].clear()
+    _, _, reserve_mode = _run_stochastic_policy_batch(
+        pd.DataFrame(), pd.DataFrame(), _capacity_frame("2026-05-02"), "aFRR",
+        **_ROUTER_KW,
+    )
+    assert reserve_mode is False
+    assert len(calls["v2"]) == 0 and len(calls["v1"]) == 1
+
+
+def test_strategy_chart_rows_excludes_reserve_policy_value_delta() -> None:
+    # V2-D guardrail extension: the chart exclusion covers BOTH delta labels —
+    # one delta row at a time, the label switches with the routing (§5).
+    table = build_strategy_comparison(
+        _summary(100.0, 130.0, 160.0, valid_days=10),
+        power_mw=2.0,
+        policy_value_total=18.0,
+        policy_value_label=STOCHASTIC_POLICY_VALUE_RESERVE_LABEL,
+    )
+    chart = _strategy_chart_rows(table)
+    assert STOCHASTIC_POLICY_VALUE_RESERVE_LABEL in set(table["strategy"])
+    assert STOCHASTIC_POLICY_VALUE_RESERVE_LABEL not in set(chart["strategy"])
+    assert len(chart) == len(table) - 1
+
+
+def test_reserve_label_is_distinct() -> None:
+    # The reserve-mode baseline is a DIFFERENT number from the v1 capped
+    # myopic; the labels must never collide or the panel would show two
+    # disagreeing numbers under one name.
+    assert STOCHASTIC_POLICY_VALUE_RESERVE_LABEL != STOCHASTIC_POLICY_VALUE_LABEL
+    assert "reserve" in STOCHASTIC_POLICY_VALUE_RESERVE_LABEL.lower()
+
+
+def test_append_stochastic_assumptions_reserve_mode_rows() -> None:
+    base = pd.DataFrame(
+        [{"parameter": "Power", "value": "2", "unit": "MW",
+          "source": "sidebar", "affects": "all"}],
+    )
+    summary = {"rebid_cap_mw": 1.0, "n_scenarios": 10}
+    v1_rows = _append_stochastic_assumptions(base, summary=summary)
+    v2_rows = _append_stochastic_assumptions(
+        base, summary=summary, reserve_mode=True,
+    )
+    v1_params = set(v1_rows["parameter"])
+    v2_params = set(v2_rows["parameter"])
+    # The v2 export names the reserve-mode conventions explicitly (§5).
+    for param in (
+        "Reserve-mode information set",
+        "Reserve-mode deadband",
+        "Reserve granularity & zero-price skip",
+        "Reserve availability haircut",
+        "Stage-0 expected objective",
+        "Stage-0 tie-break stability",
+    ):
+        assert param in v2_params
+        assert param not in v1_params
+    # Basis row points at the v2 batch.
+    basis = v2_rows[v2_rows["parameter"] == "Stochastic policy value basis"]
+    assert basis["source"].iloc[0] == "simulate_stochastic_triple_batch"
+    assert "reserve" in basis["value"].iloc[0]
