@@ -72,7 +72,7 @@ euro-bess-radar/
 │   ├── activation_overlay.py # Activation-energy replay overlay (screening, non-additive)
 │   ├── imbalance_overlay.py  # reBAP/imbalance replay overlay primitive
 │   └── export.py             # Excel report generation
-├── tests/                    # 825 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 833 passing tests, heavily mocked; 2 PDF tests may skip
 ├── scripts/                  # Maintenance/demo scripts (seed + Netztransparenz converter)
 ├── samples/                  # Generated demo CSVs from seed_demo_9_2b.py (git-ignored)
 ├── docs/runbooks/            # Operator runbooks (9.2b + imbalance validation, manual UI smoke)

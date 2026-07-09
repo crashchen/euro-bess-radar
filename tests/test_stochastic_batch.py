@@ -247,3 +247,226 @@ class TestStochasticBatch:
             simulate_stochastic_da_id_batch(
                 da_df, ida_df, n_scenarios=4, rebid_cap_mw=-1.0, **_KW,
             )
+
+
+def _reserve_series(index: pd.DatetimeIndex, *, skip_first_days: int = 0) -> pd.Series:
+    """4h-block alternating reserve price series (12/4 EUR/MW/h).
+
+    ``skip_first_days`` drops the leading days of reserve data so the
+    walk-forward reserve forecast has no history for the first valid day —
+    producing genuine zero-reserve (Stage-0 skip) days.
+    """
+    vals = np.where((np.arange(index.size) // 4) % 2 == 0, 12.0, 4.0).astype(float)
+    series = pd.Series(vals, index=index)
+    if skip_first_days:
+        series = series[series.index >= index[skip_first_days * 24]]
+    return series
+
+
+class TestStochasticTripleBatch:
+    """Increment V2-C: reserve-mode three-policy batch (v2 contract §3).
+
+    Pins §6-1.2 (constrained collapse), §6-6 (anchor incl. zero-reserve day),
+    §6-8 (no deadband knob — inert by construction), §6-9 (adverse-geometry
+    headline) + summary/risk block + both tie-break fallback counters.
+    """
+
+    def test_batch_aggregates_and_headline(self) -> None:
+        da_df, ida_df = _history(days=6)
+        from src.simulation import simulate_stochastic_triple_batch
+
+        per_day, summ = simulate_stochastic_triple_batch(
+            da_df, ida_df, _reserve_series(da_df.index),
+            n_scenarios=4, seed=1, rebid_cap_mw=0.8, **_KW,
+        )
+        # Walk-forward loses the first day (no bundle / no DA forecast).
+        assert summ["valid_days"] == 5
+        assert summ["excluded_days"] == 1
+        assert summ["forecast_mode"] == "walk_forward"
+        assert summ["n_stage0_skip_days"] == 0
+        # Headline identity + diagnostic split decomposition.
+        np.testing.assert_allclose(
+            summ["total_policy_value_v2_eur"],
+            summ["total_stochastic_realised_eur"]
+            - summ["total_myopic_realised_eur"], atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            per_day["commitment_value_eur"] + per_day["distribution_value_eur"],
+            per_day["policy_value_v2_eur"], atol=1e-6,
+        )
+        # §6-2 threading: per-day realised never exceeds the endogenous
+        # ceiling; reserve is actually committed (capacity in the money).
+        assert (
+            per_day["stochastic_realised_eur"]
+            <= per_day["coopt_ceiling_v2_eur"] + 1e-6
+        ).all()
+        assert (per_day["stochastic_avg_reserve_mw"] > 0).any()
+        rb = summ["risk_block"]
+        assert rb["n"] == summ["valid_days"] * 4
+        assert rb["p10"] <= rb["p50"] <= rb["p90"]
+
+    def test_constrained_collapse_matches_v1_batch(self) -> None:
+        # §6-1.2: with NO reserve prices anywhere, every arm's Stage 0 skips
+        # (r* == 0) and the v2 batch equals the v1 batch element-wise WHEN the
+        # v1 comparator runs under the reserve-mode conventions — walk-forward,
+        # deadband 0, same seed/S — including valid-day equality (the skip must
+        # not exclude days the comparator keeps) and scenario-RNG equality (the
+        # bundle is built once; Stage 0 consumes no randomness).
+        da_df, ida_df = _history(days=6, seed=21)
+        from src.simulation import simulate_stochastic_triple_batch
+
+        v2_per_day, v2 = simulate_stochastic_triple_batch(
+            da_df, ida_df, None, n_scenarios=4, seed=3, rebid_cap_mw=0.8, **_KW,
+        )
+        v1_per_day, v1 = simulate_stochastic_da_id_batch(
+            da_df, ida_df, n_scenarios=4, seed=3, rebid_cap_mw=0.8,
+            forecast_mode="walk_forward", min_rebid_uplift_eur=0.0, **_KW,
+        )
+        assert v2["valid_days"] == v1["valid_days"] > 0
+        assert v2["n_stage0_skip_days"] == v2["valid_days"]
+        assert v2_per_day["stage0_skipped"].all()
+        np.testing.assert_array_equal(
+            v2_per_day["date"].to_numpy(), v1_per_day["date"].to_numpy(),
+        )
+        for v2_col, v1_col in [
+            ("da_only_eur", "da_only_eur"),
+            ("myopic_realised_eur", "myopic_realised_eur"),
+            ("coopt_realised_eur", "coopt_realised_eur"),
+            ("stochastic_realised_eur", "stochastic_realised_eur"),
+            ("policy_value_v2_eur", "policy_value_eur"),
+        ]:
+            np.testing.assert_allclose(
+                v2_per_day[v2_col].to_numpy(), v1_per_day[v1_col].to_numpy(),
+                atol=1e-6, err_msg=v2_col,
+            )
+
+    def test_anchor_ties_9_2b_reserve_batch_with_zero_reserve_day(self) -> None:
+        # §6-6: at rebid_cap = inf (deadband inert) the cap-feasible myopic
+        # baseline ties simulate_sequential_da_id_reserve_batch's realised
+        # total EXACTLY, day by day — including zero-reserve days (reserve data
+        # starts two days late, so the first valid days have no reserve
+        # forecast: v2 skips, 9.2b safe-degrades to r = 0 — the case that
+        # exposed the deadband asymmetry). Fixture optima are non-degenerate
+        # (shaped DA + alternating block prices), so the canonical Stage-0
+        # selector picks the same unique r as 9.2b's raw joint LP.
+        da_df, ida_df = _history(days=8, seed=0)
+        from src.simulation import (
+            simulate_sequential_da_id_reserve_batch,
+            simulate_stochastic_triple_batch,
+        )
+
+        rp = _reserve_series(da_df.index, skip_first_days=2)
+        v2_per_day, _ = simulate_stochastic_triple_batch(
+            da_df, ida_df, rp, n_scenarios=4, seed=0, rebid_cap_mw=np.inf, **_KW,
+        )
+        b92_per_day, _ = simulate_sequential_da_id_reserve_batch(
+            da_df, ida_df, rp,
+            dates=sorted({ts.date() for ts in da_df.index}), **_KW,
+        )
+        merged = v2_per_day.merge(b92_per_day, on="date")
+        assert len(merged) == len(v2_per_day) > 0
+        assert (merged["myopic_avg_reserve_mw"] < 1e-9).any()  # zero-reserve day
+        assert (merged["myopic_avg_reserve_mw"] > 0.5).any()   # live-reserve day
+        np.testing.assert_allclose(
+            merged["myopic_realised_eur"].to_numpy(),
+            merged["realised_eur"].to_numpy(), atol=1e-4,
+        )
+
+    def test_adverse_geometry_headline_is_negative(self) -> None:
+        # §6-9: the headline can LOSE and is not clamped. Flat DA makes the
+        # myopic arm fill reserve at the full fee; the IDA history's huge
+        # dispersion makes the scenario-aware Stage 0 hold back headroom for a
+        # rebid opportunity that the realised path (== DA, no rebid value)
+        # never delivers — so the stochastic arm forgoes fee income for
+        # nothing and policy_value_v2 < 0.
+        days = 5
+        idx = pd.date_range("2026-06-01", periods=days * 24, freq="h", tz="UTC")
+        da = np.full(days * 24, 50.0)
+        ida = np.full(days * 24, 50.0)
+        pattern = np.where(np.arange(24) < 12, -40.0, 40.0)
+        for d in range(days - 1):  # dispersion history; final day realised == DA
+            ida[d * 24:(d + 1) * 24] = 50.0 + (1 if d % 2 == 0 else -1) * pattern
+        da_df = pd.DataFrame({"price_eur_mwh": da}, index=idx)
+        ida_df = pd.DataFrame({"intraday_price_eur_mwh": ida}, index=idx)
+        from src.simulation import simulate_stochastic_triple_batch
+
+        per_day, summ = simulate_stochastic_triple_batch(
+            da_df, ida_df, pd.Series(15.0, index=idx),
+            n_scenarios=4, seed=0, rebid_cap_mw=np.inf, **_KW,
+        )
+        assert summ["valid_days"] > 0
+        assert per_day["policy_value_v2_eur"].iloc[-1] < -1.0
+        assert summ["total_policy_value_v2_eur"] < -1.0
+
+    def test_no_deadband_or_forecast_mode_knobs(self) -> None:
+        # §2.3 + §3 (the §6-8 batch half): walk-forward and the inert deadband
+        # are enforced by CONSTRUCTION — the batch deliberately exposes neither
+        # a forecast_mode nor a min_rebid_uplift_eur parameter, so no caller
+        # can leak LOO history into the reserve gate or re-arm the deadband.
+        # (The v1 path's deadband semantics are untouched — its own tests.)
+        import inspect
+
+        from src.simulation import simulate_stochastic_triple_batch
+
+        params = inspect.signature(simulate_stochastic_triple_batch).parameters
+        assert "forecast_mode" not in params
+        assert "min_rebid_uplift_eur" not in params
+
+    def test_stage0_fallback_days_counted(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Both tie-break fallback counters ride the #43 pattern. Forcing every
+        # time-limited (canonical) solve to fail marks each valid day unstable
+        # on BOTH stages — Stage-0 ties hit the HEADLINE (§2.2), so
+        # n_stage0_fallback_days is the count the cockpit warning attaches to.
+        da_df, ida_df = _history(days=4, seed=31)
+        from src.simulation import simulate_stochastic_triple_batch
+
+        kw = dict(n_scenarios=3, seed=5, rebid_cap_mw=0.8, **_KW)
+        rp = _reserve_series(da_df.index)
+        _, normal = simulate_stochastic_triple_batch(da_df, ida_df, rp, **kw)
+        assert normal["n_stage0_fallback_days"] == 0
+        assert normal["n_tiebreak_fallback_days"] == 0
+
+        _force_canonical_tiebreak_fallback(monkeypatch)
+        per_day, fallback = simulate_stochastic_triple_batch(
+            da_df, ida_df, rp, **kw,
+        )
+        assert fallback["valid_days"] == normal["valid_days"] > 0
+        assert fallback["n_stage0_fallback_days"] == fallback["valid_days"]
+        assert not per_day["stage0_tiebreak_stable"].any()
+
+    def test_seed_reproducible(self) -> None:
+        da_df, ida_df = _history(days=4, seed=32)
+        from src.simulation import simulate_stochastic_triple_batch
+
+        kw = dict(n_scenarios=4, seed=7, rebid_cap_mw=0.8, **_KW)
+        rp = _reserve_series(da_df.index)
+        a = simulate_stochastic_triple_batch(da_df, ida_df, rp, **kw)[1]
+        b = simulate_stochastic_triple_batch(da_df, ida_df, rp, **kw)[1]
+        assert (
+            a["total_stochastic_realised_eur"] == b["total_stochastic_realised_eur"]
+        )
+        assert a["total_policy_value_v2_eur"] == b["total_policy_value_v2_eur"]
+
+    def test_negative_rebid_cap_raises(self) -> None:
+        da_df, ida_df = _history(days=3, seed=33)
+        from src.simulation import simulate_stochastic_triple_batch
+
+        with pytest.raises(ValueError, match="rebid_cap_mw must be >= 0"):
+            simulate_stochastic_triple_batch(
+                da_df, ida_df, _reserve_series(da_df.index),
+                n_scenarios=3, rebid_cap_mw=-1.0, **_KW,
+            )
+
+    def test_empty_inputs(self) -> None:
+        from src.simulation import simulate_stochastic_triple_batch
+
+        per_day, summ = simulate_stochastic_triple_batch(
+            pd.DataFrame(columns=["price_eur_mwh"]),
+            pd.DataFrame(columns=["intraday_price_eur_mwh"]),
+            None, n_scenarios=3,
+        )
+        assert per_day.empty
+        assert summ["valid_days"] == 0
+        assert summ["risk_block"]["n"] == 0
