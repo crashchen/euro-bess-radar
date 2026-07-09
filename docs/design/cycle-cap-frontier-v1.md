@@ -1,10 +1,11 @@
 # Cycle-cap × degradation net-revenue frontier — v1 design contract
 
-Status: **r1 — Codex round-1 verdict "LOCK AFTER REVISIONS", the listed
-revisions applied (2 blockers: gross-objective tie-sensitivity → canonical
-min-FEC tie-break; best-cap tie-rule conflict → lowest-finite-within-tolerance
-rule; 5 should-fix + 1 nit; Q1/Q2/Q3 closed). Formal lock = merge of the
-design PR.** No code lands until locked, per the house playbook
+Status: **r2 — Codex round-2 verified all round-1 revisions RESOLVED and the
+capex=0 / best-cap clauses consistent; four local consistency edits applied
+(z* defined in solver-objective space; one fallback field name; cap-compliance
+tolerance in MWh; solver-failure observability + exclusion wording). Verdict
+LOCK AFTER REVISIONS → revisions applied. Formal lock = merge of the design
+PR.** No code lands until locked, per the house playbook
 (`stochastic-milp-v1.md` / `stochastic-milp-v2-reserve.md`: contract → review
 rounds → lock → small PRs).
 
@@ -46,11 +47,15 @@ more, net of battery wear?"), not a dispatch-strategy question.
   lexicographic per day: pass 1 optimal revenue `z*`; pass 2 fixes revenue at
   `z*` (house tolerance discipline: `≤ z* + 1e-9·(1+|z*|)` in the solver's
   minimisation form, `> z* + 1e-6` degradation backstop → keep pass 1) and
-  minimises discharged energy. Exposed as
+  minimises discharged energy. Sign convention: `z*` is the scipy `linprog`
+  optimum of the NEGATED-revenue objective (`z* = result.fun`; the reported
+  revenue is `-result.fun`), so the inequalities above are written in the
+  SOLVER'S minimisation space — exactly the `_canonicalize_stage1` discipline.
+  Exposed as
   `solve_daily_lp(..., min_throughput_tiebreak: bool = False)` — default off,
   so no existing caller changes behaviour; the frontier always passes True.
-  A pass-2 failure falls back to pass 1 (day marked in a `tiebreak_stable`
-  summary count, #43 pattern).
+  A pass-2 failure falls back to pass 1; the frontier summary counts such
+  days as `n_tiebreak_fallback_days` (ONE contract field, #43 pattern).
 - **No cycle-life curve fitting.** `cycle_life` is a user knob (default
   `degradation.DEFAULT_CYCLE_LIFE = 6000`), not something estimated from the
   cap (a real cycle-life vs DoD curve is a non-goal; the linear proxy is the
@@ -119,9 +124,9 @@ def compute_cycle_cap_frontier(
 - Per cap: loop the window's clean local days (same day-selection rules as the
   existing replay batches: `_select_local_day`, regular-UTC-day check),
   `solve_daily_lp(max_efc_per_day=cap)` per day, sum revenue and FEC.
-  **Identical valid-day set across caps** — a day is excluded for data
-  reasons only, never for cap reasons, so every row is co-temporal (the
-  strategy-comparison lesson).
+  **Identical valid-day set across caps** — a day is excluded for DATA or
+  SOLVER reasons only, never for cap reasons, and any exclusion applies to
+  ALL caps, so every row is co-temporal (the strategy-comparison lesson).
 - Wear: `fec_total × cost_per_cycle_eur` with
   `cost_per_cycle_eur = capex_eur_kwh · capacity_kwh / cycle_life` (via the
   existing `calculate_degradation_cost` — no new formula). Also expose the
@@ -159,7 +164,12 @@ def compute_cycle_cap_frontier(
   convention); zero valid days ⇒ a TYPED empty frame + a summary with
   `valid_days=0` and NaN-free scalars (no division by zero); a solver failure
   on any day excludes that day FOR ALL caps (the co-temporal rule) and counts
-  it in `excluded_days`. Day selection reuses the replay helpers
+  it in `excluded_days`. **Failure observability (F-A scope)**: today
+  `solve_daily_lp` returns a zero schedule on solver failure with NO flag —
+  indistinguishable from a genuine zero-revenue day — so F-A adds a
+  `success: bool` key to its return dict (additive; existing callers
+  unaffected) and the frontier excludes days where ANY cap's solve reports
+  `success=False`. Day selection reuses the replay helpers
   (`_select_local_day` + regular-UTC-day check), so DST days follow the
   existing convention.
 
@@ -226,7 +236,8 @@ changes `z*` and reduces (never raises) reported FEC on a degenerate fixture.
 
 ## 7. Increment plan (after lock)
 
-- **F-A**: `solve_daily_lp(max_efc_per_day=...)` + pins §6-1/2/3.
+- **F-A**: `solve_daily_lp(max_efc_per_day=..., min_throughput_tiebreak=...)`
+  + the `success` return key + pins §6-1/2/3/9.
 - **F-B**: `cycle_frontier.compute_cycle_cap_frontier` + pins §6-4..8.
 - **F-C**: cockpit expander + export + AppTest smoke.
 
