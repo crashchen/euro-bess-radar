@@ -271,6 +271,20 @@ class TestStochasticTripleBatch:
     headline) + summary/risk block + both tie-break fallback counters.
     """
 
+    @pytest.fixture(autouse=True)
+    def _generous_canonical_deadline(self, monkeypatch: pytest.MonkeyPatch):
+        # The production 8s canonical-pass deadline is a PERF budget (§8), not
+        # a correctness property — on a slow CI runner it can trip an HONEST
+        # fallback mid-fixture (observed: 2 of 3 days on a shared box), which
+        # is legitimate solver behaviour but turns wall-clock speed into a
+        # test input. Widen it so these tests assert SEMANTICS (fallback
+        # counting, element-wise equality) rather than runner speed; the
+        # forced-fallback test still works — its monkeypatch fails the pass
+        # regardless of the time limit's value.
+        monkeypatch.setattr(
+            stochastic_dispatch, "_CANONICAL_TIEBREAK_TIME_LIMIT_S", 120.0,
+        )
+
     def test_batch_aggregates_and_headline(self) -> None:
         da_df, ida_df = _history(days=6)
         from src.simulation import simulate_stochastic_triple_batch
