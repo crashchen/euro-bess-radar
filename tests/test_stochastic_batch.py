@@ -363,8 +363,12 @@ class TestStochasticTripleBatch:
             da_df, ida_df, rp,
             dates=sorted({ts.date() for ts in da_df.index}), **_KW,
         )
+        # Symmetric date-set equality (Codex audit NIT): the two batches must
+        # keep EXACTLY the same days, not merely overlap.
+        assert len(v2_per_day) > 0
+        assert set(v2_per_day["date"]) == set(b92_per_day["date"])
         merged = v2_per_day.merge(b92_per_day, on="date")
-        assert len(merged) == len(v2_per_day) > 0
+        assert len(merged) == len(v2_per_day) == len(b92_per_day)
         assert (merged["myopic_avg_reserve_mw"] < 1e-9).any()  # zero-reserve day
         assert (merged["myopic_avg_reserve_mw"] > 0.5).any()   # live-reserve day
         np.testing.assert_allclose(
@@ -435,6 +439,10 @@ class TestStochasticTripleBatch:
         assert fallback["valid_days"] == normal["valid_days"] > 0
         assert fallback["n_stage0_fallback_days"] == fallback["valid_days"]
         assert not per_day["stage0_tiebreak_stable"].any()
+        # The Stage-1 counter rides the same forced-timeout pattern (Codex
+        # audit NIT: assert BOTH counters, not just Stage-0).
+        assert fallback["n_tiebreak_fallback_days"] == fallback["valid_days"]
+        assert not per_day["tiebreak_stable"].any()
 
     def test_seed_reproducible(self) -> None:
         da_df, ida_df = _history(days=4, seed=32)
