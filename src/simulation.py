@@ -41,6 +41,8 @@ from src.reserve_forecast import (
 from src.stochastic_dispatch import (
     solve_myopic_capped_da_id_dispatch,
     solve_stochastic_da_id_dispatch,
+    solve_stochastic_reserve_commitment,
+    solve_stochastic_triple_dispatch,
 )
 
 DAYS_PER_YEAR = 365.25
@@ -1755,3 +1757,271 @@ def _stochastic_summary(
         "n_rebid_days": 0 if per_day.empty else int(per_day["rebid"].sum()),
         "scenario_meta": scen_meta,
     }
+
+
+# ── Increment V2-C: reserve-mode three-policy batch (v2 contract §3) ───────────
+
+_TRIPLE_STOCH_COLUMNS = [
+    "date", "da_only_eur", "myopic_realised_eur", "coopt_realised_eur",
+    "stochastic_realised_eur", "coopt_ceiling_v2_eur", "policy_value_v2_eur",
+    "commitment_value_eur", "distribution_value_eur",
+    "myopic_avg_reserve_mw", "stochastic_avg_reserve_mw", "stage0_skipped",
+    "n_scenarios", "tiebreak_stable", "stage0_tiebreak_stable",
+]
+
+
+def _triple_stochastic_day(
+    da_prices, ida_prices, bundle, da_fc_series, reserve_fc_series,
+    reserve_price_series, *, local_date, tz, power_mw, duration_hours,
+    efficiency, rebid_cap_mw, availability,
+) -> tuple[dict[str, Any], np.ndarray] | None:
+    """Solve one v2 reserve-mode day across the three §3 arms, or None."""
+    if bundle is None:
+        return None
+    da_day = _select_local_day(da_prices, local_date, tz)
+    ida_day = _select_local_day(ida_prices, local_date, tz)
+    if da_day.empty or ida_day.empty or IDA_VALUE_COL not in ida_day.columns:
+        return None
+    merged = (
+        da_day[["price_eur_mwh"]]
+        .join(ida_day[[IDA_VALUE_COL]], how="inner")
+        .dropna()
+    )
+    if merged.empty or not _is_regular_utc_day(merged):
+        return None
+    aligned = _align_day_scenarios(bundle, pd.DatetimeIndex(merged.index))
+    if aligned is None:
+        return None
+    base, scen = aligned
+    idx = pd.DatetimeIndex(merged.index)
+    da = merged["price_eur_mwh"].to_numpy(dtype=float)
+    realised = merged[IDA_VALUE_COL].to_numpy(dtype=float)
+    dt = _infer_interval_hours(idx)
+    weights = np.full(scen.shape[0], 1.0 / scen.shape[0])
+
+    da_fc = (
+        da_fc_series.reindex(idx).to_numpy(dtype=float)
+        if da_fc_series is not None
+        else np.full(idx.size, np.nan)
+    )
+    reserve_fc = align_reserve_price_to_index(reserve_fc_series, idx, tz)
+    reserve_realised = align_reserve_price_to_index(reserve_price_series, idx, tz)
+    # §2 skip-ordering at the batch level: a day with no positive reserve
+    # forecast runs through the Stage-0 SKIP (r* = 0) regardless of the DA
+    # forecast (walk-forward's first day has none) — a day the v1 path can run
+    # is never excluded by a Stage-0-only input. Only a day that genuinely
+    # needs Stage 0 (positive forecast fee somewhere) requires a usable DA
+    # forecast.
+    has_reserve_gate = (
+        reserve_fc is not None and float(np.nanmax(reserve_fc, initial=0.0)) > 0.0
+    )
+    stage0_price = reserve_fc if has_reserve_gate else None
+    if has_reserve_gate and np.isnan(da_fc).any():
+        return None
+
+    common = dict(
+        power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
+        rebid_cap_mw=rebid_cap_mw, availability=availability,
+    )
+    # Arm 1 — cap-feasible myopic reserve baseline (§3): Stage 0 is the
+    # cap-constrained myopic joint problem, expressed through the SAME Stage-0
+    # solver with a single scenario == the DA forecast (identical objective to
+    # the cap-constrained solve_daily_joint_capacity_lp — the §6-5 collapse —
+    # and the §2.2 canonical selector applies symmetrically for free); both
+    # stages of the execution stay myopic.
+    # A skip day (stage0_price None) never reads da_fc values, so a missing
+    # walk-forward DA forecast (NaN) is fine here — the V2-A skip-ordering.
+    myopic_stage0 = solve_stochastic_reserve_commitment(
+        da_fc, da_fc[None, :], np.array([1.0]), dt,
+        reserve_price_forecast_eur_mw_h=stage0_price, **common,
+    )
+    if not myopic_stage0["success"]:
+        return None
+    myopic = solve_myopic_capped_da_id_dispatch(
+        da, base, realised, dt, reserve_mw=myopic_stage0["reserve_mw"],
+        reserve_price_eur_mw_h=reserve_realised, always_rebid=True, **common,
+    )
+    # Arms 2 + 3 — S=1 deterministic co-opt and S=N stochastic, both through
+    # the V2-B triple wrapper (deadband inert, capacity settled at realised).
+    triple_kw = dict(
+        da_forecast=da_fc, reserve_price_forecast_eur_mw_h=stage0_price,
+        reserve_price_realised_eur_mw_h=reserve_realised, **common,
+    )
+    coopt = solve_stochastic_triple_dispatch(
+        da, base[None, :], np.array([1.0]), base, realised, dt, **triple_kw,
+    )
+    stoch = solve_stochastic_triple_dispatch(
+        da, scen, weights, base, realised, dt, **triple_kw,
+    )
+    if not (myopic["success"] and coopt["success"] and stoch["success"]):
+        return None
+    row = {
+        "date": local_date,
+        "da_only_eur": stoch["da_only_revenue_eur"],
+        "myopic_realised_eur": myopic["realised_total_eur"],
+        "coopt_realised_eur": coopt["realised_total_eur"],
+        "stochastic_realised_eur": stoch["realised_total_eur"],
+        "coopt_ceiling_v2_eur": stoch["coopt_ceiling_v2_eur"],
+        # Headline (§3): signed, never clamped, INCLUDING capacity revenue on
+        # both sides — different arms commit different r*, so capacity no
+        # longer cancels in the delta (unlike the v1-D DA+IDA1-only batch).
+        "policy_value_v2_eur": (
+            stoch["realised_total_eur"] - myopic["realised_total_eur"]
+        ),
+        # Diagnostic split (§3, inherited caveats): "commitment" now bundles
+        # Stage-0 AND Stage-1 point-forecast awareness; a finer four-way split
+        # is explicitly out of v2.0 scope.
+        "commitment_value_eur": (
+            coopt["realised_total_eur"] - myopic["realised_total_eur"]
+        ),
+        "distribution_value_eur": (
+            stoch["realised_total_eur"] - coopt["realised_total_eur"]
+        ),
+        "myopic_avg_reserve_mw": float(np.mean(myopic_stage0["reserve_mw"])),
+        "stochastic_avg_reserve_mw": float(np.mean(stoch["reserve_mw"])),
+        "stage0_skipped": bool(stoch["stage0_skipped"]),
+        "n_scenarios": int(scen.shape[0]),
+        "tiebreak_stable": (
+            coopt.get("canonical_tiebreak_applied") is True
+            and stoch.get("canonical_tiebreak_applied") is True
+        ),
+        # Stage-0 ties hit the HEADLINE (§2.2/§3): the day is stage0-stable
+        # only when EVERY arm's Stage 0 accepted the canonical pass (a skip is
+        # deterministic and counts as stable).
+        "stage0_tiebreak_stable": (
+            bool(myopic_stage0["stage0_tiebreak_stable"])
+            and bool(coopt["stage0_tiebreak_stable"])
+            and bool(stoch["stage0_tiebreak_stable"])
+        ),
+    }
+    return row, np.asarray(stoch["scenario_total_eur"], dtype=float)
+
+
+def simulate_stochastic_triple_batch(
+    da_prices: pd.DataFrame,
+    ida_prices: pd.DataFrame,
+    reserve_price_series: pd.Series | None,
+    *,
+    dates: list[date] | None = None,
+    tz: str | None = None,
+    power_mw: float = 1.0,
+    duration_hours: float = 1.0,
+    efficiency: float = 0.88,
+    n_scenarios: int = 10,
+    bucket: str = "hour_of_day",
+    seed: int | None = None,
+    rebid_cap_mw: float | None = None,
+    availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
+) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Per-day three-policy v2 reserve-mode comparison at a COMMON cap (V2-C).
+
+    The §3 comparison basis: per local day, at an identical ``rebid_cap_mw`` /
+    scenario bundle / forecast series / realised settlement prices, run
+
+    - the **cap-feasible myopic reserve baseline** ("9.2b-STYLE", NOT the
+      panel's uncapped sixth row — the two coincide only at ``cap = inf``):
+      a cap-constrained myopic Stage 0, then the myopic capped execution;
+    - the **S=1 deterministic co-opt** (base-forecast scenario) and the
+      **S=N stochastic**, both through the V2-B triple day wrapper.
+
+    ALL forecast inputs are forced walk-forward (§2.3): the Stage-0 DA point
+    forecast, the reserve-price forecast, AND the IDA scenario bundle — the
+    reserve gate is a real-time commitment, so no LOO variant is offered and
+    ``forecast_mode`` is deliberately not a parameter (the window loses its
+    first day(s) exactly as 9.2b does). The deadband is INERT on all days for
+    all arms (§3) — ``min_rebid_uplift_eur`` is likewise not a parameter.
+
+    **Headline**: ``policy_value_v2 = stochastic_realised - myopic_realised``,
+    signed, never clamped, INCLUDING capacity revenue on both sides (different
+    arms commit different ``r*``, so it no longer cancels). Headline integrity
+    rests on the canonical Stage-0 selector: on ``stage0_tiebreak_stable =
+    False`` days the HEADLINE itself is non-canonical (not just the split) —
+    the summary counts them (``n_stage0_fallback_days``).
+
+    A day with no positive reserve forecast runs through the Stage-0 skip
+    (``r* = 0``) even when the walk-forward DA forecast is missing (§2
+    skip-ordering); a day that genuinely needs Stage 0 but lacks a usable DA
+    forecast is excluded. Returns ``(per_day_df, summary)`` with the window
+    totals, the diagnostic commitment/distribution split, both tie-break
+    fallback counts, and the pooled scenario risk block (:func:`_risk_block`).
+    """
+    selected = dates or available_local_dates(da_prices, tz=tz)
+    scenarios_by_date, scen_meta = build_ida_scenarios(
+        ida_prices, target_dates=selected, n_scenarios=n_scenarios, tz=tz,
+        bucket=bucket, forecast_mode="walk_forward", seed=seed,
+    )
+    da_fc_df, _ = build_da_price_forecast(
+        da_prices, target_dates=selected, tz=tz, bucket=bucket,
+        forecast_mode="walk_forward",
+    )
+    da_fc_series = da_fc_df[DA_FORECAST_COL] if not da_fc_df.empty else None
+    if reserve_price_series is not None and len(reserve_price_series) > 0:
+        reserve_hist = pd.DataFrame({RESERVE_VALUE_COL: reserve_price_series})
+        reserve_fc_df, _ = build_reserve_price_forecast(
+            reserve_hist, target_dates=selected, tz=tz,
+            forecast_mode="walk_forward",
+        )
+        reserve_fc_series = (
+            reserve_fc_df[RESERVE_FORECAST_COL] if not reserve_fc_df.empty else None
+        )
+    else:
+        reserve_fc_series = None
+
+    rows: list[dict[str, Any]] = []
+    pooled: list[float] = []
+    excluded = 0
+    for local_date in selected:
+        result = _triple_stochastic_day(
+            da_prices, ida_prices, scenarios_by_date.get(local_date),
+            da_fc_series, reserve_fc_series, reserve_price_series,
+            local_date=local_date, tz=tz, power_mw=power_mw,
+            duration_hours=duration_hours, efficiency=efficiency,
+            rebid_cap_mw=rebid_cap_mw, availability=availability,
+        )
+        if result is None:
+            excluded += 1
+            continue
+        row, scen_totals = result
+        rows.append(row)
+        pooled.extend(scen_totals.tolist())
+
+    if not rows:
+        per_day = pd.DataFrame(columns=_TRIPLE_STOCH_COLUMNS)
+    else:
+        per_day = (
+            pd.DataFrame(rows, columns=_TRIPLE_STOCH_COLUMNS)
+            .sort_values("date").reset_index(drop=True)
+        )
+
+    def _tot(col: str) -> float:
+        return 0.0 if per_day.empty else float(per_day[col].sum())
+
+    summary = {
+        "valid_days": len(per_day),
+        "excluded_days": excluded,
+        "total_da_only_eur": _tot("da_only_eur"),
+        "total_myopic_realised_eur": _tot("myopic_realised_eur"),
+        "total_coopt_realised_eur": _tot("coopt_realised_eur"),
+        "total_stochastic_realised_eur": _tot("stochastic_realised_eur"),
+        "total_coopt_ceiling_v2_eur": _tot("coopt_ceiling_v2_eur"),
+        "total_policy_value_v2_eur": _tot("policy_value_v2_eur"),
+        "total_commitment_value_eur": _tot("commitment_value_eur"),
+        "total_distribution_value_eur": _tot("distribution_value_eur"),
+        "n_tiebreak_fallback_days": (
+            0 if per_day.empty else int((~per_day["tiebreak_stable"]).sum())
+        ),
+        "n_stage0_fallback_days": (
+            0 if per_day.empty
+            else int((~per_day["stage0_tiebreak_stable"]).sum())
+        ),
+        "n_stage0_skip_days": (
+            0 if per_day.empty else int(per_day["stage0_skipped"].sum())
+        ),
+        "risk_block": _risk_block(pooled),
+        "rebid_cap_mw": rebid_cap_mw,
+        "n_scenarios": n_scenarios,
+        "forecast_mode": "walk_forward",
+        "scenario_meta": scen_meta,
+    }
+    per_day.attrs["summary"] = summary
+    return per_day, summary
