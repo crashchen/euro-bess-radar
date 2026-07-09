@@ -1026,6 +1026,57 @@ class TestMaxEfcCapAndTiebreak:
         np.testing.assert_allclose(canonical["revenue_eur"], 0.0, atol=1e-6)
         assert float(canonical["p_discharge"].sum()) <= 1e-9
 
+    def test_tiebreak_lowers_forced_churny_pass1(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Codex review (PR #51): the breakeven fixture above is genuinely
+        # tied, but HiGHS pass 1 already picks the zero-FEC member there, so
+        # it cannot prove the accepted pass-2 solution actually REPLACES the
+        # pass-1 one. Deterministic forcing (#43 pattern): intercept ONLY the
+        # first linprog call and swap its solution for the equal-objective
+        # CHURNY tie member (charge 0.5 @ t0, discharge 0.5 @ t1 — feasible,
+        # terminal-neutral, revenue exactly 0), then let the real pass 2 run.
+        # Without the tie-break the churny schedule must surface; with it the
+        # canonical zero-throughput member must replace it at the identical
+        # objective — pinning the result.x mutation glue.
+        import src.dispatch as dispatch_mod
+
+        prices = np.array([10.0, 11.0] * 6)
+        n = prices.size
+
+        def churny_x() -> np.ndarray:
+            x = np.zeros(3 * n)
+            x[0] = 0.5          # p_charge[0]
+            x[n + 1] = 0.5      # p_discharge[1]
+            x[2 * n] = 1.0      # b[0] = charging mode
+            return x
+
+        original_linprog = dispatch_mod.linprog
+        state = {"first": True}
+
+        def forcing_linprog(c, *args, **kwargs):
+            result = original_linprog(c, *args, **kwargs)
+            if state["first"]:
+                state["first"] = False
+                x = churny_x()
+                assert abs(float(c @ x)) < 1e-9  # equal-objective tie member
+                result.x = x
+                result.fun = float(c @ x)
+            return result
+
+        monkeypatch.setattr(dispatch_mod, "linprog", forcing_linprog)
+        kw = dict(dt=1.0, power_mw=1.0, duration_hours=1.0, efficiency=1.0)
+        plain = solve_daily_lp(prices, **kw)
+        assert float(plain["p_discharge"].sum()) == pytest.approx(0.5)
+
+        state["first"] = True
+        canonical = solve_daily_lp(prices, min_throughput_tiebreak=True, **kw)
+        assert canonical["tiebreak_applied"] is True
+        assert float(canonical["p_discharge"].sum()) <= 1e-9
+        np.testing.assert_allclose(
+            canonical["revenue_eur"], plain["revenue_eur"], atol=1e-6,
+        )
+
     def test_tiebreak_preserves_objective_and_never_raises_fec(self) -> None:
         # §6-9: on a normal (non-degenerate) day the canonical pass returns
         # the same revenue and never MORE throughput than pass 1.
