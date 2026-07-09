@@ -1141,26 +1141,31 @@ def _stochastic_rebid_cap_mw(cap_pct: float, power_mw: float) -> float:
 
 
 def _run_stochastic_policy_batch(
-    primary_df, intraday_df, reserve_series, *, dates, tz, power_mw,
-    duration_hours, efficiency, bucket, forecast_mode, rebid_cap_mw,
+    primary_df, intraday_df, capacity_df, reserve_product, *, valid_dates, tz,
+    power_mw, duration_hours, efficiency, bucket, forecast_mode, rebid_cap_mw,
     min_rebid_uplift_eur,
 ):
     """Route the opt-in stochastic policy run (v2 §5, the §6-1.1 routing pin).
 
     Reserve mode is active iff the selected product's per-interval capacity
-    series is non-empty AFTER windowing to the valid dates (``reserve_series``
-    is exactly that windowed series — the same rule the 5th/6th strategy rows
-    use, NOT the full-sample availability check). When active, the v2
-    reserve-mode batch runs INSTEAD of the v1 DA+IDA1 batch; otherwise the
-    LITERAL v1 path runs and no v2 machinery is invoked — equality by routing,
-    not by numerics. In reserve mode the panel's forecast-mode toggle and
-    deadband are deliberately NOT forwarded: the v2 batch forces walk-forward
-    and an inert deadband by construction (§2.3/§3), and its signature accepts
-    neither knob.
+    series is non-empty AFTER windowing to the valid dates. The router OWNS
+    that predicate's production chain — ``_slice_to_local_dates`` then
+    ``capacity_price_series_for_product``, the exact rule the 5th/6th strategy
+    rows use (NOT the full-sample availability check) — so a call site cannot
+    accidentally feed it an unwindowed frame (Codex review, PR #49). When
+    active, the v2 reserve-mode batch runs INSTEAD of the v1 DA+IDA1 batch;
+    otherwise the LITERAL v1 path runs and no v2 machinery is invoked —
+    equality by routing, not by numerics. In reserve mode the panel's
+    forecast-mode toggle and deadband are deliberately NOT forwarded: the v2
+    batch forces walk-forward and an inert deadband by construction
+    (§2.3/§3), and its signature accepts neither knob.
 
     Returns ``(per_day, summary, reserve_mode)``.
     """
+    window_anc = _slice_to_local_dates(capacity_df, valid_dates, tz)
+    reserve_series = capacity_price_series_for_product(window_anc, reserve_product)
     reserve_mode = reserve_series is not None and len(reserve_series) > 0
+    dates = sorted(valid_dates)
     if reserve_mode:
         per_day, summary = simulate_stochastic_triple_batch(
             primary_df, intraday_df, reserve_series, dates=dates, tz=tz,
@@ -1648,7 +1653,9 @@ def _render_forecast_policy_section(
                     "The load-bearing coupling |stage2_net - da_net| <= cap. A "
                     "finite cap is where the scenario-aware commitment earns its "
                     "value; at 100% the rebid can largely undo the DA commit. "
-                    "DA+IDA1 only — reserve co-opt stays the separate triple rows."
+                    "DA+IDA1 only unless reserve mode is active (see the note "
+                    "below), in which case the same cap governs the v2 "
+                    "DA+IDA1+reserve batch."
                 ),
             )
             st.caption(
@@ -1765,8 +1772,9 @@ def _render_forecast_policy_section(
                     _run_stochastic_policy_batch(
                         primary_df,
                         intraday_df,
-                        reserve_series,
-                        dates=sorted(valid_dates),
+                        capacity_df,
+                        reserve_product,
+                        valid_dates=valid_dates,
                         tz=zone_tz,
                         power_mw=power_mw,
                         duration_hours=duration_hours,

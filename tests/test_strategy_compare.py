@@ -728,11 +728,11 @@ def _install_batch_spies(monkeypatch: pytest.MonkeyPatch) -> dict:
     sentinel = (pd.DataFrame(), {"valid_days": 0})
 
     def v1_spy(*args, **kwargs):
-        calls["v1"].append(kwargs)
+        calls["v1"].append({"args": args, **kwargs})
         return sentinel
 
     def v2_spy(*args, **kwargs):
-        calls["v2"].append(kwargs)
+        calls["v2"].append({"args": args, **kwargs})
         return sentinel
 
     monkeypatch.setattr(cockpit, "simulate_stochastic_da_id_batch", v1_spy)
@@ -741,26 +741,42 @@ def _install_batch_spies(monkeypatch: pytest.MonkeyPatch) -> dict:
 
 
 _ROUTER_KW = dict(
-    dates=[date(2026, 5, 2)], tz="Europe/Berlin", power_mw=2.0,
+    valid_dates={date(2026, 5, 2)}, tz="UTC", power_mw=2.0,
     duration_hours=2.0, efficiency=0.88, bucket="hour_of_day",
     forecast_mode="loo", rebid_cap_mw=1.0, min_rebid_uplift_eur=25.0,
 )
 
 
+def _capacity_frame(day: str) -> pd.DataFrame:
+    """Standard ancillary capacity frame covering one UTC day."""
+    idx = pd.date_range(day, periods=24, freq="h", tz="UTC")
+    return pd.DataFrame(
+        {
+            "product_type": "FCR",
+            "direction": "symmetric",
+            "capacity_price_eur_mw": 12.0,
+        },
+        index=idx,
+    )
+
+
 def test_routing_pin_v1_path_when_no_windowed_capacity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # §6-1.1 routing pin: when the windowed per-product capacity series is
-    # empty (including a zone whose capacity rows exist only OUTSIDE the
-    # window — windowing collapses that to an empty series), the LITERAL v1
-    # path runs and the v2 entry point is NOT called — equality by routing,
-    # not numerics. The user's own LOO/deadband settings are forwarded.
+    # §6-1.1 routing pin THROUGH the real predicate production chain (Codex
+    # review, PR #49): the router itself windows the capacity frame and
+    # derives the per-product series, so a zone whose capacity rows exist
+    # only OUTSIDE the valid-date window (here: rows on May 20, window on
+    # May 2 — the pinned §5 fixture) routes to the LITERAL v1 path and the
+    # v2 entry point is never called. The user's own LOO/deadband settings
+    # are forwarded. None / empty frames route identically.
     calls = _install_batch_spies(monkeypatch)
-    for empty_series in (None, pd.Series(dtype=float)):
+    out_of_window = _capacity_frame("2026-05-20")
+    for capacity_df in (None, pd.DataFrame(), out_of_window):
         calls["v1"].clear()
         calls["v2"].clear()
         _, _, reserve_mode = _run_stochastic_policy_batch(
-            pd.DataFrame(), pd.DataFrame(), empty_series, **_ROUTER_KW,
+            pd.DataFrame(), pd.DataFrame(), capacity_df, "FCR", **_ROUTER_KW,
         )
         assert reserve_mode is False
         assert len(calls["v2"]) == 0, "v2 machinery must not be invoked"
@@ -772,16 +788,16 @@ def test_routing_pin_v1_path_when_no_windowed_capacity(
 def test_routing_pin_v2_path_when_capacity_in_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # §5: reserve mode active iff the windowed series is non-empty. The v2
-    # batch receives NEITHER the forecast-mode toggle NOR the deadband — walk-
-    # forward and the inert deadband are enforced by its construction (§2.3/§3).
+    # §5: reserve mode active iff the WINDOWED series is non-empty — same
+    # frame as the out-of-window test, dated inside the window, through the
+    # same real chain. The v2 batch receives NEITHER the forecast-mode toggle
+    # NOR the deadband — walk-forward and the inert deadband are enforced by
+    # its construction (§2.3/§3) — and its reserve series is the windowed
+    # per-interval product series, not the raw frame.
     calls = _install_batch_spies(monkeypatch)
-    series = pd.Series(
-        [12.0, 4.0],
-        index=pd.date_range("2026-05-02", periods=2, freq="4h", tz="UTC"),
-    )
     _, _, reserve_mode = _run_stochastic_policy_batch(
-        pd.DataFrame(), pd.DataFrame(), series, **_ROUTER_KW,
+        pd.DataFrame(), pd.DataFrame(), _capacity_frame("2026-05-02"), "FCR",
+        **_ROUTER_KW,
     )
     assert reserve_mode is True
     assert len(calls["v1"]) == 0, "the v1 path must not also run"
@@ -790,6 +806,20 @@ def test_routing_pin_v2_path_when_capacity_in_window(
     assert "forecast_mode" not in v2_kwargs
     assert "min_rebid_uplift_eur" not in v2_kwargs
     assert v2_kwargs["rebid_cap_mw"] == 1.0
+    # The v2 batch receives the WINDOWED per-interval product series (24
+    # hourly FCR rows), not the raw ancillary frame.
+    reserve_series = v2_kwargs["args"][2]
+    assert isinstance(reserve_series, pd.Series)
+    assert len(reserve_series) == 24
+    # A different product with no rows routes v1 (per-product predicate).
+    calls["v1"].clear()
+    calls["v2"].clear()
+    _, _, reserve_mode = _run_stochastic_policy_batch(
+        pd.DataFrame(), pd.DataFrame(), _capacity_frame("2026-05-02"), "aFRR",
+        **_ROUTER_KW,
+    )
+    assert reserve_mode is False
+    assert len(calls["v2"]) == 0 and len(calls["v1"]) == 1
 
 
 def test_strategy_chart_rows_excludes_reserve_policy_value_delta() -> None:
