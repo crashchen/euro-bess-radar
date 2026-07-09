@@ -1,11 +1,14 @@
 # Cycle-cap × degradation net-revenue frontier — v1 design contract
 
-Status: **r2 — Codex round-2 verified all round-1 revisions RESOLVED and the
-capex=0 / best-cap clauses consistent; four local consistency edits applied
-(z* defined in solver-objective space; one fallback field name; cap-compliance
-tolerance in MWh; solver-failure observability + exclusion wording). Verdict
-LOCK AFTER REVISIONS → revisions applied. Formal lock = merge of the design
-PR.** No code lands until locked, per the house playbook
+Status: **r3 — Gemini PR review (2 medium, both accepted, Codex concurred):
+the degradation backstop now SCALES with the bound cushion
+(`max(1e-6, 10·tol_z)` — fixes the known v1/v2 tolerance-crossing edge in
+this new contract rather than inheriting it) and the uplift-vs-uncapped
+denominator is ABSOLUTE (sign stays meaningful at negative uncapped net).
+r2 — Codex round-2 verified all round-1 revisions RESOLVED; four local
+consistency edits applied (z* in solver-objective space; one fallback field
+name; cap-compliance tolerance in MWh; solver-failure observability +
+exclusion wording). Formal lock = merge of the design PR.** No code lands until locked, per the house playbook
 (`stochastic-milp-v1.md` / `stochastic-milp-v2-reserve.md`: contract → review
 rounds → lock → small PRs).
 
@@ -45,8 +48,15 @@ more, net of battery wear?"), not a dispatch-strategy question.
   `net_eur` solver-tie-sensitive — the same class of problem the stochastic
   canonical selectors exist for. Frontier solves therefore run a two-pass
   lexicographic per day: pass 1 optimal revenue `z*`; pass 2 fixes revenue at
-  `z*` (house tolerance discipline: `≤ z* + 1e-9·(1+|z*|)` in the solver's
-  minimisation form, `> z* + 1e-6` degradation backstop → keep pass 1) and
+  `z*` (bound cushion `tol_z = 1e-9·(1+|z*|)` in the solver's minimisation
+  form; degradation backstop `> z* + max(1e-6, 10·tol_z)` → keep pass 1 — the
+  backstop SCALES with the bound cushion instead of being a fixed absolute,
+  so the two can never cross at large `|z*|`. This deliberately FIXES the
+  known v1-#41/v2-§2.2 edge where the fixed `1e-6` backstop undercuts the
+  relative cushion once `|z*| ≳ 1e3` and trips benign fallbacks; those
+  contracts are locked with the old constants — this scaled pair is the
+  erratum candidate to backport as v2.1 if their real-data batches trip it)
+  and
   minimises discharged energy. Sign convention: `z*` is the scipy `linprog`
   optimum of the NEGATED-revenue objective (`z* = result.fun`; the reported
   revenue is `-result.fun`), so the inequalities above are written in the
@@ -139,8 +149,11 @@ def compute_cycle_cap_frontier(
   `gross_eur_per_mw_yr`, `wear_eur_per_mw_yr`, `net_eur_per_mw_yr`
   (365.25 i.i.d. annualisation over the common valid days — the house
   convention), `net_delta_vs_uncapped_eur`, and `net_uplift_vs_uncapped_pct`
-  (NaN when |uncapped net| is within the window tolerance of zero — no
-  division blow-ups).
+  = `(net_eur − uncapped_net_eur) / abs(uncapped_net_eur)` — the ABSOLUTE
+  denominator keeps the sign meaningful when the uncapped net is negative
+  (wear can exceed gross: −5 vs −10 is a +50% improvement, not −50%); NaN
+  when |uncapped net| is within the window tolerance of zero (no division
+  blow-ups).
 - Summary dict: `valid_days`, `excluded_days`, `cost_per_cycle_eur`,
   `wear_eur_per_mwh_discharged`, `cycle_life`, `capex_eur_kwh`,
   `best_cap_label`, `frontier_flat`, `n_tiebreak_fallback_days`.
