@@ -1141,10 +1141,21 @@ def _stochastic_rebid_cap_mw(cap_pct: float, power_mw: float) -> float:
 
 
 def _run_stochastic_policy_batch(
-    primary_df, intraday_df, capacity_df, reserve_product, *, valid_dates, tz,
-    power_mw, duration_hours, efficiency, bucket, forecast_mode, rebid_cap_mw,
-    min_rebid_uplift_eur,
-):
+    primary_df: pd.DataFrame,
+    intraday_df: pd.DataFrame | None,
+    capacity_df: pd.DataFrame | None,
+    reserve_product: str | None,
+    *,
+    valid_dates: set,
+    tz: str | None,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    bucket: str,
+    forecast_mode: str,
+    rebid_cap_mw: float,
+    min_rebid_uplift_eur: float,
+) -> tuple[pd.DataFrame, dict, bool]:
     """Route the opt-in stochastic policy run (v2 §5, the §6-1.1 routing pin).
 
     Reserve mode is active iff the selected product's per-interval capacity
@@ -1164,7 +1175,7 @@ def _run_stochastic_policy_batch(
     """
     window_anc = _slice_to_local_dates(capacity_df, valid_dates, tz)
     reserve_series = capacity_price_series_for_product(window_anc, reserve_product)
-    reserve_mode = reserve_series is not None and len(reserve_series) > 0
+    reserve_mode = reserve_series is not None and not reserve_series.empty
     dates = sorted(valid_dates)
     if reserve_mode:
         per_day, summary = simulate_stochastic_triple_batch(
