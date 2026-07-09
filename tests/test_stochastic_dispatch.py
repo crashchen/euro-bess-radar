@@ -15,7 +15,11 @@ import numpy as np
 import pytest
 
 import src.stochastic_dispatch as stochastic_dispatch
-from src.dispatch import solve_daily_joint_capacity_lp, solve_daily_lp
+from src.dispatch import (
+    DISPATCH_VOM_COST_EUR_MWH,
+    solve_daily_joint_capacity_lp,
+    solve_daily_lp,
+)
 from src.stochastic_dispatch import (
     solve_myopic_capped_da_id_dispatch,
     solve_stochastic_da_commitment,
@@ -1159,6 +1163,51 @@ class TestStochasticTripleDispatch:
         assert t["success"]
         assert t["reserve_mw"].max() <= 0.5 + 1e-9
         assert t["realised_total_eur"] <= t["coopt_ceiling_v2_eur"] + 1e-6
+
+    def test_realised_total_recomputed_under_ceiling_accounting(self) -> None:
+        # Codex audit NIT (PR #47): §6-2 alone is inequality-based, so a
+        # ceiling inflated by an accounting mismatch would still pass it.
+        # Recompute the executed triple's value INDEPENDENTLY under the
+        # ceiling's objective terms — financial DA leg, implicit MtM, VOM'd
+        # Stage-2 value at realised IDA, floored fee at availability — and pin
+        # it to realised_total_eur. This is the accounting-parity half of the
+        # by-construction argument (the feasible point's value is computed in
+        # the same currency the ceiling maximises over).
+        t = self._triple(seed=0)
+        da, _, _, _, _, realised = self._case(seed=0)
+        da_net = t["da_p_discharge"] - t["da_p_charge"]
+        exec_net = t["exec_p_discharge"] - t["exec_p_charge"]
+        vom = DISPATCH_VOM_COST_EUR_MWH
+        energy = (
+            float((da_net * da).sum())
+            - float((da_net * realised).sum())
+            + float(
+                (exec_net * realised).sum()
+                - vom * (t["exec_p_discharge"] + t["exec_p_charge"]).sum()
+            )
+        )
+        fee = float(
+            (np.maximum(self._RP_REAL, 0.0) * 0.95 * t["reserve_mw"]).sum()
+        )
+        np.testing.assert_allclose(
+            t["realised_total_eur"], energy + fee, atol=1e-6,
+        )
+        assert energy + fee <= t["coopt_ceiling_v2_eur"] + 1e-6
+
+    def test_ceiling_v2_floors_negative_reserve_price(self) -> None:
+        # Fee-flooring parity with the settlement side: a negative realised
+        # capacity price contributes nothing to the ceiling either (you are
+        # not paid to hold reserve at a negative price), so the ceiling at a
+        # negative fee equals the ceiling at zero fee.
+        da, _, _, _, _, realised = self._case(seed=1)
+        kw = dict(power_mw=1.0, duration_hours=2.0, rebid_cap_mw=1.0)
+        neg = stochastic_coopt_ceiling_v2(
+            da, realised, 1.0, reserve_price_realised_eur_mw_h=-12.0, **kw,
+        )
+        zero = stochastic_coopt_ceiling_v2(
+            da, realised, 1.0, reserve_price_realised_eur_mw_h=0.0, **kw,
+        )
+        np.testing.assert_allclose(neg, zero, atol=1e-6)
 
     def test_forecast_error_cost_v2_is_clamped_gap(self) -> None:
         t = self._triple(seed=1)
