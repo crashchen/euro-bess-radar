@@ -37,9 +37,11 @@ from src.simulation import (
     simulate_sequential_da_id_batch,
     simulate_sequential_da_id_reserve_batch,
     simulate_stochastic_da_id_batch,
+    simulate_stochastic_triple_batch,
 )
 from src.strategy_compare import (
     STOCHASTIC_POLICY_VALUE_LABEL,
+    STOCHASTIC_POLICY_VALUE_RESERVE_LABEL,
     build_strategy_comparison,
 )
 
@@ -1138,8 +1140,49 @@ def _stochastic_rebid_cap_mw(cap_pct: float, power_mw: float) -> float:
     return max(0.0, float(cap_pct) / 100.0 * float(power_mw))
 
 
+def _run_stochastic_policy_batch(
+    primary_df, intraday_df, reserve_series, *, dates, tz, power_mw,
+    duration_hours, efficiency, bucket, forecast_mode, rebid_cap_mw,
+    min_rebid_uplift_eur,
+):
+    """Route the opt-in stochastic policy run (v2 §5, the §6-1.1 routing pin).
+
+    Reserve mode is active iff the selected product's per-interval capacity
+    series is non-empty AFTER windowing to the valid dates (``reserve_series``
+    is exactly that windowed series — the same rule the 5th/6th strategy rows
+    use, NOT the full-sample availability check). When active, the v2
+    reserve-mode batch runs INSTEAD of the v1 DA+IDA1 batch; otherwise the
+    LITERAL v1 path runs and no v2 machinery is invoked — equality by routing,
+    not by numerics. In reserve mode the panel's forecast-mode toggle and
+    deadband are deliberately NOT forwarded: the v2 batch forces walk-forward
+    and an inert deadband by construction (§2.3/§3), and its signature accepts
+    neither knob.
+
+    Returns ``(per_day, summary, reserve_mode)``.
+    """
+    reserve_mode = reserve_series is not None and len(reserve_series) > 0
+    if reserve_mode:
+        per_day, summary = simulate_stochastic_triple_batch(
+            primary_df, intraday_df, reserve_series, dates=dates, tz=tz,
+            power_mw=power_mw, duration_hours=duration_hours,
+            efficiency=efficiency, n_scenarios=_STOCHASTIC_N_SCENARIOS,
+            bucket=bucket, seed=_STOCHASTIC_SEED, rebid_cap_mw=rebid_cap_mw,
+        )
+    else:
+        per_day, summary = simulate_stochastic_da_id_batch(
+            primary_df, intraday_df, dates=dates, tz=tz, power_mw=power_mw,
+            duration_hours=duration_hours, efficiency=efficiency,
+            n_scenarios=_STOCHASTIC_N_SCENARIOS, bucket=bucket,
+            forecast_mode=forecast_mode, seed=_STOCHASTIC_SEED,
+            rebid_cap_mw=rebid_cap_mw,
+            min_rebid_uplift_eur=min_rebid_uplift_eur,
+        )
+    return per_day, summary, reserve_mode
+
+
 def _append_stochastic_assumptions(
     assumptions: pd.DataFrame | None, *, summary: dict,
+    reserve_mode: bool = False,
 ) -> pd.DataFrame | None:
     """Append stochastic policy-value provenance to the export assumptions."""
     if assumptions is None:
@@ -1149,9 +1192,17 @@ def _append_stochastic_assumptions(
     rows = pd.DataFrame([
         {
             "parameter": "Stochastic policy value basis",
-            "value": "stochastic_realised - capped_myopic_realised",
+            "value": (
+                "stochastic_realised - capped_9.2b_reserve_first_realised "
+                "(both incl. reserve capacity at realised prices)"
+                if reserve_mode
+                else "stochastic_realised - capped_myopic_realised"
+            ),
             "unit": "EUR (window)",
-            "source": "simulate_stochastic_da_id_batch",
+            "source": (
+                "simulate_stochastic_triple_batch" if reserve_mode
+                else "simulate_stochastic_da_id_batch"
+            ),
             "affects": (
                 "Robust headline DELTA (not a revenue total); common rebid cap, "
                 "same valid-day window; screening diagnostic, NOT bankable"
@@ -1182,7 +1233,69 @@ def _append_stochastic_assumptions(
             ),
         },
     ])
+    if reserve_mode:
+        rows = pd.concat([rows, _reserve_mode_stochastic_rows()], ignore_index=True)
     return pd.concat([assumptions, rows], ignore_index=True)
+
+
+def _reserve_mode_stochastic_rows() -> pd.DataFrame:
+    """v2 reserve-mode provenance rows for the export assumptions (§5)."""
+    return pd.DataFrame([
+        {
+            "parameter": "Reserve-mode information set",
+            "value": "walk-forward FORCED (DA forecast, reserve forecast, IDA scenarios)",
+            "unit": "",
+            "source": "simulate_stochastic_triple_batch (no forecast_mode knob)",
+            "affects": (
+                "The reserve gate is a real-time commitment: the panel's LOO "
+                "toggle is ignored; the window loses its first day(s)"
+            ),
+        },
+        {
+            "parameter": "Reserve-mode deadband",
+            "value": "inert (re-dispatches on all days, all arms)",
+            "unit": "",
+            "source": "v2 contract §3",
+            "affects": "The rebid-deadband knob is ignored in reserve mode",
+        },
+        {
+            "parameter": "Reserve granularity & zero-price skip",
+            "value": (
+                "per-interval r* (screening, not a 4h product commitment); "
+                "a day with no positive forecast fee commits r* = 0"
+            ),
+            "unit": "MW",
+            "source": "solve_stochastic_reserve_commitment",
+            "affects": "Committed reserve pattern; per-arm avg in the per-day sheet",
+        },
+        {
+            "parameter": "Reserve availability haircut",
+            "value": f"{ANCILLARY_CAPACITY_AVAILABILITY:.2f}",
+            "unit": "fraction",
+            "source": "config.ANCILLARY_CAPACITY_AVAILABILITY",
+            "affects": "Capacity fee on both the commitment objective and settlement",
+        },
+        {
+            "parameter": "Stage-0 expected objective",
+            "value": "DIAGNOSTIC only",
+            "unit": "",
+            "source": "v2 contract §2.4",
+            "affects": (
+                "Never a pinned identity or a UI revenue number; realised "
+                "identities anchor post-execution"
+            ),
+        },
+        {
+            "parameter": "Stage-0 tie-break stability",
+            "value": "per-day stage0_tiebreak_stable column; headline-level",
+            "unit": "",
+            "source": "canonical Stage-0 selector (v2 contract §2.2)",
+            "affects": (
+                "Stage-0 ties hit the HEADLINE (not just the split); fallback "
+                "days are counted in n_stage0_fallback_days"
+            ),
+        },
+    ])
 
 
 def _reserve_history_for_product(
@@ -1538,6 +1651,16 @@ def _render_forecast_policy_section(
                     "DA+IDA1 only — reserve co-opt stays the separate triple rows."
                 ),
             )
+            st.caption(
+                "Reserve mode: when the selected reserve product has capacity "
+                "prices INSIDE the comparison window (the same rule as the "
+                "reserve strategy rows), the stochastic run switches to the v2 "
+                "DA+IDA1+reserve batch — which IGNORES the rebid deadband "
+                "(re-dispatches every day) and forces WALK-FORWARD forecasts "
+                "regardless of the forecast-mode toggle. The deadband/LOO "
+                "settings above apply only while the DA+IDA1-only path is "
+                "active."
+            )
 
         run = st.button("Run forecast policy", key="forecast_policy_run")
         if not run:
@@ -1632,30 +1755,43 @@ def _render_forecast_policy_section(
         # chart (see _strategy_chart_rows; Increment D guardrail).
         stoch_per_day = None
         stoch_summary = None
+        stoch_reserve_mode = False
         if include_stochastic:
             with st.spinner(
                 f"Solving {len(valid_dates)} day(s) x 3 policies "
                 "(capped-myopic / co-opt / stochastic)..."
             ):
-                stoch_per_day, stoch_summary = simulate_stochastic_da_id_batch(
-                    primary_df,
-                    intraday_df,
-                    dates=sorted(valid_dates),
-                    tz=zone_tz,
-                    power_mw=power_mw,
-                    duration_hours=duration_hours,
-                    efficiency=efficiency,
-                    n_scenarios=_STOCHASTIC_N_SCENARIOS,
-                    bucket=bucket,
-                    forecast_mode=forecast_mode,
-                    seed=_STOCHASTIC_SEED,
-                    rebid_cap_mw=_stochastic_rebid_cap_mw(stochastic_cap_pct, power_mw),
-                    min_rebid_uplift_eur=min_rebid_uplift_eur,
+                stoch_per_day, stoch_summary, stoch_reserve_mode = (
+                    _run_stochastic_policy_batch(
+                        primary_df,
+                        intraday_df,
+                        reserve_series,
+                        dates=sorted(valid_dates),
+                        tz=zone_tz,
+                        power_mw=power_mw,
+                        duration_hours=duration_hours,
+                        efficiency=efficiency,
+                        bucket=bucket,
+                        forecast_mode=forecast_mode,
+                        rebid_cap_mw=_stochastic_rebid_cap_mw(
+                            stochastic_cap_pct, power_mw,
+                        ),
+                        min_rebid_uplift_eur=min_rebid_uplift_eur,
+                    )
                 )
         policy_value_total = None
         policy_value_valid_days = None
+        policy_value_label = None
         if stoch_summary is not None and stoch_summary["valid_days"] > 0:
-            policy_value_total = stoch_summary["total_policy_value_eur"]
+            # One delta row, label switches with the routing (§5): the reserve-
+            # mode baseline is the capped 9.2b reserve-first policy — a
+            # DIFFERENT number from the v1 capped-myopic — and both labels are
+            # excluded from the bar chart by _strategy_chart_rows.
+            if stoch_reserve_mode:
+                policy_value_total = stoch_summary["total_policy_value_v2_eur"]
+                policy_value_label = STOCHASTIC_POLICY_VALUE_RESERVE_LABEL
+            else:
+                policy_value_total = stoch_summary["total_policy_value_eur"]
             policy_value_valid_days = stoch_summary["valid_days"]
         comparison = build_strategy_comparison(
             summary,
@@ -1670,6 +1806,7 @@ def _render_forecast_policy_section(
             triple_da_baseline=triple["triple_da_baseline"],
             policy_value_total=policy_value_total,
             policy_value_valid_days=policy_value_valid_days,
+            policy_value_label=policy_value_label,
         )
         _render_strategy_comparison(
             comparison, chart_template,
@@ -1684,7 +1821,10 @@ def _render_forecast_policy_section(
                 "co-temporally with the DA+ID rows."
             )
         if stoch_summary is not None and stoch_summary["valid_days"] > 0:
-            _render_stochastic_attribution_panel(stoch_summary, power_mw=power_mw)
+            _render_stochastic_attribution_panel(
+                stoch_summary, power_mw=power_mw,
+                reserve_mode=stoch_reserve_mode,
+            )
         if triple["seq_summary"] is not None:
             _render_reserve_gap_panel(
                 triple["seq_summary"], reserve_product, chart_template,
@@ -1713,6 +1853,7 @@ def _render_forecast_policy_section(
         if stoch_summary is not None and stoch_summary["valid_days"] > 0:
             export_assumptions = _append_stochastic_assumptions(
                 export_assumptions, summary=stoch_summary,
+                reserve_mode=stoch_reserve_mode,
             )
         export_tables = {"Strategy comparison": comparison, "Sequential DA+ID": per_day}
         if triple["seq_per_day"] is not None and not triple["seq_per_day"].empty:
@@ -1804,8 +1945,11 @@ def _strategy_chart_rows(comparison: pd.DataFrame) -> pd.DataFrame:
     """
     if comparison is None or comparison.empty:
         return comparison
+    delta_labels = [
+        STOCHASTIC_POLICY_VALUE_LABEL, STOCHASTIC_POLICY_VALUE_RESERVE_LABEL,
+    ]
     return comparison[
-        comparison["strategy"] != STOCHASTIC_POLICY_VALUE_LABEL
+        ~comparison["strategy"].isin(delta_labels)
     ].reset_index(drop=True)
 
 
@@ -1845,14 +1989,17 @@ def _render_strategy_comparison(
             "when ancillary capacity prices are loaded."
         )
     has_policy_value = bool(
-        (comparison["strategy"] == STOCHASTIC_POLICY_VALUE_LABEL).any()
+        comparison["strategy"].isin([
+            STOCHASTIC_POLICY_VALUE_LABEL, STOCHASTIC_POLICY_VALUE_RESERVE_LABEL,
+        ]).any()
     )
     if has_policy_value:
         notes.append(
             "The Stochastic policy value row is a value DELTA (scenario-aware "
-            "commitment minus capped-myopic, at the common rebid cap over the "
-            "same valid days), NOT a revenue total — it has no DA uplift and is "
-            "excluded from the bar chart above; see the attribution & risk panel."
+            "commitment minus the capped myopic baseline named in its label, "
+            "at the common rebid cap over the same valid days), NOT a revenue "
+            "total — it has no DA uplift and is excluded from the bar chart "
+            "above; see the attribution & risk panel."
         )
     window_note = (
         "DA/IDA rows use the forecast-policy window; reserve-first triple rows "
@@ -1950,7 +2097,7 @@ def _render_reserve_gap_panel(
 
 
 def _render_stochastic_attribution_panel(
-    summary: dict, *, power_mw: float,
+    summary: dict, *, power_mw: float, reserve_mode: bool = False,
 ) -> None:
     """Attribution + risk for the stochastic policy value (Increment D).
 
@@ -1963,7 +2110,9 @@ def _render_stochastic_attribution_panel(
     """
     if summary is None or summary.get("valid_days", 0) <= 0:
         return
-    pv = summary["total_policy_value_eur"]
+    pv = summary[
+        "total_policy_value_v2_eur" if reserve_mode else "total_policy_value_eur"
+    ]
     days = int(summary["valid_days"])
     cap = summary.get("rebid_cap_mw")
     cap_txt = (
@@ -1979,12 +2128,18 @@ def _render_stochastic_attribution_panel(
     cols[0].metric("Policy value (window)", f"EUR {pv:,.0f}")
     cols[1].metric("Annualised", f"EUR {per_mw_yr:,.0f}/MW/yr")
     cols[2].metric("Rebid cap", cap_txt)
+    scope_note = (
+        "Includes reserve capacity at REALISED prices on both sides; reserve "
+        "committed walk-forward before the DA gate; per-interval reserve "
+        "(screening, not a 4h product commitment); deadband inert."
+        if reserve_mode
+        else "DA+IDA1 only (reserve co-opt is the separate triple rows)."
+    )
     st.caption(
-        f"Scenario-aware DA commitment minus capped-myopic realised, common "
+        f"Scenario-aware commitment minus the capped myopic baseline, common "
         f"rebid cap {cap_txt}, over {days} valid day(s). A screening diagnostic, "
         "NOT a bankable co-optimised revenue. The split below is an attribution "
-        "diagnostic; trust it only on tie-stable days. DA+IDA1 only (reserve "
-        "co-opt is the separate triple rows)."
+        f"diagnostic; trust it only on tie-stable days. {scope_note}"
     )
     fallback_days = int(summary.get("n_tiebreak_fallback_days", 0) or 0)
     stable_days = max(days - fallback_days, 0)
@@ -1997,7 +2152,7 @@ def _render_stochastic_attribution_panel(
         "Distribution value (stochastic - co-opt)",
         f"EUR {summary['total_distribution_value_eur']:,.0f}",
     )
-    st.caption(f"Split tie-stable on {stable_days}/{days} days")
+    st.caption(f"Stage-1 split tie-stable on {stable_days}/{days} days")
     if fallback_days > 0:
         st.warning(
             "Commitment/distribution split is tie-SENSITIVE on "
@@ -2005,6 +2160,20 @@ def _render_stochastic_attribution_panel(
             "the pass-1 solution. Trust only the robust policy-value headline "
             "for those days."
         )
+    if reserve_mode:
+        # Stage-0 ties hit the HEADLINE, not just the split (§2.2/§3), so the
+        # warning attaches to the policy-value metric itself.
+        s0_fallback = int(summary.get("n_stage0_fallback_days", 0) or 0)
+        s0_stable = max(days - s0_fallback, 0)
+        st.caption(f"Stage-0 (reserve) tie-stable on {s0_stable}/{days} days")
+        if s0_fallback > 0:
+            st.warning(
+                f"HEADLINE is non-canonical on {s0_fallback}/{days} day(s): "
+                "the Stage-0 reserve tie-break fell back to the pass-1 vector, "
+                "so equal-optimal reserve commitments may settle to different "
+                "realised money on those days — treat the policy value there "
+                "as one member of a tie set, not a canonical number."
+            )
     risk = summary.get("risk_block") or {}
     if risk.get("n", 0) > 0:
         rcols = st.columns(4)

@@ -7,7 +7,9 @@ canonical Stage-0 selector + pins §6-4/5/7/10); **V2-B landed**
 (`solve_stochastic_triple_dispatch` day wrapper + selector-disabled
 `stochastic_coopt_ceiling_v2` + pins §6-2/3); **V2-C landed**
 (`simulate_stochastic_triple_batch` three-arm reserve-mode batch + pins
-§6-1.2/6/8/9). The lock mirrored the v1
+§6-1.2/6/8/9); **V2-D landed** (cockpit/export wiring per §5 + the §6-1.1
+routing pin + the two-label chart guardrail) — **v2 increment plan COMPLETE**.
+The lock mirrored the v1
 process (`docs/design/stochastic-milp-v1.md`, four review rounds before
 Increment A).
 
