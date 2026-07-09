@@ -1,8 +1,12 @@
 # Cycle-cap × degradation net-revenue frontier — v1 design contract
 
-Status: **r0 draft (CC-authored, 2026-07-09). Not locked — no code lands until
-this contract is locked**, per the house playbook (`stochastic-milp-v1.md` /
-`stochastic-milp-v2-reserve.md`: contract → review rounds → lock → small PRs).
+Status: **r1 — Codex round-1 verdict "LOCK AFTER REVISIONS", the listed
+revisions applied (2 blockers: gross-objective tie-sensitivity → canonical
+min-FEC tie-break; best-cap tie-rule conflict → lowest-finite-within-tolerance
+rule; 5 should-fix + 1 nit; Q1/Q2/Q3 closed). Formal lock = merge of the
+design PR.** No code lands until locked, per the house playbook
+(`stochastic-milp-v1.md` / `stochastic-milp-v2-reserve.md`: contract → review
+rounds → lock → small PRs).
 
 Origin: r2b "How BESS Earn Money" workshop deck (2026-06) + the Paternò Sicily
 45MW/270MWh cycle debate. The deck's third-party trader table prices
@@ -28,6 +32,25 @@ more, net of battery wear?"), not a dispatch-strategy question.
 - **The cap constrains the OPTIMISER, not the accounting.** A capped run's
   reported EFC is the realised optimum under the constraint (≤ cap), never
   clamped after the fact.
+- **The optimiser is WEAR-BLIND; only the table nets wear.** `gross_eur` is
+  raw `solve_daily_lp` revenue — already net of the in-objective
+  `DISPATCH_VOM_COST_EUR_MWH = 0.5` EUR/MWh on both legs — while `wear_eur`
+  is applied EX-POST in the frontier table only. No capture haircut is
+  applied anywhere in v1. VOM and wear are DIFFERENT costs (operational vs
+  capex amortisation) and are never merged into one coefficient; the
+  assumptions rows state both.
+- **Canonical min-FEC tie-break on frontier solves.** Equal-gross optima can
+  differ in FEC (degenerate/flat days), which would make `wear_eur` and
+  `net_eur` solver-tie-sensitive — the same class of problem the stochastic
+  canonical selectors exist for. Frontier solves therefore run a two-pass
+  lexicographic per day: pass 1 optimal revenue `z*`; pass 2 fixes revenue at
+  `z*` (house tolerance discipline: `≤ z* + 1e-9·(1+|z*|)` in the solver's
+  minimisation form, `> z* + 1e-6` degradation backstop → keep pass 1) and
+  minimises discharged energy. Exposed as
+  `solve_daily_lp(..., min_throughput_tiebreak: bool = False)` — default off,
+  so no existing caller changes behaviour; the frontier always passes True.
+  A pass-2 failure falls back to pass 1 (day marked in a `tiebreak_stable`
+  summary count, #43 pattern).
 - **No cycle-life curve fitting.** `cycle_life` is a user knob (default
   `degradation.DEFAULT_CYCLE_LIFE = 6000`), not something estimated from the
   cap (a real cycle-life vs DoD curve is a non-goal; the linear proxy is the
@@ -38,8 +61,14 @@ more, net of battery wear?"), not a dispatch-strategy question.
 `dispatch.solve_daily_lp` gains one optional parameter:
 
 ```python
-def solve_daily_lp(..., max_efc_per_day: float | None = None) -> dict:
+def solve_daily_lp(
+    ..., max_efc_per_day: float | None = None,
+    min_throughput_tiebreak: bool = False,
+) -> dict:
 ```
+
+Both new parameters are appended AFTER the existing ones (positional API
+compatibility for every current caller).
 
 - Semantics: **discharged energy per solved day** is capped —
   `Σ_t p_discharge_t · dt ≤ max_efc_per_day · capacity_mwh`. ONE extra A_ub
@@ -52,6 +81,10 @@ def solve_daily_lp(..., max_efc_per_day: float | None = None) -> dict:
   (zero dispatch, zero revenue — the constraint admits the zero vector).
 - A cap large enough to be slack (e.g. `24/duration_hours`) reproduces the
   uncapped optimum exactly (pin).
+- **FEC source is RAW**: the frontier's wear and cap-compliance accounting use
+  `p_discharge.sum() · dt / capacity_mwh` recomputed from the returned
+  schedule — never the ROUNDED `n_cycles` convenience field (4-decimal
+  rounding would leak into money).
 - The knob is NOT added to `solve_daily_da_id_dispatch`,
   `solve_daily_joint_capacity_lp`, the continuous-horizon replay, or any
   stochastic solver in v1 (§7 non-goals). The continuous multi-day MILP would
@@ -77,9 +110,12 @@ def compute_cycle_cap_frontier(
 ) -> tuple[pd.DataFrame, dict]
 ```
 
-- `DEFAULT_CYCLE_CAPS = (0.5, 1.0, 1.2, 1.5, 2.0, None)` — `None` = uncapped
-  reference row (labelled "uncapped"), the values chosen to bracket the r2b /
-  Sicily debate points. User-overridable.
+- `DEFAULT_CYCLE_CAPS = (0.5, 1.0, 1.2, 1.5, 2.0, 3.0, None)` — `None` =
+  uncapped reference row (labelled "uncapped"); the values bracket the r2b /
+  Sicily debate points and 3.0 covers 1h systems (Q2 closed). User-overridable.
+- Cap-set normalisation: finite caps must be non-negative floats (negative or
+  non-finite values raise); duplicates deduped; rows ordered ascending finite
+  caps then uncapped last; at most one `None`.
 - Per cap: loop the window's clean local days (same day-selection rules as the
   existing replay batches: `_select_local_day`, regular-UTC-day check),
   `solve_daily_lp(max_efc_per_day=cap)` per day, sum revenue and FEC.
@@ -97,19 +133,43 @@ def compute_cycle_cap_frontier(
   `wear_eur` (window), `net_eur = gross − wear`,
   `gross_eur_per_mw_yr`, `wear_eur_per_mw_yr`, `net_eur_per_mw_yr`
   (365.25 i.i.d. annualisation over the common valid days — the house
-  convention), `net_uplift_vs_uncapped_pct`.
+  convention), `net_delta_vs_uncapped_eur`, and `net_uplift_vs_uncapped_pct`
+  (NaN when |uncapped net| is within the window tolerance of zero — no
+  division blow-ups).
 - Summary dict: `valid_days`, `excluded_days`, `cost_per_cycle_eur`,
   `wear_eur_per_mwh_discharged`, `cycle_life`, `capex_eur_kwh`,
-  `best_cap_label` = argmax over `net_eur` (ties → the LOWEST cap: prefer
-  committing less wear for equal money, echoing the Stage-0 selector
-  philosophy), and `frontier_flat` = True when max(net) − min(net) is within
-  a small tolerance (an honest "the cap barely matters here" flag).
+  `best_cap_label`, `frontier_flat`, `n_tiebreak_fallback_days`.
+- **One tolerance policy** (all comparisons in this module):
+  `NET_TOL_EUR_PER_MW_YR = 1.0` on annualised per-MW figures, converted to a
+  window-EUR tolerance via `× power_mw × valid_days / 365.25` where a window
+  quantity is compared. Cap compliance uses solver tolerance `1e-6` MWh.
+- **Best-cap rule (r1, replaces the conflicting r0 wording): the LOWEST
+  FINITE cap whose `net_eur` is within tolerance of the maximum wins;
+  "uncapped" wins only when it is STRICTLY better than every finite cap by
+  more than the tolerance.** (Prefer committing less wear for equal money —
+  the Stage-0 selector philosophy — while an uncapped strict winner stays
+  visible.) `frontier_flat` = True when max(net) − min(net) across rows is
+  within tolerance ("the cap barely matters here" — honest flag).
+- Extra column per row (Q3 closed): `cycle_limited_life_years` =
+  `cycle_life / (avg_efc_per_day × 365.25)` via the existing
+  `estimate_battery_lifetime` (cycle-limited figure ONLY — calendar/effective
+  life is NOT surfaced unless the export also states that assumption).
+
+- Degenerate handling: `dates=None` ⇒ all available local dates (house
+  convention); zero valid days ⇒ a TYPED empty frame + a summary with
+  `valid_days=0` and NaN-free scalars (no division by zero); a solver failure
+  on any day excludes that day FOR ALL caps (the co-temporal rule) and counts
+  it in `excluded_days`. Day selection reuses the replay helpers
+  (`_select_local_day` + regular-UTC-day check), so DST days follow the
+  existing convention.
 
 Identities to pin (§6): gross is non-decreasing in the cap; realised
 `avg_efc_per_day ≤ cap + tol` per row; `net = gross − wear` exactly;
 the uncapped row equals the slack-cap row; cap=0 row has zero gross and zero
-wear; at `capex = 0` the net frontier equals the gross frontier and
-`best_cap` = the uncapped row (ties resolved to the lowest equal-net cap).
+wear; at `capex = 0` the net frontier equals the gross frontier and the
+best-cap rule picks the LOWEST cap whose net ties the maximum within
+tolerance (uncapped only on a strict win); the min-FEC tie-break never
+changes `z*` and reduces (never raises) reported FEC on a degenerate fixture.
 
 ## 4. Cockpit placement (increment F-C)
 
@@ -155,8 +215,14 @@ wear; at `capex = 0` the net frontier equals the gross frontier and
    `calculate_degradation_cost` (no second formula).
 6. Common valid-day set across all rows (excluding a day excludes it for
    every cap).
-7. `capex=0` ⇒ net ≡ gross and `best_cap` = lowest-tie resolution pin.
+7. `capex=0` ⇒ net ≡ gross; best-cap = lowest cap tying the max net within
+   tolerance (uncapped only on a strict win).
 8. `frontier_flat` flag behaviour on a flat-price fixture.
+9. Min-FEC tie-break: objective preserved (backstop), FEC never higher than
+   pass-1 on a degenerate fixture, `min_throughput_tiebreak=False` default
+   bit-identical, fallback counted (#43 pattern).
+10. Raw-FEC accounting: wear computed from the schedule sum, not the rounded
+    `n_cycles` field (a fixture where the rounding would differ).
 
 ## 7. Increment plan (after lock)
 
@@ -167,13 +233,12 @@ wear; at `capex = 0` the net frontier equals the gross frontier and
 Each increment its own PR with dual review (Codex + agy/Gemini), per the
 house lane.
 
-## 8. Open questions (to resolve before lock)
+## 8. Resolved questions (all closed at r1 — nothing open)
 
-- Q1 — should the FEC cap count the discharge leg only (proposed, matches
-  `n_cycles`) or (charge+discharge)/2? Discharge-only is the industry EFC
-  convention and the existing accounting; flag for reviewer confirmation.
-- Q2 — `DEFAULT_CYCLE_CAPS` set: is (0.5, 1.0, 1.2, 1.5, 2.0, uncapped) the
-  right bracket, and should 3.0 be included for 1h systems?
-- Q3 — should the frontier ALSO report the cycle-limited lifetime per cap
-  (`estimate_battery_lifetime`) as an extra column (years to 6000 FEC at the
-  realised EFC rate)? Cheap and investment-relevant; proposed YES.
+- ~~Q1~~ **CLOSED: discharge-leg EFC** (industry convention + matches the
+  existing `n_cycles` accounting; Codex r1 confirmed).
+- ~~Q2~~ **CLOSED: defaults `(0.5, 1.0, 1.2, 1.5, 2.0, 3.0, None)`** (3.0
+  added for 1h systems; Codex r1).
+- ~~Q3~~ **CLOSED: YES — `cycle_limited_life_years` column**, cycle-limited
+  figure only; calendar/effective life stays out unless the export states
+  that extra assumption (Codex r1).
