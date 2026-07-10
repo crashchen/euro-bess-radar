@@ -266,23 +266,39 @@ class TestCoTemporalValidDays:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Pin section 6-6 (solver reason): success=False on ANY cap drops
-        the day from EVERY row."""
-        df = _frame(_double_cycle_day() + _double_cycle_day())
+        the day from EVERY row — the failed day's revenue/FEC must not leak
+        into rows whose own solve succeeded (Codex hardening: fail a MIDDLE
+        cap on a HIGH-revenue day, assert every row equals the day-1-only
+        aggregate, not just the summary counts)."""
+        # Day 2 doubles the peaks: a leak of its cap=0.5/uncapped solves
+        # would visibly inflate those rows.
+        day2 = [p * 2.0 if p >= 100.0 else p for p in _double_cycle_day()]
+        day2[0] = 11.0  # marker price
+        df = _frame(_double_cycle_day() + day2)
 
         def fake_solve(prices, dt, **kwargs):
             result = solve_daily_lp(prices, dt, **kwargs)
-            # Fail only day 2's cap=0.5 solve (day 2 carries a marker price).
-            if kwargs.get("max_efc_per_day") == 0.5 and prices[0] == 11.0:
+            # Fail only day 2's MIDDLE cap solve (marker price identifies it).
+            if kwargs.get("max_efc_per_day") == 1.0 and prices[0] == 11.0:
                 return {**result, "success": False}
             return result
 
-        df.loc[df.index[24], "price_eur_mwh"] = 11.0  # marker on day 2
         monkeypatch.setattr(cf, "solve_daily_lp", fake_solve)
-        _frame_out, summary = compute_cycle_cap_frontier(
-            df, capex_eur_kwh=100.0, cycle_caps=(0.5, 1.0, None), **_KW
+        caps = (0.5, 1.0, None)
+        frame_out, summary = compute_cycle_cap_frontier(
+            df, capex_eur_kwh=100.0, cycle_caps=caps, **_KW
         )
         assert summary["valid_days"] == 1
         assert summary["excluded_days"] == 1
+        # Row-level equality with a day-1-only run (the wrapper delegates to
+        # the real solver on day 1, so this is the true reference).
+        day1_only, _ = compute_cycle_cap_frontier(
+            _frame(_double_cycle_day()), capex_eur_kwh=100.0, cycle_caps=caps, **_KW
+        )
+        for col in ("gross_eur", "avg_efc_per_day", "wear_eur", "net_eur"):
+            np.testing.assert_allclose(
+                frame_out[col].to_numpy(), day1_only[col].to_numpy(), rtol=1e-9
+            )
 
     def test_dates_none_uses_all_available_local_days(self) -> None:
         df = _frame(_double_cycle_day() + _double_cycle_day())
@@ -348,15 +364,17 @@ class TestSolverWiring:
     def test_wear_uses_raw_schedule_fec_not_rounded_n_cycles(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Pin section 6-10: a sub-4-decimal discharge still accrues wear.
+        """Pin section 6-10: wear = sum(p_discharge)*dt/capacity * cost.
 
-        The mocked solve reports a schedule whose raw FEC (4e-5) rounds to
-        0.0 in the `n_cycles` convenience field; wear must come from the
-        schedule sum, so it is strictly positive.
+        Non-unit dt (30-min data) and non-unit capacity (2 MW x 2 h) so a
+        mutation dropping the dt factor or the capacity normalisation moves
+        the number (Codex hardening), and the raw FEC (4e-5) rounds to 0.0
+        in the `n_cycles` convenience field, so using the rounded field
+        would zero the wear entirely.
         """
-        n = 24
+        n = 48  # 30-min intervals -> dt = 0.5 h
         p_discharge = np.zeros(n)
-        p_discharge[12] = 4e-5  # raw FEC = 4e-5 -> n_cycles rounds to 0.0
+        p_discharge[10] = 3.2e-4  # MW; discharged = 1.6e-4 MWh, FEC = 4e-5
 
         def fake_solve(prices, dt, **kwargs):
             return {
@@ -364,21 +382,97 @@ class TestSolverWiring:
                 "p_charge": np.zeros(n),
                 "p_discharge": p_discharge,
                 "soc": np.zeros(n),
-                "n_cycles": round(float(p_discharge.sum() * dt), 4),  # == 0.0
+                "n_cycles": round(float(p_discharge.sum() * dt / 4.0), 4),  # 0.0
                 "success": True,
                 "tiebreak_applied": True,
             }
 
         monkeypatch.setattr(cf, "solve_daily_lp", fake_solve)
-        frame, _summary = compute_cycle_cap_frontier(
-            _frame([50.0] * n),
+        idx = pd.date_range("2026-03-02", periods=n, freq="30min", tz="UTC")
+        df = pd.DataFrame({"price_eur_mwh": [50.0] * n}, index=idx)
+        df.index.name = "timestamp"
+        frame, summary = compute_cycle_cap_frontier(
+            df,
+            power_mw=2.0,
+            duration_hours=2.0,
+            efficiency=0.9,
             capex_eur_kwh=600.0,
             cycle_life=6000.0,
             cycle_caps=(1.0,),
-            **_KW,
         )
-        assert frame["wear_eur"].iloc[0] == pytest.approx(4e-5 * 100.0)
+        # cost_per_cycle = 600 * 4000 / 6000 = 400 EUR; FEC = 3.2e-4*0.5/4.
+        assert summary["cost_per_cycle_eur"] == pytest.approx(400.0)
+        assert frame["wear_eur"].iloc[0] == pytest.approx(4e-5 * 400.0)
         assert frame["wear_eur"].iloc[0] > 0.0
+
+
+def _revenue_by_cap_solver(revenue_by_cap: dict):
+    """Mock solve returning a fixed per-day revenue per cap, zero schedule."""
+
+    def fake_solve(prices, dt, **kwargs):
+        n = len(prices)
+        return {
+            "revenue_eur": float(revenue_by_cap[kwargs.get("max_efc_per_day")]),
+            "p_charge": np.zeros(n),
+            "p_discharge": np.zeros(n),
+            "soc": np.zeros(n),
+            "n_cycles": 0.0,
+            "success": True,
+            "tiebreak_applied": True,
+        }
+
+    return fake_solve
+
+
+class TestToleranceBoundary:
+    """Codex hardening: pin the CONVERTED window tolerance
+    (1 EUR/MW/yr x power_mw x valid_days / 365.25), not a flat 1 EUR.
+
+    power_mw=10 and valid_days=3 give tol_window = 30/365.25 ~ 0.0821 EUR.
+    A net gap of 0.05 (inside) discriminates a power-less mutation
+    (3/365.25 ~ 0.0082 would flip it to outside), and a gap of 0.5
+    (outside) discriminates a flat-1-EUR mutation (would flip it to
+    inside).
+    """
+
+    def _run(self, monkeypatch: pytest.MonkeyPatch, revenue_by_cap: dict):
+        monkeypatch.setattr(cf, "solve_daily_lp", _revenue_by_cap_solver(revenue_by_cap))
+        return compute_cycle_cap_frontier(
+            _frame([50.0] * 72),  # 3 flat local days
+            power_mw=10.0,
+            duration_hours=1.0,
+            efficiency=0.9,
+            capex_eur_kwh=0.0,
+            cycle_caps=(1.0, None),
+        )
+
+    def test_uncapped_gap_outside_tolerance_is_a_strict_win(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Window net gap = 0.5 EUR > tol (~0.0821): uncapped strict win.
+        _, summary = self._run(monkeypatch, {1.0: 100.0, None: 100.0 + 0.5 / 3.0})
+        assert summary["best_cap_label"] == UNCAPPED_LABEL
+        assert summary["frontier_flat"] is False
+
+    def test_uncapped_gap_inside_tolerance_ties_to_lowest_finite_cap(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Window net gap = 0.05 EUR < tol: the finite cap ties and wins.
+        _, summary = self._run(monkeypatch, {1.0: 100.0, None: 100.0 + 0.05 / 3.0})
+        assert summary["best_cap_label"] == "1 EFC/day"
+        assert summary["frontier_flat"] is True
+
+    def test_uplift_nan_gate_uses_converted_tolerance(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # |uncapped net| = 0.05 EUR (inside tol): uplift undefined -> NaN.
+        frame_in, _ = self._run(monkeypatch, {1.0: 0.0, None: 0.05 / 3.0})
+        assert frame_in["net_uplift_vs_uncapped_pct"].isna().all()
+        assert frame_in["net_delta_vs_uncapped_eur"].notna().all()
+        # |uncapped net| = 0.5 EUR (outside tol): uplift defined and signed.
+        frame_out, _ = self._run(monkeypatch, {1.0: 0.0, None: 0.5 / 3.0})
+        assert frame_out["net_uplift_vs_uncapped_pct"].notna().all()
+        assert frame_out["net_uplift_vs_uncapped_pct"].iloc[0] == pytest.approx(-100.0)
 
 
 class TestDegenerateHandling:
