@@ -17,11 +17,17 @@ from src.ancillary import (
 )
 from src.assumptions import CAPTURE_PARAM_LABEL
 from src.config import ANCILLARY_CAPACITY_AVAILABILITY
+from src.cycle_frontier import (
+    DEFAULT_CYCLE_CAPS,
+    UNCAPPED_LABEL,
+    compute_cycle_cap_frontier,
+)
 from src.data_ingestion import (
     read_activation_cache,
     read_capacity_cache,
     read_imbalance_cache,
 )
+from src.degradation import DEFAULT_CYCLE_LIFE
 from src.dispatch import solve_joint_capacity_batch
 from src.export import cockpit_tables_to_excel
 from src.imbalance_overlay import compute_imbalance_overlay
@@ -230,6 +236,17 @@ def render(
         duration_hours=duration_hours,
         efficiency=efficiency,
         capture_rate=cockpit_capture_rate,
+        capex_eur_kwh=capex_eur_kwh,
+        chart_template=chart_template,
+        assumptions=assumptions,
+    )
+    _render_cycle_frontier_section(
+        primary_df=primary_df,
+        dates=dates,
+        zone_tz=zone_tz,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
         capex_eur_kwh=capex_eur_kwh,
         chart_template=chart_template,
         assumptions=assumptions,
@@ -844,6 +861,388 @@ def _render_multi_day_summary(
             label="\U0001f4e5 Download multi-day replay (Excel)",
             file_name="cockpit_multiday_replay.xlsx",
         )
+
+
+def _frontier_cap_options() -> list[str]:
+    """Default cycle-cap multiselect options (contract cap set as strings)."""
+    return [
+        UNCAPPED_LABEL if cap is None else f"{cap:g}" for cap in DEFAULT_CYCLE_CAPS
+    ]
+
+
+def _parse_frontier_caps(
+    selected: list[str] | None,
+) -> tuple[list[float | None], list[str]]:
+    """Map multiselect entries to solver caps; collect invalid free entries.
+
+    ``"uncapped"`` maps to ``None`` (the uncapped reference row); numeric
+    strings must be finite and non-negative. Duplicates and ordering are
+    handled downstream by ``compute_cycle_cap_frontier``'s normaliser.
+    """
+    caps: list[float | None] = []
+    invalid: list[str] = []
+    for raw in selected or []:
+        text = str(raw).strip()
+        if not text:
+            continue
+        if text.lower() == UNCAPPED_LABEL:
+            caps.append(None)
+            continue
+        try:
+            value = float(text)
+        except ValueError:
+            invalid.append(text)
+            continue
+        if not math.isfinite(value) or value < 0:
+            invalid.append(text)
+            continue
+        caps.append(value)
+    return caps, invalid
+
+
+def _append_frontier_assumptions(
+    assumptions: pd.DataFrame | None,
+    *,
+    summary: dict,
+    capex_eur_kwh: float,
+) -> pd.DataFrame | None:
+    """Append cycle-cap frontier provenance to the export assumptions.
+
+    The global ``build_assumptions_table`` is deliberately NOT extended in v1
+    (contract section 4) — the panel's export carries its own rows instead.
+    """
+    if assumptions is None:
+        return None
+    rows = pd.DataFrame([
+        {
+            "parameter": "Frontier wear model",
+            "value": (
+                "LINEAR capex amortisation: capex x capacity / cycle life "
+                "per FEC (no DoD / C-rate / temperature / calendar "
+                "dependence)"
+            ),
+            "unit": "",
+            "source": "docs/design/cycle-cap-frontier-v1.md",
+            "affects": (
+                "wear_eur / net_eur — screening proxy, NOT an "
+                "electrochemical model"
+            ),
+        },
+        {
+            "parameter": "Frontier cost per cycle",
+            "value": f"{summary['cost_per_cycle_eur']:.2f}",
+            "unit": "EUR/FEC",
+            "source": "calculate_degradation_cost",
+            "affects": (
+                "wear_eur = raw discharge-leg FEC x cost per cycle, netted "
+                "EX-POST (the optimiser is wear-blind)"
+            ),
+        },
+        {
+            "parameter": "Frontier wear per MWh discharged",
+            "value": f"{summary['wear_eur_per_mwh_discharged']:.2f}",
+            "unit": "EUR/MWh",
+            "source": "cost per cycle / capacity",
+            "affects": "Audit-convenience equivalent of the per-FEC wear rate",
+        },
+        {
+            "parameter": "Frontier cycle life",
+            "value": f"{summary['cycle_life']:g}",
+            "unit": "FEC",
+            "source": "Cockpit frontier panel",
+            "affects": "Linear wear denominator (user knob, not fitted)",
+        },
+        {
+            "parameter": "Frontier capex basis",
+            "value": f"{capex_eur_kwh:g}",
+            "unit": "EUR/kWh",
+            "source": "Sidebar CapEx (single source of truth; no second knob)",
+            "affects": "Cost-per-cycle numerator",
+        },
+        {
+            "parameter": "Frontier revenue basis",
+            "value": (
+                "DA-only per-day standalone terminal-neutral MILP with "
+                "min-FEC tie-break; VOM in-objective; no capture haircut"
+            ),
+            "unit": "",
+            "source": "solve_daily_lp(max_efc_per_day, min_throughput_tiebreak=True)",
+            "affects": (
+                "gross_eur — no IDA / reserve / multi-day SoC-carry "
+                "interaction in v1"
+            ),
+        },
+        {
+            "parameter": "Frontier annualisation",
+            "value": f"365.25 / {summary['valid_days']} common valid days",
+            "unit": "",
+            "source": "House i.i.d. convention",
+            "affects": (
+                "EUR/MW/yr columns; the valid-day set is IDENTICAL across "
+                "caps (co-temporal rows)"
+            ),
+        },
+    ])
+    return pd.concat([assumptions, rows], ignore_index=True)
+
+
+_FRONTIER_DISPLAY_COLUMNS = {
+    "best": "Best",
+    "label": "Cap",
+    "gross_eur": "Gross EUR",
+    "avg_efc_per_day": "Avg EFC/day",
+    "wear_eur": "Wear EUR",
+    "net_eur": "Net EUR",
+    "gross_eur_per_mw_yr": "Gross EUR/MW/yr",
+    "wear_eur_per_mw_yr": "Wear EUR/MW/yr",
+    "net_eur_per_mw_yr": "Net EUR/MW/yr",
+    "net_delta_vs_uncapped_eur": "Net delta vs uncapped EUR",
+    "net_uplift_vs_uncapped_pct": "Net uplift vs uncapped",
+    "cycle_limited_life_years": "Cycle-limited life (yr)",
+}
+
+
+def _render_cycle_frontier_section(
+    *,
+    primary_df: pd.DataFrame,
+    dates: list,
+    zone_tz: str,
+    power_mw: float,
+    duration_hours: int,
+    efficiency: float,
+    capex_eur_kwh: float,
+    chart_template: str,
+    assumptions: pd.DataFrame | None = None,
+) -> None:
+    """Cycle-cap x degradation net-revenue frontier (contract section 4)."""
+    with st.expander(
+        "Cycle-cap x degradation net-revenue frontier", expanded=False,
+    ):
+        st.caption(
+            "Investment screening: sweeps a per-day cycle cap over the loaded "
+            "DA window (per-day standalone MILP solves with the min-FEC "
+            "tie-break) and nets a LINEAR wear proxy off gross revenue "
+            "EX-POST, so the table answers 'which cycle cap is worth most "
+            "net of battery wear?'. Linear capex-amortisation wear only (no "
+            "DoD / C-rate / temperature model), DA-only basis (no IDA / "
+            "reserve / multi-day SoC carry), raw solver values. Screening, "
+            "not bankable."
+        )
+        c1, c2, c3 = st.columns([1.6, 1.0, 1.0])
+        selected = c1.multiselect(
+            "Cycle caps (EFC/day)",
+            options=_frontier_cap_options(),
+            default=_frontier_cap_options(),
+            accept_new_options=True,
+            key="cycle_frontier_caps",
+            help=(
+                "Per-day discharged-energy caps in full-equivalent cycles "
+                f"per day; '{UNCAPPED_LABEL}' adds the uncapped reference "
+                "row. Type a number for a custom cap."
+            ),
+        )
+        cycle_life = c2.number_input(
+            "Cycle life (FEC)",
+            min_value=1.0,
+            value=float(DEFAULT_CYCLE_LIFE),
+            step=500.0,
+            key="cycle_frontier_cycle_life",
+            help=(
+                "Full-equivalent cycles to end of life. Wear is a LINEAR "
+                "capex-amortisation proxy (capex x capacity / cycle life per "
+                "FEC) — a screening knob, not a fitted DoD/temperature "
+                "cycle-life curve."
+            ),
+        )
+        sample = c3.selectbox(
+            "Window",
+            options=[
+                "7 latest days", "30 latest days", "90 latest days",
+                "All loaded days",
+            ],
+            index=1,
+            key="cycle_frontier_sample",
+        )
+        st.caption(
+            f"CapEx basis inherited from the sidebar: **{capex_eur_kwh:g} "
+            "EUR/kWh** (single source of truth — change it there). At 0 the "
+            "frontier reports net = gross."
+        )
+        if not st.button("Run frontier sweep", key="cycle_frontier_run"):
+            st.info("Pick caps and click Run to sweep the loaded window.")
+            return
+
+        caps, invalid = _parse_frontier_caps(selected)
+        if invalid:
+            st.warning(
+                "Ignored invalid cap entries: " + ", ".join(sorted(invalid))
+            )
+        if not caps:
+            st.info("Select at least one cycle cap.")
+            return
+
+        limit = _sample_limit(sample)
+        sweep_dates = dates if limit is None else dates[-limit:]
+        try:
+            with st.spinner(
+                f"Solving {len(sweep_dates)} day(s) x {len(set(caps))} cap(s) "
+                "(two solver passes per pair)..."
+            ):
+                frontier, summary = compute_cycle_cap_frontier(
+                    primary_df,
+                    dates=sweep_dates,
+                    tz=zone_tz,
+                    power_mw=power_mw,
+                    duration_hours=duration_hours,
+                    efficiency=efficiency,
+                    capex_eur_kwh=capex_eur_kwh,
+                    cycle_life=float(cycle_life),
+                    cycle_caps=tuple(caps),
+                )
+        except ValueError as exc:
+            st.error(f"Frontier sweep failed: {exc}")
+            return
+
+        if frontier.empty:
+            st.warning(
+                "No valid days in this window (excluded: "
+                f"{summary['excluded_days']}). Load a cleaner DA window."
+            )
+            return
+
+        _render_frontier_result(frontier, summary, chart_template)
+        export_assumptions = _append_frontier_assumptions(
+            _cockpit_export_assumptions(
+                assumptions,
+                capture_value="Not applied (raw solver values)",
+                capture_affects=(
+                    "Frontier gross/net use raw MILP revenue; the ex-post "
+                    "wear deduction is the only haircut in this panel"
+                ),
+            ),
+            summary=summary,
+            capex_eur_kwh=capex_eur_kwh,
+        )
+        _cockpit_download_button(
+            {"Cycle-cap frontier": frontier}, export_assumptions,
+            key="dl_cycle_frontier",
+            label="\U0001f4e5 Download frontier table (Excel)",
+            file_name="cockpit_cycle_frontier.xlsx",
+        )
+
+
+def _render_frontier_result(
+    frontier: pd.DataFrame, summary: dict, chart_template: str,
+) -> None:
+    """Frontier KPIs + grouped gross-vs-net bar chart + flagged table."""
+    best_label = summary.get("best_cap_label")
+    excluded = int(summary.get("excluded_days", 0))
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Best cap (net of wear)", best_label or "-")
+    m2.metric("Cost per cycle", f"EUR {summary['cost_per_cycle_eur']:,.2f}")
+    m3.metric(
+        "Wear per MWh discharged",
+        f"EUR {summary['wear_eur_per_mwh_discharged']:,.2f}",
+    )
+    m4.metric(
+        "Valid days",
+        str(summary["valid_days"]),
+        delta=f"-{excluded} excluded" if excluded else None,
+        delta_color="off",
+    )
+    if summary.get("frontier_flat"):
+        st.info(
+            "Frontier is FLAT within tolerance — the cycle cap barely "
+            "matters on this window; the best-cap pick then simply prefers "
+            "committing the least wear."
+        )
+    fallback_days = int(summary.get("n_tiebreak_fallback_days", 0))
+    if fallback_days:
+        st.warning(
+            f"Min-FEC tie-break fell back to the raw optimum on "
+            f"{fallback_days} day(s); wear on those days may reflect a "
+            "solver-arbitrary equal-revenue schedule."
+        )
+
+    # ONE grouped chart, not two: the gross-vs-net gap IS the wear.
+    fig = go.Figure()
+    fig.add_bar(
+        name="Gross",
+        x=frontier["label"],
+        y=frontier["gross_eur_per_mw_yr"],
+        marker_color=_C_REVENUE,
+        opacity=_BAR_OPACITY,
+    )
+    fig.add_bar(
+        name="Net of wear",
+        x=frontier["label"],
+        y=frontier["net_eur_per_mw_yr"],
+        marker_color=_C_DISCHARGE,
+        opacity=_BAR_OPACITY,
+    )
+    fig.update_layout(barmode="group")
+    _apply_panel_layout(
+        fig,
+        "Gross vs net-of-wear by cycle cap (the gap is the wear)",
+        "EUR/MW/yr",
+        chart_template,
+        height=300,
+    )
+    st.plotly_chart(fig, width="stretch")
+
+    display = frontier.drop(columns=["cycle_cap"]).copy()
+    display.insert(
+        0, "best",
+        ["★" if lbl == best_label else "" for lbl in display["label"]],
+    )
+    display = display.rename(columns=_FRONTIER_DISPLAY_COLUMNS)
+    best_cap_name = _FRONTIER_DISPLAY_COLUMNS["label"]
+    net_cols = [
+        _FRONTIER_DISPLAY_COLUMNS["net_eur"],
+        _FRONTIER_DISPLAY_COLUMNS["net_eur_per_mw_yr"],
+    ]
+    eur_cols = [
+        _FRONTIER_DISPLAY_COLUMNS[c]
+        for c in (
+            "gross_eur", "wear_eur", "net_eur", "gross_eur_per_mw_yr",
+            "wear_eur_per_mw_yr", "net_eur_per_mw_yr",
+            "net_delta_vs_uncapped_eur",
+        )
+    ]
+    styled = (
+        display.style
+        .apply(
+            lambda row: (
+                ["background-color: rgba(0,163,255,0.14)"] * len(row)
+                if row[best_cap_name] == best_label else [""] * len(row)
+            ),
+            axis=1,
+        )
+        .set_properties(subset=net_cols, **{"font-weight": "700"})
+        .format({col: "{:,.0f}" for col in eur_cols}, na_rep="-")
+        .format(
+            {
+                _FRONTIER_DISPLAY_COLUMNS["avg_efc_per_day"]: "{:.2f}",
+                _FRONTIER_DISPLAY_COLUMNS["net_uplift_vs_uncapped_pct"]:
+                    "{:+.1f}%",
+                _FRONTIER_DISPLAY_COLUMNS["cycle_limited_life_years"]: (
+                    lambda v: "inf" if math.isinf(v) else f"{v:.1f}"
+                ),
+            },
+            na_rep="-",
+        )
+    )
+    st.dataframe(styled, width="stretch", hide_index=True)
+    st.caption(
+        "Best cap = the LOWEST finite cap whose net is within tolerance "
+        "(1 EUR/MW/yr over the common valid days) of the maximum — prefer "
+        "committing less wear for equal money; 'uncapped' wins only on a "
+        "strict win. Realised EFC is the optimum under each cap, never "
+        "clamped after the fact. Net uplift vs uncapped uses an ABSOLUTE "
+        "denominator (sign stays meaningful when the uncapped net is "
+        "negative) and is blank when the uncapped net is within tolerance "
+        "of zero. Cycle-limited life ignores calendar aging."
+    )
 
 
 def _slice_to_local_dates(
