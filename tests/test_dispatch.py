@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -923,3 +925,193 @@ class TestMixedResolutionDtInference:
         assert cap_day1 > 0 and cap_day2 > 0
         ratio = max(cap_day1, cap_day2) / min(cap_day1, cap_day2)
         assert ratio < 1.05
+
+
+class TestMaxEfcCapAndTiebreak:
+    """Cycle-cap frontier contract §2 pins (increment F-A).
+
+    The cap is one inequality row on discharged energy (discharge-leg FEC
+    convention); the min-FEC tie-break is the canonical selector for
+    equal-revenue optima that differ in throughput; ``success`` makes a
+    solver failure distinguishable from a genuine zero-revenue day.
+    """
+
+    @staticmethod
+    def _shaped_prices(n: int = 24) -> np.ndarray:
+        return 50 + 30 * np.sin(np.arange(n) / n * 2 * np.pi)
+
+    def test_none_cap_is_bit_identical(self) -> None:
+        prices = self._shaped_prices()
+        base = solve_daily_lp(prices, dt=1.0, power_mw=1.0, duration_hours=2.0)
+        with_none = solve_daily_lp(
+            prices, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            max_efc_per_day=None,
+        )
+        assert base["revenue_eur"] == with_none["revenue_eur"]
+        np.testing.assert_array_equal(base["p_charge"], with_none["p_charge"])
+        np.testing.assert_array_equal(
+            base["p_discharge"], with_none["p_discharge"],
+        )
+        assert base["success"] is True
+        assert base["tiebreak_applied"] is None
+
+    def test_slack_cap_equals_uncapped(self) -> None:
+        # §6-2: a cap that cannot bind (24h/duration) reproduces the uncapped
+        # optimum exactly (non-degenerate shaped fixture).
+        prices = self._shaped_prices()
+        uncapped = solve_daily_lp(prices, dt=1.0, power_mw=1.0, duration_hours=2.0)
+        slack = solve_daily_lp(
+            prices, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            max_efc_per_day=12.0,
+        )
+        np.testing.assert_allclose(
+            slack["revenue_eur"], uncapped["revenue_eur"], atol=1e-6,
+        )
+        np.testing.assert_allclose(
+            slack["p_discharge"], uncapped["p_discharge"], atol=1e-6,
+        )
+
+    def test_cap_zero_is_feasible_forced_idle(self) -> None:
+        prices = self._shaped_prices()
+        r = solve_daily_lp(
+            prices, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            max_efc_per_day=0.0,
+        )
+        assert r["success"] is True
+        assert r["revenue_eur"] == 0.0
+        np.testing.assert_allclose(r["p_discharge"], 0.0, atol=1e-9)
+        np.testing.assert_allclose(r["p_charge"], 0.0, atol=1e-9)
+
+    def test_negative_cap_raises(self) -> None:
+        with pytest.raises(ValueError, match="max_efc_per_day must be >= 0"):
+            solve_daily_lp(
+                self._shaped_prices(), dt=1.0, max_efc_per_day=-0.5,
+            )
+
+    def test_binding_caps_comply_and_gross_is_monotone(self) -> None:
+        # §6-3 + §6-4: discharged energy respects each cap in ENERGY space
+        # (contract tolerance 1e-6 MWh) and revenue is non-decreasing in the
+        # cap across the sweep.
+        prices = self._shaped_prices()
+        capacity_mwh = 2.0
+        revenues = []
+        for cap in (0.5, 1.0, 1.5, 2.0):
+            r = solve_daily_lp(
+                prices, dt=1.0, power_mw=1.0, duration_hours=2.0,
+                max_efc_per_day=cap,
+            )
+            discharged = float(r["p_discharge"].sum()) * 1.0
+            assert discharged <= cap * capacity_mwh + 1e-6, f"cap {cap}"
+            revenues.append(r["revenue_eur"])
+        assert all(
+            b >= a - 1e-6 for a, b in itertools.pairwise(revenues)
+        ), revenues
+        # A binding low cap really binds (strictly below the uncapped FEC).
+        uncapped = solve_daily_lp(prices, dt=1.0, power_mw=1.0, duration_hours=2.0)
+        assert revenues[0] < uncapped["revenue_eur"]
+
+    def test_min_fec_tiebreak_resolves_breakeven_tie(self) -> None:
+        # §6-9: at 100% efficiency and a spread EXACTLY equal to the two-leg
+        # VOM (2 x 0.5), cycling nets zero — the same objective as idling, so
+        # the optimum is a genuine tie between FEC 0 and FEC > 0. The
+        # canonical pass must pick the least-wear member: zero throughput at
+        # the identical (zero) revenue.
+        prices = np.array([10.0, 11.0] * 6)
+        canonical = solve_daily_lp(
+            prices, dt=1.0, power_mw=1.0, duration_hours=1.0, efficiency=1.0,
+            min_throughput_tiebreak=True,
+        )
+        assert canonical["success"] is True
+        assert canonical["tiebreak_applied"] is True
+        np.testing.assert_allclose(canonical["revenue_eur"], 0.0, atol=1e-6)
+        assert float(canonical["p_discharge"].sum()) <= 1e-9
+
+    def test_tiebreak_lowers_forced_churny_pass1(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Codex review (PR #51): the breakeven fixture above is genuinely
+        # tied, but HiGHS pass 1 already picks the zero-FEC member there, so
+        # it cannot prove the accepted pass-2 solution actually REPLACES the
+        # pass-1 one. Deterministic forcing (#43 pattern): intercept ONLY the
+        # first linprog call and swap its solution for the equal-objective
+        # CHURNY tie member (charge 0.5 @ t0, discharge 0.5 @ t1 — feasible,
+        # terminal-neutral, revenue exactly 0), then let the real pass 2 run.
+        # Without the tie-break the churny schedule must surface; with it the
+        # canonical zero-throughput member must replace it at the identical
+        # objective — pinning the result.x mutation glue.
+        import src.dispatch as dispatch_mod
+
+        prices = np.array([10.0, 11.0] * 6)
+        n = prices.size
+
+        def churny_x() -> np.ndarray:
+            x = np.zeros(3 * n)
+            x[0] = 0.5          # p_charge[0]
+            x[n + 1] = 0.5      # p_discharge[1]
+            x[2 * n] = 1.0      # b[0] = charging mode
+            return x
+
+        original_linprog = dispatch_mod.linprog
+        state = {"first": True}
+
+        def forcing_linprog(c, *args, **kwargs):
+            result = original_linprog(c, *args, **kwargs)
+            if state["first"]:
+                state["first"] = False
+                x = churny_x()
+                assert abs(float(c @ x)) < 1e-9  # equal-objective tie member
+                result.x = x
+                result.fun = float(c @ x)
+            return result
+
+        monkeypatch.setattr(dispatch_mod, "linprog", forcing_linprog)
+        kw = dict(dt=1.0, power_mw=1.0, duration_hours=1.0, efficiency=1.0)
+        plain = solve_daily_lp(prices, **kw)
+        assert float(plain["p_discharge"].sum()) == pytest.approx(0.5)
+
+        state["first"] = True
+        canonical = solve_daily_lp(prices, min_throughput_tiebreak=True, **kw)
+        assert canonical["tiebreak_applied"] is True
+        assert float(canonical["p_discharge"].sum()) <= 1e-9
+        np.testing.assert_allclose(
+            canonical["revenue_eur"], plain["revenue_eur"], atol=1e-6,
+        )
+
+    def test_tiebreak_preserves_objective_and_never_raises_fec(self) -> None:
+        # §6-9: on a normal (non-degenerate) day the canonical pass returns
+        # the same revenue and never MORE throughput than pass 1.
+        prices = self._shaped_prices()
+        plain = solve_daily_lp(prices, dt=1.0, power_mw=1.0, duration_hours=2.0)
+        canonical = solve_daily_lp(
+            prices, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            min_throughput_tiebreak=True,
+        )
+        np.testing.assert_allclose(
+            canonical["revenue_eur"], plain["revenue_eur"], atol=1e-6,
+        )
+        assert (
+            float(canonical["p_discharge"].sum())
+            <= float(plain["p_discharge"].sum()) + 1e-6
+        )
+        assert canonical["tiebreak_applied"] is True
+
+    def test_tiebreak_composes_with_cap(self) -> None:
+        # The cap row participates in the pass-2 problem too: a capped
+        # canonical solve still complies with the cap.
+        prices = self._shaped_prices()
+        r = solve_daily_lp(
+            prices, dt=1.0, power_mw=1.0, duration_hours=2.0,
+            max_efc_per_day=1.0, min_throughput_tiebreak=True,
+        )
+        assert r["success"] is True
+        assert float(r["p_discharge"].sum()) <= 1.0 * 2.0 + 1e-6
+
+    def test_success_flag_distinguishes_failure_from_zero_revenue(self) -> None:
+        # Frontier contract §3: a NaN/empty day reports success=False, while a
+        # genuine zero-revenue day (flat prices, VOM kills any cycle) reports
+        # success=True with zero revenue.
+        bad = solve_daily_lp(np.array([50.0, np.nan]), dt=1.0)
+        assert bad["success"] is False
+        flat = solve_daily_lp(np.full(8, 50.0), dt=1.0)
+        assert flat["success"] is True
+        assert flat["revenue_eur"] == 0.0

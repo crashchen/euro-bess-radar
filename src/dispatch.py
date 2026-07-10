@@ -26,6 +26,8 @@ def solve_daily_lp(
     efficiency: float = 0.88,
     soc_init_frac: float = 0.5,
     power_cap_mw: float | np.ndarray | None = None,
+    max_efc_per_day: float | None = None,
+    min_throughput_tiebreak: bool = False,
 ) -> dict:
     """Solve optimal charge/discharge schedule for one day via MILP.
 
@@ -40,10 +42,32 @@ def solve_daily_lp(
             ``None`` preserves the historical full-power behaviour. When
             provided, charge/discharge bounds are clipped to ``[0, power_mw]``;
             non-finite entries become 0.
+        max_efc_per_day: Optional cycle cap (cycle-cap frontier contract §2):
+            discharged energy per solved day is capped at
+            ``max_efc_per_day * capacity_mwh`` — ONE extra inequality row, the
+            discharge-leg full-equivalent-cycle convention that matches
+            ``n_cycles``. ``None`` (default) appends no row and is
+            bit-identical to the historical behaviour; ``0`` is a feasible
+            forced-idle day; negative raises ``ValueError``.
+        min_throughput_tiebreak: When True, run the canonical min-FEC second
+            pass (frontier contract §2): fix the objective at the pass-1
+            optimum (cushion ``1e-9*(1+|z*|)`` in the solver's minimisation
+            space) and minimise discharged energy, so equal-revenue optima
+            resolve to the least-wear schedule instead of a solver-arbitrary
+            one. A pass-2 failure or an objective degradation beyond
+            ``max(1e-6, 10*cushion)`` falls back to the pass-1 solution
+            (``tiebreak_applied=False``). Default False: no behaviour change
+            for existing callers.
 
     Returns:
-        Dict with keys: revenue_eur, p_charge, p_discharge, soc, n_cycles.
+        Dict with keys: revenue_eur, p_charge, p_discharge, soc, n_cycles,
+        success (False for empty/NaN input or a solver failure — a zero
+        schedule is otherwise indistinguishable from a genuine zero-revenue
+        day), and tiebreak_applied (None unless ``min_throughput_tiebreak``;
+        True when the canonical pass was accepted, False on fallback).
     """
+    if max_efc_per_day is not None and max_efc_per_day < 0:
+        raise ValueError(f"max_efc_per_day must be >= 0, got {max_efc_per_day}")
     n = len(prices)
     if n == 0 or np.isnan(prices).any():
         return {
@@ -52,6 +76,8 @@ def solve_daily_lp(
             "p_discharge": np.zeros(max(n, 0)),
             "soc": np.zeros(max(n, 0) + 1),
             "n_cycles": 0.0,
+            "success": False,
+            "tiebreak_applied": None,
         }
 
     capacity_mwh = power_mw * duration_hours
@@ -114,6 +140,13 @@ def solve_daily_lp(
         a_ub_rows.append(row_lower)
         b_ub_rows.append(soc_init)
 
+    if max_efc_per_day is not None:
+        # Cycle cap (frontier contract §2): discharge-leg energy per day.
+        row_efc = np.zeros(3 * n)
+        row_efc[n:2 * n] = dt
+        a_ub_rows.append(row_efc)
+        b_ub_rows.append(max_efc_per_day * capacity_mwh)
+
     row_terminal = np.zeros(3 * n)
     row_terminal[:n] = sqrt_eff * dt
     row_terminal[n:2 * n] = -dt / sqrt_eff
@@ -134,7 +167,20 @@ def solve_daily_lp(
             "p_discharge": np.zeros(n),
             "soc": np.full(n + 1, soc_init),
             "n_cycles": 0.0,
+            "success": False,
+            "tiebreak_applied": None,
         }
+
+    tiebreak_applied = None
+    if min_throughput_tiebreak:
+        canonical_x = _min_throughput_pass(
+            c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n,
+            float(result.fun),
+        )
+        tiebreak_applied = canonical_x is not None
+        if canonical_x is not None:
+            result.x = canonical_x
+            result.fun = float(c @ canonical_x)
 
     p_charge = result.x[:n]
     p_discharge = result.x[n:2 * n]
@@ -156,7 +202,45 @@ def solve_daily_lp(
         "p_discharge": p_discharge,
         "soc": soc,
         "n_cycles": round(float(n_cycles), 4),
+        "success": True,
+        "tiebreak_applied": tiebreak_applied,
     }
+
+
+def _min_throughput_pass(
+    c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, z_star,
+):
+    """Canonical min-FEC second pass (cycle-cap frontier contract §2).
+
+    Equal-revenue daily optima can differ in discharged energy (e.g. a spread
+    exactly at the VOM breakeven), which would make an ex-post wear costing
+    solver-tie-sensitive. Fix the objective at the pass-1 optimum ``z_star``
+    (solver minimisation space, cushion ``1e-9*(1+|z*|)``) and minimise total
+    discharged energy. The degradation backstop SCALES with the cushion —
+    ``> z* + max(1e-6, 10*cushion)`` — so the two tolerances can never cross
+    at large ``|z*|`` (the fix for the v1-#41/v2-§2.2 crossing edge, adopted
+    here from the start). Returns the canonical solution vector, or ``None``
+    (keep pass 1) on solver failure or backstop trip.
+    """
+    tol_z = 1e-9 * (1.0 + abs(z_star))
+    a_ub2 = np.vstack([a_ub, c.reshape(1, -1)])
+    b_ub2 = np.append(b_ub, z_star + tol_z)
+    c2 = np.zeros(3 * n)
+    c2[n:2 * n] = 1.0  # minimise discharged power (FEC, discharge leg)
+    result = linprog(c2, A_ub=a_ub2, b_ub=b_ub2, A_eq=a_eq, b_eq=b_eq,
+                     bounds=bounds, integrality=integrality, method="highs")
+    if not result.success:
+        logger.warning(
+            "min-FEC tie-break pass failed (%s); keeping primary solution",
+            result.message,
+        )
+        return None
+    if float(c @ result.x) > z_star + max(1e-6, 10.0 * tol_z):
+        logger.warning(
+            "min-FEC tie-break degraded the objective; keeping primary solution",
+        )
+        return None
+    return result.x
 
 
 def _coerce_power_cap(

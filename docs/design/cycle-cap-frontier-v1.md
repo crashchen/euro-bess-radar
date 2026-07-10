@@ -8,7 +8,7 @@ denominator is ABSOLUTE (sign stays meaningful at negative uncapped net).
 r2 — Codex round-2 verified all round-1 revisions RESOLVED; four local
 consistency edits applied (z* in solver-objective space; one fallback field
 name; cap-compliance tolerance in MWh; solver-failure observability +
-exclusion wording). Formal lock = merge of the design PR.** No code lands until locked, per the house playbook
+exclusion wording). Formal lock = merge of the design PR.** Increment progress: **F-A landed** (`solve_daily_lp` cap + min-FEC tie-break + `success` key + pins §6-1/2/3/9). No code lands until locked, per the house playbook
 (`stochastic-milp-v1.md` / `stochastic-milp-v2-reserve.md`: contract → review
 rounds → lock → small PRs).
 
