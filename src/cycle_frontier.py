@@ -25,7 +25,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.analytics import _infer_interval_hours
+from src.analytics import _infer_interval_hours, calculate_dispatch_price_vwaps
 from src.degradation import (
     DAYS_PER_YEAR,
     DEFAULT_CYCLE_LIFE,
@@ -58,6 +58,8 @@ FRONTIER_COLUMNS = [
     "net_delta_vs_uncapped_eur",
     "net_uplift_vs_uncapped_pct",
     "cycle_limited_life_years",
+    "charge_vwap_eur_mwh",
+    "discharge_vwap_eur_mwh",
 ]
 
 
@@ -108,6 +110,10 @@ def _sweep_window(
     """
     gross = {cap: 0.0 for cap in caps}
     fec = {cap: 0.0 for cap in caps}
+    charge_energy = {cap: 0.0 for cap in caps}
+    charge_value = {cap: 0.0 for cap in caps}
+    discharge_energy = {cap: 0.0 for cap in caps}
+    discharge_value = {cap: 0.0 for cap in caps}
     valid_days = 0
     excluded_days = 0
     tiebreak_fallback_days = 0
@@ -154,6 +160,23 @@ def _sweep_window(
             tiebreak_fallback_days += 1
         for cap, result in day_results.items():
             gross[cap] += float(result["revenue_eur"])
+            vwap = calculate_dispatch_price_vwaps(
+                prices,
+                result["p_charge"],
+                result["p_discharge"],
+                dt_hours=dt,
+            )
+            charge_energy[cap] += vwap["charge_energy_mwh"]
+            discharge_energy[cap] += vwap["discharge_energy_mwh"]
+            if vwap["charge_energy_mwh"] > 0:
+                charge_value[cap] += (
+                    vwap["charge_vwap_eur_mwh"] * vwap["charge_energy_mwh"]
+                )
+            if vwap["discharge_energy_mwh"] > 0:
+                discharge_value[cap] += (
+                    vwap["discharge_vwap_eur_mwh"]
+                    * vwap["discharge_energy_mwh"]
+                )
             # RAW FEC from the returned schedule — never the ROUNDED
             # `n_cycles` convenience field (4-decimal rounding would leak
             # into money).
@@ -165,6 +188,10 @@ def _sweep_window(
     return {
         "gross": gross,
         "fec": fec,
+        "charge_energy": charge_energy,
+        "charge_value": charge_value,
+        "discharge_energy": discharge_energy,
+        "discharge_value": discharge_value,
         "valid_days": valid_days,
         "excluded_days": excluded_days,
         "n_tiebreak_fallback_days": tiebreak_fallback_days,
@@ -193,6 +220,8 @@ def _build_rows(
         wear_eur = wear["total_degradation_eur"]
         avg_efc = fec_total / valid_days
         lifetime = estimate_battery_lifetime(avg_efc, cycle_life)
+        charged_mwh = sweep["charge_energy"][cap]
+        discharged_mwh = sweep["discharge_energy"][cap]
         rows.append(
             {
                 "cycle_cap": math.nan if cap is None else cap,
@@ -205,6 +234,14 @@ def _build_rows(
                 "wear_eur_per_mw_yr": wear_eur * annualize,
                 "net_eur_per_mw_yr": (gross_eur - wear_eur) * annualize,
                 "cycle_limited_life_years": lifetime["cycle_limited_years"],
+                "charge_vwap_eur_mwh": (
+                    sweep["charge_value"][cap] / charged_mwh
+                    if charged_mwh > 0 else math.nan
+                ),
+                "discharge_vwap_eur_mwh": (
+                    sweep["discharge_value"][cap] / discharged_mwh
+                    if discharged_mwh > 0 else math.nan
+                ),
             }
         )
     return pd.DataFrame(rows)

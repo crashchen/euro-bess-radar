@@ -504,6 +504,25 @@ def _render_kpis(summary: dict, *, mode: str, power_mw: float) -> None:
         f"(power_mw={power_mw:.1f}). Sample-size of 1, NOT a bankable annual figure - "
         "pick representative days or aggregate a multi-day window for a usable estimate."
     )
+    if summary.get("market_vwap_available"):
+        charge_vwap = summary["charge_vwap_eur_mwh"]
+        discharge_vwap = summary["discharge_vwap_eur_mwh"]
+        charge_text = (
+            f"EUR {charge_vwap:,.1f}/MWh" if math.isfinite(charge_vwap) else "no charge"
+        )
+        discharge_text = (
+            f"EUR {discharge_vwap:,.1f}/MWh"
+            if math.isfinite(discharge_vwap) else "no discharge"
+        )
+        st.caption(
+            f"Physical DA VWAP: charge {charge_text}; discharge {discharge_text}. "
+            "Energy-weighted actual dispatch prices, before VOM and capture haircut."
+        )
+    else:
+        st.caption(
+            "Physical DA VWAP is not shown for DA+IDA1 replay: its two-market "
+            "financial settlement needs a separate all-in price convention."
+        )
 
 
 def _kpi_card(label: str, value: str, help_text: str, accent: str) -> str:
@@ -1035,6 +1054,8 @@ _FRONTIER_DISPLAY_COLUMNS = {
     "net_delta_vs_uncapped_eur": "Net delta vs uncapped EUR",
     "net_uplift_vs_uncapped_pct": "Net uplift vs uncapped",
     "cycle_limited_life_years": "Cycle-limited life (yr)",
+    "charge_vwap_eur_mwh": "Charge VWAP (EUR/MWh)",
+    "discharge_vwap_eur_mwh": "Discharge VWAP (EUR/MWh)",
 }
 
 
@@ -1303,6 +1324,8 @@ def _render_frontier_result(
                 _FRONTIER_DISPLAY_COLUMNS["cycle_limited_life_years"]: (
                     lambda v: "inf" if math.isinf(v) else f"{v:.1f}"
                 ),
+                _FRONTIER_DISPLAY_COLUMNS["charge_vwap_eur_mwh"]: "{:.1f}",
+                _FRONTIER_DISPLAY_COLUMNS["discharge_vwap_eur_mwh"]: "{:.1f}",
             },
             na_rep="-",
         )

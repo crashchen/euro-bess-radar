@@ -10,7 +10,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.analytics import _infer_interval_hours, _to_local
+from src.analytics import (
+    _infer_interval_hours,
+    _to_local,
+    calculate_dispatch_price_vwaps,
+)
 from src.config import ANCILLARY_CAPACITY_AVAILABILITY, MAX_CONTINUOUS_REPLAY_INTERVALS
 from src.da_forecast import DA_FORECAST_COL, build_da_price_forecast
 from src.degradation import (
@@ -111,6 +115,9 @@ def empty_simulation_result(reason: str = "") -> dict[str, Any]:
         "max_depth_of_discharge_pct": 0.0,
         "degradation_cost_eur": 0.0,
         "soh_delta_pct": 0.0,
+        "charge_vwap_eur_mwh": math.nan,
+        "discharge_vwap_eur_mwh": math.nan,
+        "market_vwap_available": False,
         "reason": reason,
     }
     return {"summary": summary, "timeseries": pd.DataFrame(columns=_SIM_COLUMNS)}
@@ -272,6 +279,7 @@ def simulate_da_id_replay(
         daily_fce=daily_fce,
         traded_volume_mwh=traded_volume,
         extra_columns=extra_columns,
+        include_market_vwap=False,
     )
     out["summary"]["rebid_uplift_eur"] = round(
         float(result["rebid_uplift_eur"]) * capture_rate, 2
@@ -623,6 +631,7 @@ def _simulate_continuous_da_id_replay(
                 daily_fce=daily_fce,
                 traded_volume_mwh=traded_volume,
                 extra_columns=extra_columns,
+                include_market_vwap=False,
             )
             rows.append(
                 _summary_row(local_date, "DA + IDA1 Replay", day_result, soc_start_frac)
@@ -1348,6 +1357,7 @@ def _build_result(
     daily_fce: float,
     traded_volume_mwh: float | None = None,
     extra_columns: dict[str, np.ndarray] | None = None,
+    include_market_vwap: bool = True,
 ) -> dict[str, Any]:
     """Build the cockpit summary and interval DataFrame from solver arrays."""
     capacity_mwh = power_mw * duration_hours
@@ -1363,6 +1373,18 @@ def _build_result(
         else physical_throughput
     )
     total_revenue = float(np.asarray(interval_revenue).sum())
+    market_vwap = (
+        calculate_dispatch_price_vwaps(
+            day["price_eur_mwh"].to_numpy(dtype=float),
+            p_charge,
+            p_discharge,
+            dt_hours=dt,
+        )
+        if include_market_vwap else {
+            "charge_vwap_eur_mwh": math.nan,
+            "discharge_vwap_eur_mwh": math.nan,
+        }
+    )
     active_power = np.abs(net_dispatch)
     active = active_power > 1e-6
     avg_c_rate = (
@@ -1427,6 +1449,9 @@ def _build_result(
         "max_depth_of_discharge_pct": _max_dod_pct(soc, capacity_mwh),
         "degradation_cost_eur": float(deg["total_degradation_eur"]),
         "soh_delta_pct": soh_delta_pct,
+        "charge_vwap_eur_mwh": market_vwap["charge_vwap_eur_mwh"],
+        "discharge_vwap_eur_mwh": market_vwap["discharge_vwap_eur_mwh"],
+        "market_vwap_available": include_market_vwap,
         "reason": "",
     }
     return {"summary": summary, "timeseries": ts}

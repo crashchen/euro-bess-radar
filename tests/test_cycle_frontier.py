@@ -15,6 +15,7 @@ import pandas as pd
 import pytest
 
 import src.cycle_frontier as cf
+from src.analytics import calculate_dispatch_price_vwaps
 from src.cycle_frontier import (
     DEFAULT_CYCLE_CAPS,
     FRONTIER_COLUMNS,
@@ -240,6 +241,40 @@ class TestFrontierIdentities:
         assert row["cycle_limited_life_years"] == pytest.approx(
             expected["cycle_limited_years"]
         )
+
+    def test_reports_realised_charge_and_discharge_vwaps(self) -> None:
+        prices = _double_cycle_day()
+        frame, _summary = compute_cycle_cap_frontier(
+            _frame(prices),
+            capex_eur_kwh=0.0,
+            cycle_caps=(1.0,),
+            **_KW,
+        )
+        result = solve_daily_lp(
+            np.asarray(prices), dt=1.0, max_efc_per_day=1.0,
+            min_throughput_tiebreak=True, **_KW,
+        )
+        expected = calculate_dispatch_price_vwaps(
+            np.asarray(prices), result["p_charge"], result["p_discharge"],
+            dt_hours=1.0,
+        )
+        row = frame.iloc[0]
+        assert row["charge_vwap_eur_mwh"] == pytest.approx(
+            expected["charge_vwap_eur_mwh"], abs=1e-9
+        )
+        assert row["discharge_vwap_eur_mwh"] == pytest.approx(
+            expected["discharge_vwap_eur_mwh"], abs=1e-9
+        )
+
+    def test_idle_cap_reports_missing_vwaps(self) -> None:
+        frame, _summary = compute_cycle_cap_frontier(
+            _frame(_double_cycle_day()),
+            capex_eur_kwh=0.0,
+            cycle_caps=(0.0,),
+            **_KW,
+        )
+        assert math.isnan(frame["charge_vwap_eur_mwh"].iloc[0])
+        assert math.isnan(frame["discharge_vwap_eur_mwh"].iloc[0])
 
 
 class TestCoTemporalValidDays:
