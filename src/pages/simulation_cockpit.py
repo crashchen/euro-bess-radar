@@ -241,6 +241,7 @@ def render(
         assumptions=assumptions,
     )
     _render_cycle_frontier_section(
+        primary_zone=primary_zone,
         primary_df=primary_df,
         dates=dates,
         zone_tz=zone_tz,
@@ -986,6 +987,41 @@ def _append_frontier_assumptions(
     return pd.concat([assumptions, rows], ignore_index=True)
 
 
+_FRONTIER_STATE_KEY = "cycle_frontier_result"
+
+
+def _frontier_fingerprint(
+    *,
+    primary_zone: str,
+    caps: list[float | None],
+    cycle_life: float,
+    sweep_dates: list,
+    zone_tz: str | None,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    capex_eur_kwh: float,
+) -> tuple:
+    """Identity of one sweep's inputs, for session-state cache invalidation.
+
+    ``None`` (uncapped) maps to a -1.0 sentinel (real caps are >= 0, so no
+    collision). The date component is (first, last, count) — a same-length
+    in-place data correction is the accepted blind spot (the user re-runs).
+    """
+    cap_key = tuple(sorted(-1.0 if c is None else float(c) for c in caps))
+    if sweep_dates:
+        date_key = (
+            str(sweep_dates[0]), str(sweep_dates[-1]), len(sweep_dates),
+        )
+    else:
+        date_key = ("", "", 0)
+    return (
+        str(primary_zone), cap_key, float(cycle_life), date_key, str(zone_tz),
+        float(power_mw), float(duration_hours), float(efficiency),
+        float(capex_eur_kwh),
+    )
+
+
 _FRONTIER_DISPLAY_COLUMNS = {
     "best": "Best",
     "label": "Cap",
@@ -1004,6 +1040,7 @@ _FRONTIER_DISPLAY_COLUMNS = {
 
 def _render_cycle_frontier_section(
     *,
+    primary_zone: str,
     primary_df: pd.DataFrame,
     dates: list,
     zone_tz: str,
@@ -1016,7 +1053,10 @@ def _render_cycle_frontier_section(
 ) -> None:
     """Cycle-cap x degradation net-revenue frontier (contract section 4)."""
     with st.expander(
-        "Cycle-cap x degradation net-revenue frontier", expanded=False,
+        # The multiplication sign is the LOCKED contract section-4 UI copy
+        # (Codex review) — not a typo for "x".
+        "Cycle-cap × degradation net-revenue frontier",  # noqa: RUF001
+        expanded=False,
     ):
         st.caption(
             "Investment screening: sweeps a per-day cycle cap over the loaded "
@@ -1068,9 +1108,7 @@ def _render_cycle_frontier_section(
             "EUR/kWh** (single source of truth — change it there). At 0 the "
             "frontier reports net = gross."
         )
-        if not st.button("Run frontier sweep", key="cycle_frontier_run"):
-            st.info("Pick caps and click Run to sweep the loaded window.")
-            return
+        run_clicked = st.button("Run frontier sweep", key="cycle_frontier_run")
 
         caps, invalid = _parse_frontier_caps(selected)
         if invalid:
@@ -1083,25 +1121,59 @@ def _render_cycle_frontier_section(
 
         limit = _sample_limit(sample)
         sweep_dates = dates if limit is None else dates[-limit:]
-        try:
-            with st.spinner(
-                f"Solving {len(sweep_dates)} day(s) x {len(set(caps))} cap(s) "
-                "(two solver passes per pair)..."
-            ):
-                frontier, summary = compute_cycle_cap_frontier(
-                    primary_df,
-                    dates=sweep_dates,
-                    tz=zone_tz,
-                    power_mw=power_mw,
-                    duration_hours=duration_hours,
-                    efficiency=efficiency,
-                    capex_eur_kwh=capex_eur_kwh,
-                    cycle_life=float(cycle_life),
-                    cycle_caps=tuple(caps),
-                )
-        except ValueError as exc:
-            st.error(f"Frontier sweep failed: {exc}")
+        fingerprint = _frontier_fingerprint(
+            primary_zone=primary_zone,
+            caps=caps,
+            cycle_life=float(cycle_life),
+            sweep_dates=sweep_dates,
+            zone_tz=zone_tz,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            capex_eur_kwh=capex_eur_kwh,
+        )
+        if run_clicked:
+            try:
+                with st.spinner(
+                    f"Solving {len(sweep_dates)} day(s) x {len(set(caps))} "
+                    "cap(s) (two solver passes per pair)..."
+                ):
+                    frontier, summary = compute_cycle_cap_frontier(
+                        primary_df,
+                        dates=sweep_dates,
+                        tz=zone_tz,
+                        power_mw=power_mw,
+                        duration_hours=duration_hours,
+                        efficiency=efficiency,
+                        capex_eur_kwh=capex_eur_kwh,
+                        cycle_life=float(cycle_life),
+                        cycle_caps=tuple(caps),
+                    )
+            except ValueError as exc:
+                st.error(f"Frontier sweep failed: {exc}")
+                return
+            # Cache the result so the panel survives unrelated reruns (a
+            # download-button click reruns the script with the run button
+            # back at False, which would otherwise collapse the results) —
+            # solving on every rerun instead would make the whole dashboard
+            # pay the sweep on any widget interaction.
+            st.session_state[_FRONTIER_STATE_KEY] = {
+                "fingerprint": fingerprint,
+                "frontier": frontier,
+                "summary": summary,
+            }
+
+        cached = st.session_state.get(_FRONTIER_STATE_KEY)
+        if cached is None:
+            st.info("Pick caps and click Run to sweep the loaded window.")
             return
+        if cached["fingerprint"] != fingerprint:
+            st.info(
+                "Inputs changed since the last sweep — click Run frontier "
+                "sweep to refresh the table."
+            )
+            return
+        frontier, summary = cached["frontier"], cached["summary"]
 
         if frontier.empty:
             st.warning(
@@ -1209,8 +1281,11 @@ def _render_frontier_result(
             "net_delta_vs_uncapped_eur",
         )
     ]
+    # Index hidden via the Styler itself: st.dataframe ignores
+    # hide_index=True when handed a Styler (Gemini review catch).
     styled = (
         display.style
+        .hide(axis="index")
         .apply(
             lambda row: (
                 ["background-color: rgba(0,163,255,0.14)"] * len(row)
@@ -1232,7 +1307,7 @@ def _render_frontier_result(
             na_rep="-",
         )
     )
-    st.dataframe(styled, width="stretch", hide_index=True)
+    st.dataframe(styled, width="stretch")
     st.caption(
         "Best cap = the LOWEST finite cap whose net is within tolerance "
         "(1 EUR/MW/yr over the common valid days) of the maximum — prefer "
