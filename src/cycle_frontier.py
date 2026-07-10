@@ -25,7 +25,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.analytics import _infer_interval_hours, calculate_dispatch_price_vwaps
+from src.analytics import _infer_interval_hours
 from src.degradation import (
     DAYS_PER_YEAR,
     DEFAULT_CYCLE_LIFE,
@@ -160,23 +160,16 @@ def _sweep_window(
             tiebreak_fallback_days += 1
         for cap, result in day_results.items():
             gross[cap] += float(result["revenue_eur"])
-            vwap = calculate_dispatch_price_vwaps(
-                prices,
-                result["p_charge"],
-                result["p_discharge"],
-                dt_hours=dt,
-            )
-            charge_energy[cap] += vwap["charge_energy_mwh"]
-            discharge_energy[cap] += vwap["discharge_energy_mwh"]
-            if vwap["charge_energy_mwh"] > 0:
-                charge_value[cap] += (
-                    vwap["charge_vwap_eur_mwh"] * vwap["charge_energy_mwh"]
-                )
-            if vwap["discharge_energy_mwh"] > 0:
-                discharge_value[cap] += (
-                    vwap["discharge_vwap_eur_mwh"]
-                    * vwap["discharge_energy_mwh"]
-                )
+            charge_mwh = np.maximum(
+                np.asarray(result["p_charge"], dtype=float), 0.0
+            ) * dt
+            discharge_mwh = np.maximum(
+                np.asarray(result["p_discharge"], dtype=float), 0.0
+            ) * dt
+            charge_energy[cap] += float(charge_mwh.sum())
+            discharge_energy[cap] += float(discharge_mwh.sum())
+            charge_value[cap] += float(np.dot(prices, charge_mwh))
+            discharge_value[cap] += float(np.dot(prices, discharge_mwh))
             # RAW FEC from the returned schedule — never the ROUNDED
             # `n_cycles` convenience field (4-decimal rounding would leak
             # into money).

@@ -266,6 +266,52 @@ class TestFrontierIdentities:
             expected["discharge_vwap_eur_mwh"], abs=1e-9
         )
 
+    def test_vwaps_are_energy_weighted_across_days(self) -> None:
+        """Frontier VWAP is total value / total energy, not a mean of days."""
+        day_one = _double_cycle_day()  # Two profitable cycles at 10 -> 100.
+        day_two = [20.0] * 8 + [80.0] * 8 + [55.0] * 8  # One at 20 -> 80.
+        frame, _summary = compute_cycle_cap_frontier(
+            _frame(day_one + day_two),
+            capex_eur_kwh=0.0,
+            cycle_caps=(2.0,),
+            **_KW,
+        )
+
+        expected_charge_energy = 0.0
+        expected_charge_value = 0.0
+        expected_discharge_energy = 0.0
+        expected_discharge_value = 0.0
+        for prices in (day_one, day_two):
+            result = solve_daily_lp(
+                np.asarray(prices),
+                dt=1.0,
+                max_efc_per_day=2.0,
+                min_throughput_tiebreak=True,
+                **_KW,
+            )
+            vwap = calculate_dispatch_price_vwaps(
+                np.asarray(prices),
+                result["p_charge"],
+                result["p_discharge"],
+                dt_hours=1.0,
+            )
+            expected_charge_energy += vwap["charge_energy_mwh"]
+            expected_charge_value += (
+                vwap["charge_vwap_eur_mwh"] * vwap["charge_energy_mwh"]
+            )
+            expected_discharge_energy += vwap["discharge_energy_mwh"]
+            expected_discharge_value += (
+                vwap["discharge_vwap_eur_mwh"] * vwap["discharge_energy_mwh"]
+            )
+
+        row = frame.iloc[0]
+        assert row["charge_vwap_eur_mwh"] == pytest.approx(
+            expected_charge_value / expected_charge_energy, abs=1e-9
+        )
+        assert row["discharge_vwap_eur_mwh"] == pytest.approx(
+            expected_discharge_value / expected_discharge_energy, abs=1e-9
+        )
+
     def test_idle_cap_reports_missing_vwaps(self) -> None:
         frame, _summary = compute_cycle_cap_frontier(
             _frame(_double_cycle_day()),
