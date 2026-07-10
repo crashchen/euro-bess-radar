@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import math
 from datetime import date
 
 import numpy as np
@@ -112,6 +113,42 @@ def test_throughput_and_fce_match_dispatch_arrays() -> None:
     assert result["summary"]["traded_volume_mwh"] == pytest.approx(expected_throughput)
     assert result["summary"]["daily_fce"] == pytest.approx(expected_fce, abs=1e-4)
     assert result["summary"]["rebalancing_factor"] == pytest.approx(1.0)
+
+
+def test_da_replay_summary_exposes_physical_da_vwaps() -> None:
+    prices = _make_prices()
+    result = simulate_da_milp_replay(
+        prices,
+        simulation_date=prices.index[0].date(),
+        power_mw=1.0,
+        duration_hours=2.0,
+    )
+    ts = result["timeseries"]
+    charge_energy = ts["p_charge_mw"].sum()
+    discharge_energy = ts["p_discharge_mw"].sum()
+
+    assert result["summary"]["market_vwap_available"] is True
+    assert result["summary"]["charge_vwap_eur_mwh"] == pytest.approx(
+        (ts["price_eur_mwh"] * ts["p_charge_mw"]).sum() / charge_energy
+    )
+    assert result["summary"]["discharge_vwap_eur_mwh"] == pytest.approx(
+        (ts["price_eur_mwh"] * ts["p_discharge_mw"]).sum() / discharge_energy
+    )
+
+
+def test_da_id_replay_does_not_claim_a_single_market_vwap() -> None:
+    da_df, ida_df = _make_da_id_pair()
+    result = simulate_da_id_replay(
+        da_df,
+        ida_df,
+        simulation_date=da_df.index[0].date(),
+        power_mw=1.0,
+        duration_hours=2.0,
+    )
+
+    assert result["summary"]["market_vwap_available"] is False
+    assert math.isnan(result["summary"]["charge_vwap_eur_mwh"])
+    assert math.isnan(result["summary"]["discharge_vwap_eur_mwh"])
 
 
 def test_trade_count_uses_contiguous_nonzero_blocks() -> None:

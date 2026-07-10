@@ -6,6 +6,55 @@ import numpy as np
 import pandas as pd
 
 
+def calculate_dispatch_price_vwaps(
+    prices_eur_mwh: np.ndarray | pd.Series,
+    p_charge_mw: np.ndarray | pd.Series,
+    p_discharge_mw: np.ndarray | pd.Series,
+    *,
+    dt_hours: float,
+) -> dict[str, float]:
+    """Return energy-weighted physical charge and discharge market prices.
+
+    This is a reporting diagnostic for a dispatch already selected by a solver:
+    it excludes VOM, capture haircuts, and financial re-settlement. A missing
+    charge/discharge leg returns ``NaN`` for that side rather than a made-up
+    zero price. Callers must use one unambiguous market-price stream; DA+IDA
+    financial replays therefore do not expose this DA-only diagnostic.
+    """
+    prices = np.asarray(prices_eur_mwh, dtype=float)
+    charge = np.asarray(p_charge_mw, dtype=float)
+    discharge = np.asarray(p_discharge_mw, dtype=float)
+    if not (len(prices) == len(charge) == len(discharge)):
+        raise ValueError("prices, p_charge_mw, and p_discharge_mw must align.")
+    if dt_hours <= 0 or not np.isfinite(dt_hours):
+        raise ValueError("dt_hours must be a positive finite number.")
+    if not (
+        np.isfinite(prices).all()
+        and np.isfinite(charge).all()
+        and np.isfinite(discharge).all()
+    ):
+        raise ValueError("VWAP inputs must be finite.")
+
+    # Solver power vectors are non-negative. Clipping tiny numerical negatives
+    # keeps a reporting metric from turning round-off into negative energy.
+    charge_mwh = np.maximum(charge, 0.0) * dt_hours
+    discharge_mwh = np.maximum(discharge, 0.0) * dt_hours
+    charge_total = float(charge_mwh.sum())
+    discharge_total = float(discharge_mwh.sum())
+    return {
+        "charge_energy_mwh": charge_total,
+        "discharge_energy_mwh": discharge_total,
+        "charge_vwap_eur_mwh": (
+            float(np.dot(prices, charge_mwh) / charge_total)
+            if charge_total > 0 else float("nan")
+        ),
+        "discharge_vwap_eur_mwh": (
+            float(np.dot(prices, discharge_mwh) / discharge_total)
+            if discharge_total > 0 else float("nan")
+        ),
+    }
+
+
 def _to_local(df: pd.DataFrame, tz: str | None) -> pd.DataFrame:
     """Return a copy with index converted to local time, or as-is if tz is None."""
     if tz is None:

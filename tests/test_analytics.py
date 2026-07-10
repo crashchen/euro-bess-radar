@@ -14,6 +14,7 @@ from src.analytics import (
     build_renewable_price_scatter,
     build_spread_heatmap,
     calculate_daily_spreads,
+    calculate_dispatch_price_vwaps,
     calculate_imbalance_spread,
     calculate_intraday_uplift,
     calculate_monthly_revenue,
@@ -77,6 +78,54 @@ def half_hour_negative_prices() -> pd.DataFrame:
 
 
 # ── Daily spreads ────────────────────────────────────────────────────────────
+
+
+class TestDispatchPriceVwaps:
+    def test_energy_weights_not_interval_counts(self) -> None:
+        result = calculate_dispatch_price_vwaps(
+            np.array([-40.0, 10.0, 50.0, 100.0]),
+            np.array([1.0, 2.0, 0.0, 0.0]),
+            np.array([0.0, 0.0, 1.0, 3.0]),
+            dt_hours=0.25,
+        )
+
+        assert result["charge_energy_mwh"] == pytest.approx(0.75)
+        assert result["discharge_energy_mwh"] == pytest.approx(1.0)
+        # Negative charging prices are valid market outcomes, not missing data.
+        assert result["charge_vwap_eur_mwh"] == pytest.approx(-5.0 / 0.75)
+        assert result["discharge_vwap_eur_mwh"] == pytest.approx(87.5)
+
+    def test_no_physical_leg_is_nan_not_a_zero_price(self) -> None:
+        result = calculate_dispatch_price_vwaps(
+            np.array([10.0, 20.0]),
+            np.zeros(2),
+            np.array([0.0, 1.0]),
+            dt_hours=1.0,
+        )
+
+        assert np.isnan(result["charge_vwap_eur_mwh"])
+        assert result["discharge_vwap_eur_mwh"] == pytest.approx(20.0)
+
+    @pytest.mark.parametrize(
+        "prices, charge, discharge, dt_hours, match",
+        [
+            (np.array([1.0]), np.array([1.0, 0.0]), np.array([0.0]), 1.0, "align"),
+            (np.array([1.0]), np.array([1.0]), np.array([0.0]), 0.0, "positive"),
+            (np.array([np.nan]), np.array([1.0]), np.array([0.0]), 1.0, "finite"),
+        ],
+    )
+    def test_invalid_inputs_raise(
+        self,
+        prices: np.ndarray,
+        charge: np.ndarray,
+        discharge: np.ndarray,
+        dt_hours: float,
+        match: str,
+    ) -> None:
+        with pytest.raises(ValueError, match=match):
+            calculate_dispatch_price_vwaps(
+                prices, charge, discharge, dt_hours=dt_hours,
+            )
 
 class TestDailySpreads:
     def test_correct_spread(self, seven_day_prices: pd.DataFrame) -> None:

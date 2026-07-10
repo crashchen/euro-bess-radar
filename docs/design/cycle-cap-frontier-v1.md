@@ -257,6 +257,17 @@ changes `z*` and reduces (never raises) reported FEC on a degenerate fixture.
 Each increment its own PR with dual review (Codex + agy/Gemini), per the
 house lane.
 
+### Reporting addendum: realised DA VWAPs
+
+The completed frontier also reports `charge_vwap_eur_mwh` and
+`discharge_vwap_eur_mwh` for each cap. These are energy-weighted prices of the
+actual DA-only physical schedule across the common valid-day window:
+`sum(price x charged/discharged MWh) / sum(charged/discharged MWh)`. They are
+reporting diagnostics only: negative prices remain signed, a missing physical
+leg is `NaN` rather than a made-up zero, and neither VOM nor a capture haircut
+is included. The fields do not enter the solver, gross revenue, wear, net
+revenue, best-cap rule, or any red line above.
+
 ## 8. Resolved questions (all closed at r1 — nothing open)
 
 - ~~Q1~~ **CLOSED: discharge-leg EFC** (industry convention + matches the
