@@ -48,6 +48,7 @@ def _force_canonical_tiebreak_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 class TestStochasticBatch:
+    @pytest.mark.slow
     def test_batch_aggregates_and_deltas(self) -> None:
         da_df, ida_df = _history()
         per_day, summ = simulate_stochastic_da_id_batch(
@@ -126,6 +127,7 @@ class TestStochasticBatch:
             atol=1e-6,
         )
 
+    @pytest.mark.slow
     def test_stochastic_realised_at_most_coopt_ceiling(self) -> None:
         da_df, ida_df = _history(seed=2)
         _, summ = simulate_stochastic_da_id_batch(
@@ -152,6 +154,7 @@ class TestStochasticBatch:
             stoch["total_da_only_eur"], seq["total_da_only_eur"], atol=1e-2,
         )
 
+    @pytest.mark.slow
     def test_risk_block_structure(self) -> None:
         da_df, ida_df = _history(seed=6)
         _, summ = simulate_stochastic_da_id_batch(
@@ -162,6 +165,7 @@ class TestStochasticBatch:
         assert rb["p10"] <= rb["p50"] <= rb["p90"]
         assert rb["cvar90"] <= rb["p10"] + 1e-9  # downside tail mean
 
+    @pytest.mark.slow
     def test_reserve_capacity_flows_into_totals(self) -> None:
         da_df, ida_df = _history(seed=8)
         no_res = simulate_stochastic_da_id_batch(
@@ -183,6 +187,7 @@ class TestStochasticBatch:
             <= with_res["total_coopt_ceiling_eur"] + 1e-6
         )
 
+    @pytest.mark.slow
     def test_local_timezone_does_not_exclude_all_days(self) -> None:
         # Regression (Gemini catch): the merged day index is in the zone's local
         # tz but scenario bundles are UTC; without aligning the lookup to UTC,
@@ -194,6 +199,7 @@ class TestStochasticBatch:
         )
         assert summ["valid_days"] >= 8  # boundary partial days may drop
 
+    @pytest.mark.slow
     def test_window_reserve_series_is_aligned_per_day(self) -> None:
         # A window-indexed reserve Series (the loaded-capacity standard) is
         # aligned per day by (local date, 4h block), so real block-of-day
@@ -215,6 +221,7 @@ class TestStochasticBatch:
             > no_res["total_stochastic_realised_eur"]
         )
 
+    @pytest.mark.slow
     def test_seed_reproducible(self) -> None:
         da_df, ida_df = _history(seed=10)
         kw = dict(n_scenarios=8, seed=11, **_KW)
@@ -285,6 +292,7 @@ class TestStochasticTripleBatch:
             stochastic_dispatch, "_CANONICAL_TIEBREAK_TIME_LIMIT_S", 120.0,
         )
 
+    @pytest.mark.slow
     def test_batch_aggregates_and_headline(self) -> None:
         da_df, ida_df = _history(days=6)
         from src.simulation import simulate_stochastic_triple_batch
@@ -319,6 +327,7 @@ class TestStochasticTripleBatch:
         assert rb["n"] == summ["valid_days"] * 4
         assert rb["p10"] <= rb["p50"] <= rb["p90"]
 
+    @pytest.mark.slow
     def test_constrained_collapse_matches_v1_batch(self) -> None:
         # §6-1.2: with NO reserve prices anywhere, every arm's Stage 0 skips
         # (r* == 0) and the v2 batch equals the v1 batch element-wise WHEN the
@@ -430,6 +439,7 @@ class TestStochasticTripleBatch:
         assert "forecast_mode" not in params
         assert "min_rebid_uplift_eur" not in params
 
+    @pytest.mark.slow
     def test_stage0_fallback_days_counted(
         self, monkeypatch: pytest.MonkeyPatch,
     ) -> None:
@@ -458,6 +468,7 @@ class TestStochasticTripleBatch:
         assert fallback["n_tiebreak_fallback_days"] == fallback["valid_days"]
         assert not per_day["tiebreak_stable"].any()
 
+    @pytest.mark.slow
     def test_seed_reproducible(self) -> None:
         da_df, ida_df = _history(days=4, seed=32)
         from src.simulation import simulate_stochastic_triple_batch

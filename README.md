@@ -43,7 +43,10 @@ echo "ENTSOE_API_KEY=your_key_here" > .env
 # Optional: Fingrid Open Data v2 key for Finnish ancillary data
 echo "FINGRID_API_KEY=your_key_here" >> .env
 
-# Run tests
+# Fast local feedback (keeps all non-solver-heavy coverage)
+python -m pytest tests/ -m "not slow" -q
+
+# Full suite, including solver-heavy integration/performance tests
 python -m pytest tests/ -v
 
 # Launch dashboard

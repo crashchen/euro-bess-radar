@@ -14,6 +14,8 @@ Thanks for your interest in improving `euro-bess-radar`.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python -m pytest tests/ -m "not slow" -q  # fast development loop
+python -m pytest tests/ -m slow -q        # solver-heavy checks
 python -m pytest tests/ -v
 streamlit run app.py
 ```

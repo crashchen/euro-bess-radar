@@ -317,6 +317,7 @@ class TestStochasticCommitment:
             da2, np.tile(da2, (2, 1)), np.array([1.2, -0.2]), dt=1.0,
         )["success"]
 
+    @pytest.mark.slow
     def test_worst_case_15min_day_solves_within_budget(self) -> None:
         # Scope §6: a 15-min day at S=10 (~1056 binaries) must stay well under
         # the ~10s single-day budget. Loose bound guards a scaling regression
@@ -982,6 +983,7 @@ class TestStochasticReserveCommitment:
             reserve_price_forecast_eur_mw_h=price,
         )["success"]
 
+    @pytest.mark.slow
     def test_worst_case_15min_day_solves_within_budget(self) -> None:
         # §8 Q2: pass-1 (~4s locally) + the contract-exact free-binary
         # canonical passes under the shared 8s deadline, which THIS size can
