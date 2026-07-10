@@ -164,6 +164,8 @@ Fingrid / Regelleistung / Elexon all detect HTTP 401/403 via the shared `_raise_
 
 ## Commands
 - `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
+- `python -m pytest tests/ -m "not slow" -q` — fast local regression loop; skips only the 13 solver-heavy tests marked `slow`.
+- `python -m pytest tests/ -m slow -q` — run the 13 solver-heavy stochastic integration/performance tests only.
 - `python -m pytest tests/ -v` — run all tests (912 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
 - `python scripts/seed_demo_9_2b.py` — seed a SYNTHETIC DE_LU DA+IDA1+reserve dataset into the cache to validate the Phase 9.2b cockpit panel offline (`--clean` to remove). See `docs/runbooks/validate-9-2b.md`.
 - `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
@@ -171,4 +173,4 @@ Fingrid / Regelleistung / Elexon all detect HTTP 401/403 via the shared `_raise_
 - `python -c "from src.data_ingestion import test_elexon_connection; test_elexon_connection()"` — smoke-test Elexon (no API key needed).
 - `python -c "from src.data_ingestion import test_entsoe_connection; test_entsoe_connection()"` — smoke-test ENTSO-E (needs `ENTSOE_API_KEY` in `.env`).
 
-CI runs `python -m pytest tests/ -v` on every push/PR via `.github/workflows/ci.yml`; keep the mocked-test suite green before pushing. See `CONTRIBUTING.md` for PR expectations and secret-handling rules.
+CI still runs the complete suite (including `slow`) on every push/PR via `.github/workflows/ci.yml`; keep the full mocked-test suite green before merging. See `CONTRIBUTING.md` for PR expectations and secret-handling rules.
