@@ -64,6 +64,14 @@ minimum cash-flow level, so a top-up is paid only when `M < F`. The formula
 remains well-defined for a negative merchant-net year: the top-up then covers
 the full gap from that loss to the contractual floor.
 
+An effective floor of zero is still a floor under this v1 formula. Therefore,
+when `M < 0` and either the quote or availability makes `F = 0`, the protected
+cash flow is `P = 0` and the top-up is `T = -M`; it does **not** reproduce the
+negative merchant result. This is a deliberate consequence of applying the
+screening floor to the wear-net merchant baseline. A real term sheet that
+settles against gross revenue, EBITDA, or another cash waterfall requires the
+future contract design deferred in section 9.
+
 `merchant_pv_eur` and `floor_protected_pv_eur` are **contract-window operating
 cash-flow PVs**, not project NPVs. v1 deliberately does not subtract initial
 CapEx, add debt, model taxes, or assume post-term merchant cash flows. This
@@ -75,10 +83,11 @@ does not forecast escalation, inflation, or merchant-spread decay.
 
 ### 2.1 Input validation and units
 
-- Floor rate and power must be non-negative; tenor must be positive; discount
-  rate must be non-negative; availability must lie in `[0, 1]`.
-- Merchant net remains signed. A bad merchant year is information, not a value
-  to clamp before applying the floor.
+- Every numeric input must be finite. Floor rate and power must be
+  non-negative; tenor must be positive; discount rate must be non-negative;
+  availability must lie in `[0, 1]`.
+- Merchant net remains signed but finite. A bad merchant year is information,
+  not a value to clamp before applying the floor.
 - The quote basis is always **EUR/MW-year of installed power** in v1. It is
   not EUR/MWh, qualified reserve MW, calendar-year energy, or availability
   payment per settlement interval.
@@ -132,10 +141,11 @@ Returned fields include:
 - `merchant_pv_eur`, `floor_protected_pv_eur`, `floor_pv_uplift_eur`;
 - `floor_tenor_years`, `discount_rate`, `contract_availability`.
 
-The annuity factor must be promoted to a small public helper in `scenario.py`
-or another single finance utility. Do not duplicate the fractional-year PV
-math currently used by `calculate_npv_distribution`; retaining identical
-discounting is part of the contract.
+CF-A must rename the existing private `scenario._annuity_pv_factor` helper to
+the public `scenario.annuity_pv_factor`, update its existing callers in
+`calculate_npv_distribution` and `sensitivity_table`, and import that helper
+for the overlay. Do not duplicate the fractional-year PV math; retaining
+identical discounting across all three call sites is part of the contract.
 
 ## 5. Cockpit and export placement (increment CF-B)
 
@@ -146,9 +156,11 @@ Add one expander immediately after the cycle-cap frontier section:
 Inputs are:
 
 - quoted floor (EUR/MW/year);
-- contracted availability (%);
+- contracted availability (%; divide by 100 before passing the scalar in
+  `[0, 1]` to `compute_contracted_floor_overlay`);
 - floor term (years);
-- discount rate (%).
+- discount rate (%; divide by 100 before passing the decimal rate to
+  `compute_contracted_floor_overlay`).
 
 The panel inherits power, duration, CapEx, cycle-life, date window, and best
 cap from the current frontier result. It deliberately has no independent BESS
@@ -193,19 +205,22 @@ not the global model-audit table.
 
 Before UI work, CF-A tests must pin:
 
-1. `quoted_floor = 0` and `contract_availability = 0` both reproduce merchant
-   cash flow and zero top-up exactly.
-2. A floor strictly below merchant net produces `P = M` and zero top-up.
-3. A floor strictly above merchant net produces `P = F` and `T = F - M`.
-4. A negative merchant-net fixture is not clamped; the top-up reaches the
-   effective floor and remains non-negative.
-5. Scaling power by `k` scales all EUR outputs by `k`, while per-MW values and
+1. With `M >= 0`, `quoted_floor = 0` and `contract_availability = 0` both
+   reproduce merchant cash flow and zero top-up exactly.
+2. With `M < 0` and `F = 0`, the signed merchant output remains `M`, while
+   `P = 0` and `T = -M` exactly; the negative baseline is not silently erased.
+3. A floor strictly below a non-negative merchant net produces `P = M` and
+   zero top-up.
+4. A floor strictly above merchant net produces `P = F` and `T = F - M`.
+5. A negative merchant-net fixture with a positive effective floor is not
+   clamped; the top-up reaches that floor and remains non-negative.
+6. Scaling power by `k` scales all EUR outputs by `k`, while per-MW values and
    percentage availability are unchanged.
-6. `floor_protected_pv - merchant_pv == floor_pv_uplift` within floating-point
+7. `floor_protected_pv - merchant_pv == floor_pv_uplift` within floating-point
    tolerance, including a fractional tenor and zero discount rate.
-7. Invalid floor, availability, tenor, and discount inputs raise early with
-   clear messages.
-8. The core function does not mutate the merchant baseline or invoke any
+8. NaN/Inf in any numeric input, plus invalid floor, power, availability,
+   tenor, and discount domains, raise early with clear messages.
+9. The core function does not mutate the merchant baseline or invoke any
    dispatch/solver function.
 
 CF-B AppTest pins must cover: frontier-result gating; exact source caption;
