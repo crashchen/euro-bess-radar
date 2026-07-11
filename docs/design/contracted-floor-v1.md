@@ -1,8 +1,8 @@
 # Contracted-floor versus merchant cash-flow — v1 design contract
 
-Status: **DRAFT - IN REVIEW.** This document locks the first productisation
-layer only after review and merge. It is deliberately a cash-flow comparison
-overlay, not a dispatch, trading, financing, or legal-contract engine.
+Status: **LOCKED - merged via PR #54 (`a9e546d`).** This document defines the
+first productisation layer. It is deliberately a cash-flow comparison overlay,
+not a dispatch, trading, financing, or legal-contract engine.
 
 ## 1. Positioning
 

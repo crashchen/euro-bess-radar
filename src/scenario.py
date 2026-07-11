@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 
-def _annuity_pv_factor(life_years: float, discount_rate: float) -> float:
+def annuity_pv_factor(life_years: float, discount_rate: float) -> float:
     """Present-value factor for an annuity of 1 per year over a fractional life.
 
     The integer years use the closed-form annuity formula; any fractional
@@ -96,7 +96,7 @@ def calculate_npv_distribution(
     Returns:
         Dict with npv_p10, npv_p50, npv_p90, prob_positive_npv, npv_array.
     """
-    pv_factor = _annuity_pv_factor(float(effective_life_years), discount_rate)
+    pv_factor = annuity_pv_factor(float(effective_life_years), discount_rate)
 
     net_annual = annual_revenue_dist - annual_degradation_cost
     npv_array = net_annual * pv_factor - total_capex
@@ -150,7 +150,7 @@ def sensitivity_table(
             life = val if param == "lifetime" else effective_life_years
             deg = annual_degradation_cost
 
-            pv_factor = _annuity_pv_factor(float(life), dr)
+            pv_factor = annuity_pv_factor(float(life), dr)
             npv = (rev - deg) * pv_factor - capex
 
             rows.append({
