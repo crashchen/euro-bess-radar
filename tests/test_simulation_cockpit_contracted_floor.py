@@ -31,6 +31,23 @@ from src.pages.simulation_cockpit import (
 _EXPANDER_TITLE = "Contracted floor versus merchant cash flow"
 
 
+def test_contract_locked_copy_is_verbatim() -> None:
+    """Anchor the section-3 source label and section-5 hard caption literally.
+
+    The AppTest assertions compare rendered captions against the module
+    constants; without this anchor a reworded constant would keep every
+    test green while drifting from the locked contract copy.
+    """
+    assert _CONTRACTED_FLOOR_SOURCE_LABEL == (
+        "DA-only merchant net after linear wear - cycle-frontier best cap"
+    )
+    assert _CONTRACTED_FLOOR_HARD_CAPTION == (
+        "Screening floor overlay, not a binding contract model; DA only; "
+        "linear wear proxy; no credit, performance, tax, financing, or "
+        "post-term merchant assumption."
+    )
+
+
 def _context(
     *, merchant_per_mw: float = 40000.0, avg_efc: float = 1.2,
     valid_days: int = 30, frontier_token: str = "frontier-v1",
