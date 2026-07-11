@@ -17,6 +17,7 @@ from src.ancillary import (
 )
 from src.assumptions import CAPTURE_PARAM_LABEL
 from src.config import ANCILLARY_CAPACITY_AVAILABILITY
+from src.contracted_floor import compute_contracted_floor_overlay
 from src.cycle_frontier import (
     DEFAULT_CYCLE_CAPS,
     UNCAPPED_LABEL,
@@ -240,7 +241,7 @@ def render(
         chart_template=chart_template,
         assumptions=assumptions,
     )
-    _render_cycle_frontier_section(
+    frontier_context = _render_cycle_frontier_section(
         primary_zone=primary_zone,
         primary_df=primary_df,
         dates=dates,
@@ -249,6 +250,11 @@ def render(
         duration_hours=duration_hours,
         efficiency=efficiency,
         capex_eur_kwh=capex_eur_kwh,
+        chart_template=chart_template,
+        assumptions=assumptions,
+    )
+    _render_contracted_floor_section(
+        frontier_context=frontier_context,
         chart_template=chart_template,
         assumptions=assumptions,
     )
@@ -1071,7 +1077,7 @@ def _render_cycle_frontier_section(
     capex_eur_kwh: float,
     chart_template: str,
     assumptions: pd.DataFrame | None = None,
-) -> None:
+) -> dict | None:
     """Cycle-cap x degradation net-revenue frontier (contract section 4)."""
     with st.expander(
         # The multiplication sign is the LOCKED contract section-4 UI copy
@@ -1222,6 +1228,17 @@ def _render_cycle_frontier_section(
             label="\U0001f4e5 Download frontier table (Excel)",
             file_name="cockpit_cycle_frontier.xlsx",
         )
+        return {
+            "fingerprint": fingerprint,
+            "frontier": frontier,
+            "summary": summary,
+            "sweep_dates": tuple(str(day) for day in sweep_dates),
+            "primary_zone": str(primary_zone),
+            "power_mw": float(power_mw),
+            "duration_hours": float(duration_hours),
+            "cycle_life": float(cycle_life),
+            "capex_eur_kwh": float(capex_eur_kwh),
+        }
 
 
 def _render_frontier_result(
@@ -1341,6 +1358,431 @@ def _render_frontier_result(
         "negative) and is blank when the uncapped net is within tolerance "
         "of zero. Cycle-limited life ignores calendar aging."
     )
+
+
+_CONTRACTED_FLOOR_STATE_KEY = "contracted_floor_result"
+_CONTRACTED_FLOOR_SOURCE_LABEL = (
+    "DA-only merchant net after linear wear - cycle-frontier best cap"
+)
+_CONTRACTED_FLOOR_HARD_CAPTION = (
+    "Screening floor overlay, not a binding contract model; DA only; linear "
+    "wear proxy; no credit, performance, tax, financing, or post-term "
+    "merchant assumption."
+)
+
+
+def _contracted_floor_best_row(frontier_context: dict) -> pd.Series:
+    """Return the single best-cap row carried by a current frontier result."""
+    frontier = frontier_context["frontier"]
+    best_label = frontier_context["summary"].get("best_cap_label")
+    matches = frontier[frontier["label"] == best_label]
+    if best_label is None or len(matches) != 1:
+        raise ValueError("Current frontier result has no unique best-cap row.")
+    return matches.iloc[0]
+
+
+def _contracted_floor_fingerprint(
+    *,
+    frontier_context: dict,
+    quoted_floor_eur_per_mw_yr: float,
+    contract_availability: float,
+    floor_tenor_years: float,
+    discount_rate: float,
+) -> tuple:
+    """Identity of the current merchant baseline plus all contract inputs.
+
+    The selected row's values are included in addition to the frontier input
+    fingerprint. Re-running the same frontier inputs after a source-data
+    correction therefore invalidates an older floor result even though the
+    frontier's own documented input fingerprint remains unchanged.
+    """
+    best = _contracted_floor_best_row(frontier_context)
+    summary = frontier_context["summary"]
+    return (
+        tuple(frontier_context["fingerprint"]),
+        str(frontier_context["primary_zone"]),
+        tuple(frontier_context["sweep_dates"]),
+        str(best["label"]),
+        float(best["net_eur_per_mw_yr"]),
+        float(best["avg_efc_per_day"]),
+        float(summary["cycle_life"]),
+        float(summary["capex_eur_kwh"]),
+        int(summary["valid_days"]),
+        bool(summary.get("frontier_flat", False)),
+        int(summary.get("n_tiebreak_fallback_days", 0)),
+        float(quoted_floor_eur_per_mw_yr),
+        float(contract_availability),
+        float(floor_tenor_years),
+        float(discount_rate),
+    )
+
+
+def _contracted_floor_assumption_rows(
+    *,
+    frontier_context: dict,
+    result: dict[str, float],
+) -> pd.DataFrame:
+    """Self-contained commercial inputs and frontier provenance for export."""
+    best = _contracted_floor_best_row(frontier_context)
+    summary = frontier_context["summary"]
+    sweep_dates = frontier_context["sweep_dates"]
+    window = (
+        f"{sweep_dates[0]} to {sweep_dates[-1]} ({len(sweep_dates)} requested days)"
+        if sweep_dates else "No requested days"
+    )
+    rows = [
+        {
+            "parameter": "Contract merchant baseline",
+            "value": f"{result['merchant_net_eur_per_mw_yr']:.2f}",
+            "unit": "EUR/MW/yr",
+            "source": _CONTRACTED_FLOOR_SOURCE_LABEL,
+            "affects": "M in P = max(M, F); signed and net of linear wear",
+        },
+        {
+            "parameter": "Contract power basis",
+            "value": f"{frontier_context['power_mw']:g}",
+            "unit": "MW",
+            "source": "Sidebar Power (inherited through frontier)",
+            "affects": "Scales all annual EUR cash flows",
+        },
+        {
+            "parameter": "Quoted contracted floor",
+            "value": f"{result['quoted_floor_eur'] / frontier_context['power_mw']:.2f}",
+            "unit": "EUR/MW/yr",
+            "source": "Contracted-floor cockpit input",
+            "affects": "Quoted annual floor before availability adjustment",
+        },
+        {
+            "parameter": "Contract availability",
+            "value": f"{result['contract_availability']:.2%}",
+            "unit": "",
+            "source": "Contracted-floor cockpit input",
+            "affects": "Effective floor = quoted floor x availability",
+        },
+        {
+            "parameter": "Effective contracted floor",
+            "value": f"{result['effective_floor_eur_per_mw_yr']:.2f}",
+            "unit": "EUR/MW/yr",
+            "source": "Quoted floor x contract availability",
+            "affects": "F in P = max(M, F)",
+        },
+        {
+            "parameter": "Floor term",
+            "value": f"{result['floor_tenor_years']:g}",
+            "unit": "years",
+            "source": "Contracted-floor cockpit input",
+            "affects": "Contract-window operating-cash-flow PV only",
+        },
+        {
+            "parameter": "Floor discount rate",
+            "value": f"{result['discount_rate']:.2%}",
+            "unit": "annual",
+            "source": "Contracted-floor cockpit input",
+            "affects": "Contract-window operating-cash-flow PV only",
+        },
+        {
+            "parameter": "Frontier best cap",
+            "value": str(best["label"]),
+            "unit": "",
+            "source": "Cycle-cap frontier best-row rule",
+            "affects": "Selects the merchant baseline",
+        },
+        {
+            "parameter": "Frontier realised cycling",
+            "value": f"{best['avg_efc_per_day']:.4f}",
+            "unit": "EFC/day",
+            "source": "Cycle-cap frontier selected row",
+            "affects": "Linear wear deducted from merchant gross",
+        },
+        {
+            "parameter": "Frontier cycle life",
+            "value": f"{summary['cycle_life']:g}",
+            "unit": "FEC",
+            "source": "Cycle-cap frontier run",
+            "affects": "Linear wear denominator",
+        },
+        {
+            "parameter": "Frontier BESS duration",
+            "value": f"{frontier_context['duration_hours']:g}",
+            "unit": "hours",
+            "source": "Sidebar Duration (inherited through frontier)",
+            "affects": "Energy capacity and achievable DA dispatch",
+        },
+        {
+            "parameter": "Frontier capex basis",
+            "value": f"{summary['capex_eur_kwh']:g}",
+            "unit": "EUR/kWh",
+            "source": "Sidebar CapEx inherited by frontier",
+            "affects": "Linear wear numerator",
+        },
+        {
+            "parameter": "Frontier valid days",
+            "value": str(summary["valid_days"]),
+            "unit": "days",
+            "source": "Co-temporal frontier window",
+            "affects": "Annualisation denominator shared by every cap",
+        },
+        {
+            "parameter": "Frontier annualisation",
+            "value": f"365.25 / {summary['valid_days']} valid days / power MW",
+            "unit": "",
+            "source": "House i.i.d. convention",
+            "affects": "Merchant baseline in EUR/MW/yr",
+        },
+        {
+            "parameter": "Frontier window",
+            "value": window,
+            "unit": "",
+            "source": f"Loaded DA data ({frontier_context['primary_zone']})",
+            "affects": "Merchant baseline provenance",
+        },
+        {
+            "parameter": "Frontier zone",
+            "value": str(frontier_context["primary_zone"]),
+            "unit": "",
+            "source": "Display zone used by the DA frontier",
+            "affects": "Merchant price-series provenance",
+        },
+        {
+            "parameter": "Frontier flat",
+            "value": str(bool(summary.get("frontier_flat", False))),
+            "unit": "",
+            "source": "Cycle-cap frontier summary",
+            "affects": "Warns that best-cap selection is tolerance-tied",
+        },
+        {
+            "parameter": "Frontier tie-break fallback days",
+            "value": str(int(summary.get("n_tiebreak_fallback_days", 0))),
+            "unit": "days",
+            "source": "Cycle-cap frontier summary",
+            "affects": "Wear-net baseline audit quality",
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+def _append_contracted_floor_assumptions(
+    assumptions: pd.DataFrame | None,
+    *,
+    frontier_context: dict,
+    result: dict[str, float],
+) -> pd.DataFrame:
+    """Append panel-local commercial assumptions without changing global audit."""
+    rows = _contracted_floor_assumption_rows(
+        frontier_context=frontier_context, result=result,
+    )
+    if assumptions is None or assumptions.empty:
+        return rows
+    return pd.concat([assumptions.copy(), rows], ignore_index=True)
+
+
+def _contracted_floor_export_table(
+    *,
+    frontier_context: dict,
+    result: dict[str, float],
+) -> pd.DataFrame:
+    """One-row output table for the panel's Contracted floor Excel sheet."""
+    best = _contracted_floor_best_row(frontier_context)
+    return pd.DataFrame([{
+        "merchant_baseline_source": _CONTRACTED_FLOOR_SOURCE_LABEL,
+        "zone": frontier_context["primary_zone"],
+        "best_cycle_cap": best["label"],
+        "avg_efc_per_day": float(best["avg_efc_per_day"]),
+        "valid_days": int(frontier_context["summary"]["valid_days"]),
+        **result,
+    }])
+
+
+def _render_contracted_floor_result(
+    *,
+    frontier_context: dict,
+    result: dict[str, float],
+    chart_template: str,
+) -> None:
+    """Render annual/PV KPIs, one grouped chart, and formula-input table."""
+    annual = st.columns(4)
+    annual[0].metric(
+        "Annual merchant net", f"EUR {result['merchant_net_eur']:,.0f}",
+    )
+    annual[1].metric(
+        "Effective contracted floor",
+        f"EUR {result['effective_floor_eur']:,.0f}",
+    )
+    annual[2].metric(
+        "Floor-protected annual cash flow",
+        f"EUR {result['floor_protected_cashflow_eur']:,.0f}",
+    )
+    annual[3].metric(
+        "Annual top-up", f"EUR {result['annual_top_up_eur']:,.0f}",
+    )
+    pv = st.columns(3)
+    pv[0].metric(
+        "Merchant contract-window PV", f"EUR {result['merchant_pv_eur']:,.0f}",
+    )
+    pv[1].metric(
+        "Protected contract-window PV",
+        f"EUR {result['floor_protected_pv_eur']:,.0f}",
+    )
+    pv[2].metric(
+        "Floor PV uplift", f"EUR {result['floor_pv_uplift_eur']:,.0f}",
+    )
+
+    fig = go.Figure()
+    for label, value, color in (
+        ("Merchant net", result["merchant_net_eur"], _C_REVENUE),
+        ("Effective floor", result["effective_floor_eur"], _C_PRICE_IDA),
+        ("Floor protected", result["floor_protected_cashflow_eur"], _C_DISCHARGE),
+    ):
+        fig.add_bar(
+            name=label, x=["Annual cash flow"], y=[value],
+            marker_color=color, opacity=_BAR_OPACITY,
+        )
+    fig.update_layout(barmode="group")
+    _apply_panel_layout(
+        fig, "Merchant versus contracted floor", "EUR/year",
+        chart_template, height=280,
+    )
+    st.plotly_chart(fig, width="stretch")
+
+    inputs = _contracted_floor_assumption_rows(
+        frontier_context=frontier_context, result=result,
+    ).iloc[:9]
+    st.markdown("**Formula inputs and inherited merchant basis**")
+    st.dataframe(
+        inputs[["parameter", "value", "unit", "source"]],
+        width="stretch", hide_index=True,
+    )
+    st.caption(_CONTRACTED_FLOOR_HARD_CAPTION)
+
+
+def _render_contracted_floor_section(
+    *,
+    frontier_context: dict | None,
+    chart_template: str,
+    assumptions: pd.DataFrame | None = None,
+) -> None:
+    """Contracted-floor versus merchant overlay (contract section 5)."""
+    with st.expander(
+        "Contracted floor versus merchant cash flow", expanded=False,
+    ):
+        st.caption(
+            "Compare the CURRENT cycle-frontier best row with a protective "
+            "annual floor. The floor is max(merchant, effective floor), not "
+            "an additive revenue stream, and it does not change dispatch."
+        )
+        if frontier_context is None:
+            st.session_state.pop(_CONTRACTED_FLOOR_STATE_KEY, None)
+            st.info(
+                "Run a valid cycle-cap frontier sweep first; this panel does "
+                "not accept a free-form merchant baseline."
+            )
+            return
+
+        try:
+            best = _contracted_floor_best_row(frontier_context)
+        except ValueError as exc:
+            st.session_state.pop(_CONTRACTED_FLOOR_STATE_KEY, None)
+            st.warning(str(exc))
+            return
+        st.caption(
+            f"Merchant baseline source: {_CONTRACTED_FLOOR_SOURCE_LABEL}. "
+            f"Selected cap: **{best['label']}**; realised cycling: "
+            f"**{best['avg_efc_per_day']:.2f} EFC/day**; common valid days: "
+            f"**{frontier_context['summary']['valid_days']}**."
+        )
+
+        c1, c2, c3, c4 = st.columns(4)
+        quoted_floor = c1.number_input(
+            "Quoted floor (EUR/MW/year)", min_value=0.0, value=50000.0,
+            step=5000.0, key="contracted_floor_quote",
+            help="Annual floor quoted per MW of installed power.",
+        )
+        availability_pct = c2.number_input(
+            "Contracted availability (%)", min_value=0.0, max_value=100.0,
+            value=100.0, step=1.0, key="contracted_floor_availability_pct",
+            help=(
+                "Commercial contract availability, separate from reserve "
+                "capacity availability. Divided by 100 before calculation."
+            ),
+        )
+        tenor = c3.number_input(
+            "Floor term (years)", min_value=0.1, value=10.0, step=0.5,
+            key="contracted_floor_tenor",
+        )
+        discount_pct = c4.number_input(
+            "Discount rate (%)", min_value=0.0, value=8.0, step=0.5,
+            key="contracted_floor_discount_pct",
+            help=(
+                "Annual discount rate for the contract-window cash-flow PV. "
+                "Divided by 100 before calculation; this is not project NPV."
+            ),
+        )
+        run_clicked = st.button(
+            "Run contracted-floor comparison", key="contracted_floor_run",
+        )
+        availability = float(availability_pct) / 100.0
+        discount_rate = float(discount_pct) / 100.0
+        fingerprint = _contracted_floor_fingerprint(
+            frontier_context=frontier_context,
+            quoted_floor_eur_per_mw_yr=float(quoted_floor),
+            contract_availability=availability,
+            floor_tenor_years=float(tenor),
+            discount_rate=discount_rate,
+        )
+
+        if run_clicked:
+            try:
+                result = compute_contracted_floor_overlay(
+                    merchant_net_eur_per_mw_yr=float(
+                        best["net_eur_per_mw_yr"]
+                    ),
+                    power_mw=float(frontier_context["power_mw"]),
+                    quoted_floor_eur_per_mw_yr=float(quoted_floor),
+                    floor_tenor_years=float(tenor),
+                    contract_availability=availability,
+                    discount_rate=discount_rate,
+                )
+            except ValueError as exc:
+                st.error(f"Contracted-floor calculation failed: {exc}")
+                return
+            st.session_state[_CONTRACTED_FLOOR_STATE_KEY] = {
+                "fingerprint": fingerprint,
+                "result": result,
+            }
+
+        cached = st.session_state.get(_CONTRACTED_FLOOR_STATE_KEY)
+        if cached is None:
+            st.info("Set the contract terms and click Run contracted-floor comparison.")
+            return
+        if cached["fingerprint"] != fingerprint:
+            st.session_state.pop(_CONTRACTED_FLOOR_STATE_KEY, None)
+            st.info(
+                "Contract or frontier inputs changed since the last run - "
+                "click Run contracted-floor comparison to refresh."
+            )
+            return
+        result = cached["result"]
+        _render_contracted_floor_result(
+            frontier_context=frontier_context,
+            result=result,
+            chart_template=chart_template,
+        )
+        export_assumptions = _append_contracted_floor_assumptions(
+            assumptions,
+            frontier_context=frontier_context,
+            result=result,
+        )
+        _cockpit_download_button(
+            {
+                "Contracted floor": _contracted_floor_export_table(
+                    frontier_context=frontier_context, result=result,
+                )
+            },
+            export_assumptions,
+            key="dl_contracted_floor",
+            label="Download contracted-floor comparison (Excel)",
+            file_name="cockpit_contracted_floor.xlsx",
+        )
 
 
 def _slice_to_local_dates(

@@ -176,13 +176,11 @@ def test_render_places_frontier_after_multi_day_summary() -> None:
         node for node in tree.body
         if isinstance(node, ast.FunctionDef) and node.name == "render"
     )
-    calls = [
-        stmt.value.func.id
-        for stmt in render_fn.body
-        if isinstance(stmt, ast.Expr)
-        and isinstance(stmt.value, ast.Call)
-        and isinstance(stmt.value.func, ast.Name)
-    ]
+    calls = []
+    for stmt in render_fn.body:
+        value = stmt.value if isinstance(stmt, (ast.Expr, ast.Assign)) else None
+        if isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
+            calls.append(value.func.id)
     order = (
         "_render_multi_day_summary",
         "_render_cycle_frontier_section",
