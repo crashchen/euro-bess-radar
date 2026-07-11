@@ -100,6 +100,7 @@ def _sweep_window(
     duration_hours: float,
     efficiency: float,
     capacity_mwh: float,
+    executable_power_mw: float | None,
 ) -> dict[str, Any]:
     """Solve every (day, cap) pair under the co-temporal valid-day rule.
 
@@ -138,6 +139,7 @@ def _sweep_window(
                 power_mw=power_mw,
                 duration_hours=duration_hours,
                 efficiency=efficiency,
+                power_cap_mw=executable_power_mw,
                 max_efc_per_day=cap,
                 min_throughput_tiebreak=True,
             )
@@ -285,6 +287,7 @@ def _empty_result(
     wear_eur_per_mwh_discharged: float,
     cycle_life: float,
     capex_eur_kwh: float,
+    executable_power_mw: float | None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Typed empty frame + NaN-free summary for a zero-valid-day window."""
     frame = pd.DataFrame(columns=FRONTIER_COLUMNS)
@@ -295,6 +298,7 @@ def _empty_result(
         "wear_eur_per_mwh_discharged": wear_eur_per_mwh_discharged,
         "cycle_life": cycle_life,
         "capex_eur_kwh": capex_eur_kwh,
+        "executable_power_mw": executable_power_mw,
         "best_cap_label": None,
         "frontier_flat": False,
         "n_tiebreak_fallback_days": 0,
@@ -313,6 +317,7 @@ def compute_cycle_cap_frontier(
     capex_eur_kwh: float,
     cycle_life: float = DEFAULT_CYCLE_LIFE,
     cycle_caps: Sequence[float | None] = DEFAULT_CYCLE_CAPS,
+    executable_power_mw: float | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Sweep per-day cycle caps and net a linear wear cost off DA revenue.
 
@@ -335,18 +340,36 @@ def compute_cycle_cap_frontier(
         capex_eur_kwh: Installed CapEx basis in EUR/kWh.
         cycle_life: Full-equivalent cycle life (linear-proxy denominator).
         cycle_caps: Cap sweep; `None` entry = uncapped reference row.
+        executable_power_mw: Optional scalar DA trading-power cap. `None`
+            preserves the historical full-power path. When set, only the
+            solver's per-interval charge/discharge bounds are clipped;
+            capacity, EFC, wear, annualisation, and best-cap tolerance remain
+            based on installed `power_mw`.
 
     Returns:
         `(frontier_df, summary)` — one row per cap ordered ascending finite
         caps then uncapped; summary with `valid_days`, `excluded_days`,
         `cost_per_cycle_eur`, `wear_eur_per_mwh_discharged`, `cycle_life`,
         `capex_eur_kwh`, `best_cap_label`, `frontier_flat`,
-        `n_tiebreak_fallback_days`.
+        `n_tiebreak_fallback_days`, and `executable_power_mw` (None when the
+        liquidity participation cap is off).
     """
     if power_mw <= 0:
         raise ValueError(f"power_mw must be positive, got {power_mw}")
     if duration_hours <= 0:
         raise ValueError(f"duration_hours must be positive, got {duration_hours}")
+    if executable_power_mw is not None:
+        try:
+            executable_power_mw = float(executable_power_mw)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("executable_power_mw must be finite") from exc
+        if not math.isfinite(executable_power_mw):
+            raise ValueError("executable_power_mw must be finite")
+        if executable_power_mw <= 0 or executable_power_mw > power_mw:
+            raise ValueError(
+                "executable_power_mw must satisfy 0 < executable_power_mw "
+                "<= power_mw"
+            )
     caps = _normalize_cycle_caps(cycle_caps)
     capacity_mwh = power_mw * duration_hours
     capacity_kwh = capacity_mwh * 1000.0
@@ -367,6 +390,7 @@ def compute_cycle_cap_frontier(
         duration_hours=duration_hours,
         efficiency=efficiency,
         capacity_mwh=capacity_mwh,
+        executable_power_mw=executable_power_mw,
     )
     if sweep["valid_days"] == 0:
         return _empty_result(
@@ -375,6 +399,7 @@ def compute_cycle_cap_frontier(
             wear_eur_per_mwh_discharged=wear_eur_per_mwh_discharged,
             cycle_life=cycle_life,
             capex_eur_kwh=capex_eur_kwh,
+            executable_power_mw=executable_power_mw,
         )
 
     frame = _build_rows(
@@ -399,6 +424,7 @@ def compute_cycle_cap_frontier(
         "wear_eur_per_mwh_discharged": wear_eur_per_mwh_discharged,
         "cycle_life": cycle_life,
         "capex_eur_kwh": capex_eur_kwh,
+        "executable_power_mw": executable_power_mw,
         "best_cap_label": _best_cap_label(frame, tol_window_eur),
         "frontier_flat": bool(net.max() - net.min() <= tol_window_eur),
         "n_tiebreak_fallback_days": sweep["n_tiebreak_fallback_days"],

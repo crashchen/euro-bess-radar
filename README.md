@@ -71,12 +71,13 @@ euro-bess-radar/
 │   ├── da_forecast.py        # Screening DA-price climatology forecast (Phase 9.2b Stage-0 prep)
 │   ├── degradation.py        # Throughput-based degradation and lifetime metrics
 │   ├── contracted_floor.py   # Floor-protected merchant cash-flow comparison
+│   ├── liquidity.py          # DA executable-power participation-cap calculation
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   ├── activation_overlay.py # Activation-energy replay overlay (screening, non-additive)
 │   ├── imbalance_overlay.py  # reBAP/imbalance replay overlay primitive
 │   └── export.py             # Excel report generation
-├── tests/                    # 959 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 989 passing tests, heavily mocked; 2 PDF tests may skip
 ├── scripts/                  # Maintenance/demo scripts (seed + Netztransparenz converter)
 ├── samples/                  # Generated demo CSVs from seed_demo_9_2b.py (git-ignored)
 ├── docs/runbooks/            # Operator runbooks (9.2b + imbalance validation, manual UI smoke)

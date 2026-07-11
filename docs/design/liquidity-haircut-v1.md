@@ -1,7 +1,7 @@
 # Self-cannibalization / liquidity haircut — v1 design contract
 
-Status: **DRAFT - IN REVIEW.** This document locks the liquidity-realism
-layer only after review and merge. It is deliberately a feasible-volume cap
+Status: **LOCKED - merged via PR #59 (`08d560d`).** This document defines the
+liquidity-realism layer. It is deliberately a feasible-volume cap
 on the existing DA merchant chain, not a price-impact, market-depth, or
 bidding-strategy model.
 
