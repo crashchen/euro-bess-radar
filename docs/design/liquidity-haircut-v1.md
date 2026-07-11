@@ -52,9 +52,14 @@ Inputs:
   (numerically MW). Single-sided means the auction's cleared buy volume
   (== cleared sell volume), never buy + sell summed — double counting would
   halve every participation share. Positive and finite when the feature is
-  enabled. v1 has **no data source for this number**: the repository fetches
-  no traded-volume data (verified), so the value is a user assertion with
-  provenance recorded as such.
+  enabled. **Normalisation is pinned**: whatever the source publishes
+  (per-MTU MWh at 15/30/60 min, daily or yearly totals), the entered value
+  is `total MWh over the reference period / hours in that period` —
+  equivalently MWh per delivery interval divided by the interval length in
+  hours — so the number is an average MW independent of the market time
+  unit. The UI help text must state this rule. v1 has **no data source for
+  this number**: the repository fetches no traded-volume data (verified),
+  so the value is a user assertion with provenance recorded as such.
 - `max_participation_share`: scalar in `(0, 1]`, default **0.10**. The
   maximum share of hourly market volume the asset is assumed able to
   transact without materially moving the price. This is a screening
@@ -81,12 +86,26 @@ Mechanics — all four locked:
    interval, not the size of the tank. A binding cap therefore behaves like
    a longer-duration asset at lower power, which is the correct physics.
 3. **Every per-MW denominator stays installed power.** EUR/MW/yr, the
-   net-tolerance conversion, EFC and cycle-cap accounting (both
+   best-cap net-tolerance conversion (`NET_TOL_EUR_PER_MW_YR x power_mw x
+   valid_days / 365.25`), EFC and cycle-cap accounting (both
    capacity-based) are unchanged. A binding cap must show up as a LOWER
    headline EUR/MW/yr; renormalising by executable MW would cancel the
-   haircut out of the headline and is prohibited.
+   haircut out of the headline and is prohibited. Because the tolerance
+   stays on installed power, the capped run's best-cap/`frontier_flat`
+   selection can legitimately differ from a resized-asset run near the
+   tolerance boundary — the selector basis is part of this contract, not
+   an implementation accident.
 4. The cap is a **constant scalar across intervals** in v1 (one average
    volume per zone). Hour-of-day volume shape is v2 realism (section 9).
+5. The cap clips **both directions** — charge and discharge bounds alike
+   (`power_cap_mw` semantics) — including charging into negative prices: a
+   thin market limits how many MW you can buy at a negative print exactly
+   as it limits selling.
+6. The frontier's **uncapped reference row stays cycle-uncapped only**:
+   with liquidity enabled it is still executable-power-capped, like every
+   other row, so the co-temporal comparison across cycle caps shares one
+   power basis and `net_delta_vs_uncapped` stays meaningful. UI and export
+   must say "uncapped = no cycle cap; liquidity cap still applied".
 
 ### 2.1 Input validation and units
 
@@ -123,7 +142,13 @@ remains **EUR/MW-year of installed power** (contracted-floor contract
 section 2.1). A binding liquidity cap lowers the merchant baseline `M` while
 the effective floor `F` is unchanged, so the annual top-up rises — a thin
 zone makes a quoted floor more valuable. This composition is the screening
-insight, not a bug, and the floor panel needs no change.
+insight, not a bug. The floor **formula and calculation module need no
+change**, but the floor contract's section 3 requires baseline provenance
+to be carried verbatim — so when the inherited frontier baseline was
+liquidity-capped, LH-B must extend the floor panel's caption and its
+assumption rows with the inherited liquidity fields (volume, share,
+executable power, binding). A liquidity-capped merchant baseline silently
+exported as an unconstrained one would violate the floor contract.
 
 The capture-rate sidebar haircut and this cap do **not** overlap by
 construction in v1: capture models price-capture imperfection
@@ -176,12 +201,16 @@ mismatch):
 
 When enabled, the panel captions installed vs executable power, the share
 cap, and a binding/non-binding statement, and the frontier caption gains
-the derating note. Outputs (table schema, chart, best-cap rule) are
-unchanged — the haircut changes the numbers, not the shape. Excel export
-appends the section-3 liquidity provenance rows via
-`_append_frontier_assumptions` when the cap is on. `build_assumptions_table`
-is unchanged in v1 (panel-local knob, panel-local export — same decision as
-the frontier and contracted-floor contracts).
+the derating note plus the reference-row clarification "uncapped = no
+cycle cap; liquidity cap still applied" (section 2 mechanics point 6).
+Outputs (table schema, chart, best-cap rule) are unchanged — the haircut
+changes the numbers, not the shape. Excel export appends the section-3
+liquidity provenance rows via `_append_frontier_assumptions` when the cap
+is on, and the **contracted-floor panel's caption and assumption rows gain
+the inherited liquidity fields** when the consumed baseline was capped
+(section 3). `build_assumptions_table` is unchanged in v1 (panel-local
+knob, panel-local export — same decision as the frontier and
+contracted-floor contracts).
 
 A hard caption when enabled: "Liquidity participation cap: screening
 feasible-volume derating, not a price-impact or market-depth model;
@@ -217,32 +246,59 @@ LH-A tests (before any UI):
    bit-identical to a run without the parameter — full-frame equality, not
    spot checks.
 2. A non-binding cap (`s x V >= P`) also reproduces the off outputs exactly.
-3. **Capacity-preservation cross-check**: with a binding cap `e`, the
-   frontier's window EUR outputs equal a plain frontier run at
-   `power_mw = e, duration_hours = P x D / e` (same capacity, same power
-   bound), while the per-MW rows differ exactly by the denominator ratio
-   `e / P`. This pins "cap clips power, capacity stays installed" against
-   the solver's actual arithmetic.
-4. On a fixture where the cap truly binds the optimum, gross window EUR is
+3. **Capacity-preservation cross-check, window-EUR scope only**: with a
+   binding cap `e`, each frontier row's **window EUR and raw-FEC fields**
+   (`gross_eur`, `wear_eur`, `net_eur`, `avg_efc_per_day`, VWAPs) match a
+   plain frontier run at `power_mw = e, duration_hours = P x D / e` (same
+   capacity, same power bound) **within solver and min-FEC tie-break
+   tolerance** — the feasible sets are mathematically identical, but the
+   constraint matrices are not byte-identical (big-M rows scale with
+   `power_mw`) and pass 2 accepts `tol_z` objective slack, so the pin is
+   per-field `pytest.approx`, not frame equality. The pin deliberately
+   does NOT cover `best_cap_label` / `frontier_flat` / uplift-NaN gating:
+   those read the net tolerance converted at installed `P`, so the capped
+   run and the resized run can legitimately disagree near the tolerance
+   boundary (section 2 mechanics point 3).
+4. **Selector basis pin**: in a liquidity-capped run, the best-cap
+   tolerance conversion still uses installed `power_mw` — construct a
+   fixture where an executable-power-based tolerance would flip the
+   best-cap choice and assert it does not.
+5. On a fixture where the cap truly binds the optimum, gross window EUR is
    strictly below the uncapped-feature run (feasible-set shrinkage), and
    gross EUR/MW/yr falls with the denominator held at installed power. Net
    is reported, not sign-pinned (the optimiser stays wear-blind per the
    frontier contract, so net ordering is not guaranteed in pathology).
-5. `compute_liquidity_cap` known answers: binding and non-binding cases,
-   `binding` flag, `participation_at_full_power`, share-cap echo.
-6. Validation raises with field-named messages: volume <= 0 / NaN / Inf,
-   share outside `(0, 1]`, share NaN, `executable_power_mw <= 0` or
-   `> power_mw` at the frontier boundary.
-7. Purity: no solver import in `src/liquidity.py`, no input mutation.
-8. Frontier summary carries `executable_power_mw` (None when off).
+6. **Uncapped-row basis**: with liquidity enabled, the cycle-uncapped
+   reference row is also executable-power-capped (its gross falls on a
+   binding fixture), and `net_delta_vs_uncapped` is computed against that
+   liquidity-capped reference.
+7. **Both directions**: on a negative-price fixture the charge leg is
+   clipped to `e` exactly like the discharge leg.
+8. **Joint binding**: a fixture where the liquidity cap and a cycle cap
+   bind together — discharged energy respects `min` of both constraints
+   and the day stays feasible.
+9. `compute_liquidity_cap` known answers: binding and non-binding cases,
+   `binding` flag, `participation_at_full_power`, share-cap echo;
+   `share = 1` is valid (the asset may be assumed able to absorb the whole
+   cleared volume) and non-binding when `V >= P`; a very small positive
+   volume yields a small positive executable power (never zero — forced
+   near-idle days are a legitimate solve, executable zero is not).
+10. Validation raises with field-named messages: volume <= 0 / NaN / Inf,
+    share outside `(0, 1]`, share NaN, `executable_power_mw <= 0` or
+    `> power_mw` at the frontier boundary.
+11. Purity: no solver import in `src/liquidity.py`, no input mutation.
+12. Frontier summary carries `executable_power_mw` (None when off).
 
 LH-B AppTest pins: checkbox off ⇒ no liquidity captions and unchanged
 fingerprint; enabling or editing volume/share invalidates the cached
 frontier result AND (via the existing mechanism) a cached contracted-floor
-result; the derating caption and hard caption render when enabled; Excel
-assumptions contain the liquidity rows when on and omit them when off; the
-contracted-floor panel consumes the haircut merchant baseline with its
-power basis still installed power.
+result; the derating caption, the uncapped-row wording ("uncapped = no
+cycle cap; liquidity cap still applied"), and the hard caption render when
+enabled; Excel assumptions contain the liquidity rows when on and omit
+them when off; the contracted-floor panel's caption and assumption rows
+carry the inherited liquidity fields (volume, share, executable power,
+binding) when the frontier baseline was capped, with its power basis still
+installed power.
 
 ## 8. Increment plan after lock
 
