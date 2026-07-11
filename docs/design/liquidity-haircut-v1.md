@@ -57,7 +57,10 @@ Inputs:
   is `total MWh over the reference period / hours in that period` —
   equivalently MWh per delivery interval divided by the interval length in
   hours — so the number is an average MW independent of the market time
-  unit. The UI help text must state this rule. v1 has **no data source for
+  unit. The UI help text must state this rule **with a concrete example**
+  ("for a 15-min MTU clearing 100 MWh per interval, enter 400 MWh/h"),
+  because pasting a raw per-interval volume from a sub-hourly source would
+  over-punish the asset by the MTU factor (4x at 15 min). v1 has **no data source for
   this number**: the repository fetches no traded-volume data (verified),
   so the value is a user assertion with provenance recorded as such.
 - `max_participation_share`: scalar in `(0, 1]`, default **0.10**. The
@@ -150,6 +153,20 @@ assumption rows with the inherited liquidity fields (volume, share,
 executable power, binding). A liquidity-capped merchant baseline silently
 exported as an unconstrained one would violate the floor contract.
 
+**Capped baseline label (authorised amendment to the floor contract's
+verbatim label).** Assumption rows alone do not survive a screenshot or a
+skim of the main table: a deeply derated `M` shown against the standard
+source label would visually inflate the floor's value without context.
+When and only when the inherited baseline was liquidity-capped, the floor
+panel and export therefore use the capped label variant, locked here
+verbatim:
+
+`DA-only merchant net after linear wear (liquidity-capped) - cycle-frontier best cap`
+
+The uncapped label stays byte-identical to the floor contract's original.
+LH-B must update the floor panel's literal-copy test to pin both variants
+and the condition that selects between them.
+
 The capture-rate sidebar haircut and this cap do **not** overlap by
 construction in v1: capture models price-capture imperfection
 (slippage/forecast error) and is NOT applied in the frontier (raw solver
@@ -173,8 +190,10 @@ def compute_liquidity_cap(
 Returned fields:
 
 - `executable_power_mw`, `binding`;
-- `participation_at_full_power` (= power / volume, diagnostic),
-  `applied_share_cap`, `zone_da_volume_mw`, `power_mw` (echoes).
+- `participation_at_full_power` (= power / volume, diagnostic);
+- `max_participation_share`, `zone_da_volume_mw`, `power_mw` — input
+  echoes under their exact input names, so an implementer cannot confuse
+  the echoed share cap with a derived effective share.
 
 `cycle_frontier.compute_cycle_cap_frontier()` gains one optional parameter
 `executable_power_mw: float | None = None` (default `None` = today's
@@ -214,7 +233,9 @@ contracted-floor contracts).
 
 A hard caption when enabled: "Liquidity participation cap: screening
 feasible-volume derating, not a price-impact or market-depth model;
-executable power min(P, s x V) at user-entered volume; DA only."
+executable power min(P, s x V) at user-entered zone DA volume; DA only."
+("zone DA volume", not "volume" — an investor must not misread V as the
+asset's own trading budget.)
 
 ## 6. Red lines and non-goals
 
@@ -298,7 +319,10 @@ enabled; Excel assumptions contain the liquidity rows when on and omit
 them when off; the contracted-floor panel's caption and assumption rows
 carry the inherited liquidity fields (volume, share, executable power,
 binding) when the frontier baseline was capped, with its power basis still
-installed power.
+installed power; the floor panel shows the capped source-label variant
+exactly when the baseline was capped and the original label otherwise,
+with both strings pinned literally (extending the existing
+`test_contract_locked_copy_is_verbatim` anchor).
 
 ## 8. Increment plan after lock
 
