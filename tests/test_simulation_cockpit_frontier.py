@@ -14,19 +14,23 @@ from __future__ import annotations
 import ast
 import inspect
 import json
+from io import BytesIO
 from typing import ClassVar
 
 import pandas as pd
 import pytest
+from openpyxl import load_workbook
 from streamlit.testing.v1 import AppTest
 
 import src.pages.simulation_cockpit as cockpit
 from src.cycle_frontier import DEFAULT_CYCLE_CAPS, UNCAPPED_LABEL
 from src.export import cockpit_tables_to_excel
 from src.pages.simulation_cockpit import (
+    _LIQUIDITY_HARD_CAPTION,
     _append_frontier_assumptions,
     _frontier_cap_options,
     _frontier_fingerprint,
+    _optional_percent_fraction,
     _parse_frontier_caps,
 )
 
@@ -34,6 +38,19 @@ from src.pages.simulation_cockpit import (
 _FRONTIER_EXPANDER_TITLE = (
     "Cycle-cap × degradation net-revenue frontier"  # noqa: RUF001
 )
+
+
+def test_liquidity_contract_locked_copy_is_verbatim() -> None:
+    assert _LIQUIDITY_HARD_CAPTION == (
+        "Liquidity participation cap: screening feasible-volume derating, "
+        "not a price-impact or market-depth model; executable power "
+        "min(P, s x V) at user-entered zone DA volume; DA only."
+    )
+
+
+def test_optional_percent_boundary_guards_cleared_input() -> None:
+    assert _optional_percent_fraction(None) is None
+    assert _optional_percent_fraction(10.0) == pytest.approx(0.1)
 
 
 class TestFrontierCapParsing:
@@ -87,6 +104,37 @@ class TestFrontierFingerprint:
         b = _frontier_fingerprint(caps=[0.0], **self._KW)
         assert a != b
 
+    def test_disabled_liquidity_is_historical_fingerprint(self) -> None:
+        historical = _frontier_fingerprint(caps=[1.0], **self._KW)
+        explicit_off = _frontier_fingerprint(
+            caps=[1.0],
+            liquidity_enabled=False,
+            zone_da_volume_mw=100.0,
+            max_participation_share=0.1,
+            **self._KW,
+        )
+        assert explicit_off == historical
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("zone_da_volume_mw", 20.0),
+            ("max_participation_share", 0.2),
+        ],
+    )
+    def test_enabled_liquidity_inputs_invalidate(
+        self, field: str, value: float,
+    ) -> None:
+        kwargs = {
+            "liquidity_enabled": True,
+            "zone_da_volume_mw": 10.0,
+            "max_participation_share": 0.1,
+        }
+        base = _frontier_fingerprint(caps=[1.0], **self._KW, **kwargs)
+        kwargs[field] = value
+        changed = _frontier_fingerprint(caps=[1.0], **self._KW, **kwargs)
+        assert changed != base
+
     @pytest.mark.parametrize(
         "override",
         [
@@ -116,6 +164,14 @@ class TestFrontierExportAssumptions:
         "wear_eur_per_mwh_discharged": 100.0,
         "cycle_life": 6000.0,
         "valid_days": 2,
+    }
+    _LIQUIDITY: ClassVar[dict] = {
+        "power_mw": 1.0,
+        "zone_da_volume_mw": 5.0,
+        "max_participation_share": 0.1,
+        "executable_power_mw": 0.5,
+        "participation_at_full_power": 0.2,
+        "binding": True,
     }
 
     def test_none_assumptions_pass_through(self) -> None:
@@ -164,6 +220,38 @@ class TestFrontierExportAssumptions:
         )
         assert isinstance(data, bytes) and len(data) > 0
 
+    def test_liquidity_rows_are_appended_only_when_enabled(self) -> None:
+        off = _append_frontier_assumptions(
+            self._BASE, summary=self._SUMMARY, capex_eur_kwh=600.0,
+        )
+        on = _append_frontier_assumptions(
+            self._BASE,
+            summary=self._SUMMARY,
+            capex_eur_kwh=600.0,
+            liquidity=self._LIQUIDITY,
+        )
+        assert "User-entered zone DA volume" not in set(off["parameter"])
+        assert len(on) == len(off) + 5
+        by_parameter = on.set_index("parameter")
+        assert by_parameter.loc["User-entered zone DA volume", "value"] == "5"
+        assert by_parameter.loc["Maximum DA participation share", "value"] == "10.00%"
+        assert by_parameter.loc["Liquidity executable power", "value"] == "0.5"
+        assert by_parameter.loc["Liquidity cap binding", "value"] == "True"
+        assert "installed MW remains" in by_parameter.loc[
+            "Liquidity scope", "value"
+        ]
+        data = cockpit_tables_to_excel(
+            {"Cycle-cap frontier": pd.DataFrame({"label": ["uncapped"]})},
+            assumptions=on,
+        )
+        workbook = load_workbook(BytesIO(data))
+        excel_parameters = {
+            row[0].value
+            for row in workbook["Assumptions"].iter_rows(min_row=2)
+        }
+        assert "User-entered zone DA volume" in excel_parameters
+        assert "Liquidity executable power" in excel_parameters
+
 
 def test_render_places_frontier_after_multi_day_summary() -> None:
     """Contract section 4 wiring pin: the frontier expander renders
@@ -199,14 +287,23 @@ def _frontier_app() -> None:
     """Minimal harness driving the REAL frontier panel (AppTest target)."""
     import pandas as pd
 
-    from src.pages.simulation_cockpit import _render_cycle_frontier_section
+    from src.pages.simulation_cockpit import (
+        _render_contracted_floor_section,
+        _render_cycle_frontier_section,
+    )
     from src.simulation import available_local_dates
 
     day = [10.0] * 6 + [100.0] * 3 + [10.0] * 6 + [100.0] * 3 + [50.0] * 6
     idx = pd.date_range("2026-03-02", periods=48, freq="h", tz="UTC")
     df = pd.DataFrame({"price_eur_mwh": day + day}, index=idx)
     df.index.name = "timestamp"
-    _render_cycle_frontier_section(
+    assumptions = pd.DataFrame([
+        {
+            "parameter": "Power", "value": "1", "unit": "MW",
+            "source": "Sidebar", "affects": "Everything",
+        },
+    ])
+    context = _render_cycle_frontier_section(
         primary_zone="DE_LU",
         primary_df=df,
         dates=available_local_dates(df, tz="UTC"),
@@ -216,12 +313,12 @@ def _frontier_app() -> None:
         efficiency=0.9,
         capex_eur_kwh=150.0,
         chart_template="plotly_dark",
-        assumptions=pd.DataFrame([
-            {
-                "parameter": "Power", "value": "1", "unit": "MW",
-                "source": "Sidebar", "affects": "Everything",
-            },
-        ]),
+        assumptions=assumptions,
+    )
+    _render_contracted_floor_section(
+        frontier_context=context,
+        chart_template="plotly_dark",
+        assumptions=assumptions,
     )
 
 
@@ -255,6 +352,11 @@ class TestFrontierAppTestSmoke:
         assert any("click Run" in info.value for info in app.info)
         # The capex single-source caption is visible before running.
         assert any("inherited from the sidebar" in c.value for c in app.caption)
+        assert _LIQUIDITY_HARD_CAPTION not in [c.value for c in app.caption]
+        assert all(
+            item.key != "cycle_frontier_zone_da_volume_mw"
+            for item in app.number_input
+        )
 
     def test_run_click_renders_frontier_outputs(self, app: AppTest) -> None:
         app.button(key="cycle_frontier_run").click().run(timeout=120)
@@ -317,3 +419,44 @@ class TestFrontierAppTestSmoke:
         assert any("Inputs changed" in info.value for info in app.info)
         assert len(app.dataframe) == 0
         assert len(_find_elements(app.main, "download_button")) == 0
+
+    def test_liquidity_controls_render_and_invalidate_both_panels(
+        self, app: AppTest,
+    ) -> None:
+        app.button(key="cycle_frontier_run").click().run(timeout=120)
+        app.button(key="contracted_floor_run").click().run(timeout=30)
+        assert "Annual merchant net" in [metric.label for metric in app.metric]
+
+        app.checkbox(key="cycle_frontier_liquidity_enabled").check().run(
+            timeout=30
+        )
+        assert not app.exception
+        assert any("No proxy or default volume" in i.value for i in app.info)
+        assert "Best cap (net of wear)" not in [m.label for m in app.metric]
+        assert "Annual merchant net" not in [m.label for m in app.metric]
+
+        app.number_input(key="cycle_frontier_zone_da_volume_mw").set_value(
+            5.0
+        ).run(timeout=30)
+        assert _LIQUIDITY_HARD_CAPTION in [c.value for c in app.caption]
+        assert any("uncapped = no cycle cap" in c.value for c in app.caption)
+        assert any("BINDING" in c.value for c in app.caption)
+        assert "Best cap (net of wear)" not in [m.label for m in app.metric]
+
+        app.button(key="cycle_frontier_run").click().run(timeout=120)
+        assert not app.exception
+        assert "Best cap (net of wear)" in [m.label for m in app.metric]
+        assert any(
+            "liquidity-capped" in c.value for c in app.caption
+        )
+
+        app.button(key="contracted_floor_run").click().run(timeout=30)
+        assert "Annual merchant net" in [m.label for m in app.metric]
+        assert any("Inherited liquidity basis" in c.value for c in app.caption)
+
+        app.number_input(key="cycle_frontier_liquidity_share_pct").set_value(
+            20.0
+        ).run(timeout=30)
+        assert any("Inputs changed" in i.value for i in app.info)
+        assert "Best cap (net of wear)" not in [m.label for m in app.metric]
+        assert "Annual merchant net" not in [m.label for m in app.metric]
