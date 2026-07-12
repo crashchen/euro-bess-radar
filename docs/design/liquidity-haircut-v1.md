@@ -5,7 +5,7 @@ liquidity-realism layer. It is deliberately a feasible-volume cap
 on the existing DA merchant chain, not a price-impact, market-depth, or
 bidding-strategy model.
 
-Implementation: **LH-A LANDED via PR #60 (`81b94b3`); LH-B IN REVIEW.**
+Implementation: **COMPLETE — LH-A via PR #60 (`81b94b3`), LH-B via PR #61 (`de598a8`).**
 
 ## 1. Positioning
 
