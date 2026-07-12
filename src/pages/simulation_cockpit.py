@@ -1097,6 +1097,11 @@ _LIQUIDITY_HARD_CAPTION = (
 )
 
 
+def _optional_percent_fraction(value: float | None) -> float | None:
+    """Convert a UI percentage to a fraction while preserving empty input."""
+    return None if value is None else float(value) / 100.0
+
+
 def _frontier_fingerprint(
     *,
     primary_zone: str,
@@ -1273,7 +1278,7 @@ def _render_cycle_frontier_section(
                     "before calculation."
                 ),
             )
-            max_participation_share = float(share_pct) / 100.0
+            max_participation_share = _optional_percent_fraction(share_pct)
             st.caption(_LIQUIDITY_HARD_CAPTION)
             st.caption(
                 "Frontier reference row: uncapped = no cycle cap; liquidity "
@@ -1284,6 +1289,10 @@ def _render_cycle_frontier_section(
                 st.info(
                     "Enter the user-asserted average zone DA volume to apply "
                     "the participation cap. No proxy or default volume is used."
+                )
+            elif max_participation_share is None:
+                st.info(
+                    "Enter the maximum participation share to apply the cap."
                 )
             else:
                 try:

@@ -30,6 +30,7 @@ from src.pages.simulation_cockpit import (
     _append_frontier_assumptions,
     _frontier_cap_options,
     _frontier_fingerprint,
+    _optional_percent_fraction,
     _parse_frontier_caps,
 )
 
@@ -45,6 +46,11 @@ def test_liquidity_contract_locked_copy_is_verbatim() -> None:
         "not a price-impact or market-depth model; executable power "
         "min(P, s x V) at user-entered zone DA volume; DA only."
     )
+
+
+def test_optional_percent_boundary_guards_cleared_input() -> None:
+    assert _optional_percent_fraction(None) is None
+    assert _optional_percent_fraction(10.0) == pytest.approx(0.1)
 
 
 class TestFrontierCapParsing:
