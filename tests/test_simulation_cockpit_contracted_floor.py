@@ -21,11 +21,13 @@ import src.pages.simulation_cockpit as cockpit
 from src.export import cockpit_tables_to_excel
 from src.pages.simulation_cockpit import (
     _CONTRACTED_FLOOR_HARD_CAPTION,
+    _CONTRACTED_FLOOR_LIQUIDITY_SOURCE_LABEL,
     _CONTRACTED_FLOOR_SOURCE_LABEL,
     _append_contracted_floor_assumptions,
     _contracted_floor_best_row,
     _contracted_floor_export_table,
     _contracted_floor_fingerprint,
+    _contracted_floor_source_label,
 )
 
 _EXPANDER_TITLE = "Contracted floor versus merchant cash flow"
@@ -41,6 +43,10 @@ def test_contract_locked_copy_is_verbatim() -> None:
     assert _CONTRACTED_FLOOR_SOURCE_LABEL == (
         "DA-only merchant net after linear wear - cycle-frontier best cap"
     )
+    assert _CONTRACTED_FLOOR_LIQUIDITY_SOURCE_LABEL == (
+        "DA-only merchant net after linear wear (liquidity-capped) - "
+        "cycle-frontier best cap"
+    )
     assert _CONTRACTED_FLOOR_HARD_CAPTION == (
         "Screening floor overlay, not a binding contract model; DA only; "
         "linear wear proxy; no credit, performance, tax, financing, or "
@@ -51,6 +57,7 @@ def test_contract_locked_copy_is_verbatim() -> None:
 def _context(
     *, merchant_per_mw: float = 40000.0, avg_efc: float = 1.2,
     valid_days: int = 30, frontier_token: str = "frontier-v1",
+    liquidity: bool = False,
 ) -> dict:
     frontier = pd.DataFrame({
         "cycle_cap": [1.2, float("nan")],
@@ -61,7 +68,7 @@ def _context(
         "net_eur": [3000.0, 2700.0],
         "net_eur_per_mw_yr": [merchant_per_mw, 36000.0],
     })
-    return {
+    context = {
         "fingerprint": (frontier_token, "DE_LU", valid_days),
         "frontier": frontier,
         "summary": {
@@ -79,6 +86,16 @@ def _context(
         "cycle_life": 6000.0,
         "capex_eur_kwh": 150.0,
     }
+    if liquidity:
+        context["liquidity"] = {
+            "power_mw": 1.0,
+            "zone_da_volume_mw": 5.0,
+            "max_participation_share": 0.1,
+            "executable_power_mw": 0.5,
+            "participation_at_full_power": 0.2,
+            "binding": True,
+        }
+    return context
 
 
 def _result() -> dict[str, float]:
@@ -118,6 +135,20 @@ class TestContractedFloorHelpers:
         )
         with pytest.raises(ValueError, match="unique best-cap"):
             _contracted_floor_best_row(duplicate)
+
+    def test_source_label_changes_only_when_liquidity_cap_binds(self) -> None:
+        assert _contracted_floor_source_label(_context()) == (
+            _CONTRACTED_FLOOR_SOURCE_LABEL
+        )
+        assert _contracted_floor_source_label(_context(liquidity=True)) == (
+            _CONTRACTED_FLOOR_LIQUIDITY_SOURCE_LABEL
+        )
+        nonbinding = _context(liquidity=True)
+        nonbinding["liquidity"]["binding"] = False
+        nonbinding["liquidity"]["executable_power_mw"] = 1.0
+        assert _contracted_floor_source_label(nonbinding) == (
+            _CONTRACTED_FLOOR_SOURCE_LABEL
+        )
 
     def test_identical_fingerprints_match(self) -> None:
         kwargs = dict(
@@ -228,6 +259,35 @@ class TestContractedFloorExport:
         )
         pd.testing.assert_frame_equal(original, before)
         assert len(rows) == len(original) + 18
+
+    def test_liquidity_capped_baseline_inherits_full_provenance(self) -> None:
+        context = _context(liquidity=True)
+        rows = _append_contracted_floor_assumptions(
+            None, frontier_context=context, result=_result(),
+        )
+        by_parameter = rows.set_index("parameter")
+        assert by_parameter.loc["Contract merchant baseline", "source"] == (
+            _CONTRACTED_FLOOR_LIQUIDITY_SOURCE_LABEL
+        )
+        assert by_parameter.loc["Contract power basis", "value"] == "1"
+        assert by_parameter.loc[
+            "Inherited user-entered zone DA volume", "value"
+        ] == "5"
+        assert by_parameter.loc[
+            "Inherited maximum DA participation share", "value"
+        ] == "10.00%"
+        assert by_parameter.loc[
+            "Inherited liquidity executable power", "value"
+        ] == "0.5"
+        assert by_parameter.loc[
+            "Inherited liquidity cap binding", "value"
+        ] == "True"
+        export = _contracted_floor_export_table(
+            frontier_context=context, result=_result(),
+        )
+        assert export.loc[0, "merchant_baseline_source"] == (
+            _CONTRACTED_FLOOR_LIQUIDITY_SOURCE_LABEL
+        )
 
     def test_excel_contains_contract_table_and_complete_provenance(self) -> None:
         context = _context()

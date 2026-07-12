@@ -32,6 +32,7 @@ from src.degradation import DEFAULT_CYCLE_LIFE
 from src.dispatch import solve_joint_capacity_batch
 from src.export import cockpit_tables_to_excel
 from src.imbalance_overlay import compute_imbalance_overlay
+from src.liquidity import compute_liquidity_cap
 from src.reserve_forecast import RESERVE_VALUE_COL, compute_reserve_forecast_skill
 from src.simulation import (
     DAYS_PER_YEAR,
@@ -931,6 +932,7 @@ def _append_frontier_assumptions(
     *,
     summary: dict,
     capex_eur_kwh: float,
+    liquidity: dict[str, float | bool] | None = None,
 ) -> pd.DataFrame | None:
     """Append cycle-cap frontier provenance to the export assumptions.
 
@@ -939,7 +941,7 @@ def _append_frontier_assumptions(
     """
     if assumptions is None:
         return None
-    rows = pd.DataFrame([
+    records = [
         {
             "parameter": "Frontier wear model",
             "value": (
@@ -1008,11 +1010,91 @@ def _append_frontier_assumptions(
                 "caps (co-temporal rows)"
             ),
         },
-    ])
+    ]
+    if liquidity is not None:
+        records.extend(_liquidity_assumption_records(liquidity))
+    rows = pd.DataFrame(records)
     return pd.concat([assumptions, rows], ignore_index=True)
 
 
+def _liquidity_assumption_records(
+    liquidity: dict[str, float | bool],
+    *,
+    inherited: bool = False,
+) -> list[dict[str, str]]:
+    """Panel-local liquidity provenance for frontier and floor exports."""
+    user_prefix = "Inherited user-entered" if inherited else "User-entered"
+    share_parameter = (
+        "Inherited maximum DA participation share"
+        if inherited
+        else "Maximum DA participation share"
+    )
+    executable_parameter = (
+        "Inherited liquidity executable power"
+        if inherited
+        else "Liquidity executable power"
+    )
+    binding_parameter = (
+        "Inherited liquidity cap binding"
+        if inherited
+        else "Liquidity cap binding"
+    )
+    scope_parameter = (
+        "Inherited liquidity scope" if inherited else "Liquidity scope"
+    )
+    source = (
+        "Inherited from current cycle-frontier result"
+        if inherited
+        else "Cockpit liquidity input (user assertion; no fetched source)"
+    )
+    return [
+        {
+            "parameter": f"{user_prefix} zone DA volume",
+            "value": f"{float(liquidity['zone_da_volume_mw']):g}",
+            "unit": "MWh/h",
+            "source": source,
+            "affects": "DA executable-power participation cap",
+        },
+        {
+            "parameter": share_parameter,
+            "value": f"{float(liquidity['max_participation_share']):.2%}",
+            "unit": "",
+            "source": source,
+            "affects": "Executable power = min(installed MW, share x volume)",
+        },
+        {
+            "parameter": executable_parameter,
+            "value": f"{float(liquidity['executable_power_mw']):g}",
+            "unit": "MW",
+            "source": "compute_liquidity_cap",
+            "affects": "Both DA charge and discharge interval bounds",
+        },
+        {
+            "parameter": binding_parameter,
+            "value": str(bool(liquidity["binding"])),
+            "unit": "",
+            "source": "compute_liquidity_cap",
+            "affects": "Discloses whether executable MW is below installed MW",
+        },
+        {
+            "parameter": scope_parameter,
+            "value": (
+                "DA-only feasible-volume cap; installed MW remains the "
+                "capacity, wear, EFC, and annualisation basis"
+            ),
+            "unit": "",
+            "source": "docs/design/liquidity-haircut-v1.md",
+            "affects": "Cycle-cap frontier merchant baseline only",
+        },
+    ]
+
+
 _FRONTIER_STATE_KEY = "cycle_frontier_result"
+_LIQUIDITY_HARD_CAPTION = (
+    "Liquidity participation cap: screening feasible-volume derating, not a "
+    "price-impact or market-depth model; executable power min(P, s x V) at "
+    "user-entered zone DA volume; DA only."
+)
 
 
 def _frontier_fingerprint(
@@ -1026,6 +1108,9 @@ def _frontier_fingerprint(
     duration_hours: float,
     efficiency: float,
     capex_eur_kwh: float,
+    liquidity_enabled: bool = False,
+    zone_da_volume_mw: float | None = None,
+    max_participation_share: float | None = None,
 ) -> tuple:
     """Identity of one sweep's inputs, for session-state cache invalidation.
 
@@ -1040,10 +1125,22 @@ def _frontier_fingerprint(
         )
     else:
         date_key = ("", "", 0)
-    return (
+    base = (
         str(primary_zone), cap_key, float(cycle_life), date_key, str(zone_tz),
         float(power_mw), float(duration_hours), float(efficiency),
         float(capex_eur_kwh),
+    )
+    if not liquidity_enabled:
+        return base
+    return (
+        *base,
+        "liquidity",
+        None if zone_da_volume_mw is None else float(zone_da_volume_mw),
+        (
+            None
+            if max_participation_share is None
+            else float(max_participation_share)
+        ),
     )
 
 
@@ -1135,6 +1232,78 @@ def _render_cycle_frontier_section(
             "EUR/kWh** (single source of truth — change it there). At 0 the "
             "frontier reports net = gross."
         )
+        liquidity_enabled = st.checkbox(
+            "Apply liquidity participation cap",
+            value=False,
+            key="cycle_frontier_liquidity_enabled",
+            help=(
+                "Limits both DA charge and discharge power to a stated share "
+                "of user-entered average single-sided zone DA volume. This is "
+                "a feasible-volume screening assumption, not price impact."
+            ),
+        )
+        liquidity: dict[str, float | bool] | None = None
+        zone_da_volume_mw: float | None = None
+        max_participation_share: float | None = None
+        if liquidity_enabled:
+            l1, l2 = st.columns(2)
+            zone_da_volume_mw = l1.number_input(
+                "Zone DA volume (MWh/h)",
+                min_value=0.01,
+                value=None,
+                step=10.0,
+                key="cycle_frontier_zone_da_volume_mw",
+                help=(
+                    "User-entered average SINGLE-SIDED cleared DA volume: "
+                    "reference-period MWh divided by hours. For a 15-min MTU "
+                    "clearing 100 MWh per interval, enter 400 MWh/h. This is "
+                    "not fetched in v1."
+                ),
+            )
+            share_pct = l2.number_input(
+                "Max participation share (%)",
+                min_value=0.01,
+                max_value=100.0,
+                value=10.0,
+                step=1.0,
+                key="cycle_frontier_liquidity_share_pct",
+                help=(
+                    "Screening calibration for the maximum share of hourly "
+                    "zone DA volume the asset can transact. Divided by 100 "
+                    "before calculation."
+                ),
+            )
+            max_participation_share = float(share_pct) / 100.0
+            st.caption(_LIQUIDITY_HARD_CAPTION)
+            st.caption(
+                "Frontier reference row: uncapped = no cycle cap; liquidity "
+                "cap still applied. Installed MW remains the capacity, wear, "
+                "EFC, best-cap tolerance, and EUR/MW/yr basis."
+            )
+            if zone_da_volume_mw is None:
+                st.info(
+                    "Enter the user-asserted average zone DA volume to apply "
+                    "the participation cap. No proxy or default volume is used."
+                )
+            else:
+                try:
+                    liquidity = compute_liquidity_cap(
+                        power_mw=power_mw,
+                        zone_da_volume_mw=float(zone_da_volume_mw),
+                        max_participation_share=max_participation_share,
+                    )
+                except ValueError as exc:
+                    st.error(f"Liquidity cap input error: {exc}")
+                else:
+                    binding = "BINDING" if liquidity["binding"] else "NON-BINDING"
+                    st.caption(
+                        f"Installed power: **{power_mw:g} MW**; executable "
+                        f"power: **{float(liquidity['executable_power_mw']):g} "
+                        f"MW**; user-entered zone DA volume: "
+                        f"**{float(liquidity['zone_da_volume_mw']):g} MWh/h**; "
+                        f"share cap: **{float(liquidity['max_participation_share']):.1%}**; "
+                        f"status: **{binding}**."
+                    )
         run_clicked = st.button("Run frontier sweep", key="cycle_frontier_run")
 
         caps, invalid = _parse_frontier_caps(selected)
@@ -1158,7 +1327,14 @@ def _render_cycle_frontier_section(
             duration_hours=duration_hours,
             efficiency=efficiency,
             capex_eur_kwh=capex_eur_kwh,
+            liquidity_enabled=bool(liquidity_enabled),
+            zone_da_volume_mw=(
+                None if zone_da_volume_mw is None else float(zone_da_volume_mw)
+            ),
+            max_participation_share=max_participation_share,
         )
+        if liquidity_enabled and liquidity is None:
+            return
         if run_clicked:
             try:
                 with st.spinner(
@@ -1175,6 +1351,11 @@ def _render_cycle_frontier_section(
                         capex_eur_kwh=capex_eur_kwh,
                         cycle_life=float(cycle_life),
                         cycle_caps=tuple(caps),
+                        executable_power_mw=(
+                            None
+                            if liquidity is None
+                            else float(liquidity["executable_power_mw"])
+                        ),
                     )
             except ValueError as exc:
                 st.error(f"Frontier sweep failed: {exc}")
@@ -1188,6 +1369,7 @@ def _render_cycle_frontier_section(
                 "fingerprint": fingerprint,
                 "frontier": frontier,
                 "summary": summary,
+                "liquidity": liquidity,
             }
 
         cached = st.session_state.get(_FRONTIER_STATE_KEY)
@@ -1201,6 +1383,7 @@ def _render_cycle_frontier_section(
             )
             return
         frontier, summary = cached["frontier"], cached["summary"]
+        cached_liquidity = cached.get("liquidity")
 
         if frontier.empty:
             st.warning(
@@ -1216,11 +1399,13 @@ def _render_cycle_frontier_section(
                 capture_value="Not applied (raw solver values)",
                 capture_affects=(
                     "Frontier gross/net use raw MILP revenue; the ex-post "
-                    "wear deduction is the only haircut in this panel"
+                    "wear deduction and any separately labelled liquidity "
+                    "feasible-volume cap are the only panel adjustments"
                 ),
             ),
             summary=summary,
             capex_eur_kwh=capex_eur_kwh,
+            liquidity=cached_liquidity,
         )
         _cockpit_download_button(
             {"Cycle-cap frontier": frontier}, export_assumptions,
@@ -1238,6 +1423,7 @@ def _render_cycle_frontier_section(
             "duration_hours": float(duration_hours),
             "cycle_life": float(cycle_life),
             "capex_eur_kwh": float(capex_eur_kwh),
+            "liquidity": cached_liquidity,
         }
 
 
@@ -1364,6 +1550,10 @@ _CONTRACTED_FLOOR_STATE_KEY = "contracted_floor_result"
 _CONTRACTED_FLOOR_SOURCE_LABEL = (
     "DA-only merchant net after linear wear - cycle-frontier best cap"
 )
+_CONTRACTED_FLOOR_LIQUIDITY_SOURCE_LABEL = (
+    "DA-only merchant net after linear wear (liquidity-capped) - "
+    "cycle-frontier best cap"
+)
 _CONTRACTED_FLOOR_HARD_CAPTION = (
     "Screening floor overlay, not a binding contract model; DA only; linear "
     "wear proxy; no credit, performance, tax, financing, or post-term "
@@ -1379,6 +1569,14 @@ def _contracted_floor_best_row(frontier_context: dict) -> pd.Series:
     if best_label is None or len(matches) != 1:
         raise ValueError("Current frontier result has no unique best-cap row.")
     return matches.iloc[0]
+
+
+def _contracted_floor_source_label(frontier_context: dict) -> str:
+    """Select the locked merchant-baseline label from frontier provenance."""
+    liquidity = frontier_context.get("liquidity")
+    if liquidity is not None and bool(liquidity["binding"]):
+        return _CONTRACTED_FLOOR_LIQUIDITY_SOURCE_LABEL
+    return _CONTRACTED_FLOOR_SOURCE_LABEL
 
 
 def _contracted_floor_fingerprint(
@@ -1430,12 +1628,13 @@ def _contracted_floor_assumption_rows(
         f"{sweep_dates[0]} to {sweep_dates[-1]} ({len(sweep_dates)} requested days)"
         if sweep_dates else "No requested days"
     )
+    source_label = _contracted_floor_source_label(frontier_context)
     rows = [
         {
             "parameter": "Contract merchant baseline",
             "value": f"{result['merchant_net_eur_per_mw_yr']:.2f}",
             "unit": "EUR/MW/yr",
-            "source": _CONTRACTED_FLOOR_SOURCE_LABEL,
+            "source": source_label,
             "affects": "M in P = max(M, F); signed and net of linear wear",
         },
         {
@@ -1558,6 +1757,9 @@ def _contracted_floor_assumption_rows(
             "affects": "Wear-net baseline audit quality",
         },
     ]
+    liquidity = frontier_context.get("liquidity")
+    if liquidity is not None:
+        rows.extend(_liquidity_assumption_records(liquidity, inherited=True))
     return pd.DataFrame(rows)
 
 
@@ -1584,7 +1786,9 @@ def _contracted_floor_export_table(
     """One-row output table for the panel's Contracted floor Excel sheet."""
     best = _contracted_floor_best_row(frontier_context)
     return pd.DataFrame([{
-        "merchant_baseline_source": _CONTRACTED_FLOOR_SOURCE_LABEL,
+        "merchant_baseline_source": _contracted_floor_source_label(
+            frontier_context
+        ),
         "zone": frontier_context["primary_zone"],
         "best_cycle_cap": best["label"],
         "avg_efc_per_day": float(best["avg_efc_per_day"]),
@@ -1684,12 +1888,25 @@ def _render_contracted_floor_section(
             st.session_state.pop(_CONTRACTED_FLOOR_STATE_KEY, None)
             st.warning(str(exc))
             return
+        source_label = _contracted_floor_source_label(frontier_context)
         st.caption(
-            f"Merchant baseline source: {_CONTRACTED_FLOOR_SOURCE_LABEL}. "
+            f"Merchant baseline source: {source_label}. "
             f"Selected cap: **{best['label']}**; realised cycling: "
             f"**{best['avg_efc_per_day']:.2f} EFC/day**; common valid days: "
             f"**{frontier_context['summary']['valid_days']}**."
         )
+        liquidity = frontier_context.get("liquidity")
+        if liquidity is not None:
+            binding = "BINDING" if liquidity["binding"] else "NON-BINDING"
+            st.caption(
+                "Inherited liquidity basis: user-entered zone DA volume "
+                f"**{float(liquidity['zone_da_volume_mw']):g} MWh/h**, "
+                f"maximum share **{float(liquidity['max_participation_share']):.1%}**, "
+                f"executable power **{float(liquidity['executable_power_mw']):g} "
+                f"MW** (**{binding}**). The floor quote and annual cash-flow "
+                f"scaling remain on installed power **{frontier_context['power_mw']:g} "
+                "MW**; a binding cap lowers merchant M but does not derate F."
+            )
 
         c1, c2, c3, c4 = st.columns(4)
         quoted_floor = c1.number_input(
