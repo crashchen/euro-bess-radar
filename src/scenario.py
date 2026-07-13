@@ -30,6 +30,83 @@ def annuity_pv_factor(life_years: float, discount_rate: float) -> float:
     return pv
 
 
+def _validate_decay_inputs(
+    annual_decay_rate: float,
+    decay_floor_share: float,
+) -> tuple[float, float, bool]:
+    """Validate decay assumptions and return their canonical activity state."""
+    try:
+        decay = float(annual_decay_rate)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("annual_decay_rate must be finite") from exc
+    try:
+        floor = float(decay_floor_share)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("decay_floor_share must be finite") from exc
+
+    if not math.isfinite(decay):
+        raise ValueError("annual_decay_rate must be finite")
+    if not 0.0 <= decay < 1.0:
+        raise ValueError("annual_decay_rate must be in [0, 1)")
+    if not math.isfinite(floor):
+        raise ValueError("decay_floor_share must be finite")
+    if not 0.0 <= floor <= 1.0:
+        raise ValueError("decay_floor_share must be in [0, 1]")
+    return decay, floor, decay > 0.0 and floor < 1.0
+
+
+def decaying_annuity_pv_factor(
+    life_years: float,
+    discount_rate: float,
+    annual_decay_rate: float = 0.0,
+    decay_floor_share: float = 0.0,
+) -> float:
+    """PV factor for a merchant-revenue trajectory with annual decay.
+
+    Year one remains at the full year-one revenue level. Later years receive
+    ``max((1 - decay) ** (year - 1), floor_share)``. Fractional lives follow
+    :func:`annuity_pv_factor`: the residual is a pro-rata cash flow at the end
+    of the next year and therefore uses that next year's decay weight.
+    """
+    decay, floor, active = _validate_decay_inputs(
+        annual_decay_rate,
+        decay_floor_share,
+    )
+    return _decaying_annuity_pv_factor_validated(
+        life_years,
+        discount_rate,
+        decay,
+        floor,
+        active,
+    )
+
+
+def _decaying_annuity_pv_factor_validated(
+    life_years: float,
+    discount_rate: float,
+    decay: float,
+    floor: float,
+    active: bool,
+) -> float:
+    """Compute the factor from canonical values returned by the validator."""
+    if not active:
+        return annuity_pv_factor(life_years, discount_rate)
+    if life_years <= 0:
+        return 0.0
+
+    n_full = math.floor(life_years)
+    frac = life_years - n_full
+    pv = 0.0
+    for year in range(1, n_full + 1):
+        weight = max((1.0 - decay) ** (year - 1), floor)
+        pv += weight / (1.0 + discount_rate) ** year
+    if frac > 0:
+        residual_year = n_full + 1
+        weight = max((1.0 - decay) ** (residual_year - 1), floor)
+        pv += frac * weight / (1.0 + discount_rate) ** residual_year
+    return pv
+
+
 def bootstrap_annual_revenue(
     daily_revenues: pd.Series | np.ndarray,
     n_simulations: int = 5000,
@@ -80,11 +157,14 @@ def calculate_npv_distribution(
     annual_degradation_cost: float = 0.0,
     effective_life_years: float = 20.0,
     discount_rate: float = 0.08,
+    annual_decay_rate: float = 0.0,
+    decay_floor_share: float = 0.0,
 ) -> dict:
     """Calculate NPV distribution from annual revenue simulations.
 
-    Each simulation uses the same annual revenue across all years (static
-    assumption), discounted at the given rate.
+    By default, each simulation uses the same annual revenue across all years.
+    When revenue decay is active, merchant revenue follows the decayed PV
+    factor while annual degradation cost remains flat.
 
     Args:
         annual_revenue_dist: Array of simulated annual revenues (n_simulations,).
@@ -92,14 +172,37 @@ def calculate_npv_distribution(
         annual_degradation_cost: Annual degradation cost in EUR.
         effective_life_years: Asset effective life in years.
         discount_rate: Discount rate for NPV (e.g. 0.08 = 8%).
+        annual_decay_rate: Annual merchant-revenue decay as a decimal fraction.
+        decay_floor_share: Minimum annual revenue weight versus year one.
 
     Returns:
         Dict with npv_p10, npv_p50, npv_p90, prob_positive_npv, npv_array.
     """
-    pv_factor = annuity_pv_factor(float(effective_life_years), discount_rate)
-
-    net_annual = annual_revenue_dist - annual_degradation_cost
-    npv_array = net_annual * pv_factor - total_capex
+    decay, floor, active = _validate_decay_inputs(
+        annual_decay_rate,
+        decay_floor_share,
+    )
+    decay_factor = _decaying_annuity_pv_factor_validated(
+        float(effective_life_years),
+        discount_rate,
+        decay,
+        floor,
+        active,
+    )
+    if active:
+        flat_factor = annuity_pv_factor(
+            float(effective_life_years),
+            discount_rate,
+        )
+        npv_array = (
+            annual_revenue_dist * decay_factor
+            - annual_degradation_cost * flat_factor
+            - total_capex
+        )
+    else:
+        pv_factor = decay_factor
+        net_annual = annual_revenue_dist - annual_degradation_cost
+        npv_array = net_annual * pv_factor - total_capex
 
     return {
         "npv_p10": float(np.percentile(npv_array, 10)),
@@ -117,6 +220,8 @@ def sensitivity_table(
     annual_degradation_cost: float = 0.0,
     discount_rate: float = 0.08,
     vary: dict[str, list[float]] | None = None,
+    annual_decay_rate: float = 0.0,
+    decay_floor_share: float = 0.0,
 ) -> pd.DataFrame:
     """One-at-a-time sensitivity analysis on key parameters.
 
@@ -126,12 +231,19 @@ def sensitivity_table(
         effective_life_years: Asset life (years).
         annual_degradation_cost: Annual degradation cost (EUR).
         discount_rate: Discount rate for NPV.
-        vary: Dict mapping parameter name to [low, mid, high] multipliers
-            applied to the base value. Defaults to standard ranges.
+        vary: Dict mapping parameter name to sensitivity values. Revenue and
+            CapEx values are multipliers; discount rate, lifetime, and decay
+            values are absolute. Defaults to standard ranges.
+        annual_decay_rate: Base annual merchant-revenue decay as a fraction.
+        decay_floor_share: Minimum annual revenue weight versus year one.
 
     Returns:
         DataFrame with columns: param, label, multiplier, value, npv.
     """
+    decay, floor, active = _validate_decay_inputs(
+        annual_decay_rate,
+        decay_floor_share,
+    )
     if vary is None:
         vary = {
             "revenue": [0.7, 1.0, 1.3],
@@ -139,6 +251,12 @@ def sensitivity_table(
             "discount_rate": [0.06, 0.08, 0.10],
             "lifetime": [15, 20, 25],
         }
+        if active:
+            vary["decay"] = [
+                0.0,
+                decay,
+                min(2.0 * decay, (1.0 + decay) / 2.0),
+            ]
 
     rows = []
 
@@ -150,8 +268,26 @@ def sensitivity_table(
             life = val if param == "lifetime" else effective_life_years
             deg = annual_degradation_cost
 
-            pv_factor = annuity_pv_factor(float(life), dr)
-            npv = (rev - deg) * pv_factor - capex
+            if param == "decay":
+                row_decay, row_floor, row_active = _validate_decay_inputs(
+                    val,
+                    floor,
+                )
+            else:
+                row_decay, row_floor, row_active = decay, floor, active
+            row_decay_factor = _decaying_annuity_pv_factor_validated(
+                float(life),
+                dr,
+                row_decay,
+                row_floor,
+                row_active,
+            )
+            if row_active:
+                flat_factor = annuity_pv_factor(float(life), dr)
+                npv = rev * row_decay_factor - deg * flat_factor - capex
+            else:
+                pv_factor = row_decay_factor
+                npv = (rev - deg) * pv_factor - capex
 
             rows.append({
                 "param": param,
