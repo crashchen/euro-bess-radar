@@ -20,6 +20,7 @@ from streamlit.testing.v1 import AppTest
 import src.pages.simulation_cockpit as cockpit
 from src.export import cockpit_tables_to_excel
 from src.pages.simulation_cockpit import (
+    _CONTRACTED_FLOOR_FLAT_BASELINE_CAPTION,
     _CONTRACTED_FLOOR_HARD_CAPTION,
     _CONTRACTED_FLOOR_LIQUIDITY_SOURCE_LABEL,
     _CONTRACTED_FLOOR_SOURCE_LABEL,
@@ -51,6 +52,11 @@ def test_contract_locked_copy_is_verbatim() -> None:
         "Screening floor overlay, not a binding contract model; DA only; "
         "linear wear proxy; no credit, performance, tax, financing, or "
         "post-term merchant assumption."
+    )
+    assert _CONTRACTED_FLOOR_FLAT_BASELINE_CAPTION == (
+        "Merchant baseline: flat annual revenue across the tenor; any "
+        "revenue-decay assumption from Risk Analysis is NOT reflected here "
+        "(decaying-merchant floor composition is a v2 contract)."
     )
 
 
@@ -449,6 +455,7 @@ class TestContractedFloorAppTest:
         captions = [caption.value for caption in app.caption]
         assert any(_CONTRACTED_FLOOR_SOURCE_LABEL in text for text in captions)
         assert _CONTRACTED_FLOOR_HARD_CAPTION in captions
+        assert _CONTRACTED_FLOOR_FLAT_BASELINE_CAPTION in captions
 
         charts = _find_elements(app.main, "plotly_chart")
         assert len(charts) == 2

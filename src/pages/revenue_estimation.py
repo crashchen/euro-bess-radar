@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -50,6 +52,70 @@ from src.scenario import (
     sensitivity_table,
 )
 from src.ui_theme import apply_cockpit_plot_theme
+
+_REVENUE_DECAY_HARD_CAPTION = (
+    "Revenue-trajectory decay: screening assumption on annual merchant cash "
+    "flows; does not simulate future hourly prices or re-dispatch. Battery "
+    "degradation cost stays flat, so late decayed years can show negative "
+    "operating margins rather than an idled asset. Decay begins after year 1 "
+    "(the loaded sample's year). User assertion — no build-out data is fetched."
+)
+_REVENUE_DECAY_FLOOR_HELP = (
+    "Recommended > 0 (e.g. 20-30%) to model a long-run equilibrium where "
+    "thin spreads halt further build-out; 0 means pure geometric decay "
+    "toward zero."
+)
+
+
+def _normalise_revenue_decay_inputs(
+    decay_pct: float | None,
+    floor_pct: float | None,
+) -> tuple[float, float, bool] | None:
+    """Convert UI percentages and expose the contract's activity predicate."""
+    if decay_pct is None or floor_pct is None:
+        return None
+    decay = float(decay_pct) / 100.0
+    floor = float(floor_pct) / 100.0
+    return decay, floor, decay > 0.0 and floor < 1.0
+
+
+def _terminal_decay_year_and_weight(
+    life_years: float,
+    annual_decay_rate: float,
+    decay_floor_share: float,
+) -> tuple[int, float]:
+    """Return the last full or fractional residual year and its revenue weight."""
+    n_full = math.floor(life_years)
+    terminal_year = n_full if float(life_years).is_integer() else n_full + 1
+    terminal_year = max(terminal_year, 1)
+    weight = max(
+        (1.0 - annual_decay_rate) ** (terminal_year - 1),
+        decay_floor_share,
+    )
+    return terminal_year, weight
+
+
+def _build_npv_tornado_frame(
+    sensitivity: pd.DataFrame,
+    *,
+    base_npv: float,
+) -> pd.DataFrame:
+    """Assign tornado downside/upside by resulting NPV, never parameter order."""
+    rows = []
+    for param in sensitivity["param"].unique():
+        npv = pd.to_numeric(
+            sensitivity.loc[sensitivity["param"] == param, "npv"],
+            errors="raise",
+        )
+        downside_npv = float(npv.min())
+        upside_npv = float(npv.max())
+        rows.append({
+            "param": param,
+            "downside_delta": downside_npv - base_npv,
+            "upside_delta": upside_npv - base_npv,
+            "swing": upside_npv - downside_npv,
+        })
+    return pd.DataFrame(rows).sort_values("swing", ascending=True)
 
 
 def render(
@@ -619,7 +685,34 @@ def render(
             apply_cockpit_plot_theme(fig_seasonal)
             st.plotly_chart(fig_seasonal, width="stretch")
 
-    # ── Risk analysis — Monte Carlo (P4-B) ─────────────────────────────
+    _render_revenue_risk_analysis(
+        daily_spreads=daily_spreads,
+        revenue=revenue,
+        capture_rate=capture_rate,
+        use_lp_dispatch=use_lp_dispatch,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        capex_eur_kwh=capex_eur_kwh,
+        chart_template=chart_template,
+    )
+
+    return export_revenue
+
+
+def _render_revenue_risk_analysis(
+    *,
+    daily_spreads: pd.DataFrame,
+    revenue: dict,
+    capture_rate: float,
+    use_lp_dispatch: bool,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    capex_eur_kwh: float,
+    chart_template: str,
+) -> None:
+    """Render Monte Carlo revenue and multi-year NPV risk diagnostics."""
     with st.expander("Risk Analysis (Monte Carlo)", expanded=False):
         if use_lp_dispatch and "lp_revenue" in daily_spreads.columns:
             daily_rev_series = daily_spreads["lp_revenue"] * capture_rate
@@ -642,106 +735,157 @@ def render(
             labels={"x": "Annual Revenue (EUR)", "count": "Simulations"},
             template=chart_template,
         )
-        fig_mc.add_vline(x=mc["p10"], line_dash="dash",
-                         annotation_text=f"P10: \u20ac{mc['p10']:,.0f}")
-        fig_mc.add_vline(x=mc["p50"], line_dash="solid", line_color="green",
-                         annotation_text=f"P50: \u20ac{mc['p50']:,.0f}")
-        fig_mc.add_vline(x=mc["p90"], line_dash="dash", line_color="red",
-                         annotation_text=f"P90: \u20ac{mc['p90']:,.0f}")
+        fig_mc.add_vline(
+            x=mc["p10"], line_dash="dash",
+            annotation_text=f"P10: \u20ac{mc['p10']:,.0f}",
+        )
+        fig_mc.add_vline(
+            x=mc["p50"], line_dash="solid", line_color="green",
+            annotation_text=f"P50: \u20ac{mc['p50']:,.0f}",
+        )
+        fig_mc.add_vline(
+            x=mc["p90"], line_dash="dash", line_color="red",
+            annotation_text=f"P90: \u20ac{mc['p90']:,.0f}",
+        )
         apply_cockpit_plot_theme(fig_mc)
         st.plotly_chart(fig_mc, width="stretch")
 
-        # NPV distribution (if CapEx provided)
-        if capex_eur_kwh > 0:
-            capacity_kwh = power_mw * duration_hours * 1000
-            total_capex_mc = capex_eur_kwh * capacity_kwh
-            if "n_cycles" in daily_spreads.columns:
-                mc_avg_cycles = float(daily_spreads["n_cycles"].mean())
-            else:
-                mc_avg_cycles = float(revenue.get("cycles_per_day_assumption", 1.0))
-            annual_cycles = mc_avg_cycles * 365.25
-            mc_deg = calculate_degradation_cost(
-                n_cycles=annual_cycles,
-                capex_eur_kwh=capex_eur_kwh,
-                capacity_kwh=capacity_kwh,
+        if capex_eur_kwh <= 0:
+            return
+
+        capacity_kwh = power_mw * duration_hours * 1000
+        total_capex_mc = capex_eur_kwh * capacity_kwh
+        if "n_cycles" in daily_spreads.columns:
+            mc_avg_cycles = float(daily_spreads["n_cycles"].mean())
+        else:
+            mc_avg_cycles = float(revenue.get("cycles_per_day_assumption", 1.0))
+        annual_cycles = mc_avg_cycles * 365.25
+        mc_deg = calculate_degradation_cost(
+            n_cycles=annual_cycles,
+            capex_eur_kwh=capex_eur_kwh,
+            capacity_kwh=capacity_kwh,
+        )
+        mc_lifetime = estimate_battery_lifetime(avg_cycles_per_day=mc_avg_cycles)
+        effective_life = float(mc_lifetime["effective_life_years"])
+
+        decay_col, floor_col = st.columns(2)
+        decay_pct = decay_col.number_input(
+            "Annual merchant revenue decay (%/yr)",
+            min_value=0.0,
+            max_value=99.0,
+            value=0.0,
+            step=1.0,
+            key="merchant_revenue_decay_pct",
+            help=(
+                "User-asserted decay in annual merchant cash flow after year 1. "
+                "Do not combine a forward level that you already manually "
+                "eroded with a decay rate calibrated to the same erosion."
+            ),
+        )
+        floor_pct = floor_col.number_input(
+            "Decay floor (% of year-1 revenue)",
+            min_value=0.0,
+            max_value=100.0,
+            value=0.0,
+            step=1.0,
+            key="merchant_revenue_decay_floor_pct",
+            help=_REVENUE_DECAY_FLOOR_HELP,
+        )
+        decay_inputs = _normalise_revenue_decay_inputs(decay_pct, floor_pct)
+        if decay_inputs is None:
+            st.info(
+                "Enter both the annual merchant revenue decay and decay floor "
+                "to calculate multi-year NPV."
             )
-            mc_lifetime = estimate_battery_lifetime(avg_cycles_per_day=mc_avg_cycles)
+            return
+        annual_decay_rate, decay_floor_share, decay_active = decay_inputs
 
-            npv_dist = calculate_npv_distribution(
-                mc["simulations"],
-                total_capex=total_capex_mc,
-                annual_degradation_cost=mc_deg["total_degradation_eur"],
-                effective_life_years=float(mc_lifetime["effective_life_years"]),
+        if decay_active:
+            terminal_year, terminal_weight = _terminal_decay_year_and_weight(
+                effective_life,
+                annual_decay_rate,
+                decay_floor_share,
             )
-
-            n1, n2, n3, n4 = st.columns(4)
-            n1.metric("NPV P10", f"\u20ac{npv_dist['npv_p10']:,.0f}")
-            n2.metric("NPV P50", f"\u20ac{npv_dist['npv_p50']:,.0f}")
-            n3.metric("NPV P90", f"\u20ac{npv_dist['npv_p90']:,.0f}")
-            prob_color = "normal" if npv_dist["prob_positive_npv"] >= 0.5 else "inverse"
-            n4.metric("P(NPV>0)", f"{npv_dist['prob_positive_npv']:.0%}",
-                      delta_color=prob_color)
-
-            fig_npv = px.histogram(
-                x=npv_dist["npv_array"], nbins=50,
-                title="NPV Distribution",
-                labels={"x": "NPV (EUR)", "count": "Simulations"},
-                template=chart_template,
+            st.caption(
+                f"Annual merchant revenue decay: **{annual_decay_rate:.1%}**; "
+                f"long-run floor: **{decay_floor_share:.1%}**; year "
+                f"**{terminal_year}** earns **{terminal_weight:.1%}** of "
+                "year-1 revenue."
             )
-            fig_npv.add_vline(x=0, line_dash="solid", line_color="gray",
-                              annotation_text="Break-even")
-            apply_cockpit_plot_theme(fig_npv)
-            st.plotly_chart(fig_npv, width="stretch")
-
-            # Sensitivity tornado
-            sens = sensitivity_table(
-                base_revenue=mc["p50"],
-                total_capex=total_capex_mc,
-                effective_life_years=float(mc_lifetime["effective_life_years"]),
-                annual_degradation_cost=mc_deg["total_degradation_eur"],
+            st.caption(
+                "Year-1 basis: the annual merchant revenue estimated from the "
+                "loaded sample; decay first applies in year 2."
             )
-            base_npv = sens.loc[
-                (sens["param"] == "revenue") & (sens["value"] == 1.0), "npv"
-            ].iloc[0]
-            tornado_rows = []
-            for param in sens["param"].unique():
-                param_data = sens[sens["param"] == param].sort_values("value")
-                low_npv = param_data["npv"].iloc[0]
-                high_npv = param_data["npv"].iloc[-1]
-                tornado_rows.append({
-                    "param": param,
-                    "low_delta": low_npv - base_npv,
-                    "high_delta": high_npv - base_npv,
-                })
-            tornado_df = pd.DataFrame(tornado_rows)
-            tornado_df["swing"] = tornado_df["high_delta"] - tornado_df["low_delta"]
-            tornado_df = tornado_df.sort_values("swing", ascending=True)
+            st.caption(_REVENUE_DECAY_HARD_CAPTION)
 
-            fig_tornado = go.Figure()
-            fig_tornado.add_trace(go.Bar(
-                y=tornado_df["param"],
-                x=tornado_df["low_delta"],
-                orientation="h",
-                name="Downside",
-                marker_color="#E74C3C",
-            ))
-            fig_tornado.add_trace(go.Bar(
-                y=tornado_df["param"],
-                x=tornado_df["high_delta"],
-                orientation="h",
-                name="Upside",
-                marker_color="#2ECC71",
-            ))
-            fig_tornado.update_layout(
-                title="NPV Sensitivity (vs base case)",
-                template=chart_template,
-                barmode="overlay",
-                xaxis_title="NPV Delta (EUR)",
-            )
-            apply_cockpit_plot_theme(fig_tornado)
-            st.plotly_chart(fig_tornado, width="stretch")
+        npv_dist = calculate_npv_distribution(
+            mc["simulations"],
+            total_capex=total_capex_mc,
+            annual_degradation_cost=mc_deg["total_degradation_eur"],
+            effective_life_years=effective_life,
+            annual_decay_rate=annual_decay_rate,
+            decay_floor_share=decay_floor_share,
+        )
 
-    return export_revenue
+        n1, n2, n3, n4 = st.columns(4)
+        n1.metric("NPV P10", f"\u20ac{npv_dist['npv_p10']:,.0f}")
+        n2.metric("NPV P50", f"\u20ac{npv_dist['npv_p50']:,.0f}")
+        n3.metric("NPV P90", f"\u20ac{npv_dist['npv_p90']:,.0f}")
+        prob_color = "normal" if npv_dist["prob_positive_npv"] >= 0.5 else "inverse"
+        n4.metric(
+            "P(NPV>0)", f"{npv_dist['prob_positive_npv']:.0%}",
+            delta_color=prob_color,
+        )
+
+        fig_npv = px.histogram(
+            x=npv_dist["npv_array"], nbins=50,
+            title="NPV Distribution",
+            labels={"x": "NPV (EUR)", "count": "Simulations"},
+            template=chart_template,
+        )
+        fig_npv.add_vline(
+            x=0, line_dash="solid", line_color="gray",
+            annotation_text="Break-even",
+        )
+        apply_cockpit_plot_theme(fig_npv)
+        st.plotly_chart(fig_npv, width="stretch")
+
+        sens = sensitivity_table(
+            base_revenue=mc["p50"],
+            total_capex=total_capex_mc,
+            effective_life_years=effective_life,
+            annual_degradation_cost=mc_deg["total_degradation_eur"],
+            annual_decay_rate=annual_decay_rate,
+            decay_floor_share=decay_floor_share,
+        )
+        base_npv = float(sens.loc[
+            (sens["param"] == "revenue") & (sens["value"] == 1.0), "npv"
+        ].iloc[0])
+        tornado_df = _build_npv_tornado_frame(sens, base_npv=base_npv)
+
+        fig_tornado = go.Figure()
+        fig_tornado.add_trace(go.Bar(
+            y=tornado_df["param"],
+            x=tornado_df["downside_delta"],
+            orientation="h",
+            name="Downside",
+            marker_color="#E74C3C",
+        ))
+        fig_tornado.add_trace(go.Bar(
+            y=tornado_df["param"],
+            x=tornado_df["upside_delta"],
+            orientation="h",
+            name="Upside",
+            marker_color="#2ECC71",
+        ))
+        fig_tornado.update_layout(
+            title="NPV Sensitivity (vs base case)",
+            template=chart_template,
+            barmode="overlay",
+            xaxis_title="NPV Delta (EUR)",
+        )
+        apply_cockpit_plot_theme(fig_tornado)
+        st.plotly_chart(fig_tornado, width="stretch")
 
 
 def _render_sensitivity_table(

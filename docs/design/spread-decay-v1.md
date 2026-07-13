@@ -5,7 +5,7 @@ revenue-erosion layer for forward-looking screening. It is deliberately a
 decay assumption on the annual merchant cash-flow trajectory, not a
 price-series transform, a re-dispatch model, or a build-out forecast.
 
-Implementation: **SD-A IN REVIEW — pure calculation layer; SD-B pending.**
+Implementation: **SD-A LANDED via PR #63 (`f20560a`); SD-B IN REVIEW.**
 
 ## 1. Positioning
 

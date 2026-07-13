@@ -1568,6 +1568,11 @@ _CONTRACTED_FLOOR_HARD_CAPTION = (
     "wear proxy; no credit, performance, tax, financing, or post-term "
     "merchant assumption."
 )
+_CONTRACTED_FLOOR_FLAT_BASELINE_CAPTION = (
+    "Merchant baseline: flat annual revenue across the tenor; any "
+    "revenue-decay assumption from Risk Analysis is NOT reflected here "
+    "(decaying-merchant floor composition is a v2 contract)."
+)
 
 
 def _contracted_floor_best_row(frontier_context: dict) -> pd.Series:
@@ -1883,6 +1888,7 @@ def _render_contracted_floor_section(
             "annual floor. The floor is max(merchant, effective floor), not "
             "an additive revenue stream, and it does not change dispatch."
         )
+        st.caption(_CONTRACTED_FLOOR_FLAT_BASELINE_CAPTION)
         if frontier_context is None:
             st.session_state.pop(_CONTRACTED_FLOOR_STATE_KEY, None)
             st.info(
