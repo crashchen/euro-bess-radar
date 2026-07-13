@@ -269,7 +269,11 @@ locked verbatim (literal-copy test updated):
 
 `Merchant trajectory: projected by this panel's own decay and
 floor-escalation inputs (flat when both are inactive); the Risk Analysis
-revenue-decay assumption is NOT read here.`
+revenue-decay assumption is never used in this calculation.`
+
+("Never used in this calculation", not "not read": the section-5
+divergence hint READS the Risk-Analysis keys for display, so a "not read
+here" caption would be literally false once the hint ships.)
 
 When `composition_active`, the panel additionally renders:
 
