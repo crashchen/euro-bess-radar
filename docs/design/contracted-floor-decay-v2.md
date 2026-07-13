@@ -1,11 +1,14 @@
 # Decaying merchant × contracted floor — v2 composition contract
 
-Status: **DRAFT — under review.** This document composes two locked, shipped
-layers — the contracted-floor overlay (`docs/design/contracted-floor-v1.md`,
+Status: **LOCKED — merged via PR #65 (`69d3bf6`).** This document composes two
+locked, shipped layers — the contracted-floor overlay (`docs/design/contracted-floor-v1.md`,
 PR #54/#57/#58) and the annual merchant-revenue decay
 (`docs/design/spread-decay-v1.md`, PR #62/#63/#64) — into the per-year
 comparison both contracts deferred: a merchant trajectory that erodes while
 the contracted floor holds. It is the flagship v2 named in spread-decay §9.1.
+
+Implementation: **FD-A IN REVIEW** — pure calculation API and contract pins;
+FD-B cockpit/export wiring remains pending.
 
 ## 0. Authorised amendments
 
