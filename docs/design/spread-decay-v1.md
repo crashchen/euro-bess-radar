@@ -1,9 +1,11 @@
 # Annual revenue decay (spread cannibalization) — v1 design contract
 
-Status: **DRAFT — under review.** This document defines the multi-year
+Status: **LOCKED — merged via PR #62 (`8ba738c`).** This document defines the multi-year
 revenue-erosion layer for forward-looking screening. It is deliberately a
 decay assumption on the annual merchant cash-flow trajectory, not a
 price-series transform, a re-dispatch model, or a build-out forecast.
+
+Implementation: **SD-A IN REVIEW — pure calculation layer; SD-B pending.**
 
 ## 1. Positioning
 
