@@ -4,6 +4,11 @@ Status: **LOCKED - merged via PR #54 (`a9e546d`).** This document defines the
 first productisation layer. It is deliberately a cash-flow comparison overlay,
 not a dispatch, trading, financing, or legal-contract engine.
 
+A v2 composition contract (`docs/design/contracted-floor-decay-v2.md`)
+amends three clauses of this document for the decaying-merchant case; the
+amendments are enumerated in its section 0 and change nothing when the
+composition knobs are off.
+
 ## 1. Positioning
 
 The dashboard can now estimate an annualised, degradation-net merchant outcome
