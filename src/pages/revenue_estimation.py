@@ -101,6 +101,10 @@ def _build_npv_tornado_frame(
     base_npv: float,
 ) -> pd.DataFrame:
     """Assign tornado downside/upside by resulting NPV, never parameter order."""
+    if sensitivity.empty:
+        return pd.DataFrame(
+            columns=["param", "downside_delta", "upside_delta", "swing"]
+        )
     rows = []
     for param in sensitivity["param"].unique():
         npv = pd.to_numeric(

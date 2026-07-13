@@ -119,6 +119,17 @@ def test_tornado_directions_follow_resulting_npv_for_every_axis() -> None:
     assert capex["upside_delta"] == 20.0
 
 
+def test_tornado_frame_handles_empty_sensitivity() -> None:
+    from src.scenario import sensitivity_table
+
+    empty = sensitivity_table(base_revenue=100.0, total_capex=25.0, vary={})
+    result = _build_npv_tornado_frame(empty, base_npv=100.0)
+    assert result.empty
+    assert list(result.columns) == [
+        "param", "downside_delta", "upside_delta", "swing",
+    ]
+
+
 class TestRevenueDecayAppTest:
     @pytest.fixture()
     def app(self) -> AppTest:
