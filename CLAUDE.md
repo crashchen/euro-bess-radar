@@ -169,7 +169,7 @@ Fingrid / Regelleistung / Elexon all detect HTTP 401/403 via the shared `_raise_
 - `pip install -r requirements.txt` — install deps (Python 3.11+; use `.venv` on macOS).
 - `python -m pytest tests/ -m "not slow" -q` — fast local regression loop; skips only the 13 solver-heavy tests marked `slow`.
 - `python -m pytest tests/ -m slow -q` — run the 13 solver-heavy stochastic integration/performance tests only.
-- `python -m pytest tests/ -v` — run all tests (1059 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
+- `python -m pytest tests/ -v` — run all tests (1060 passing tests, fully mocked, no network; 2 PDF chart-render tests may skip when local Kaleido is unavailable).
 - `python scripts/seed_demo_9_2b.py` — seed a SYNTHETIC DE_LU DA+IDA1+reserve dataset into the cache to validate the Phase 9.2b cockpit panel offline (`--clean` to remove). See `docs/runbooks/validate-9-2b.md`.
 - `python -m pytest tests/test_analytics.py::TestOrderedSpreads -v` — run a single class; swap in `::test_name` for a single test.
 - `streamlit run app.py` — launch the dashboard.
