@@ -72,6 +72,23 @@ def decaying_annuity_pv_factor(
         annual_decay_rate,
         decay_floor_share,
     )
+    return _decaying_annuity_pv_factor_validated(
+        life_years,
+        discount_rate,
+        decay,
+        floor,
+        active,
+    )
+
+
+def _decaying_annuity_pv_factor_validated(
+    life_years: float,
+    discount_rate: float,
+    decay: float,
+    floor: float,
+    active: bool,
+) -> float:
+    """Compute the factor from canonical values returned by the validator."""
     if not active:
         return annuity_pv_factor(life_years, discount_rate)
     if life_years <= 0:
@@ -165,11 +182,12 @@ def calculate_npv_distribution(
         annual_decay_rate,
         decay_floor_share,
     )
-    decay_factor = decaying_annuity_pv_factor(
+    decay_factor = _decaying_annuity_pv_factor_validated(
         float(effective_life_years),
         discount_rate,
         decay,
         floor,
+        active,
     )
     if active:
         flat_factor = annuity_pv_factor(
@@ -248,19 +266,22 @@ def sensitivity_table(
             capex = total_capex * val if param == "capex" else total_capex
             dr = val if param == "discount_rate" else discount_rate
             life = val if param == "lifetime" else effective_life_years
-            row_decay = val if param == "decay" else decay
             deg = annual_degradation_cost
 
-            row_decay_factor = decaying_annuity_pv_factor(
+            if param == "decay":
+                row_decay, row_floor, row_active = _validate_decay_inputs(
+                    val,
+                    floor,
+                )
+            else:
+                row_decay, row_floor, row_active = decay, floor, active
+            row_decay_factor = _decaying_annuity_pv_factor_validated(
                 float(life),
                 dr,
                 row_decay,
-                floor,
+                row_floor,
+                row_active,
             )
-            if param == "decay":
-                _, _, row_active = _validate_decay_inputs(row_decay, floor)
-            else:
-                row_active = active
             if row_active:
                 flat_factor = annuity_pv_factor(float(life), dr)
                 npv = rev * row_decay_factor - deg * flat_factor - capex
