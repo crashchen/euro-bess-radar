@@ -32,8 +32,11 @@ in exactly the scenario that motivates buying one: as build-out compresses
 spreads, the merchant trajectory erodes while the contractual floor holds,
 so the counterparty top-up grows year by year and there is a **crossover
 year** after which the floor binds permanently. A flat comparison prices the
-floor at its year-1 top-up forever; a decaying comparison shows the floor is
-worth most exactly when the market thins.
+floor at its year-1 top-up forever; a decaying comparison shows the floor's
+top-up value growing exactly when the market thins. (The protected cash
+flow itself still falls with the market — the floor limits the downside, it
+does not restore a healthy merchant year; UI copy must not claim
+otherwise.)
 
 v1 answers one narrow question:
 
@@ -74,8 +77,15 @@ M_t          = N + G * (weight_t - 1)               # merchant trajectory
 F_t          = F_eff * (1 + g)^(t-1)                # escalating floor
 P_t          = max(M_t, F_t)                        # protected cash flow
 T_t          = P_t - M_t                            # top-up, >= 0 by construction
+binding_t    = (T_t > 0)                            # strict: F_t > M_t
 composition_active = ((d > 0) and (f < 1)) or (g > 0)
 ```
+
+`binding_t` is STRICT: an exact tie (`F_t == M_t`) pays no top-up and is
+not a binding year; `crossover_year` is the first year with `binding_t`
+true. Because `F_t − M_t` is non-decreasing (mechanics 3), both the strict
+and non-strict sets are suffixes — the strict rule is locked so the flag
+always agrees with "the counterparty actually pays".
 
 Mechanics — all locked:
 
@@ -102,6 +112,18 @@ Mechanics — all locked:
    With `g ≥ 0`, `F_t` is non-decreasing. Therefore once `F_t > M_t` the
    floor binds for every later year: the **crossover year** (first binding
    year) is well-defined and the binding set is a suffix of the tenor.
+   **Negative-year consequence, inherited and deliberately kept:** in a
+   year with `M_t < 0`, the top-up `T_t = F_t − M_t` EXCEEDS the floor
+   `F_t` itself. This is the v1 wear-net settlement basis at work — v1 §2
+   locked it for the scalar case ("the top-up then covers the full gap
+   from that loss to the contractual floor", pinned by v1 test 5) and this
+   contract inherits the basis unchanged (section 9 item 1). Clamping the
+   top-up basis at zero or capping `T_t` at `F_t` is PROHIBITED: it would
+   break the exact per-year identity `P_t = M_t + T_t = max(M_t, F_t)`,
+   contradict the shipped v1 pins, and smuggle a revenue-settled contract
+   into a net-settled formula. FD-B must instead DISCLOSE the situation
+   whenever it occurs (section 5's negative-year caption); a real
+   revenue-settled cap is the settlement-basis amendment.
 4. **Fractional tenor mirrors the annuity convention.** Integer years
    `1..floor(L)` count in full; the residual `frac(L)` is a pro-rata cash
    flow at the end of year `floor(L)+1`, with `M`, `F`, `P`, `T` all
@@ -139,12 +161,15 @@ Mechanics — all locked:
 - Percent-vs-fraction: all three new UI fields are percent, divided by 100
   at the UI boundary, None-guarded exactly like the LH-B share fix and the
   SD-B inputs (a cleared input shows a prompt, never reaches `float(None)`).
-- The panel decay inputs are PANEL-LOCAL. Reading the Revenue tab's
-  Risk-Analysis knobs from session state is prohibited — the same
-  stale-state rationale that locked the SD-B unconditional caption. The
-  two knobs are separate assertions; help text says so and recommends
-  setting them consistently, and the assumptions export records the
-  panel's own values.
+- The panel decay inputs are PANEL-LOCAL. **Injecting** the Revenue tab's
+  Risk-Analysis values into this panel (auto-sync, sync button, shared
+  widget state) is prohibited — a computed number whose provenance depends
+  on hidden cross-tab session history is not auditable, the same
+  stale-state rationale that locked the SD-B unconditional caption. A
+  display-only, divergence-gated hint that READS those keys without
+  changing any computed value is authorised and specified in section 5.
+  The two knobs remain separate assertions; help text says so, and the
+  assumptions export records the panel's own values.
 
 ## 3. Baseline and provenance
 
@@ -193,25 +218,51 @@ Return contract:
   `crossover_year`, `n_binding_years`.
 - Inactive (`composition_active == False`): the thirteen v1 values come
   from the delegate bit-identically; `per_year == []`,
-  `crossover_year is None`, `n_binding_years == 0`.
+  `crossover_year is None`, `n_binding_years is None`. `None` here means
+  **not evaluated on the inactive path** — NOT "the floor never binds":
+  a flat v1 comparison can bind from year 1, which the v1 scalar output
+  already reports via `annual_top_up_eur > 0`. A `0` would falsely assert
+  a zero-binding evaluation.
 - Active: the four annual keys keep their year-1 values (mechanics 2); the
   three PV keys hold the trajectory PVs from the per-year pass;
   `per_year` is a list of dicts
-  `{year, year_fraction, weight, merchant_eur, floor_eur, protected_eur,
-  top_up_eur, binding}` covering years `1..floor(L)` plus the residual
-  year when `frac(L) > 0` (`year_fraction` is 1.0 or `frac(L)`);
+  `{year, year_fraction, weight, discount_factor, merchant_eur, floor_eur,
+  protected_eur, top_up_eur, binding}` covering years `1..floor(L)` plus
+  the residual year when `frac(L) > 0` (`year_fraction` is 1.0 or
+  `frac(L)`; `discount_factor` is `(1 + r)^(-t)`, so each row's PV
+  contribution is `year_fraction · amount · discount_factor` and the Excel
+  table reconciles to the headline PVs without recomputation);
   `crossover_year` is the first binding year as an `int`, or `None` when
-  the floor never binds in the window; `n_binding_years` counts binding
-  `per_year` rows (the pro-rated residual year counts as one).
+  the floor never binds in the window; `n_binding_years` is a count of
+  binding `per_year` ROWS (the pro-rated residual year counts as one row —
+  UI copy must say "binds in X of Y evaluated years", never imply elapsed
+  binding time for fractional tenors).
 
 ## 5. Cockpit and export placement (increment FD-B)
 
 The existing contracted-floor expander gains three number inputs next to
 the v1 contract inputs — "Annual merchant revenue decay (%/yr)" `[0, 99]`,
-"Decay floor (% of year-1 merchant)" `[0, 100]`, "Floor escalation (%/yr)"
-`[0, 100]`, all default 0, all ÷100 at the boundary, all None-guarded.
+"Terminal merchant share (% of year-1 merchant)" `[0, 100]`, "Floor
+escalation (%/yr)" `[0, 100]`, all default 0, all ÷100 at the boundary,
+all None-guarded. The second label deliberately does NOT reuse the Revenue
+tab's "Decay floor" wording: inside a panel titled "Contracted floor",
+"Decay floor" would collide with the contractual floor `F`. It is the same
+`decay_floor_share` parameter underneath; the help text states the
+equivalence ("same assumption as the Risk Analysis 'Decay floor' input").
 No new expander and no change to the panel's gating on a current frontier
 result.
+
+**Divergence hint (display-only, best-effort):** when the Revenue tab's
+Risk-Analysis decay session keys exist and their values differ from this
+panel's decay inputs, the panel renders one info line showing both sets
+("Risk Analysis currently asserts X%/yr, floor Y%; this panel uses its own
+inputs."). Reading those keys for DISPLAY is authorised here; **injecting
+their values is prohibited** — no auto-sync on activation and no sync
+button, because a number that changes with hidden cross-tab session
+history has no auditable provenance (the same reasoning that banned the
+conditional caption in spread-decay §3, which this display-only,
+divergence-gated hint deliberately relaxes). When the keys are absent the
+hint renders nothing.
 
 The SD-B flat-baseline sentence is REPLACED by this unconditional sentence,
 locked verbatim (literal-copy test updated):
@@ -223,8 +274,16 @@ revenue-decay assumption is NOT read here.`
 When `composition_active`, the panel additionally renders:
 
 - a caption with the crossover year ("floor first binds in year N" or
-  "floor never binds in the contract window"), the binding-year count, and
-  the terminal-year `M` and `F` values;
+  "floor never binds in the contract window"), the binding count phrased
+  as "binds in X of Y evaluated years", and the terminal-year `M` and `F`
+  values;
+- when any `per_year` row has `merchant_eur < 0`, one additional caption,
+  locked verbatim:
+
+`Negative merchant years: under the wear-net settlement basis the annual
+top-up exceeds the floor itself in those years; a revenue-settled contract
+would cap the top-up at the floor (settlement basis is deferred, section 9
+of this contract).`
 - ONE new per-year trajectory chart (merchant `M_t` and floor `F_t` lines,
   top-up `T_t` bars) — the v1 grouped annual bar chart keeps its year-1
   meaning and is unchanged;
@@ -256,9 +315,11 @@ remains untouched (panel-local disclosure, as in CF-B/LH-B/SD-B).
   idle-option clamp remains prohibited (spread-decay §9.7 rationale).
 - **Off means absent**: `(d = 0, f = *, g = 0)` and `(d > 0, f = 1, g = 0)`
   route through the v1 delegate bit-identically.
-- **Panel-local knobs; no Revenue-tab coupling**: session-state reads of
-  the Risk-Analysis decay are prohibited; the replacement caption states
-  the independence unconditionally.
+- **Panel-local knobs; no Revenue-tab value coupling**: injecting
+  Risk-Analysis values (auto-sync or sync button) is prohibited; the only
+  authorised cross-tab touch is the section-5 display-only divergence
+  hint, and the replacement caption states the independence
+  unconditionally.
 - **Contract-window only**: no post-term merchant tail, no project NPV,
   no terminal value. The v1 red line stands.
 - **No new commercial machinery**: no CPI fetch, no indexation formulae
@@ -275,9 +336,14 @@ FD-A tests (before any UI):
 
 1. **Bit-identity off, against the v1 function**: for
    `(d=0, f=0, g=0)`, `(d=0, f=0.4, g=0)`, `(d=0.3, f=1.0, g=0)`, and a
-   call without the new parameters, every one of the thirteen v1 keys
-   equals `compute_contracted_floor_overlay(...)`'s value exactly
-   (`==`, not approx), `per_year == []`, `crossover_year is None`.
+   call omitting the three optional decay/escalation parameters entirely
+   (`merchant_gross_eur_per_mw_yr` is REQUIRED and still supplied), every
+   one of the thirteen v1 keys equals
+   `compute_contracted_floor_overlay(...)`'s value exactly (`==`, not
+   approx), `per_year == []`, `crossover_year is None`, and
+   `n_binding_years is None` — including a fixture whose FLAT floor binds
+   from year 1 (`F_eff > M`), where a `0` would be a false "never binds"
+   claim.
 2. **Known answers** (hand-computed, `r = 0`):
    `N=80, G=100, F_eff=60, d=0.5, f=0, g=0, L=3` →
    `M = [80, 30, 5]`, `P = [80, 60, 60]`, `T = [0, 30, 55]`,
@@ -288,7 +354,11 @@ FD-A tests (before any UI):
    fractional `N=80, G=100, F_eff=75, d=0.1, f=0, g=0, L=2.5` →
    `M = [80, 70, 61]`, `merchant_pv = 180.5`, `protected_pv = 192.5`,
    `top_up_pv = 12` (residual year at weight `0.81` and `frac = 0.5`);
-   one case with `r > 0` checked against a manual discounted sum.
+   and the SAME fixture at `r = 0.07` — explicitly FRACTIONAL so a
+   residual discounted at year `floor(L)` instead of `floor(L)+1` cannot
+   survive: `merchant_pv = 80/1.07 + 70/1.07² + 0.5·61/1.07³`,
+   `protected_pv = 80/1.07 + 75/1.07² + 0.5·75/1.07³`,
+   `top_up_pv = 5/1.07² + 0.5·14/1.07³`.
 3. **Flat-wear pin (mutation-sensitive)**: at `N=80, G=100, d=0.5, f=0`,
    year-2 merchant is `30` (`N + G·(w−1)`), not `40` (`N·w`); a
    net-decaying mutation must fail.
@@ -299,17 +369,32 @@ FD-A tests (before any UI):
    `per_year` and PVs (all post-year-1 weights sit on the floor share).
 6. **Escalation-only activation**: `d=0, g>0` is active (per-year path,
    non-empty `per_year`), and `g=0` restores the delegate.
-7. **Suffix property**: with `g >= 0`, the `binding` flags in `per_year`
-   are non-decreasing (once true, true thereafter); `crossover_year`
-   equals the first true index and `n_binding_years` the count.
-8. **PV identities**: `protected_pv − merchant_pv ≈ top_up_pv` (tolerance,
+7. **Suffix property and tie strictness**: with `g >= 0`, the `binding`
+   flags in `per_year` are non-decreasing (once true, true thereafter);
+   `crossover_year` equals the first true index and `n_binding_years` the
+   count. An EXACT-TIE fixture pins strictness:
+   `N=80, G=100, d=0.5, f=0, g=0, F_eff=30, L=3, r=0` gives
+   `M = [80, 30, 5]`, `F = 30` — year 2 ties exactly (`T_2 = 0`, NOT
+   binding), year 3 binds, so `crossover_year = 3` and
+   `n_binding_years = 1`; a non-strict (`>=`) mutation reports year 2 and
+   must fail.
+8. **Negative years unclamped (mutation-sensitive)**:
+   `N=10, G=100, d=0.5, f=0.4, g=0, F_eff=20, L=4, r=0` gives
+   `M = [10, -40, -50, -50]` and `T = [10, 60, 70, 70]` (the floor binds
+   from year 1, since `F_eff > N`); in every NEGATIVE merchant year the
+   top-up EXCEEDS the floor itself (`60, 70 > 20`), `merchant_pv = -130`,
+   `protected_pv = 80`, `top_up_pv = 210`, `crossover_year = 1`,
+   `n_binding_years = 4`. A top-up clamp (`min(T_t, F_t)`) or a merchant
+   clamp (`max(M_t, 0)`) must fail this pin; per-year identity
+   `P_t == M_t + T_t` holds on every row.
+9. **PV identities**: `protected_pv − merchant_pv ≈ top_up_pv` (tolerance,
    incl. fractional tenor and `r = 0`); `merchant_pv ≈
    N·A(L,r) + G·(DPV(L,r,d,f) − A(L,r))` against the public SD-A factor.
-9. **Domain raises, validation-first**: `d`, `f` domains as spread-decay
-   §7 pin 6; `g` outside `[0, 1]`, NaN/Inf, `gross < 0`, and
-   `gross < net` raise with field names, all even when `d = 0` would make
-   the call delegate.
-10. **Scaling and purity**: power scaling by `k` scales all EUR outputs,
+10. **Domain raises, validation-first**: `d`, `f` domains as spread-decay
+    §7 pin 6; `g` outside `[0, 1]`, NaN/Inf, `gross < 0`, and
+    `gross < net` raise with field names, all even when `d = 0` would make
+    the call delegate.
+11. **Scaling and purity**: power scaling by `k` scales all EUR outputs,
     per-year rows included, by `k`; the module gains no new imports and
     mutates no input.
 
@@ -317,18 +402,23 @@ FD-B AppTest pins: default renders the v1 outputs with no trajectory chart
 and no composition captions; the replacement trajectory sentence renders
 unconditionally and verbatim (literal-copy test swapped, the SD-B flat
 sentence removed); entering a decay renders the trajectory chart, the
-crossover caption with the correct year, and the hard caption verbatim;
-`d>0, f=100%, g=0` renders NO composition surface and leaves every number
-at the v1 baseline; `g>0` alone activates; the year-1 KPI metrics are
-identical between active and inactive while the PV metrics move; clearing
-any of the three inputs shows a prompt instead of raising; percent→fraction
-verified at the boundary; fingerprint invalidation on each new input and on
-a gross change at constant net; Excel carries the per-year table and the
-new assumption rows.
+crossover caption with the correct year and the "binds in X of Y evaluated
+years" phrasing, and the hard caption verbatim; the negative-year caption
+renders verbatim exactly when a negative merchant year exists (and not
+otherwise); `d>0, f=100%, g=0` renders NO composition surface and leaves
+every number at the v1 baseline; `g>0` alone activates; the year-1 KPI
+metrics are identical between active and inactive while the PV metrics
+move; clearing any of the three inputs shows a prompt instead of raising;
+percent→fraction verified at the boundary; the divergence hint renders
+when injected Risk-Analysis session keys differ, and nothing renders when
+they are absent or equal (and the hint never alters any computed value);
+fingerprint invalidation on each new input and on a gross change at
+constant net; Excel carries the per-year table (with `discount_factor`)
+and the new assumption rows.
 
 ## 8. Increment plan after lock
 
-- **FD-A:** `compute_decaying_contracted_floor_overlay` + pins 1–10 in
+- **FD-A:** `compute_decaying_contracted_floor_overlay` + pins 1–11 in
   `tests/test_contracted_floor.py`. No UI.
 - **FD-B:** panel inputs, caption replacement + literal-copy swap,
   trajectory chart, crossover caption, fingerprint extension, Excel rows,
