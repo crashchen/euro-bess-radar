@@ -66,6 +66,10 @@ Inputs (beyond the v1 floor inputs, which are unchanged):
 - `merchant_gross_eur_per_mw_yr` (`G`): the SAME frontier best row's
   annualised gross (pre-wear) merchant revenue. Required by the active
   path only, validated always (section 2.1).
+- `MAX_FLOOR_TRAJECTORY_YEARS = 100.0`: one shared API/UI safety limit for
+  the ACTIVE path's materialised per-year trajectory. It is an execution
+  bound, not an economic assumption; the inactive delegate keeps the full
+  positive-tenor domain of the shipped v1 scalar calculation (mechanics 7).
 
 Definitions (year `t` counted from 1; `N` = the v1
 `merchant_net_eur_per_mw_yr × power`, `G` scaled by power likewise;
@@ -147,6 +151,16 @@ Mechanics — all locked:
    where `A` is `annuity_pv_factor` and `DPV` is
    `decaying_annuity_pv_factor` (test-level pins, not the implementation —
    summation order may differ in the last ulp).
+7. **The materialised trajectory has a hard row budget.** The active path
+   must reject `floor_tenor_years > MAX_FLOOR_TRAJECTORY_YEARS` with a
+   field-named `ValueError` BEFORE allocating or iterating `per_year`.
+   Without this guard, the v1 UI's formerly unbounded tenor input turns a
+   closed-form scalar calculation into a user-controlled O(tenor) loop and
+   can freeze or exhaust the Streamlit process. The inactive path does not
+   materialise rows and therefore still delegates for every positive finite
+   tenor accepted by v1; the safety bound must not weaken off-path
+   bit-identity. FD-B caps the UI at the same exported constant so ordinary
+   users cannot submit an over-budget active trajectory.
 
 ### 2.1 Input validation and units
 
@@ -157,7 +171,9 @@ Mechanics — all locked:
   `>= merchant_net_eur_per_mw_yr` (wear cannot be negative — a violated
   bound is a data error, raised with the field name, not repaired).
 - Validation is unconditional: every domain is checked BEFORE the inactive
-  delegation, so an invalid `g` or gross raises even at `d = 0`.
+  delegation, so an invalid `g` or gross raises even at `d = 0`. After those
+  validations determine `composition_active`, the trajectory-year safety
+  limit is checked only for the active path; it is not a new v1 tenor domain.
 - Percent-vs-fraction: all three new UI fields are percent, divided by 100
   at the UI boundary, None-guarded exactly like the LH-B share fix and the
   SD-B inputs (a cleared input shows a prompt, never reaches `float(None)`).
@@ -195,6 +211,9 @@ Mechanics — all locked:
 pandas-free and solver-free):
 
 ```python
+MAX_FLOOR_TRAJECTORY_YEARS = 100.0
+
+
 def compute_decaying_contracted_floor_overlay(
     *,
     merchant_net_eur_per_mw_yr: float,
@@ -242,15 +261,18 @@ Return contract:
 
 The existing contracted-floor expander gains three number inputs next to
 the v1 contract inputs — "Annual merchant revenue decay (%/yr)" `[0, 99]`,
-"Terminal merchant share (% of year-1 merchant)" `[0, 100]`, "Floor
+"Minimum merchant share (% of year-1 merchant)" `[0, 100]`, "Floor
 escalation (%/yr)" `[0, 100]`, all default 0, all ÷100 at the boundary,
 all None-guarded. The second label deliberately does NOT reuse the Revenue
 tab's "Decay floor" wording: inside a panel titled "Contracted floor",
-"Decay floor" would collide with the contractual floor `F`. It is the same
-`decay_floor_share` parameter underneath; the help text states the
-equivalence ("same assumption as the Risk Analysis 'Decay floor' input").
-No new expander and no change to the panel's gating on a current frontier
-result.
+"Decay floor" would collide with the contractual floor `F`. "Minimum" is
+also economically exact: the share is a lower bound and may not be reached
+within the selected contract tenor. It is the same `decay_floor_share`
+parameter underneath; the help text states both facts and the equivalence
+("same assumption as the Risk Analysis 'Decay floor' input"). The inherited
+"Floor term (years)" input gains `max_value=MAX_FLOOR_TRAJECTORY_YEARS`,
+imported from the calculation module so UI and API cannot drift. No new
+expander and no change to the panel's gating on a current frontier result.
 
 **Divergence hint (display-only, best-effort):** when the Revenue tab's
 Risk-Analysis decay session keys exist and their values differ from this
@@ -397,7 +419,11 @@ FD-A tests (before any UI):
 10. **Domain raises, validation-first**: `d`, `f` domains as spread-decay
     §7 pin 6; `g` outside `[0, 1]`, NaN/Inf, `gross < 0`, and
     `gross < net` raise with field names, all even when `d = 0` would make
-    the call delegate.
+    the call delegate. The active-path trajectory budget is pinned at both
+    sides: `L = MAX_FLOOR_TRAJECTORY_YEARS` succeeds with exactly 100
+    `per_year` rows; any larger active tenor raises with
+    `floor_tenor_years` in the message before iteration; the same larger
+    tenor on an inactive call still delegates and matches v1 exactly.
 11. **Scaling and purity**: power scaling by `k` scales all EUR outputs,
     per-year rows included, by `k`; the module gains no new imports and
     mutates no input.
@@ -418,7 +444,10 @@ when injected Risk-Analysis session keys differ, and nothing renders when
 they are absent or equal (and the hint never alters any computed value);
 fingerprint invalidation on each new input and on a gross change at
 constant net; Excel carries the per-year table (with `discount_factor`)
-and the new assumption rows.
+and the new assumption rows. The literal input label is "Minimum merchant
+share (% of year-1 merchant)", its help states that the minimum may not be
+reached within the contract tenor, and the floor-term widget's maximum is
+the imported `MAX_FLOOR_TRAJECTORY_YEARS` constant.
 
 ## 8. Increment plan after lock
 
