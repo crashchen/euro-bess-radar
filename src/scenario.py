@@ -161,15 +161,15 @@ def calculate_npv_distribution(
     Returns:
         Dict with npv_p10, npv_p50, npv_p90, prob_positive_npv, npv_array.
     """
-    decay_factor = decaying_annuity_pv_factor(
-        float(effective_life_years),
-        discount_rate,
+    decay, floor, active = _validate_decay_inputs(
         annual_decay_rate,
         decay_floor_share,
     )
-    _, _, active = _validate_decay_inputs(
-        annual_decay_rate,
-        decay_floor_share,
+    decay_factor = decaying_annuity_pv_factor(
+        float(effective_life_years),
+        discount_rate,
+        decay,
+        floor,
     )
     if active:
         flat_factor = annuity_pv_factor(
@@ -257,7 +257,10 @@ def sensitivity_table(
                 row_decay,
                 floor,
             )
-            _, _, row_active = _validate_decay_inputs(row_decay, floor)
+            if param == "decay":
+                _, _, row_active = _validate_decay_inputs(row_decay, floor)
+            else:
+                row_active = active
             if row_active:
                 flat_factor = annuity_pv_factor(float(life), dr)
                 npv = rev * row_decay_factor - deg * flat_factor - capex
