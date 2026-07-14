@@ -593,7 +593,14 @@ def _apply_panel_layout(
         plot_bgcolor="#0b1118",
         font=dict(color="#dce8f7", size=11),
         margin=dict(l=46, r=22, t=48, b=28),
-        legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.0,
+            xanchor="right",
+            x=1.0,
+            font=dict(color="#cfd8e6"),
+        ),
     )
     fig.update_xaxes(
         showgrid=True,
@@ -1947,19 +1954,20 @@ def _render_contracted_floor_result(
     chart_template: str,
 ) -> None:
     """Render annual/PV KPIs, one grouped chart, and formula-input table."""
-    annual = st.columns(4)
-    annual[0].metric(
+    annual_top = st.columns(2)
+    annual_top[0].metric(
         "Annual merchant net", f"EUR {result['merchant_net_eur']:,.0f}",
     )
-    annual[1].metric(
+    annual_top[1].metric(
         "Effective contracted floor",
         f"EUR {result['effective_floor_eur']:,.0f}",
     )
-    annual[2].metric(
+    annual_bottom = st.columns(2)
+    annual_bottom[0].metric(
         "Floor-protected annual cash flow",
         f"EUR {result['floor_protected_cashflow_eur']:,.0f}",
     )
-    annual[3].metric(
+    annual_bottom[1].metric(
         "Annual top-up", f"EUR {result['annual_top_up_eur']:,.0f}",
     )
     pv = st.columns(3)

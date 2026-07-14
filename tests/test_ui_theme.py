@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import plotly.graph_objects as go
 import plotly.io as pio
 
 import src.ui_theme as ui_theme
-from src.pages.simulation_cockpit import _health_metric, _kpi_card
+from src.pages.simulation_cockpit import (
+    _apply_panel_layout,
+    _health_metric,
+    _kpi_card,
+)
 from src.ui_theme import cockpit_chart_template
 
 
@@ -29,6 +34,14 @@ def test_cockpit_chart_template_does_not_change_plotly_default() -> None:
     cockpit_chart_template()
 
     assert pio.templates.default == original_default
+
+
+def test_panel_layout_keeps_legend_readable_on_dark_background() -> None:
+    fig = go.Figure()
+
+    _apply_panel_layout(fig, "Title", "EUR", cockpit_chart_template())
+
+    assert fig.layout.legend.font.color == "#cfd8e6"
 
 
 def test_kpi_card_escapes_user_visible_strings() -> None:
