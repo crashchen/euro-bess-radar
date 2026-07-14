@@ -116,6 +116,7 @@ _C_NET = "#FFFFFF"        # net physical / final dispatch line (white)
 _C_DA_POS = "#7FB6FF"     # DA planned position (light cyan, dotted)
 _C_AVAIL = "#0A4C8A"      # available envelope fill (deep blue)
 _C_REBID = "#FF2D95"      # rebid delta bars (magenta — financial event)
+_C_LEGEND_TEXT = "#cfd8e6"  # explicit: Streamlit theme overrides template fallbacks
 _BAR_OPACITY = 0.75
 
 
@@ -599,7 +600,7 @@ def _apply_panel_layout(
             y=1.0,
             xanchor="right",
             x=1.0,
-            font=dict(color="#cfd8e6"),
+            font=dict(color=_C_LEGEND_TEXT),
         ),
     )
     fig.update_xaxes(
@@ -3620,7 +3621,11 @@ def _plot_forecast_policy(per_day: pd.DataFrame, chart_template: str) -> None:
         height=340,
         hovermode="x unified",
         margin=dict(l=40, r=30, t=50, b=30),
-        legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.0,
+            xanchor="right", x=1.0,
+            font=dict(color=_C_LEGEND_TEXT),
+        ),
     )
     st.plotly_chart(fig, width="stretch")
 
@@ -3691,7 +3696,11 @@ def _plot_rolling_summary(batch: pd.DataFrame, chart_template: str) -> None:
         height=300,
         hovermode="x unified",
         margin=dict(l=40, r=50, t=50, b=30),
-        legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.0,
+            xanchor="right", x=1.0,
+            font=dict(color=_C_LEGEND_TEXT),
+        ),
     )
     st.plotly_chart(fig, width="stretch")
 
@@ -3753,6 +3762,10 @@ def _plot_batch_summary(batch: pd.DataFrame, chart_template: str) -> None:
         height=320,
         hovermode="x unified",
         margin=dict(l=40, r=50, t=50, b=30),
-        legend=dict(orientation="h", yanchor="bottom", y=1.0, xanchor="right", x=1.0),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.0,
+            xanchor="right", x=1.0,
+            font=dict(color=_C_LEGEND_TEXT),
+        ),
     )
     st.plotly_chart(fig, width="stretch")
