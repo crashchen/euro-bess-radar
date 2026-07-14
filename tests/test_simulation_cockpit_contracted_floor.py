@@ -433,6 +433,33 @@ def test_render_places_floor_immediately_after_frontier() -> None:
     assert indices[2] == indices[1] + 1
 
 
+def test_contracted_floor_annual_metrics_use_two_by_two_layout() -> None:
+    tree = ast.parse(inspect.getsource(cockpit._render_contracted_floor_result))
+    column_calls = sorted(
+        (
+            call
+            for call in ast.walk(tree)
+            if (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == "st"
+                and call.func.attr == "columns"
+                and call.args
+                and isinstance(call.args[0], ast.Constant)
+                and isinstance(call.args[0].value, int)
+            )
+        ),
+        key=lambda call: (call.lineno, call.col_offset),
+    )
+    column_counts = [
+        call.args[0].value
+        for call in column_calls
+    ]
+
+    assert column_counts == [2, 2, 3]
+
+
 def _gated_floor_app() -> None:
     from src.pages.simulation_cockpit import _render_contracted_floor_section
 

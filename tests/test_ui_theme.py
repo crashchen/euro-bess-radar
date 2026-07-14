@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import pandas as pd
+import plotly.graph_objects as go
 import plotly.io as pio
+import streamlit as st
 
 import src.ui_theme as ui_theme
-from src.pages.simulation_cockpit import _health_metric, _kpi_card
+from src.pages.simulation_cockpit import (
+    _apply_panel_layout,
+    _health_metric,
+    _kpi_card,
+    _plot_batch_summary,
+    _plot_forecast_policy,
+    _plot_rolling_summary,
+)
 from src.ui_theme import cockpit_chart_template
 
 
@@ -29,6 +39,44 @@ def test_cockpit_chart_template_does_not_change_plotly_default() -> None:
     cockpit_chart_template()
 
     assert pio.templates.default == original_default
+
+
+def test_cockpit_charts_keep_legends_readable_on_dark_background(
+    monkeypatch,
+) -> None:
+    figures = [go.Figure()]
+    template = cockpit_chart_template()
+
+    _apply_panel_layout(figures[0], "Title", "EUR", template)
+
+    monkeypatch.setattr(
+        st,
+        "plotly_chart",
+        lambda figure, **_kwargs: figures.append(figure),
+    )
+    dates = pd.to_datetime(["2026-01-01", "2026-01-02"])
+    _plot_forecast_policy(
+        pd.DataFrame({
+            "date": dates,
+            "da_only_eur": [10.0, 20.0],
+            "realised_eur": [12.0, 21.0],
+            "ceiling_eur": [14.0, 23.0],
+        }),
+        template,
+    )
+    batch = pd.DataFrame({
+        "date": dates,
+        "total_revenue_eur": [100.0, 120.0],
+        "daily_fce": [1.0, 1.2],
+    })
+    _plot_rolling_summary(batch, template)
+    _plot_batch_summary(batch, template)
+
+    assert len(figures) == 4
+    assert all(
+        figure.layout.legend.font.color == "#cfd8e6"
+        for figure in figures
+    )
 
 
 def test_kpi_card_escapes_user_visible_strings() -> None:
