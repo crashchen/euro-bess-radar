@@ -17,7 +17,10 @@ from src.ancillary import (
 )
 from src.assumptions import CAPTURE_PARAM_LABEL
 from src.config import ANCILLARY_CAPACITY_AVAILABILITY
-from src.contracted_floor import compute_contracted_floor_overlay
+from src.contracted_floor import (
+    MAX_FLOOR_TRAJECTORY_YEARS,
+    compute_decaying_contracted_floor_overlay,
+)
 from src.cycle_frontier import (
     DEFAULT_CYCLE_CAPS,
     UNCAPPED_LABEL,
@@ -1568,10 +1571,29 @@ _CONTRACTED_FLOOR_HARD_CAPTION = (
     "wear proxy; no credit, performance, tax, financing, or post-term "
     "merchant assumption."
 )
-_CONTRACTED_FLOOR_FLAT_BASELINE_CAPTION = (
-    "Merchant baseline: flat annual revenue across the tenor; any "
-    "revenue-decay assumption from Risk Analysis is NOT reflected here "
-    "(decaying-merchant floor composition is a v2 contract)."
+_CONTRACTED_FLOOR_TRAJECTORY_CAPTION = (
+    "Merchant trajectory: projected by this panel's own decay and "
+    "floor-escalation inputs (flat when both are inactive); the Risk Analysis "
+    "revenue-decay assumption is never used in this calculation."
+)
+_CONTRACTED_FLOOR_NEGATIVE_YEAR_CAPTION = (
+    "Negative merchant years: under the wear-net settlement basis the annual "
+    "top-up exceeds the floor itself in those years; a revenue-settled contract "
+    "would cap the top-up at the floor (settlement basis is deferred, section 9 "
+    "of this contract)."
+)
+_CONTRACTED_FLOOR_COMPOSITION_HARD_CAPTION = (
+    "Decaying-merchant floor composition: screening projection of the "
+    "frontier's year-1 merchant net using this panel's decay and escalation "
+    "inputs; wear stays flat inside the trajectory, so late merchant years can "
+    "be negative rather than idled. No re-dispatch, credit, tax, financing, or "
+    "post-term value is modelled. PVs cover the contract window only."
+)
+_CONTRACTED_FLOOR_MINIMUM_SHARE_HELP = (
+    "Lower bound on projected merchant revenue as a share of year 1; the "
+    "minimum may not be reached within the contract tenor. This is the same "
+    "assumption as the Risk Analysis 'Decay floor' input, but this panel keeps "
+    "its own auditable value."
 )
 
 
@@ -1600,6 +1622,9 @@ def _contracted_floor_fingerprint(
     contract_availability: float,
     floor_tenor_years: float,
     discount_rate: float,
+    annual_decay_rate: float,
+    decay_floor_share: float,
+    floor_escalation_rate: float,
 ) -> tuple:
     """Identity of the current merchant baseline plus all contract inputs.
 
@@ -1616,6 +1641,7 @@ def _contracted_floor_fingerprint(
         tuple(frontier_context["sweep_dates"]),
         str(best["label"]),
         float(best["net_eur_per_mw_yr"]),
+        float(best["gross_eur_per_mw_yr"]),
         float(best["avg_efc_per_day"]),
         float(summary["cycle_life"]),
         float(summary["capex_eur_kwh"]),
@@ -1626,13 +1652,16 @@ def _contracted_floor_fingerprint(
         float(contract_availability),
         float(floor_tenor_years),
         float(discount_rate),
+        float(annual_decay_rate),
+        float(decay_floor_share),
+        float(floor_escalation_rate),
     )
 
 
 def _contracted_floor_assumption_rows(
     *,
     frontier_context: dict,
-    result: dict[str, float],
+    result: dict[str, object],
 ) -> pd.DataFrame:
     """Self-contained commercial inputs and frontier provenance for export."""
     best = _contracted_floor_best_row(frontier_context)
@@ -1774,6 +1803,49 @@ def _contracted_floor_assumption_rows(
     liquidity = frontier_context.get("liquidity")
     if liquidity is not None:
         rows.extend(_liquidity_assumption_records(liquidity, inherited=True))
+    if bool(result.get("composition_active", False)):
+        per_year = list(result["per_year"])
+        crossover = result.get("crossover_year")
+        rows.extend([
+            {
+                "parameter": "Annual merchant revenue decay",
+                "value": f"{float(result['annual_decay_rate']):.2%}",
+                "unit": "annual",
+                "source": "Contracted-floor cockpit input",
+                "affects": "Merchant trajectory from year 2 onward",
+            },
+            {
+                "parameter": "Minimum merchant share",
+                "value": f"{float(result['decay_floor_share']):.2%}",
+                "unit": "of year-1 merchant gross",
+                "source": "Contracted-floor cockpit input",
+                "affects": "Lower bound on the merchant decay weight",
+            },
+            {
+                "parameter": "Floor escalation",
+                "value": f"{float(result['floor_escalation_rate']):.2%}",
+                "unit": "annual",
+                "source": "Contracted-floor cockpit input",
+                "affects": "Contracted floor trajectory from year 2 onward",
+            },
+            {
+                "parameter": "Floor crossover year",
+                "value": (
+                    "Never binds in contract window"
+                    if crossover is None else str(int(crossover))
+                ),
+                "unit": "evaluated year",
+                "source": "Decaying contracted-floor overlay",
+                "affects": "First strict top-up year",
+            },
+            {
+                "parameter": "Floor binding evaluated years",
+                "value": f"{int(result['n_binding_years'])} of {len(per_year)}",
+                "unit": "evaluated rows",
+                "source": "Decaying contracted-floor overlay",
+                "affects": "Counts residual fractional year as one row",
+            },
+        ])
     return pd.DataFrame(rows)
 
 
@@ -1781,7 +1853,7 @@ def _append_contracted_floor_assumptions(
     assumptions: pd.DataFrame | None,
     *,
     frontier_context: dict,
-    result: dict[str, float],
+    result: dict[str, object],
 ) -> pd.DataFrame:
     """Append panel-local commercial assumptions without changing global audit."""
     rows = _contracted_floor_assumption_rows(
@@ -1795,11 +1867,11 @@ def _append_contracted_floor_assumptions(
 def _contracted_floor_export_table(
     *,
     frontier_context: dict,
-    result: dict[str, float],
+    result: dict[str, object],
 ) -> pd.DataFrame:
-    """One-row output table for the panel's Contracted floor Excel sheet."""
+    """Contract summary, expanded to an auditable trajectory when active."""
     best = _contracted_floor_best_row(frontier_context)
-    return pd.DataFrame([{
+    metadata = {
         "merchant_baseline_source": _contracted_floor_source_label(
             frontier_context
         ),
@@ -1807,14 +1879,71 @@ def _contracted_floor_export_table(
         "best_cycle_cap": best["label"],
         "avg_efc_per_day": float(best["avg_efc_per_day"]),
         "valid_days": int(frontier_context["summary"]["valid_days"]),
-        **result,
-    }])
+    }
+    summary = {key: value for key, value in result.items() if key != "per_year"}
+    if not bool(result.get("composition_active", False)):
+        return pd.DataFrame([{**metadata, **summary}])
+    return pd.DataFrame([
+        {**metadata, **summary, **row}
+        for row in list(result["per_year"])
+    ])
+
+
+def _render_contracted_floor_trajectory(
+    result: dict[str, object], chart_template: str,
+) -> None:
+    """Render the active composition's reconciliation and per-year chart."""
+    per_year = list(result["per_year"])
+    if not per_year:
+        return
+    crossover = result.get("crossover_year")
+    crossover_text = (
+        "floor never binds in the contract window"
+        if crossover is None
+        else f"floor first binds in year {int(crossover)}"
+    )
+    terminal = per_year[-1]
+    st.caption(
+        f"{crossover_text}; binds in {int(result['n_binding_years'])} of "
+        f"{len(per_year)} evaluated years. Terminal evaluated year "
+        f"{int(terminal['year'])}: merchant EUR "
+        f"{float(terminal['merchant_eur']):,.0f}; floor EUR "
+        f"{float(terminal['floor_eur']):,.0f}."
+    )
+    if any(float(row["merchant_eur"]) < 0.0 for row in per_year):
+        st.caption(_CONTRACTED_FLOOR_NEGATIVE_YEAR_CAPTION)
+
+    years = [int(row["year"]) for row in per_year]
+    fig = go.Figure()
+    fig.add_bar(
+        name="Top-up T_t", x=years,
+        y=[float(row["top_up_eur"]) for row in per_year],
+        marker_color=_C_PRICE_IDA, opacity=0.45,
+    )
+    fig.add_scatter(
+        name="Merchant M_t", x=years,
+        y=[float(row["merchant_eur"]) for row in per_year],
+        mode="lines+markers", line={"color": _C_REVENUE, "width": 2.5},
+    )
+    fig.add_scatter(
+        name="Floor F_t", x=years,
+        y=[float(row["floor_eur"]) for row in per_year],
+        mode="lines+markers", line={"color": _C_DISCHARGE, "width": 2.5},
+    )
+    fig.update_layout(barmode="overlay")
+    _apply_panel_layout(
+        fig, "Merchant and contracted-floor trajectory", "EUR/year",
+        chart_template, height=340,
+    )
+    fig.update_xaxes(title="Contract year", dtick=1)
+    st.plotly_chart(fig, width="stretch")
+    st.caption(_CONTRACTED_FLOOR_COMPOSITION_HARD_CAPTION)
 
 
 def _render_contracted_floor_result(
     *,
     frontier_context: dict,
-    result: dict[str, float],
+    result: dict[str, object],
     chart_template: str,
 ) -> None:
     """Render annual/PV KPIs, one grouped chart, and formula-input table."""
@@ -1862,6 +1991,9 @@ def _render_contracted_floor_result(
     )
     st.plotly_chart(fig, width="stretch")
 
+    if bool(result.get("composition_active", False)):
+        _render_contracted_floor_trajectory(result, chart_template)
+
     inputs = _contracted_floor_assumption_rows(
         frontier_context=frontier_context, result=result,
     ).iloc[:9]
@@ -1888,7 +2020,7 @@ def _render_contracted_floor_section(
             "annual floor. The floor is max(merchant, effective floor), not "
             "an additive revenue stream, and it does not change dispatch."
         )
-        st.caption(_CONTRACTED_FLOOR_FLAT_BASELINE_CAPTION)
+        st.caption(_CONTRACTED_FLOOR_TRAJECTORY_CAPTION)
         if frontier_context is None:
             st.session_state.pop(_CONTRACTED_FLOOR_STATE_KEY, None)
             st.info(
@@ -1938,7 +2070,9 @@ def _render_contracted_floor_section(
             ),
         )
         tenor = c3.number_input(
-            "Floor term (years)", min_value=0.1, value=10.0, step=0.5,
+            "Floor term (years)", min_value=0.1,
+            max_value=MAX_FLOOR_TRAJECTORY_YEARS,
+            value=10.0, step=0.5,
             key="contracted_floor_tenor",
         )
         discount_pct = c4.number_input(
@@ -1949,30 +2083,105 @@ def _render_contracted_floor_section(
                 "Divided by 100 before calculation; this is not project NPV."
             ),
         )
+        d1, d2, d3 = st.columns(3)
+        decay_pct = d1.number_input(
+            "Annual merchant revenue decay (%/yr)",
+            min_value=0.0, max_value=99.0, value=0.0, step=1.0,
+            key="contracted_floor_decay_pct",
+            help=(
+                "Panel-local projection of annual merchant revenue after year "
+                "1. It is separate from the Risk Analysis input and is divided "
+                "by 100 before calculation."
+            ),
+        )
+        minimum_share_pct = d2.number_input(
+            "Minimum merchant share (% of year-1 merchant)",
+            min_value=0.0, max_value=100.0, value=0.0, step=1.0,
+            key="contracted_floor_minimum_share_pct",
+            help=_CONTRACTED_FLOOR_MINIMUM_SHARE_HELP,
+        )
+        escalation_pct = d3.number_input(
+            "Floor escalation (%/yr)",
+            min_value=0.0, max_value=100.0, value=0.0, step=1.0,
+            key="contracted_floor_escalation_pct",
+            help=(
+                "Panel-local annual geometric escalation of the effective "
+                "floor, divided by 100 before calculation."
+            ),
+        )
         run_clicked = st.button(
             "Run contracted-floor comparison", key="contracted_floor_run",
         )
+        required_inputs = (
+            quoted_floor, availability_pct, tenor, discount_pct,
+            decay_pct, minimum_share_pct, escalation_pct,
+        )
+        if any(value is None for value in required_inputs):
+            st.session_state.pop(_CONTRACTED_FLOOR_STATE_KEY, None)
+            st.info(
+                "Enter all contract, merchant-decay, minimum-share, and floor-"
+                "escalation inputs to run the comparison."
+            )
+            return
         availability = float(availability_pct) / 100.0
         discount_rate = float(discount_pct) / 100.0
+        annual_decay_rate = float(decay_pct) / 100.0
+        decay_floor_share = float(minimum_share_pct) / 100.0
+        floor_escalation_rate = float(escalation_pct) / 100.0
+        risk_decay_key = "merchant_revenue_decay_pct"
+        risk_floor_key = "merchant_revenue_decay_floor_pct"
+        if risk_decay_key in st.session_state and risk_floor_key in st.session_state:
+            risk_decay = st.session_state.get(risk_decay_key)
+            risk_floor = st.session_state.get(risk_floor_key)
+            try:
+                risk_decay_value = float(risk_decay)
+                risk_floor_value = float(risk_floor)
+            except (TypeError, ValueError):
+                pass
+            else:
+                if (
+                    math.isfinite(risk_decay_value)
+                    and math.isfinite(risk_floor_value)
+                    and (
+                        not math.isclose(risk_decay_value, float(decay_pct))
+                        or not math.isclose(
+                            risk_floor_value, float(minimum_share_pct)
+                        )
+                    )
+                ):
+                    st.info(
+                        "Risk Analysis currently asserts "
+                        f"{risk_decay_value:g}%/yr, floor "
+                        f"{risk_floor_value:g}%; this panel uses its own inputs."
+                    )
         fingerprint = _contracted_floor_fingerprint(
             frontier_context=frontier_context,
             quoted_floor_eur_per_mw_yr=float(quoted_floor),
             contract_availability=availability,
             floor_tenor_years=float(tenor),
             discount_rate=discount_rate,
+            annual_decay_rate=annual_decay_rate,
+            decay_floor_share=decay_floor_share,
+            floor_escalation_rate=floor_escalation_rate,
         )
 
         if run_clicked:
             try:
-                result = compute_contracted_floor_overlay(
+                result = compute_decaying_contracted_floor_overlay(
                     merchant_net_eur_per_mw_yr=float(
                         best["net_eur_per_mw_yr"]
+                    ),
+                    merchant_gross_eur_per_mw_yr=float(
+                        best["gross_eur_per_mw_yr"]
                     ),
                     power_mw=float(frontier_context["power_mw"]),
                     quoted_floor_eur_per_mw_yr=float(quoted_floor),
                     floor_tenor_years=float(tenor),
                     contract_availability=availability,
                     discount_rate=discount_rate,
+                    annual_decay_rate=annual_decay_rate,
+                    decay_floor_share=decay_floor_share,
+                    floor_escalation_rate=floor_escalation_rate,
                 )
             except ValueError as exc:
                 st.error(f"Contracted-floor calculation failed: {exc}")

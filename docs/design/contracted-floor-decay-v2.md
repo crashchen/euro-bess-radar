@@ -7,8 +7,10 @@ PR #54/#57/#58) and the annual merchant-revenue decay
 comparison both contracts deferred: a merchant trajectory that erodes while
 the contracted floor holds. It is the flagship v2 named in spread-decay §9.1.
 
-Implementation: **FD-A IN REVIEW** — pure calculation API and contract pins;
-FD-B cockpit/export wiring remains pending.
+Implementation: **FD-A LANDED via PR #67 (`baf5570`); FD-B IN REVIEW** — the
+pure calculation API and contract pins are on `main`, while this increment
+adds the cockpit inputs, trajectory disclosures/chart, fingerprinting, and
+per-year Excel export.
 
 ## 0. Authorised amendments
 
