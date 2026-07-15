@@ -48,7 +48,7 @@ ANCILLARY_STATE_KEYS = (
     "ancillary_dates",
 )
 
-DURATION_PRESET_HOURS = (1.0, 2.0, 4.0, 6.0, 8.0)
+DURATION_PRESET_HOURS = (1.0, 2.0, 4.0, 6.0, 6.7, 8.0)
 
 _UNIFIED_CAPACITY_COLUMNS = {
     "timestamp",

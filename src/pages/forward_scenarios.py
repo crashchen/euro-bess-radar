@@ -11,8 +11,11 @@ view, with explicit warnings on overlap and shape-source coverage.
 
 from __future__ import annotations
 
+import math
+
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 import streamlit as st
 
 from src.analytics import (
@@ -20,6 +23,7 @@ from src.analytics import (
     calculate_daily_spreads,
 )
 from src.config import get_zone_timezone
+from src.export import cockpit_tables_to_excel
 from src.forward_curve import (
     build_forward_synthetic_prices,
     find_overlapping_contracts,
@@ -28,13 +32,322 @@ from src.forward_curve import (
     parse_forward_csv,
     summarise_forward_revenue,
 )
+from src.trader_benchmark import (
+    MODEL_REVENUE_COLUMN,
+    QUOTE_REVENUE_COLUMN,
+    benchmark_comparability_notes,
+    build_forward_model_yearly,
+    generate_trader_benchmark_template_csv,
+    parse_trader_benchmark_csv,
+    reconcile_trader_benchmark,
+)
+
+_XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_BENCHMARK_HARD_CAPTION = (
+    "External benchmark reconciliation only: the uploaded annual revenue "
+    "curve is user-supplied and is never used as a price curve, contracted "
+    "floor, capture rate, solver input, or bankable forecast."
+)
+
+
+def _benchmark_assumptions(
+    selected: pd.DataFrame,
+    *,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    capture_rate: float,
+) -> pd.DataFrame:
+    """Self-contained audit rows for the benchmark workbook."""
+    row = selected.iloc[0]
+    source = row["source"] if pd.notna(row["source"]) else "User upload"
+    as_of = (
+        str(pd.Timestamp(row["as_of"]).date())
+        if pd.notna(row["as_of"])
+        else "Not supplied"
+    )
+    return pd.DataFrame(
+        [
+            {
+                "parameter": "External benchmark source",
+                "value": str(source),
+                "unit": "",
+                "source": "Benchmark CSV",
+                "affects": "Provenance only; never changes platform calculations",
+            },
+            {
+                "parameter": "External benchmark as-of",
+                "value": as_of,
+                "unit": "",
+                "source": "Benchmark CSV",
+                "affects": "Provenance only",
+            },
+            {
+                "parameter": "External benchmark basis",
+                "value": (
+                    f"asset={row['asset_type']}; markets={row['market_scope']}; "
+                    f"revenue={row['revenue_basis']}"
+                ),
+                "unit": "",
+                "source": "Benchmark CSV",
+                "affects": "Comparability warnings only",
+            },
+            {
+                "parameter": "Platform comparison basis",
+                "value": (
+                    "Forward-synthetic DA-only dispatch revenue after capture "
+                    "haircut; before wear, fees, tax, and financing"
+                ),
+                "unit": "",
+                "source": "Forward Scenarios",
+                "affects": "Model curve in reconciliation table",
+            },
+            {
+                "parameter": "Platform BESS case",
+                "value": (
+                    f"{power_mw:g} MW / {duration_hours:g}h / "
+                    f"{efficiency:.1%} efficiency"
+                ),
+                "unit": "",
+                "source": "Sidebar",
+                "affects": "Platform model curve only",
+            },
+            {
+                "parameter": "Platform capture haircut",
+                "value": f"{capture_rate:.1%}",
+                "unit": "",
+                "source": "Sidebar",
+                "affects": "Platform model curve only; not inferred from benchmark",
+            },
+            {
+                "parameter": "Benchmark/model ratio semantics",
+                "value": (
+                    "Observed quote/model statistic over overlapping years; "
+                    "NOT a capture-rate estimate"
+                ),
+                "unit": "",
+                "source": "docs/design/external-trader-benchmark-v1.md",
+                "affects": "Interpretation only",
+            },
+        ]
+    )
+
+
+def _benchmark_display_frame(comparison: pd.DataFrame) -> pd.DataFrame:
+    """Convert ratio fractions to percentage points for the Streamlit table."""
+    display = comparison.copy()
+    display["benchmark_to_model_ratio"] = (
+        display["benchmark_to_model_ratio"] * 100.0
+    )
+    return display
+
+
+def _render_external_benchmark_section(
+    *,
+    model_yearly: pd.DataFrame,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    capture_rate: float,
+    chart_template: str,
+) -> None:
+    """Optional external annual revenue-curve reconciliation panel."""
+    with st.expander("External trader revenue benchmark", expanded=False):
+        st.caption(_BENCHMARK_HARD_CAPTION)
+        st.caption(
+            "Use this to explain, not hide, the gap between an indicative "
+            "trader curve and the platform's forward-DA screening curve. "
+            "The join is calendar year + zone; non-overlapping years remain "
+            "visible but do not enter the headline comparison."
+        )
+        c1, c2 = st.columns([3, 1])
+        uploaded = c1.file_uploader(
+            "External annual revenue benchmark CSV",
+            type=["csv"],
+            key="external_trader_benchmark_upload",
+        )
+        c2.download_button(
+            "Download benchmark template",
+            data=generate_trader_benchmark_template_csv(),
+            file_name="external_trader_benchmark_template.csv",
+            mime="text/csv",
+        )
+        if uploaded is None:
+            st.info(
+                "Upload an annual EUR/MW/yr curve to compare it with the "
+                "platform model. No external value is assumed by default."
+            )
+            return
+        try:
+            benchmark = parse_trader_benchmark_csv(
+                uploaded.getvalue().decode("utf-8-sig")
+            )
+        except UnicodeDecodeError:
+            st.error("Benchmark parse error: file is not valid UTF-8/CSV text.")
+            return
+        except ValueError as exc:
+            st.error(f"Benchmark parse error: {exc}")
+            return
+
+        st.success(
+            f"Parsed {len(benchmark)} benchmark year(s) across "
+            f"{benchmark[['zone', 'scenario']].drop_duplicates().shape[0]} "
+            "scenario(s)."
+        )
+        with st.expander("Parsed external benchmark", expanded=False):
+            st.dataframe(benchmark, width="stretch", hide_index=True)
+
+        b1, b2 = st.columns(2)
+        zones = sorted(benchmark["zone"].unique().tolist())
+        zone = b1.selectbox(
+            "Benchmark zone", options=zones, key="external_benchmark_zone"
+        )
+        scenarios = sorted(
+            benchmark.loc[benchmark["zone"] == zone, "scenario"].unique().tolist()
+        )
+        scenario = b2.selectbox(
+            "Benchmark scenario",
+            options=scenarios,
+            key="external_benchmark_scenario",
+        )
+        comparison, summary = reconcile_trader_benchmark(
+            benchmark, model_yearly, zone=zone, scenario=scenario
+        )
+        selected = benchmark.loc[
+            (benchmark["zone"] == zone) & (benchmark["scenario"] == scenario)
+        ]
+
+        notes = benchmark_comparability_notes(
+            benchmark,
+            zone=zone,
+            scenario=scenario,
+            model_duration_hours=duration_hours,
+        )
+        if notes:
+            st.warning("Not like-for-like:\n- " + "\n- ".join(notes))
+        else:
+            st.info(
+                "Metadata is aligned to a standalone, DA-only, gross case. "
+                "Forecast method, fees, market depth, and risk margin may "
+                "still differ; matching labels do not make the quote bankable."
+            )
+
+        overlap = int(summary["n_overlap_years"])
+        k1, k2, k3, k4 = st.columns(4)
+        k1.metric(
+            "Benchmark avg (all years)",
+            f"EUR {float(summary['benchmark_average_eur_per_mw_yr']):,.0f}/MW/yr",
+        )
+        cagr = float(summary["benchmark_endpoint_cagr"])
+        k2.metric(
+            "Benchmark endpoint CAGR",
+            "n/a" if math.isnan(cagr) else f"{cagr:+.1%}/yr",
+        )
+        if overlap:
+            model_avg = float(summary["model_overlap_average_eur_per_mw_yr"])
+            gap = float(summary["model_minus_benchmark_average_eur_per_mw_yr"])
+            ratio = float(summary["benchmark_to_model_ratio"])
+            k3.metric(
+                f"Model avg ({overlap} overlap yr)",
+                f"EUR {model_avg:,.0f}/MW/yr",
+            )
+            k4.metric(
+                "Benchmark / model ratio",
+                "n/a" if math.isnan(ratio) else f"{ratio:.1%}",
+                delta=f"model - benchmark: EUR {gap:+,.0f}/MW/yr",
+                delta_color="off",
+            )
+        else:
+            k3.metric("Model overlap", "0 years")
+            k4.metric("Benchmark / model ratio", "n/a")
+            st.warning(
+                "The benchmark and current forward-price scenario have no "
+                "overlapping calendar years for this zone. The quote curve "
+                "is shown for provenance only."
+            )
+
+        fig = go.Figure()
+        fig.add_scatter(
+            name="External benchmark",
+            x=comparison["year"],
+            y=comparison[QUOTE_REVENUE_COLUMN],
+            mode="lines+markers",
+            line={"color": "#FF2D95", "width": 3},
+        )
+        model_points = comparison.dropna(subset=[MODEL_REVENUE_COLUMN])
+        if not model_points.empty:
+            fig.add_scatter(
+                name="Platform forward-DA model",
+                x=model_points["year"],
+                y=model_points[MODEL_REVENUE_COLUMN],
+                mode="lines+markers",
+                line={"color": "#00A3FF", "width": 3},
+            )
+        fig.update_layout(
+            title="External benchmark vs platform model",
+            xaxis_title="Calendar year",
+            yaxis_title="EUR/MW/yr",
+            template=chart_template,
+            height=360,
+            legend={"orientation": "h", "font": {"color": "#cfd8e6"}},
+        )
+        st.plotly_chart(fig, width="stretch")
+
+        st.dataframe(
+            _benchmark_display_frame(comparison),
+            width="stretch",
+            hide_index=True,
+            column_config={
+                QUOTE_REVENUE_COLUMN: st.column_config.NumberColumn(
+                    "External benchmark", format="EUR %,.0f/MW/yr"
+                ),
+                MODEL_REVENUE_COLUMN: st.column_config.NumberColumn(
+                    "Platform model", format="EUR %,.0f/MW/yr"
+                ),
+                "model_minus_benchmark_eur_per_mw_yr": (
+                    st.column_config.NumberColumn(
+                        "Model - benchmark", format="EUR %+.0f/MW/yr"
+                    )
+                ),
+                "benchmark_to_model_ratio": st.column_config.NumberColumn(
+                    "Benchmark / model", format="%.1f%%"
+                ),
+                "coverage_pct": st.column_config.NumberColumn(
+                    "Model coverage", format="%.1f%%"
+                ),
+            },
+        )
+        assumptions = _benchmark_assumptions(
+            selected,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            capture_rate=capture_rate,
+        )
+        workbook = cockpit_tables_to_excel(
+            {
+                "External benchmark": selected,
+                "Benchmark reconciliation": comparison,
+                "Platform annual curve": model_yearly.loc[
+                    model_yearly["zone"] == zone
+                ],
+            },
+            assumptions=assumptions,
+        )
+        st.download_button(
+            "Download benchmark reconciliation (Excel)",
+            data=workbook,
+            file_name="external_trader_benchmark_reconciliation.xlsx",
+            mime=_XLSX_MIME,
+            key="external_benchmark_download",
+        )
 
 
 def render(
     *,
     zone_data: dict[str, pd.DataFrame],
     power_mw: float,
-    duration_hours: int,
+    duration_hours: float,
     efficiency: float,
     capture_rate: float,
     chart_template: str,
@@ -110,6 +423,20 @@ def render(
 
     if uploaded is None:
         st.info("Upload a CSV to compute forward scenarios.")
+        _render_external_benchmark_section(
+            model_yearly=build_forward_model_yearly(
+                {},
+                power_mw=power_mw,
+                duration_hours=duration_hours,
+                efficiency=efficiency,
+                capture_rate=capture_rate,
+            ),
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            capture_rate=capture_rate,
+            chart_template=chart_template,
+        )
         return
 
     try:
@@ -158,6 +485,7 @@ def render(
 
     all_summaries: list[pd.DataFrame] = []
     all_synth: dict[str, pd.DataFrame] = {}
+    all_daily: dict[str, pd.DataFrame] = {}
     # Long-horizon contracts (multi-year forwards) make the MILP path
     # sequential and slow — show a progress bar so the user knows the
     # browser hasn't frozen.
@@ -187,6 +515,7 @@ def render(
             daily = calculate_daily_spreads(
                 synth[["price_eur_mwh"]], tz=tz, duration_hours=duration_hours,
             )
+        all_daily[zone] = daily
         summary = summarise_forward_revenue(
             daily, forward_df, synth, zone=zone,
             power_mw=power_mw, duration_hours=duration_hours,
@@ -254,6 +583,22 @@ def render(
                 "Avg annualised €/MW/yr", format="€%,.0f",
             ),
         },
+    )
+
+    model_yearly = build_forward_model_yearly(
+        all_daily,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        capture_rate=capture_rate,
+    )
+    _render_external_benchmark_section(
+        model_yearly=model_yearly,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        capture_rate=capture_rate,
+        chart_template=chart_template,
     )
 
     # Synthetic price preview chart per zone. For multi-year forwards the

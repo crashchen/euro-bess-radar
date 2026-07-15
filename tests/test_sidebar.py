@@ -10,9 +10,9 @@ from src.components.sidebar import (
 
 
 def test_sidebar_duration_presets_cover_longer_bess_cases() -> None:
-    assert DURATION_PRESET_HOURS == (1.0, 2.0, 4.0, 6.0, 8.0)
+    assert DURATION_PRESET_HOURS == (1.0, 2.0, 4.0, 6.0, 6.7, 8.0)
     assert [_format_duration_option(h) for h in DURATION_PRESET_HOURS] == [
-        "1", "2", "4", "6", "8",
+        "1", "2", "4", "6", "6.7", "8",
     ]
 
 
