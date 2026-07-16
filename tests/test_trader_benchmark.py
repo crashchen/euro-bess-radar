@@ -14,6 +14,7 @@ from src.pages.forward_scenarios import (
     _BENCHMARK_HARD_CAPTION,
     _benchmark_assumptions,
     _benchmark_display_frame,
+    _platform_basis_caption,
 )
 from src.trader_benchmark import (
     MODEL_REVENUE_COLUMN,
@@ -279,6 +280,15 @@ class TestBenchmarkPresentationContract:
             "curve, contracted floor, capture rate, solver input, or "
             "bankable forecast."
         )
+
+    def test_platform_basis_caption_discloses_live_capture_haircut(self) -> None:
+        caption = _platform_basis_caption(0.7)
+        assert caption == (
+            "Platform curve basis: forward-synthetic DA-only dispatch revenue "
+            "x 70.0% sidebar capture haircut; before wear, fees, tax, and "
+            "financing. The benchmark/model ratio embeds that haircut."
+        )
+        assert "85.0%" in _platform_basis_caption(0.85)
 
     def test_display_ratio_is_percentage_points_without_mutating_export(self) -> None:
         raw = pd.DataFrame(

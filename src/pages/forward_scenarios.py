@@ -50,6 +50,20 @@ _BENCHMARK_HARD_CAPTION = (
 )
 
 
+def _platform_basis_caption(capture_rate: float) -> str:
+    """On-screen platform-basis disclosure shown with every comparison.
+
+    The model curve embeds the sidebar capture haircut, so the KPI row must
+    say so even when the benchmark metadata is fully aligned — otherwise a
+    screenshot of the ratio loses the denominator's provenance.
+    """
+    return (
+        "Platform curve basis: forward-synthetic DA-only dispatch revenue "
+        f"x {capture_rate:.1%} sidebar capture haircut; before wear, fees, "
+        "tax, and financing. The benchmark/model ratio embeds that haircut."
+    )
+
+
 def _benchmark_assumptions(
     selected: pd.DataFrame,
     *,
@@ -231,6 +245,7 @@ def _render_external_benchmark_section(
                 "Forecast method, fees, market depth, and risk margin may "
                 "still differ; matching labels do not make the quote bankable."
             )
+        st.caption(_platform_basis_caption(capture_rate))
 
         overlap = int(summary["n_overlap_years"])
         k1, k2, k3, k4 = st.columns(4)
