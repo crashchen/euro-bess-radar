@@ -13,6 +13,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 - **Joint MILP co-optimization estimate** for DA arbitrage vs reserve-capacity power headroom
 - **Simulation Cockpit** for interval-level BESS dispatch replay, event tables, multi-day summaries with continuous-horizon SoC carry-over, a forecast-driven sequential DA+ID policy (vs perfect-foresight ceiling) with rebid deadband + forecast-skill report, an annualised strategy comparison (with optional DA + reserve-capacity co-optimisation, a cumulative DA + IDA1 + reserve perfect-foresight ceiling, and a Phase 9.2b forecast-driven realistic reserve-first row with a forecast-effect gap panel when ancillary capacity prices are loaded), a DA-only cycle-cap/degradation frontier with an optional user-asserted DA liquidity participation cap followed by a contracted-floor overlay that can project decaying merchant revenue against an escalating floor year by year, activation-energy and reBAP/imbalance historical replay overlays (separate, non-additive screening estimates when those streams are imported), and Excel export — plus SoC, revenue, throughput, and battery-health diagnostics
 - **Multi-zone comparison** for market screening
+- **Forward-scenario and external benchmark reconciliation** — apply a user-supplied baseload forward curve to the zone's historical DA shape, then optionally compare the resulting annual DA-only screening curve with a user-uploaded trader revenue benchmark; asset type, market scope, revenue basis, duration, cycle assumption, source, and as-of metadata stay attached so co-located/all-in/net curves cannot silently acquire a like-for-like label
 - **Data Trust diagnostics** showing source, timezone, coverage, source gaps, and imputation per fetched zone, plus a zone × data-stream **coverage matrix** (DA / IDA1–3 / reserve capacity / activation energy / imbalance settlement), per-(zone, product, direction) provenance tables for imported reserve-capacity and activation-energy prices (the activation table also surfaces the live fetch's dropped-unpriced-interval accounting), and per-zone provenance for imported reBAP/imbalance prices
 - **Excel export** with full analytics and sub-hourly negative-price normalization
 - **GBP to EUR normalization** for GB history using yearly FX mappings
@@ -73,12 +74,14 @@ euro-bess-radar/
 │   ├── scenario.py           # Bootstrap NPV, sensitivity, and merchant-revenue decay factors
 │   ├── contracted_floor.py   # Floor-protected merchant cash-flow comparison
 │   ├── liquidity.py          # DA executable-power participation-cap calculation
+│   ├── forward_curve.py      # Forward-price parsing and historical-shape synthesis
+│   ├── trader_benchmark.py   # External annual revenue-curve reconciliation
 │   ├── ancillary.py          # Ancillary services parsing & revenue calc
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   ├── activation_overlay.py # Activation-energy replay overlay (screening, non-additive)
 │   ├── imbalance_overlay.py  # reBAP/imbalance replay overlay primitive
 │   └── export.py             # Excel report generation
-├── tests/                    # 1121 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 1150 passing tests, heavily mocked; 2 PDF tests may skip
 ├── scripts/                  # Maintenance/demo scripts (seed + Netztransparenz converter)
 ├── samples/                  # Generated demo CSVs from seed_demo_9_2b.py (git-ignored)
 ├── docs/runbooks/            # Operator runbooks (9.2b + imbalance validation, manual UI smoke)
