@@ -378,3 +378,51 @@ class TestBenchmarkPresentationContract:
         assert "NOT a capture-rate estimate" in audit_rows[
             "Benchmark/model ratio semantics"
         ]
+
+    def test_excel_export_survives_provenance_only_with_blank_metadata(
+        self,
+    ) -> None:
+        """Regression: the shipped provenance-only path crashed at export.
+
+        A real upload with blank optional metadata (no source, no as_of)
+        reconciled against an EMPTY platform curve fills nullable columns
+        (``is_partial_year``, ``source``) with pd.NA, which openpyxl rejected
+        ("Cannot convert <NA> to Excel") — caught by the PR #71 browser
+        smoke, not by the overlap-path roundtrip test above.
+        """
+        selected = parse_trader_benchmark_csv(
+            _csv(
+                "IT_SICI,Base,2027,100000,standalone,unknown,unknown,,,,",
+                "IT_SICI,Base,2028,80000,standalone,unknown,unknown,,,,",
+            )
+        )
+        empty_model = build_forward_model_yearly(
+            {},
+            power_mw=45.0,
+            duration_hours=6.7,
+            efficiency=0.88,
+            capture_rate=0.7,
+        )
+        comparison, summary = reconcile_trader_benchmark(
+            selected, empty_model, zone="IT_SICI", scenario="Base"
+        )
+        assert summary["n_overlap_years"] == 0
+        assumptions = _benchmark_assumptions(
+            selected,
+            power_mw=45.0,
+            duration_hours=6.7,
+            efficiency=0.88,
+            capture_rate=0.7,
+        )
+        data = cockpit_tables_to_excel(
+            {
+                "External benchmark": selected,
+                "Benchmark reconciliation": comparison,
+            },
+            assumptions=assumptions,
+        )
+        workbook = load_workbook(BytesIO(data), data_only=True)
+        reconciliation = workbook["Benchmark reconciliation"]
+        headers = [cell.value for cell in reconciliation[1]]
+        partial_col = headers.index("is_partial_year") + 1
+        assert reconciliation.cell(row=2, column=partial_col).value is None

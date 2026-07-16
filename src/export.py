@@ -256,6 +256,11 @@ def _build_table_sheet(ws, title: str, df: pd.DataFrame) -> None:
     for r_idx, row_data in enumerate(df.itertuples(index=False), 2):
         for c_idx, value in enumerate(row_data, 1):
             cell = ws.cell(row=r_idx, column=c_idx)
+            if value is pd.NA:
+                # openpyxl rejects pandas' NA scalar ("Cannot convert <NA>
+                # to Excel"); nullable-dtype gaps stay blank cells, matching
+                # an empty CSV field. float NaN / NaT keep their branches.
+                continue
             if isinstance(value, float):
                 cell.value = round(value, 2)
                 cell.number_format = _PRICE_FMT

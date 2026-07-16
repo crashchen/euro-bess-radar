@@ -56,6 +56,28 @@ def test_cockpit_tables_to_excel_skips_empty_and_returns_bytes() -> None:
 
 def test_cockpit_tables_to_excel_empty_when_nothing_to_write() -> None:
     assert cockpit_tables_to_excel({"Skip": pd.DataFrame()}) == b""
+
+
+def test_cockpit_tables_to_excel_writes_pd_na_cells_blank() -> None:
+    """pd.NA cells must become blank, not crash openpyxl (PR #71 smoke bug).
+
+    Nullable pandas dtypes ("string", "boolean") yield the pd.NA scalar from
+    itertuples; openpyxl raises "Cannot convert <NA> to Excel" on it. float
+    NaN keeps its historical float-branch behaviour.
+    """
+    frame = pd.DataFrame(
+        {
+            "label": pd.array(["kept", pd.NA], dtype="string"),
+            "flag": pd.array([True, pd.NA], dtype="boolean"),
+            "num": [1.5, float("nan")],
+        }
+    )
+    data = cockpit_tables_to_excel({"NA sheet": frame})
+    ws = load_workbook(BytesIO(data))["NA sheet"]
+    assert ws.cell(row=2, column=1).value == "kept"
+    assert ws.cell(row=3, column=1).value is None
+    assert ws.cell(row=3, column=2).value is None
+    assert ws.cell(row=2, column=3).value == 1.5
     assert cockpit_tables_to_excel({}) == b""
 
 
