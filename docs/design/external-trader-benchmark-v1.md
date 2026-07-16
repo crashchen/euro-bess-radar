@@ -1,7 +1,9 @@
 # External trader revenue benchmark v1
 
-Status: **IN REVIEW**. This document describes the implementation proposed in
-the same PR; it is not a contract, floor quote, or market forecast.
+Status: **LANDED** (PR #71, squash `d9b0b18`, plus reviewer hardening
+`3f03f5a` — unconditional on-screen platform-basis/capture-haircut caption).
+This document describes the shipped implementation; it is not a contract,
+floor quote, or market forecast.
 
 ## 1. Problem and evidence
 
