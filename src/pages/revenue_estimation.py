@@ -55,10 +55,10 @@ from src.ui_theme import apply_cockpit_plot_theme
 
 _REVENUE_DECAY_HARD_CAPTION = (
     "Revenue-trajectory decay: screening assumption on annual merchant cash "
-    "flows; does not simulate future hourly prices or re-dispatch. Battery "
-    "degradation cost stays flat, so late decayed years can show negative "
-    "operating margins rather than an idled asset. Decay begins after year 1 "
-    "(the loaded sample's year). User assertion — no build-out data is fetched."
+    "flows; does not simulate future hourly prices or re-dispatch. Cash NPV "
+    "excludes the non-cash shadow-wear proxy; no augmentation or replacement "
+    "cash flow is modeled. Decay begins after year 1 (the loaded sample's "
+    "year). User assertion — no build-out data is fetched."
 )
 _REVENUE_DECAY_FLOOR_HELP = (
     "Recommended > 0 (e.g. 20-30%) to model a long-run equilibrium where "
@@ -169,6 +169,18 @@ def render(
             f"Data quality note: {excluded_days} local day(s) contain unresolved "
             "price gaps and are excluded from spread, dispatch, and revenue annualisation."
         )
+    solver_failed_days = int(
+        daily_spreads.attrs.get("excluded_days_due_to_solver_failure", 0)
+    )
+    if solver_failed_days > 0:
+        message = (
+            f"Model quality note: {solver_failed_days} local day(s) failed the "
+            "MILP solve and are excluded rather than recorded as €0 revenue."
+        )
+        if not daily_spreads.attrs.get("model_available", True):
+            st.error(f"{message} No valid MILP day remains; revenue is unavailable.")
+        else:
+            st.warning(message)
 
     with st.expander("How ancillary works"):
         st.markdown(
@@ -268,50 +280,73 @@ def render(
                     soc_init_frac=0.0,
                     availability=ANCILLARY_CAPACITY_AVAILABILITY,
                 )
-                if joint.empty:
-                    co_total = 0.0
-                    co_da = 0.0
-                    co_capacity = 0.0
-                    avg_reserve_fraction = 0.0
-                else:
+                joint_solver_failures = int(
+                    joint.attrs.get("excluded_days_due_to_solver_failure", 0)
+                )
+                if joint_solver_failures > 0:
+                    st.warning(
+                        f"Joint co-optimization excluded {joint_solver_failures} "
+                        "solver-failed day(s); they were not priced at €0."
+                    )
+                joint_available = bool(
+                    joint.attrs.get("model_available", not joint.empty)
+                )
+                if joint_available:
                     co_da = float(joint["joint_da_revenue"].mean()) * capture_rate * 365.25
                     co_capacity = float(joint["joint_capacity_revenue"].mean()) * 365.25
                     co_total = co_da + co_capacity
                     avg_reserve_fraction = float(joint["reserve_fraction"].mean())
 
                 export_revenue.update({
-                    "joint_cooptimized_total_eur": round(co_total, 2),
-                    "joint_cooptimized_da_eur": round(co_da, 2),
-                    "joint_cooptimized_capacity_eur": round(co_capacity, 2),
-                    "joint_cooptimized_avg_reserve_fraction": round(avg_reserve_fraction, 4),
+                    "joint_cooptimized_model_available": joint_available,
+                    "joint_cooptimized_solver_failed_days": joint_solver_failures,
                 })
+                if joint_available:
+                    export_revenue.update({
+                        "joint_cooptimized_total_eur": round(co_total, 2),
+                        "joint_cooptimized_da_eur": round(co_da, 2),
+                        "joint_cooptimized_capacity_eur": round(co_capacity, 2),
+                        "joint_cooptimized_avg_reserve_fraction": round(
+                            avg_reserve_fraction, 4,
+                        ),
+                    })
 
                 with st.expander("Joint MILP co-optimization estimate", expanded=False):
-                    co1, co2, co3 = st.columns(3)
-                    co1.metric(
-                        "Avg Reserve Commitment",
-                        f"{avg_reserve_fraction:.0%} of power",
-                    )
-                    co2.metric(
-                        "Joint MILP Total",
-                        f"\u20ac{co_total:,.0f}/yr",
-                    )
-                    uplift = co_total - stack["da_arbitrage_eur"]
-                    co3.metric(
-                        "Uplift vs DA-only",
-                        f"\u20ac{uplift:,.0f}/yr",
-                        delta=f"+{uplift / stack['da_arbitrage_eur'] * 100:.0f}%"
-                        if stack["da_arbitrage_eur"] > 0 else "",
-                    )
-                    co4, co5 = st.columns(2)
-                    co4.metric("MILP DA Component", f"\u20ac{co_da:,.0f}/yr")
-                    co5.metric("MILP Capacity Component", f"\u20ac{co_capacity:,.0f}/yr")
-                    st.caption(
-                        "Joint MILP lets reserve capacity consume power headroom alongside "
-                        "DA charge/discharge decisions. It still excludes activation "
-                        "energy, bid acceptance, reserve-specific SoC duration, and "
-                        "product qualification constraints."
-                    )
+                    if not joint_available:
+                        st.error(
+                            "Joint MILP result unavailable: no day solved "
+                            "successfully. No €0 estimate has been generated."
+                        )
+                    else:
+                        co1, co2, co3 = st.columns(3)
+                        co1.metric(
+                            "Avg Reserve Commitment",
+                            f"{avg_reserve_fraction:.0%} of power",
+                        )
+                        co2.metric(
+                            "Joint MILP Total",
+                            f"\u20ac{co_total:,.0f}/yr",
+                        )
+                        uplift = co_total - stack["da_arbitrage_eur"]
+                        co3.metric(
+                            "Uplift vs DA-only",
+                            f"\u20ac{uplift:,.0f}/yr",
+                            delta=(
+                                f"+{uplift / stack['da_arbitrage_eur'] * 100:.0f}%"
+                                if stack["da_arbitrage_eur"] > 0 else ""
+                            ),
+                        )
+                        co4, co5 = st.columns(2)
+                        co4.metric("MILP DA Component", f"\u20ac{co_da:,.0f}/yr")
+                        co5.metric(
+                            "MILP Capacity Component", f"\u20ac{co_capacity:,.0f}/yr",
+                        )
+                        st.caption(
+                            "Joint MILP lets reserve capacity consume power headroom "
+                            "alongside DA charge/discharge decisions. It still excludes "
+                            "activation energy, bid acceptance, reserve-specific SoC "
+                            "duration, and product qualification constraints."
+                        )
 
         component_rows = [
             {
@@ -367,7 +402,7 @@ def render(
                         im1, im2, im3 = st.columns(3)
                         im1.metric("Avg DA-Imbalance Spread",
                                    f"\u20ac{imb_spread['avg_spread']:.1f}/MWh")
-                        im2.metric("P90 Spread",
+                        im2.metric("90th-pct Spread",
                                    f"\u20ac{imb_spread['p90']:.1f}/MWh")
                         im3.metric(
                             "Est. Annual Value/MW",
@@ -463,9 +498,12 @@ def render(
 
         export_revenue.update({
             "annual_degradation_cost_eur": deg_cost["total_degradation_eur"],
+            "annual_shadow_wear_cost_eur": deg_cost["total_degradation_eur"],
+            "degradation_cost_semantics": "non-cash shadow wear proxy",
             "degradation_cost_per_cycle_eur": deg_cost["cost_per_cycle_eur"],
             "degradation_cycle_life": deg_cost["cycle_life"],
             "net_revenue_eur": net_rev["net_revenue_eur"],
+            "economic_margin_after_wear_eur": net_rev["net_revenue_eur"],
             "degradation_pct": net_rev["degradation_pct"],
             "effective_life_years": lifetime["effective_life_years"],
             "cycle_limited_years": lifetime["cycle_limited_years"],
@@ -473,21 +511,24 @@ def render(
             "lifetime_limiting_factor": lifetime["limiting_factor"],
             "annual_throughput_mwh": annual_throughput_mwh,
             "net_payback_years": net_payback,
+            "cash_npv_includes_shadow_wear": False,
+            "cash_npv_augmentation_cost_eur": 0.0,
         })
         if lcos_eur_mwh is not None:
             export_revenue["lcos_eur_mwh"] = lcos_eur_mwh
+            export_revenue["lcos_semantics"] = "cost per charge-plus-discharge throughput"
 
         st.divider()
         st.markdown("**Battery Degradation & Lifetime**")
         d1, d2, d3 = st.columns(3)
         d1.metric(
-            "Degradation Cost/Year",
+            "Shadow Wear/Year",
             f"\u20ac{deg_cost['total_degradation_eur']:,.0f}",
         )
         d2.metric(
-            "Net Revenue/Year",
+            "Economic Margin/Year",
             f"\u20ac{net_rev['net_revenue_eur']:,.0f}",
-            delta=f"-{net_rev['degradation_pct']:.1f}% degradation",
+            delta=f"-{net_rev['degradation_pct']:.1f}% shadow wear",
         )
         d3.metric(
             "Effective Lifetime",
@@ -502,19 +543,21 @@ def render(
         d4, d5, d6, d7 = st.columns(4)
         d4.metric("Cost per Cycle", f"\u20ac{deg_cost['cost_per_cycle_eur']:,.0f}")
         d5.metric(
-            "Net Payback",
+            "Economic Payback Proxy",
             f"{net_payback:.1f} years" if net_payback < 100 else "N/A",
         )
         d6.metric(
-            "LCOS",
+            "Two-leg Throughput Cost",
             f"\u20ac{lcos_eur_mwh:,.1f}/MWh"
             if lcos_eur_mwh is not None else "N/A",
+            help="CapEx per charge-plus-discharge throughput MWh; not conventional discharge-output LCOS.",
         )
         d7.metric("Avg Cycles/Day", f"{avg_cycles_day:.2f}")
         st.caption(
             f"Degradation uses {avg_cycles_day:.2f} modeled DA full-equivalent "
             "cycles/day. Ancillary activation wear is not modeled in this "
-            "screening estimate."
+            "screening estimate. The wear amount is a non-cash economic shadow "
+            "cost for strategy comparison; it is not deducted from cash NPV."
         )
 
     # Revenue waterfall
@@ -599,9 +642,9 @@ def render(
         template=chart_template,
     )
     fig_hist.add_vline(x=percentiles["p50"], line_dash="dash",
-                       annotation_text=f"P50: {percentiles['p50']:.1f}")
+                       annotation_text=f"50th pct: {percentiles['p50']:.1f}")
     fig_hist.add_vline(x=percentiles["p90"], line_dash="dash", line_color="red",
-                       annotation_text=f"P90: {percentiles['p90']:.1f}")
+                       annotation_text=f"90th pct: {percentiles['p90']:.1f}")
     apply_cockpit_plot_theme(fig_hist)
     st.plotly_chart(fig_hist, width="stretch")
 
@@ -729,9 +772,9 @@ def _render_revenue_risk_analysis(
         mc = bootstrap_annual_revenue(daily_rev_series, n_simulations=5000)
 
         mc1, mc2, mc3 = st.columns(3)
-        mc1.metric("P10 Revenue", f"\u20ac{mc['p10']:,.0f}")
-        mc2.metric("P50 Revenue", f"\u20ac{mc['p50']:,.0f}")
-        mc3.metric("P90 Revenue", f"\u20ac{mc['p90']:,.0f}")
+        mc1.metric("10th-pct Revenue (Downside)", f"\u20ac{mc['p10']:,.0f}")
+        mc2.metric("50th-pct Revenue (Median)", f"\u20ac{mc['p50']:,.0f}")
+        mc3.metric("90th-pct Revenue (Upside)", f"\u20ac{mc['p90']:,.0f}")
 
         fig_mc = px.histogram(
             x=mc["simulations"], nbins=50,
@@ -741,15 +784,15 @@ def _render_revenue_risk_analysis(
         )
         fig_mc.add_vline(
             x=mc["p10"], line_dash="dash",
-            annotation_text=f"P10: \u20ac{mc['p10']:,.0f}",
+            annotation_text=f"10th pct: \u20ac{mc['p10']:,.0f}",
         )
         fig_mc.add_vline(
             x=mc["p50"], line_dash="solid", line_color="green",
-            annotation_text=f"P50: \u20ac{mc['p50']:,.0f}",
+            annotation_text=f"50th pct: \u20ac{mc['p50']:,.0f}",
         )
         fig_mc.add_vline(
             x=mc["p90"], line_dash="dash", line_color="red",
-            annotation_text=f"P90: \u20ac{mc['p90']:,.0f}",
+            annotation_text=f"90th pct: \u20ac{mc['p90']:,.0f}",
         )
         apply_cockpit_plot_theme(fig_mc)
         st.plotly_chart(fig_mc, width="stretch")
@@ -763,12 +806,6 @@ def _render_revenue_risk_analysis(
             mc_avg_cycles = float(daily_spreads["n_cycles"].mean())
         else:
             mc_avg_cycles = float(revenue.get("cycles_per_day_assumption", 1.0))
-        annual_cycles = mc_avg_cycles * 365.25
-        mc_deg = calculate_degradation_cost(
-            n_cycles=annual_cycles,
-            capex_eur_kwh=capex_eur_kwh,
-            capacity_kwh=capacity_kwh,
-        )
         mc_lifetime = estimate_battery_lifetime(avg_cycles_per_day=mc_avg_cycles)
         effective_life = float(mc_lifetime["effective_life_years"])
 
@@ -825,16 +862,21 @@ def _render_revenue_risk_analysis(
         npv_dist = calculate_npv_distribution(
             mc["simulations"],
             total_capex=total_capex_mc,
-            annual_degradation_cost=mc_deg["total_degradation_eur"],
+            annual_degradation_cost=0.0,
             effective_life_years=effective_life,
             annual_decay_rate=annual_decay_rate,
             decay_floor_share=decay_floor_share,
         )
+        st.caption(
+            "Cash NPV excludes the non-cash shadow-wear proxy. No augmentation "
+            "or replacement cash flow is included until explicit timing and cost "
+            "assumptions are provided."
+        )
 
         n1, n2, n3, n4 = st.columns(4)
-        n1.metric("NPV P10", f"\u20ac{npv_dist['npv_p10']:,.0f}")
-        n2.metric("NPV P50", f"\u20ac{npv_dist['npv_p50']:,.0f}")
-        n3.metric("NPV P90", f"\u20ac{npv_dist['npv_p90']:,.0f}")
+        n1.metric("NPV 10th pct (Downside)", f"\u20ac{npv_dist['npv_p10']:,.0f}")
+        n2.metric("NPV 50th pct (Median)", f"\u20ac{npv_dist['npv_p50']:,.0f}")
+        n3.metric("NPV 90th pct (Upside)", f"\u20ac{npv_dist['npv_p90']:,.0f}")
         prob_color = "normal" if npv_dist["prob_positive_npv"] >= 0.5 else "inverse"
         n4.metric(
             "P(NPV>0)", f"{npv_dist['prob_positive_npv']:.0%}",
@@ -858,7 +900,7 @@ def _render_revenue_risk_analysis(
             base_revenue=mc["p50"],
             total_capex=total_capex_mc,
             effective_life_years=effective_life,
-            annual_degradation_cost=mc_deg["total_degradation_eur"],
+            annual_degradation_cost=0.0,
             annual_decay_rate=annual_decay_rate,
             decay_floor_share=decay_floor_share,
         )

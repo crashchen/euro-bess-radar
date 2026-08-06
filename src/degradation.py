@@ -93,15 +93,17 @@ def calculate_net_revenue(
     annual_gross_revenue: float,
     annual_degradation_cost: float,
 ) -> dict[str, float]:
-    """Subtract degradation cost from gross annual revenue.
+    """Subtract a degradation shadow price from gross annual revenue.
 
     Args:
         annual_gross_revenue: Gross/headline annual revenue in EUR.
-        annual_degradation_cost: Annual degradation cost in EUR.
+        annual_degradation_cost: Annual non-cash wear proxy in EUR. This is an
+            economic screening adjustment, not an augmentation cash flow.
 
     Returns:
-        Dict with gross revenue, degradation cost, net revenue, and degradation
-        as a percentage of gross revenue.
+        Dict with gross revenue, shadow wear, economic margin, and wear as a
+        percentage of gross revenue. Historical key names remain for API
+        compatibility.
     """
     _require_non_negative("annual_gross_revenue", annual_gross_revenue)
     _require_non_negative("annual_degradation_cost", annual_degradation_cost)
@@ -143,7 +145,7 @@ def calculate_levelized_cost_of_storage(
     annual_throughput_mwh: float,
     opex_eur_kwh_yr: float = 0.0,
 ) -> float:
-    """Calculate a simple lifetime LCOS in EUR/MWh.
+    """Calculate lifetime cost per two-leg throughput MWh.
 
     Args:
         capex_eur_kwh: Installed CapEx basis in EUR/kWh.
@@ -153,7 +155,8 @@ def calculate_levelized_cost_of_storage(
         opex_eur_kwh_yr: Optional fixed annual OpEx in EUR/kWh-year.
 
     Returns:
-        Levelized cost of storage in EUR/MWh.
+        Cost per charge-plus-discharge throughput MWh. This is not the
+        conventional discharge-output LCOS denominator.
     """
     _require_non_negative("capex_eur_kwh", capex_eur_kwh)
     _require_non_negative("capacity_kwh", capacity_kwh)

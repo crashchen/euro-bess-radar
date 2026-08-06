@@ -49,6 +49,10 @@ logger = logging.getLogger(__name__)
 
 _warned_fx_years: set[int] = set()
 ELEXON_MAX_DAYS_PER_REQUEST = 7
+ENTSOE_REQUEST_TIMEOUT_SECONDS = 30
+# Repository-level retry owns logging, auth short-circuiting, and backoff.
+# entsoe-py must make one low-level attempt per outer attempt, not its default 3.
+ENTSOE_CLIENT_RETRY_COUNT = 1
 _ZONE_RESOLUTION_TRANSITIONS: dict[str, tuple[tuple[pd.Timestamp, pd.Timedelta, pd.Timedelta], ...]] = {
     "DE_LU": (
         (
@@ -58,6 +62,15 @@ _ZONE_RESOLUTION_TRANSITIONS: dict[str, tuple[tuple[pd.Timestamp, pd.Timedelta, 
         ),
     ),
 }
+
+
+def _make_entsoe_client() -> EntsoePandasClient:
+    """Build an ENTSO-E client with one retry owner and a bounded request."""
+    return EntsoePandasClient(
+        api_key=get_api_key(),
+        retry_count=ENTSOE_CLIENT_RETRY_COUNT,
+        timeout=ENTSOE_REQUEST_TIMEOUT_SECONDS,
+    )
 
 
 # ── Exceptions ───────────────────────────────────────────────────────────────
@@ -741,7 +754,7 @@ def fetch_entsoe_prices(
     """
     if client is None:
         try:
-            client = EntsoePandasClient(api_key=get_api_key())
+            client = _make_entsoe_client()
         except OSError as exc:
             raise DataSourceAuthError(
                 "ENTSO-E API key is missing or invalid. Check your .env configuration."
@@ -1207,7 +1220,7 @@ def fetch_generation_data(
         return fetch_elexon_generation(start, end)
 
     try:
-        client = EntsoePandasClient(api_key=get_api_key())
+        client = _make_entsoe_client()
     except OSError as exc:
         raise DataSourceAuthError(
             "ENTSO-E API key is missing or invalid. Check your .env configuration."
@@ -2249,7 +2262,7 @@ def _fetch_entsoe_activation_prices(
 ) -> pd.DataFrame:
     """Fetch DE activated balancing energy prices (17.1.f) via entsoe-py."""
     try:
-        client = EntsoePandasClient(api_key=get_api_key())
+        client = _make_entsoe_client()
     except OSError as exc:
         raise DataSourceAuthError(
             "ENTSO-E API key missing or invalid for activated balancing "
@@ -2487,7 +2500,7 @@ def fetch_entsoe_imbalance_prices(
         imbalance_price_short] or None if data not available.
     """
     try:
-        client = EntsoePandasClient(api_key=get_api_key())
+        client = _make_entsoe_client()
     except OSError as exc:
         # Missing API key was previously logged at WARNING and silently
         # turned into None. DA/IDA both raise here so the sidebar can
@@ -3693,7 +3706,7 @@ def fetch_intraday_prices(
         raise ValueError(f"IDA sequence must be 1, 2 or 3 (got {sequence})")
 
     try:
-        client = EntsoePandasClient(api_key=get_api_key())
+        client = _make_entsoe_client()
     except OSError as exc:
         raise DataSourceAuthError(
             "ENTSO-E API key missing or invalid. Set ENTSOE_API_KEY in .env."
@@ -3986,7 +3999,7 @@ def test_entsoe_connection() -> None:
     start = end - pd.Timedelta(days=7)
 
     logging.basicConfig(level=logging.INFO)
-    client = EntsoePandasClient(api_key=get_api_key())
+    client = _make_entsoe_client()
 
     for zone in ["DE_LU", "FR"]:
         logger.info("Testing ENTSO-E for %s...", zone)

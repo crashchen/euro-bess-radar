@@ -30,7 +30,7 @@ def render(
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Avg Price", f"\u20ac{primary_df['price_eur_mwh'].mean():.2f}/MWh")
     k2.metric("Avg Ordered Spread", f"\u20ac{percentiles['mean']:.2f}/MWh")
-    k3.metric("P90 Ordered Spread", f"\u20ac{percentiles['p90']:.2f}/MWh")
+    k3.metric("90th-pct Ordered Spread", f"\u20ac{percentiles['p90']:.2f}/MWh")
     k4.metric(
         "Neg Price Hours",
         f"{neg_stats['negative_hours']:.1f}h",
@@ -42,6 +42,9 @@ def render(
     )
     quality = summarize_price_data_quality(primary_df)
     excluded_days = int(daily_spreads.attrs.get("excluded_days_due_to_missing", 0))
+    solver_failed_days = int(
+        daily_spreads.attrs.get("excluded_days_due_to_solver_failure", 0)
+    )
     if quality["missing_intervals"] > 0:
         st.warning(
             "Data quality: "
@@ -55,6 +58,17 @@ def render(
             f"{quality['imputed_ratio']:.1%} of intervals were short-gap imputed; "
             "no unresolved price gaps remain."
         )
+    if solver_failed_days > 0:
+        message = (
+            f"Dispatch model quality: {solver_failed_days} local day(s) failed "
+            "to solve and were excluded; they were not counted as zero-revenue days."
+        )
+        if not daily_spreads.attrs.get("model_available", True):
+            st.error(
+                f"{message} No valid MILP day remains, so dispatch revenue is unavailable."
+            )
+        else:
+            st.warning(message)
 
     price_plot_df = primary_df.reset_index()
     fig_price = px.line(

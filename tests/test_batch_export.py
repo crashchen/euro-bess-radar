@@ -64,9 +64,12 @@ class TestComparisonExport:
         ws = wb["Zone Comparison"]
         headers = [ws.cell(row=1, column=c).value for c in range(1, ws.max_column + 1)]
         assert "Zone" in headers
+        assert "50th-percentile Spread" in headers
+        assert "90th-percentile Spread" in headers
         assert "Revenue (EUR/MW/yr)" in headers
-        assert "LCOS (EUR/MWh)" in headers
-        assert "Payback (years)" in headers
+        assert "Economic Margin after Shadow Wear (EUR/MW/yr)" in headers
+        assert "Two-leg Throughput Cost (EUR/MWh)" in headers
+        assert "Economic Payback Proxy (years)" in headers
 
     def test_data_rows(self, comparison_df: pd.DataFrame) -> None:
         data = export_comparison_to_bytes(comparison_df)

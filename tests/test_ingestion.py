@@ -23,6 +23,8 @@ from src.config import (
     is_elexon_zone,
 )
 from src.data_ingestion import (
+    ENTSOE_CLIENT_RETRY_COUNT,
+    ENTSOE_REQUEST_TIMEOUT_SECONDS,
     DataSourceAuthError,
     DataSourceNetworkError,
     DataSourceParseError,
@@ -56,6 +58,30 @@ from src.data_ingestion import (
 # ── Test 1: ENTSO-E schema ──────────────────────────────────────────────────
 
 class TestFetchEntsoePrices:
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    def test_client_has_one_retry_owner_and_explicit_timeout(
+        self,
+        _mock_key: MagicMock,
+        mock_client_cls: MagicMock,
+        mock_entsoe_series: pd.Series,
+    ) -> None:
+        mock_client_cls.return_value.query_day_ahead_prices.return_value = (
+            mock_entsoe_series
+        )
+
+        fetch_entsoe_prices(
+            "DE_LU",
+            pd.Timestamp("2025-01-01", tz="UTC"),
+            pd.Timestamp("2025-01-02", tz="UTC"),
+        )
+
+        mock_client_cls.assert_called_once_with(
+            api_key="fake-key",
+            retry_count=ENTSOE_CLIENT_RETRY_COUNT,
+            timeout=ENTSOE_REQUEST_TIMEOUT_SECONDS,
+        )
+
     @patch("src.data_ingestion._call_entsoe_api")
     @patch("src.data_ingestion.get_api_key", return_value="fake-key")
     def test_returns_correct_schema(

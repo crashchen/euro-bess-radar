@@ -63,8 +63,9 @@ def solve_daily_lp(
         Dict with keys: revenue_eur, p_charge, p_discharge, soc, n_cycles,
         success (False for empty/NaN input or a solver failure — a zero
         schedule is otherwise indistinguishable from a genuine zero-revenue
-        day), and tiebreak_applied (None unless ``min_throughput_tiebreak``;
-        True when the canonical pass was accepted, False on fallback).
+        day), status/message (machine-readable state plus diagnostic text),
+        and tiebreak_applied (None unless ``min_throughput_tiebreak``; True
+        when the canonical pass was accepted, False on fallback).
     """
     if max_efc_per_day is not None and max_efc_per_day < 0:
         raise ValueError(f"max_efc_per_day must be >= 0, got {max_efc_per_day}")
@@ -77,6 +78,8 @@ def solve_daily_lp(
             "soc": np.zeros(max(n, 0) + 1),
             "n_cycles": 0.0,
             "success": False,
+            "status": "invalid_input",
+            "message": "price vector is empty or contains NaN",
             "tiebreak_applied": None,
         }
 
@@ -168,6 +171,8 @@ def solve_daily_lp(
             "soc": np.full(n + 1, soc_init),
             "n_cycles": 0.0,
             "success": False,
+            "status": "solver_failed",
+            "message": str(result.message),
             "tiebreak_applied": None,
         }
 
@@ -203,6 +208,8 @@ def solve_daily_lp(
         "soc": soc,
         "n_cycles": round(float(n_cycles), 4),
         "success": True,
+        "status": "optimal",
+        "message": "",
         "tiebreak_applied": tiebreak_applied,
     }
 
@@ -293,7 +300,9 @@ def solve_daily_joint_capacity_lp(
     This keeps the estimate screening-grade while improving on a pure time-split
     heuristic. ``capacity_price_eur_mw_h`` is a scalar cleared price or a
     per-interval vector (length ``len(prices)``) — the latter lets a 9.2b
-    block-of-day reserve-price forecast drive the headroom sizing.
+    block-of-day reserve-price forecast drive the headroom sizing. The return
+    contract always includes ``success``, ``status``, and ``message`` so a
+    solver failure cannot be confused with a genuine zero-revenue optimum.
     """
     n = len(prices)
     if n == 0 or np.isnan(prices).any():
@@ -308,6 +317,9 @@ def solve_daily_joint_capacity_lp(
             "soc": np.zeros(max(n, 0) + 1),
             "n_cycles": 0.0,
             "avg_reserve_mw": 0.0,
+            "success": False,
+            "status": "invalid_input",
+            "message": "price vector is empty or contains NaN",
         }
 
     capacity_mwh = power_mw * duration_hours
@@ -402,6 +414,9 @@ def solve_daily_joint_capacity_lp(
             "soc": np.full(n + 1, soc_init),
             "n_cycles": 0.0,
             "avg_reserve_mw": 0.0,
+            "success": False,
+            "status": "solver_failed",
+            "message": str(result.message),
         }
 
     p_charge = result.x[:n]
@@ -431,7 +446,27 @@ def solve_daily_joint_capacity_lp(
         "soc": soc,
         "n_cycles": round(float(n_cycles), 4),
         "avg_reserve_mw": round(float(reserve_mw.mean()), 6),
+        "success": True,
+        "status": "optimal",
+        "message": "",
     }
+
+
+def _set_dispatch_batch_attrs(
+    frame: pd.DataFrame,
+    *,
+    observed_days: int,
+    missing_days: int,
+    solver_failures: list[dict[str, str]],
+) -> pd.DataFrame:
+    """Attach one auditable day-coverage contract to a dispatch batch."""
+    frame.attrs["observed_days"] = observed_days
+    frame.attrs["valid_days"] = len(frame)
+    frame.attrs["excluded_days_due_to_missing"] = missing_days
+    frame.attrs["excluded_days_due_to_solver_failure"] = len(solver_failures)
+    frame.attrs["solver_failure_details"] = solver_failures
+    frame.attrs["model_available"] = len(frame) > 0
+    return frame
 
 
 def solve_joint_capacity_batch(
@@ -449,8 +484,11 @@ def solve_joint_capacity_batch(
     prices = local["price_eur_mwh"]
 
     records = []
+    observed_days = 0
     excluded_days = 0
+    solver_failures: list[dict[str, str]] = []
     for date, group in prices.groupby(prices.index.date):
+        observed_days += 1
         sorted_group = group.sort_index()
         if sorted_group.isna().any():
             excluded_days += 1
@@ -469,6 +507,13 @@ def solve_joint_capacity_batch(
             soc_init_frac=soc_init_frac,
             availability=availability,
         )
+        if not result["success"]:
+            solver_failures.append({
+                "date": str(date),
+                "status": str(result["status"]),
+                "message": str(result["message"]),
+            })
+            continue
         records.append({
             "date": date,
             "joint_total_revenue": result["total_revenue_eur"],
@@ -489,12 +534,20 @@ def solve_joint_capacity_batch(
                 "n_cycles",
             ],
         )
-        result.attrs["excluded_days_due_to_missing"] = excluded_days
-        return result
+        return _set_dispatch_batch_attrs(
+            result,
+            observed_days=observed_days,
+            missing_days=excluded_days,
+            solver_failures=solver_failures,
+        )
 
     result = pd.DataFrame.from_records(records)
-    result.attrs["excluded_days_due_to_missing"] = excluded_days
-    return result
+    return _set_dispatch_batch_attrs(
+        result,
+        observed_days=observed_days,
+        missing_days=excluded_days,
+        solver_failures=solver_failures,
+    )
 
 
 def solve_daily_da_id_dispatch(
@@ -1139,8 +1192,11 @@ def solve_dispatch_batch(
     prices = local["price_eur_mwh"]
 
     records = []
+    observed_days = 0
     excluded_days = 0
+    solver_failures: list[dict[str, str]] = []
     for date, group in prices.groupby(prices.index.date):
+        observed_days += 1
         sorted_group = group.sort_index()
         if sorted_group.isna().any():
             excluded_days += 1
@@ -1156,6 +1212,13 @@ def solve_dispatch_batch(
             efficiency=efficiency,
             soc_init_frac=soc_init_frac,
         )
+        if not result["success"]:
+            solver_failures.append({
+                "date": str(date),
+                "status": str(result["status"]),
+                "message": str(result["message"]),
+            })
+            continue
         energy_mwh = power_mw * duration_hours
         lp_spread = result["revenue_eur"] / energy_mwh if energy_mwh > 0 else 0.0
         records.append({
@@ -1169,9 +1232,17 @@ def solve_dispatch_batch(
         result = pd.DataFrame(
             columns=["date", "lp_revenue", "n_cycles", "lp_spread_eur_mwh"]
         )
-        result.attrs["excluded_days_due_to_missing"] = excluded_days
-        return result
+        return _set_dispatch_batch_attrs(
+            result,
+            observed_days=observed_days,
+            missing_days=excluded_days,
+            solver_failures=solver_failures,
+        )
 
     result = pd.DataFrame.from_records(records)
-    result.attrs["excluded_days_due_to_missing"] = excluded_days
-    return result
+    return _set_dispatch_batch_attrs(
+        result,
+        observed_days=observed_days,
+        missing_days=excluded_days,
+        solver_failures=solver_failures,
+    )

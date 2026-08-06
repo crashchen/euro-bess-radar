@@ -560,6 +560,23 @@ def test_reserve_coopt_total_guards_return_none() -> None:
     ) == (None, None, None)
 
 
+def test_reserve_coopt_total_omits_solver_failed_window(monkeypatch) -> None:
+    df = _price_frame(days=4)
+    valid = set(_berlin_dates(df)[1:3])
+    failed = pd.DataFrame(columns=["date", "joint_total_revenue"])
+    failed.attrs["excluded_days_due_to_solver_failure"] = 2
+    failed.attrs["model_available"] = False
+    monkeypatch.setattr(
+        "src.pages.simulation_cockpit.solve_joint_capacity_batch",
+        lambda *args, **kwargs: failed,
+    )
+
+    assert _reserve_coopt_total(
+        df, "FCR", _capacity_anc(), valid_dates=valid, tz="Europe/Berlin",
+        power_mw=1.0, duration_hours=2, efficiency=0.88,
+    ) == (None, None, None)
+
+
 def _ida_frame(days: int = 4) -> pd.DataFrame:
     """IDA series on the same timestamps as ``_price_frame``, perturbed off DA so
     the rebid stage has something to act on."""

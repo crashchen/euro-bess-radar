@@ -205,6 +205,9 @@ if fetch_btn or "zone_data" in st.session_state:
     export_revenue["power_mw"] = power_mw
     export_revenue["duration_hours"] = duration_hours
     export_revenue["roundtrip_efficiency"] = efficiency
+    export_revenue["capture_basis"] = (
+        "sidebar capture haircut applied to screening revenue"
+    )
 
     # Model-assumption audit, shared by the Cockpit (export) and Data Trust
     # (audit panel). Interactive panel knobs come from session state.

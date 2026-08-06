@@ -6,7 +6,10 @@ from src.components.sidebar import (
     DURATION_PRESET_HOURS,
     _format_duration_option,
     _looks_like_unified_capacity_csv,
+    load_generation,
+    load_zone_data,
 )
+from src.config import PRICE_CACHE_TTL_HOURS
 
 
 def test_sidebar_duration_presets_cover_longer_bess_cases() -> None:
@@ -14,6 +17,12 @@ def test_sidebar_duration_presets_cover_longer_bess_cases() -> None:
     assert [_format_duration_option(h) for h in DURATION_PRESET_HOURS] == [
         "1", "2", "4", "6", "6.7", "8",
     ]
+
+
+def test_streamlit_market_data_caches_match_persistent_ttl() -> None:
+    expected_seconds = PRICE_CACHE_TTL_HOURS * 3600
+    assert load_zone_data._info.ttl == expected_seconds
+    assert load_generation._info.ttl == expected_seconds
 
 
 def test_sidebar_detects_unified_capacity_csv_schema() -> None:

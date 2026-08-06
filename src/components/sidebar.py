@@ -20,7 +20,7 @@ from src.ancillary import (
     parse_imbalance_import_csv,
 )
 from src.ancillary_fetchers import get_available_fetchers, run_auto_fetch
-from src.config import ALL_ZONES
+from src.config import ALL_ZONES, PRICE_CACHE_TTL_HOURS
 from src.data_ingestion import (
     ACTIVATION_SOURCE_NETZTRANSPARENZ_ENTSOE,
     IMBALANCE_SOURCE_NETZTRANSPARENZ,
@@ -379,7 +379,7 @@ def _run_and_store_ancillary_fetch(zone: str, start: object, end: object) -> Non
 # ── Data loading (cached) ────────────────────────────────────────────────────
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=PRICE_CACHE_TTL_HOURS * 3600, show_spinner=False)
 def load_zone_data(
     zone: str,
     start: str,
@@ -398,7 +398,7 @@ def load_zone_data(
     )
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(ttl=PRICE_CACHE_TTL_HOURS * 3600, show_spinner=False)
 def load_generation(zone: str, start: str, end: str, refresh_token: int = 0) -> pd.DataFrame:
     """Fetch generation data for a zone (cached by Streamlit)."""
     from src.data_ingestion import fetch_generation_data

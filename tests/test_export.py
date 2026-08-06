@@ -571,14 +571,14 @@ class TestExportToBytes:
         assert summary["Joint MILP Avg Reserve Commitment"] == 0.42
         assert summary["DA Arbitrage Revenue (EUR)"] == 80000
         assert summary["FCR-N Revenue (EUR)"] == 25000
-        assert summary["Annual Degradation Cost (EUR)"] == 18000
-        assert summary["Net Revenue after Degradation (EUR)"] == 102000
-        assert summary["Degradation % of Gross Revenue"] == 0.15
+        assert summary["Annual Shadow Wear Proxy (EUR)"] == 18000
+        assert summary["Economic Margin after Shadow Wear (EUR)"] == 102000
+        assert summary["Shadow Wear % of Gross Revenue"] == 0.15
         assert summary["Effective Battery Lifetime (years)"] == 16.4
         assert summary["Lifetime Limiting Factor"] == "cycling"
         assert summary["Annual Throughput (MWh)"] == 2922
-        assert summary["LCOS (EUR/MWh)"] == 54.2
-        assert summary["Net Payback (years)"] == 7.5
+        assert summary["Two-leg Throughput Cost (EUR/MWh)"] == 54.2
+        assert summary["Economic Payback Proxy (years)"] == 7.5
 
     def test_summary_includes_data_quality_when_gaps_exist(self) -> None:
         idx = pd.date_range("2025-01-01", periods=8, freq="h", tz="UTC")
