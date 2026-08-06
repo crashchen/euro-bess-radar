@@ -76,11 +76,10 @@ def _plotly_values(values: list | dict) -> list[float]:
 def test_decay_contract_locked_copy_is_verbatim() -> None:
     assert _REVENUE_DECAY_HARD_CAPTION == (
         "Revenue-trajectory decay: screening assumption on annual merchant "
-        "cash flows; does not simulate future hourly prices or re-dispatch. "
-        "Battery degradation cost stays flat, so late decayed years can show "
-        "negative operating margins rather than an idled asset. Decay begins "
-        "after year 1 (the loaded sample's year). User assertion — no build-out "
-        "data is fetched."
+        "cash flows; does not simulate future hourly prices or re-dispatch. Cash "
+        "NPV excludes the non-cash shadow-wear proxy; no augmentation or "
+        "replacement cash flow is modeled. Decay begins after year 1 (the loaded "
+        "sample's year). User assertion — no build-out data is fetched."
     )
 
 
@@ -140,13 +139,25 @@ class TestRevenueDecayAppTest:
         assert _REVENUE_DECAY_HARD_CAPTION not in [c.value for c in app.caption]
         tornado = _chart_by_title(app, "NPV Sensitivity (vs base case)")
         assert "decay" not in tornado["data"][0]["y"]
-        assert len(_metric_values(app, ("NPV P10", "NPV P50", "NPV P90"))) == 3
+        assert len(_metric_values(app, (
+            "NPV 10th pct (Downside)",
+            "NPV 50th pct (Median)",
+            "NPV 90th pct (Upside)",
+        ))) == 3
 
     def test_active_decay_moves_npv_but_not_bootstrap_and_adds_axis(
         self, app: AppTest,
     ) -> None:
-        revenue_labels = ("P10 Revenue", "P50 Revenue", "P90 Revenue")
-        npv_labels = ("NPV P10", "NPV P50", "NPV P90")
+        revenue_labels = (
+            "10th-pct Revenue (Downside)",
+            "50th-pct Revenue (Median)",
+            "90th-pct Revenue (Upside)",
+        )
+        npv_labels = (
+            "NPV 10th pct (Downside)",
+            "NPV 50th pct (Median)",
+            "NPV 90th pct (Upside)",
+        )
         baseline_revenue = _metric_values(app, revenue_labels)
         baseline_npv = _metric_values(app, npv_labels)
 
@@ -161,7 +172,12 @@ class TestRevenueDecayAppTest:
         assert "decay" in tornado["data"][0]["y"]
 
     def test_floor_at_one_is_inactive_and_bit_identical(self, app: AppTest) -> None:
-        npv_labels = ("NPV P10", "NPV P50", "NPV P90", "P(NPV>0)")
+        npv_labels = (
+            "NPV 10th pct (Downside)",
+            "NPV 50th pct (Median)",
+            "NPV 90th pct (Upside)",
+            "P(NPV>0)",
+        )
         baseline_npv = _metric_values(app, npv_labels)
         app.number_input(key="merchant_revenue_decay_floor_pct").set_value(
             100.0
@@ -214,6 +230,26 @@ class TestRevenueDecayAppTest:
         assert not app.exception
         assert observed[-1] == pytest.approx(0.10)
 
+    def test_cash_npv_does_not_deduct_shadow_wear(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        observed: list[float] = []
+        original = revenue_page.calculate_npv_distribution
+
+        def spy(*args, **kwargs):
+            observed.append(kwargs["annual_degradation_cost"])
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(revenue_page, "calculate_npv_distribution", spy)
+        app = AppTest.from_function(_risk_app).run(timeout=30)
+
+        assert not app.exception
+        assert observed[-1] == 0.0
+        assert any(
+            "Cash NPV excludes the non-cash shadow-wear proxy" in caption.value
+            for caption in app.caption
+        )
+
     def test_tornado_chart_sorts_capex_by_npv_not_input(self, app: AppTest) -> None:
         tornado = _chart_by_title(app, "NPV Sensitivity (vs base case)")
         downside, upside = tornado["data"]
@@ -233,4 +269,4 @@ class TestRevenueDecayAppTest:
         app.run(timeout=30)
         assert not app.exception
         assert any("Enter both" in info.value for info in app.info)
-        assert "NPV P50" not in [metric.label for metric in app.metric]
+        assert "NPV 50th pct (Median)" not in [metric.label for metric in app.metric]

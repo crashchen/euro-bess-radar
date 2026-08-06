@@ -128,9 +128,9 @@ def _build_summary_sheet(
     row = _write_kv_pair(ws, row, "Median Price (EUR/MWh)", round(price_df["price_eur_mwh"].median(), 2), _PRICE_FMT)
     row += 1
 
-    row = _write_kv_pair(ws, row, "P50 Spread", round(percentiles["p50"], 2), _PRICE_FMT)
-    row = _write_kv_pair(ws, row, "P75 Spread", round(percentiles["p75"], 2), _PRICE_FMT)
-    row = _write_kv_pair(ws, row, "P90 Spread", round(percentiles["p90"], 2), _PRICE_FMT)
+    row = _write_kv_pair(ws, row, "50th-percentile Spread", round(percentiles["p50"], 2), _PRICE_FMT)
+    row = _write_kv_pair(ws, row, "75th-percentile Spread", round(percentiles["p75"], 2), _PRICE_FMT)
+    row = _write_kv_pair(ws, row, "90th-percentile Spread", round(percentiles["p90"], 2), _PRICE_FMT)
     row = _write_kv_pair(ws, row, "Mean Spread", round(percentiles["mean"], 2), _PRICE_FMT)
     row += 1
 
@@ -176,24 +176,28 @@ def _build_summary_sheet(
         row = _write_kv_pair(ws, row, "Round-Trip Efficiency", revenue_estimate["roundtrip_efficiency"], _PCT_FMT)
     row = _write_kv_pair(ws, row, "Modeled Cycles per Day", revenue_estimate["cycles_per_day_assumption"])
     row = _write_kv_pair(ws, row, "Capture Rate Assumption", revenue_estimate["capture_rate_assumption"])
+    if "capture_basis" in revenue_estimate:
+        row = _write_kv_pair(
+            ws, row, "Capture Basis", revenue_estimate["capture_basis"],
+        )
     if "annual_degradation_cost_eur" in revenue_estimate:
         row = _write_kv_pair(
             ws, row,
-            "Annual Degradation Cost (EUR)",
+            "Annual Shadow Wear Proxy (EUR)",
             revenue_estimate["annual_degradation_cost_eur"],
             _PRICE_FMT,
         )
     if "net_revenue_eur" in revenue_estimate:
         row = _write_kv_pair(
             ws, row,
-            "Net Revenue after Degradation (EUR)",
+            "Economic Margin after Shadow Wear (EUR)",
             revenue_estimate["net_revenue_eur"],
             _PRICE_FMT,
         )
     if "degradation_pct" in revenue_estimate:
         row = _write_kv_pair(
             ws, row,
-            "Degradation % of Gross Revenue",
+            "Shadow Wear % of Gross Revenue",
             revenue_estimate["degradation_pct"] / 100,
             _PCT_FMT,
         )
@@ -219,7 +223,7 @@ def _build_summary_sheet(
     if "lcos_eur_mwh" in revenue_estimate:
         row = _write_kv_pair(
             ws, row,
-            "LCOS (EUR/MWh)",
+            "Two-leg Throughput Cost (EUR/MWh)",
             revenue_estimate["lcos_eur_mwh"],
             _PRICE_FMT,
         )
@@ -227,8 +231,14 @@ def _build_summary_sheet(
         net_payback = revenue_estimate["net_payback_years"]
         row = _write_kv_pair(
             ws, row,
-            "Net Payback (years)",
+            "Economic Payback Proxy (years)",
             net_payback if math.isfinite(net_payback) else "N/A",
+        )
+    if "cash_npv_includes_shadow_wear" in revenue_estimate:
+        row = _write_kv_pair(
+            ws, row,
+            "Cash NPV Includes Shadow Wear",
+            revenue_estimate["cash_npv_includes_shadow_wear"],
         )
     row += 1
 
@@ -487,9 +497,9 @@ def _build_pdf_report(
         ("Avg Price (EUR/MWh)", f"{price_df['price_eur_mwh'].mean():.2f}"),
         ("Median Price (EUR/MWh)", f"{price_df['price_eur_mwh'].median():.2f}"),
         ("", ""),
-        ("P50 Spread", f"{percentiles['p50']:.2f}"),
-        ("P75 Spread", f"{percentiles['p75']:.2f}"),
-        ("P90 Spread", f"{percentiles['p90']:.2f}"),
+        ("50th-percentile Spread", f"{percentiles['p50']:.2f}"),
+        ("75th-percentile Spread", f"{percentiles['p75']:.2f}"),
+        ("90th-percentile Spread", f"{percentiles['p90']:.2f}"),
         ("Mean Spread", f"{percentiles['mean']:.2f}"),
         ("", ""),
         ("Est. Annual Revenue (EUR/MW)",
@@ -522,17 +532,19 @@ def _build_pdf_report(
                   str(revenue_estimate.get("cycles_per_day_assumption", ""))))
     rows.append(("Capture Rate Assumption",
                   str(revenue_estimate.get("capture_rate_assumption", ""))))
+    if "capture_basis" in revenue_estimate:
+        rows.append(("Capture Basis", str(revenue_estimate["capture_basis"])))
     if "roundtrip_efficiency" in revenue_estimate:
         rows.append(("Round-Trip Efficiency",
                       f"{revenue_estimate['roundtrip_efficiency']:.0%}"))
     if "annual_degradation_cost_eur" in revenue_estimate:
-        rows.append(("Annual Degradation Cost (EUR)",
+        rows.append(("Annual Shadow Wear Proxy (EUR)",
                      f"{revenue_estimate['annual_degradation_cost_eur']:,.0f}"))
     if "net_revenue_eur" in revenue_estimate:
-        rows.append(("Net Revenue after Degradation (EUR)",
+        rows.append(("Economic Margin after Shadow Wear (EUR)",
                      f"{revenue_estimate['net_revenue_eur']:,.0f}"))
     if "degradation_pct" in revenue_estimate:
-        rows.append(("Degradation % of Gross Revenue",
+        rows.append(("Shadow Wear % of Gross Revenue",
                      f"{revenue_estimate['degradation_pct']:.1f}%"))
     if "effective_life_years" in revenue_estimate:
         rows.append(("Effective Battery Lifetime (years)",
@@ -544,12 +556,15 @@ def _build_pdf_report(
         rows.append(("Annual Throughput (MWh)",
                      f"{revenue_estimate['annual_throughput_mwh']:,.0f}"))
     if "lcos_eur_mwh" in revenue_estimate:
-        rows.append(("LCOS (EUR/MWh)",
+        rows.append(("Two-leg Throughput Cost (EUR/MWh)",
                      f"{revenue_estimate['lcos_eur_mwh']:,.0f}"))
     if "net_payback_years" in revenue_estimate:
         net_payback = revenue_estimate["net_payback_years"]
-        rows.append(("Net Payback (years)",
+        rows.append(("Economic Payback Proxy (years)",
                      f"{net_payback:.1f}" if math.isfinite(net_payback) else "N/A"))
+    if "cash_npv_includes_shadow_wear" in revenue_estimate:
+        rows.append(("Cash NPV Includes Shadow Wear",
+                     str(revenue_estimate["cash_npv_includes_shadow_wear"])))
     rows.append(("", ""))
     rows.append(("Negative Price Hours",
                   str(negative_stats.get("negative_hours", 0))))
@@ -658,15 +673,15 @@ _COMPARISON_COLUMNS = {
     "avg_price": ("Avg Price (EUR/MWh)", _PRICE_FMT),
     "std_price": ("Std Dev", _PRICE_FMT),
     "avg_spread": ("Avg Spread (EUR/MWh)", _PRICE_FMT),
-    "p50_spread": ("P50 Spread", _PRICE_FMT),
-    "p90_spread": ("P90 Spread", _PRICE_FMT),
+    "p50_spread": ("50th-percentile Spread", _PRICE_FMT),
+    "p90_spread": ("90th-percentile Spread", _PRICE_FMT),
     "negative_pct": ("Neg Price %", _PCT_FMT),
     "estimated_annual_revenue_per_mw": ("Revenue (EUR/MW/yr)", "#,##0"),
     "dispatch_method": ("Dispatch Method", None),
     "avg_cycles_per_day": ("Avg Cycles/Day", "0.00"),
-    "net_revenue_per_mw": ("Net Revenue (EUR/MW/yr)", "#,##0"),
-    "lcos_eur_mwh": ("LCOS (EUR/MWh)", "#,##0.0"),
-    "payback_years": ("Payback (years)", "0.0"),
+    "net_revenue_per_mw": ("Economic Margin after Shadow Wear (EUR/MW/yr)", "#,##0"),
+    "lcos_eur_mwh": ("Two-leg Throughput Cost (EUR/MWh)", "#,##0.0"),
+    "payback_years": ("Economic Payback Proxy (years)", "0.0"),
     "effective_life_years": ("Effective Life (years)", "0.0"),
     "limiting_factor": ("Limiting Factor", None),
 }

@@ -120,6 +120,13 @@ Mechanics — all locked:
    operator idles *partially* (best days only), which needs the
    re-dispatch model (section 9.7). Discounting `(R - C)` by the decayed
    factor would silently decay the cost too and is likewise prohibited.
+
+   **2026-08-06 economic-semantics addendum:** `C` remains supported by the
+   scenario API for an explicitly documented annual cash cost. The Revenue
+   page now passes `C = 0`: its throughput-derived wear value is a non-cash
+   shadow price and is reported separately from project cash NPV. This changes
+   the caller's cost classification, not the decay factor or inactive-path
+   floating-point contract. See `economic-semantics-v1.md`.
 5. **The decay acts on the trajectory, not on year-1 estimation.** The
    bootstrap distribution (`bootstrap_annual_revenue`, which resamples 365
    daily revenues per draw), the degradation annualisation (the 365.25-day

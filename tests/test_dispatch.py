@@ -27,6 +27,16 @@ class TestSolveDailyLp:
         r = solve_daily_lp(prices, dt=1.0, power_mw=1.0, duration_hours=2.0, efficiency=0.88)
         assert abs(r["revenue_eur"]) < 0.01
         assert r["n_cycles"] == pytest.approx(0.0, abs=0.01)
+        assert r["success"] is True
+        assert r["status"] == "optimal"
+        assert r["message"] == ""
+
+    def test_invalid_prices_have_typed_failure_status(self) -> None:
+        r = solve_daily_lp(np.array([50.0, np.nan]), dt=1.0)
+
+        assert r["success"] is False
+        assert r["status"] == "invalid_input"
+        assert "NaN" in r["message"]
 
     def test_simple_spread(self) -> None:
         """Known 2-block price pattern should produce positive revenue."""
@@ -264,6 +274,62 @@ class TestSolveDispatchBatch:
         assert result.attrs["excluded_days_due_to_missing"] == 1
         assert (result["lp_revenue"] > 0).all()
 
+    def test_solver_failed_days_are_excluded_and_audited(
+        self, multi_day_prices, monkeypatch,
+    ) -> None:
+        real_solver = solve_daily_lp
+        calls = 0
+
+        def fail_middle_day(prices, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                return {
+                    "revenue_eur": 0.0,
+                    "n_cycles": 0.0,
+                    "success": False,
+                    "status": "solver_failed",
+                    "message": "forced batch failure",
+                }
+            return real_solver(prices, **kwargs)
+
+        monkeypatch.setattr("src.dispatch.solve_daily_lp", fail_middle_day)
+        result = solve_dispatch_batch(multi_day_prices)
+
+        assert len(result) == 2
+        assert result.attrs["observed_days"] == 3
+        assert result.attrs["valid_days"] == 2
+        assert result.attrs["excluded_days_due_to_missing"] == 0
+        assert result.attrs["excluded_days_due_to_solver_failure"] == 1
+        assert result.attrs["model_available"] is True
+        assert result.attrs["solver_failure_details"] == [{
+            "date": "2025-01-02",
+            "status": "solver_failed",
+            "message": "forced batch failure",
+        }]
+        assert (result["lp_revenue"] > 0).all()
+
+    def test_all_solver_failures_return_unavailable_not_zero_rows(
+        self, multi_day_prices, monkeypatch,
+    ) -> None:
+        def fail_day(prices, **kwargs):
+            return {
+                "revenue_eur": 0.0,
+                "n_cycles": 0.0,
+                "success": False,
+                "status": "solver_failed",
+                "message": "forced total failure",
+            }
+
+        monkeypatch.setattr("src.dispatch.solve_daily_lp", fail_day)
+        result = solve_dispatch_batch(multi_day_prices)
+
+        assert result.empty
+        assert result.attrs["observed_days"] == 3
+        assert result.attrs["valid_days"] == 0
+        assert result.attrs["excluded_days_due_to_solver_failure"] == 3
+        assert result.attrs["model_available"] is False
+
     def test_lp_spread_equals_revenue_over_capacity(self, multi_day_prices) -> None:
         """lp_spread_eur_mwh should equal lp_revenue / (power * duration)."""
         result = solve_dispatch_batch(
@@ -291,6 +357,20 @@ class TestSolveDailyJointCapacityLp:
         assert result["da_revenue_eur"] == pytest.approx(0.0, abs=1e-6)
         assert result["capacity_revenue_eur"] == pytest.approx(10.0 * 2.0 * 24 * 0.95)
         assert result["avg_reserve_mw"] == pytest.approx(2.0)
+        assert result["success"] is True
+        assert result["status"] == "optimal"
+        assert result["message"] == ""
+
+    def test_invalid_prices_have_typed_failure_status(self) -> None:
+        result = solve_daily_joint_capacity_lp(
+            np.array([50.0, np.nan]),
+            dt=1.0,
+            capacity_price_eur_mw_h=5.0,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "invalid_input"
+        assert "NaN" in result["message"]
 
     def test_capacity_competes_with_dispatch_power_headroom(self) -> None:
         prices = np.array([20.0] * 12 + [120.0] * 12)
@@ -425,6 +505,43 @@ class TestSolveJointCapacityBatch:
 
         assert len(result) == 1
         assert result.attrs["excluded_days_due_to_missing"] == 1
+
+    def test_solver_failed_days_are_excluded_and_audited(
+        self, monkeypatch,
+    ) -> None:
+        idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+        df = pd.DataFrame({"price_eur_mwh": [50.0] * 48}, index=idx)
+        df.index.name = "timestamp"
+        real_solver = solve_daily_joint_capacity_lp
+        calls = 0
+
+        def fail_first_day(prices, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {
+                    "success": False,
+                    "status": "solver_failed",
+                    "message": "forced joint failure",
+                }
+            return real_solver(prices, **kwargs)
+
+        monkeypatch.setattr(
+            "src.dispatch.solve_daily_joint_capacity_lp", fail_first_day,
+        )
+        result = solve_joint_capacity_batch(
+            df,
+            capacity_price_eur_mw_h=5.0,
+            power_mw=1.0,
+            duration_hours=2.0,
+        )
+
+        assert len(result) == 1
+        assert result.attrs["observed_days"] == 2
+        assert result.attrs["valid_days"] == 1
+        assert result.attrs["excluded_days_due_to_solver_failure"] == 1
+        assert result.attrs["solver_failure_details"][0]["date"] == "2025-01-01"
+        assert result.attrs["model_available"] is True
 
 
 class TestSolveDailyDaIdDispatch:

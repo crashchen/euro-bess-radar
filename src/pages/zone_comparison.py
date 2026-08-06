@@ -67,7 +67,7 @@ def render(
     # Risk/Reward scatter
     y_col = sort_col
     y_label = (
-        "Net Revenue (EUR/MW/yr)" if has_degradation
+        "Economic Margin after Shadow Wear (EUR/MW/yr)" if has_degradation
         else "Est. Annual Revenue (EUR/MW/yr)"
     )
     scatter_kwargs: dict = {
@@ -76,7 +76,7 @@ def render(
         "text": "zone",
         "title": "Zone Screening: Risk/Reward Frontier",
         "labels": {
-            "p90_spread": "P90 Spread (EUR/MWh)",
+            "p90_spread": "90th-percentile Spread (EUR/MWh)",
             y_col: y_label,
         },
         "template": chart_template,
@@ -84,7 +84,7 @@ def render(
     if has_degradation and comp["lcos_eur_mwh"].notna().any():
         scatter_kwargs["size"] = "lcos_eur_mwh"
         scatter_kwargs["size_max"] = 40
-        scatter_kwargs["labels"]["lcos_eur_mwh"] = "LCOS (EUR/MWh)"
+        scatter_kwargs["labels"]["lcos_eur_mwh"] = "Two-leg Throughput Cost (EUR/MWh)"
     else:
         scatter_kwargs["size"] = "negative_pct"
         scatter_kwargs["size_max"] = 40
@@ -107,10 +107,10 @@ def render(
             "Avg Spread", format="\u20ac%.2f",
         ),
         "p50_spread": st.column_config.NumberColumn(
-            "P50 Spread", format="\u20ac%.2f",
+            "50th-pct Spread", format="\u20ac%.2f",
         ),
         "p90_spread": st.column_config.NumberColumn(
-            "P90 Spread", format="\u20ac%.2f",
+            "90th-pct Spread", format="\u20ac%.2f",
         ),
         "negative_pct": st.column_config.NumberColumn(
             "Neg Price %", format="%.1f%%",
@@ -126,13 +126,13 @@ def render(
                 "Cycles/Day", format="%.2f",
             ),
             "net_revenue_per_mw": st.column_config.NumberColumn(
-                "Net Rev (EUR/MW/yr)", format="\u20ac%,.0f",
+                "Economic Margin (EUR/MW/yr)", format="\u20ac%,.0f",
             ),
             "lcos_eur_mwh": st.column_config.NumberColumn(
-                "LCOS", format="\u20ac%.1f/MWh",
+                "Two-leg Throughput Cost", format="\u20ac%.1f/MWh",
             ),
             "payback_years": st.column_config.NumberColumn(
-                "Payback", format="%.1f yr",
+                "Economic Payback Proxy", format="%.1f yr",
             ),
             "effective_life_years": st.column_config.NumberColumn(
                 "Lifetime", format="%.1f yr",

@@ -2324,6 +2324,16 @@ def _reserve_coopt_total(
         efficiency=efficiency,
         tz=tz,
     )
+    solver_failed_days = int(
+        joint.attrs.get("excluded_days_due_to_solver_failure", 0)
+    )
+    if solver_failed_days > 0:
+        st.warning(
+            f"DA + reserve strategy row omitted: {solver_failed_days} joint "
+            "MILP day(s) failed, so a common valid-day denominator cannot be "
+            "guaranteed. Failed days were not priced at €0."
+        )
+        return None, None, None
     if joint.empty:
         return None, None, None
     # Restrict to the DA+ID valid day set so the reserve row shares the exact

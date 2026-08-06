@@ -164,12 +164,14 @@ def calculate_npv_distribution(
 
     By default, each simulation uses the same annual revenue across all years.
     When revenue decay is active, merchant revenue follows the decayed PV
-    factor while annual degradation cost remains flat.
+    factor while any explicitly supplied annual cash cost remains flat.
 
     Args:
         annual_revenue_dist: Array of simulated annual revenues (n_simulations,).
         total_capex: Total upfront CapEx in EUR.
-        annual_degradation_cost: Annual degradation cost in EUR.
+        annual_degradation_cost: Explicit annual cash cost in EUR. Do not pass
+            a non-cash dispatch/wear shadow price here; augmentation or
+            replacement cash flows require their own documented assumptions.
         effective_life_years: Asset effective life in years.
         discount_rate: Discount rate for NPV (e.g. 0.08 = 8%).
         annual_decay_rate: Annual merchant-revenue decay as a decimal fraction.
@@ -229,7 +231,8 @@ def sensitivity_table(
         base_revenue: Base-case annual revenue (EUR).
         total_capex: Total upfront CapEx (EUR).
         effective_life_years: Asset life (years).
-        annual_degradation_cost: Annual degradation cost (EUR).
+        annual_degradation_cost: Explicit annual cash cost (EUR), not a
+            non-cash dispatch/wear shadow price.
         discount_rate: Discount rate for NPV.
         vary: Dict mapping parameter name to sensitivity values. Revenue and
             CapEx values are multipliers; discount rate, lifetime, and decay

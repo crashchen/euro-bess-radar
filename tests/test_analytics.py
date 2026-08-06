@@ -295,6 +295,7 @@ class TestRevenue:
             "avg_daily_revenue", "capture_rate_assumption",
             "cycles_per_day_assumption", "dispatch_method",
             "valid_sample_days", "excluded_days_due_to_missing",
+            "excluded_days_due_to_solver_failure", "model_available",
         }
         assert set(result.keys()) == expected_keys
         assert result["dispatch_method"] == "greedy"
@@ -1064,6 +1065,39 @@ class TestDailyDispatch:
         rev = estimate_annual_arbitrage_revenue(result, power_mw=1.0, duration_hours=2.0)
         assert rev["dispatch_method"] == "lp"
         assert rev["annual_revenue_eur"] > 0
+
+    def test_solver_failure_metadata_survives_join_and_annualisation(
+        self, spread_prices, monkeypatch,
+    ) -> None:
+        from src.analytics import calculate_daily_dispatch
+        from src.dispatch import solve_daily_lp as real_solver
+
+        calls = 0
+
+        def fail_middle_day(prices, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                return {
+                    "revenue_eur": 0.0,
+                    "n_cycles": 0.0,
+                    "success": False,
+                    "status": "solver_failed",
+                    "message": "forced analytics failure",
+                }
+            return real_solver(prices, **kwargs)
+
+        monkeypatch.setattr("src.dispatch.solve_daily_lp", fail_middle_day)
+        daily = calculate_daily_dispatch(spread_prices, duration_hours=2.0)
+        revenue = estimate_annual_arbitrage_revenue(daily)
+
+        assert len(daily) == 3
+        assert daily["lp_revenue"].notna().sum() == 2
+        assert daily.attrs["valid_days"] == 2
+        assert daily.attrs["excluded_days_due_to_solver_failure"] == 1
+        assert revenue["valid_sample_days"] == 2
+        assert revenue["excluded_days_due_to_solver_failure"] == 1
+        assert revenue["model_available"] is True
 
     def test_greedy_backward_compat(self, seven_day_prices) -> None:
         """estimate_annual_arbitrage_revenue with greedy-only data uses greedy path."""

@@ -300,6 +300,18 @@ def calculate_daily_dispatch(
         soc_init_frac=0.0,
     )
 
+    def _copy_lp_quality_attrs(target: pd.DataFrame) -> None:
+        """Keep solver exclusions visible after the greedy/LP join."""
+        target.attrs["excluded_days_due_to_solver_failure"] = int(
+            lp.attrs.get("excluded_days_due_to_solver_failure", 0)
+        )
+        target.attrs["solver_failure_details"] = list(
+            lp.attrs.get("solver_failure_details", [])
+        )
+        target.attrs["model_available"] = bool(
+            lp.attrs.get("model_available", not lp.empty)
+        )
+
     if greedy.empty or lp.empty:
         for col in ("lp_revenue", "n_cycles", "lp_spread_eur_mwh"):
             greedy[col] = pd.Series(dtype=float)
@@ -307,6 +319,8 @@ def calculate_daily_dispatch(
             int(greedy.attrs.get("excluded_days_due_to_missing", 0)),
             int(lp.attrs.get("excluded_days_due_to_missing", 0)),
         )
+        greedy.attrs["valid_days"] = int(lp.attrs.get("valid_days", len(lp)))
+        _copy_lp_quality_attrs(greedy)
         return greedy
 
     # greedy has 'date' as both a column and index.name — drop the index name
@@ -321,7 +335,8 @@ def calculate_daily_dispatch(
         int(lp.attrs.get("excluded_days_due_to_missing", 0)),
     )
     merged.attrs["observed_days"] = greedy.attrs.get("observed_days", len(merged))
-    merged.attrs["valid_days"] = len(merged)
+    merged.attrs["valid_days"] = int(lp.attrs.get("valid_days", len(lp)))
+    _copy_lp_quality_attrs(merged)
     return merged
 
 
@@ -520,6 +535,10 @@ def estimate_annual_arbitrage_revenue(
             "excluded_days_due_to_missing": int(
                 daily_spreads.attrs.get("excluded_days_due_to_missing", 0)
             ),
+            "excluded_days_due_to_solver_failure": int(
+                daily_spreads.attrs.get("excluded_days_due_to_solver_failure", 0)
+            ),
+            "model_available": False,
         }
 
     if "lp_revenue" in daily_spreads.columns:
@@ -538,10 +557,14 @@ def estimate_annual_arbitrage_revenue(
             "capture_rate_assumption": capture_rate,
             "cycles_per_day_assumption": round(avg_cycles, 2),
             "dispatch_method": "lp",
-            "valid_sample_days": len(daily_spreads),
+            "valid_sample_days": len(lp_revenue),
             "excluded_days_due_to_missing": int(
                 daily_spreads.attrs.get("excluded_days_due_to_missing", 0)
             ),
+            "excluded_days_due_to_solver_failure": int(
+                daily_spreads.attrs.get("excluded_days_due_to_solver_failure", 0)
+            ),
+            "model_available": not lp_revenue.empty,
         }
 
     spread_series = daily_spreads["spread"].dropna()
@@ -564,6 +587,10 @@ def estimate_annual_arbitrage_revenue(
         "excluded_days_due_to_missing": int(
             daily_spreads.attrs.get("excluded_days_due_to_missing", 0)
         ),
+        "excluded_days_due_to_solver_failure": int(
+            daily_spreads.attrs.get("excluded_days_due_to_solver_failure", 0)
+        ),
+        "model_available": True,
     }
 
 
