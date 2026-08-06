@@ -550,6 +550,44 @@ def solve_joint_capacity_batch(
     )
 
 
+def _qualified_nested_failure(result: dict, stage: str) -> tuple[str, str, str]:
+    """Return ``(status, message, failure_stage)`` for a failed child solve.
+
+    Composite dispatch results are atomic: a safe-shape zero returned by a
+    failed child solver must never be used to construct a plausible partial
+    cash result. Preserve the child's status while qualifying its diagnostic
+    with the exact stage (including an already-qualified nested stage).
+    """
+    nested_stage = result.get("failure_stage")
+    failure_stage = f"{stage}.{nested_stage}" if nested_stage else stage
+    status = str(result.get("status", "solver_failed"))
+    detail = str(result.get("message", "nested solver failed"))
+    return status, f"{failure_stage}: {detail}", failure_stage
+
+
+def _zero_da_id_result(
+    n: int, *, status: str, message: str, failure_stage: str,
+) -> dict:
+    """Safe-shape failed result for the two-stage DA+ID composite."""
+    zeros = np.zeros(max(n, 0))
+    return {
+        "da_revenue_eur": 0.0,
+        "ida_lp_value_eur": 0.0,
+        "implicit_mtm_eur": 0.0,
+        "rebid_uplift_eur": 0.0,
+        "total_cash_eur": 0.0,
+        "da_p_charge": zeros, "da_p_discharge": zeros,
+        "ida_p_charge": zeros, "ida_p_discharge": zeros,
+        "da_soc": np.zeros(max(n, 0) + 1),
+        "ida_soc": np.zeros(max(n, 0) + 1),
+        "da_n_cycles": 0.0, "ida_n_cycles": 0.0,
+        "success": False,
+        "status": status,
+        "message": message,
+        "failure_stage": failure_stage,
+    }
+
+
 def solve_daily_da_id_dispatch(
     da_prices: np.ndarray,
     ida_prices: np.ndarray,
@@ -590,32 +628,37 @@ def solve_daily_da_id_dispatch(
     Returns:
         Dict with da_revenue_eur, ida_lp_value_eur, implicit_mtm_eur,
         rebid_uplift_eur, total_cash_eur, plus DA-stage and IDA-stage
-        dispatch details (p_charge, p_discharge, soc, n_cycles).
+        dispatch details (p_charge, p_discharge, soc, n_cycles). ``success``,
+        ``status``, and ``message`` are always present. A failed child solve
+        invalidates the whole composite and is identified by ``failure_stage``;
+        its safe-shape zero values are never used as partial economics.
     """
     n = len(da_prices)
     if n == 0 or n != len(ida_prices) or np.isnan(da_prices).any() or np.isnan(ida_prices).any():
-        zeros = np.zeros(max(n, 0))
-        return {
-            "da_revenue_eur": 0.0,
-            "ida_lp_value_eur": 0.0,
-            "implicit_mtm_eur": 0.0,
-            "rebid_uplift_eur": 0.0,
-            "total_cash_eur": 0.0,
-            "da_p_charge": zeros, "da_p_discharge": zeros,
-            "ida_p_charge": zeros, "ida_p_discharge": zeros,
-            "da_soc": np.zeros(max(n, 0) + 1),
-            "ida_soc": np.zeros(max(n, 0) + 1),
-            "da_n_cycles": 0.0, "ida_n_cycles": 0.0,
-        }
+        return _zero_da_id_result(
+            n, status="invalid_input",
+            message="input: price vectors are empty, misaligned, or contain NaN",
+            failure_stage="input",
+        )
 
     stage_1 = solve_daily_lp(
         da_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, soc_init_frac=soc_init_frac,
     )
+    if not stage_1["success"]:
+        status, message, failure_stage = _qualified_nested_failure(stage_1, "da")
+        return _zero_da_id_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
     stage_2 = solve_daily_lp(
         ida_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, soc_init_frac=soc_init_frac,
     )
+    if not stage_2["success"]:
+        status, message, failure_stage = _qualified_nested_failure(stage_2, "ida")
+        return _zero_da_id_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
 
     da_net = stage_1["p_discharge"] - stage_1["p_charge"]
     # da_gross is the pre-VOM DA settlement value. solve_daily_lp returns
@@ -654,6 +697,34 @@ def solve_daily_da_id_dispatch(
         "ida_soc": stage_2["soc"],
         "da_n_cycles": stage_1["n_cycles"],
         "ida_n_cycles": stage_2["n_cycles"],
+        "success": True,
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
+    }
+
+
+def _zero_da_id_reserve_result(
+    n: int, *, status: str, message: str, failure_stage: str,
+) -> dict:
+    """Safe-shape failed result for the DA+ID+reserve composite."""
+    zeros = np.zeros(max(n, 0))
+    return {
+        "total_cash_eur": 0.0,
+        "da_gross_eur": 0.0,
+        "implicit_mtm_eur": 0.0,
+        "stage2_total_eur": 0.0,
+        "capacity_revenue_eur": 0.0,
+        "ida_energy_revenue_eur": 0.0,
+        "da_p_charge": zeros, "da_p_discharge": zeros,
+        "ida_p_charge": zeros, "ida_p_discharge": zeros,
+        "reserve_mw": zeros,
+        "da_soc": np.zeros(max(n, 0) + 1),
+        "ida_soc": np.zeros(max(n, 0) + 1),
+        "success": False,
+        "status": status,
+        "message": message,
+        "failure_stage": failure_stage,
     }
 
 
@@ -698,7 +769,9 @@ def solve_daily_da_id_reserve_dispatch(
     Returns:
         Dict with total_cash_eur, da_gross_eur, implicit_mtm_eur,
         stage2_total_eur, capacity_revenue_eur, ida_energy_revenue_eur, and
-        Stage-1 / Stage-2 dispatch arrays (incl. reserve_mw).
+        Stage-1 / Stage-2 dispatch arrays (incl. reserve_mw). ``success``,
+        ``status``, and ``message`` are always present. A failed child solve
+        invalidates the whole composite and is identified by ``failure_stage``.
     """
     n = len(da_prices)
     capacity_price = None
@@ -718,30 +791,36 @@ def solve_daily_da_id_reserve_dispatch(
         or np.isnan(da_prices).any() or np.isnan(ida_prices).any()
         or capacity_price is None
     ):
-        zeros = np.zeros(max(n, 0))
-        return {
-            "total_cash_eur": 0.0,
-            "da_gross_eur": 0.0,
-            "implicit_mtm_eur": 0.0,
-            "stage2_total_eur": 0.0,
-            "capacity_revenue_eur": 0.0,
-            "ida_energy_revenue_eur": 0.0,
-            "da_p_charge": zeros, "da_p_discharge": zeros,
-            "ida_p_charge": zeros, "ida_p_discharge": zeros,
-            "reserve_mw": zeros,
-            "da_soc": np.zeros(max(n, 0) + 1),
-            "ida_soc": np.zeros(max(n, 0) + 1),
-        }
+        return _zero_da_id_reserve_result(
+            n, status="invalid_input",
+            message=(
+                "input: price vectors or capacity price are empty, misaligned, "
+                "or invalid"
+            ),
+            failure_stage="input",
+        )
 
     stage_1 = solve_daily_lp(
         da_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, soc_init_frac=soc_init_frac,
     )
+    if not stage_1["success"]:
+        status, message, failure_stage = _qualified_nested_failure(stage_1, "da")
+        return _zero_da_id_reserve_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
     stage_2 = solve_daily_joint_capacity_lp(
         ida_prices, dt=dt, capacity_price_eur_mw_h=capacity_price,
         power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
         soc_init_frac=soc_init_frac, availability=availability,
     )
+    if not stage_2["success"]:
+        status, message, failure_stage = _qualified_nested_failure(
+            stage_2, "ida_reserve",
+        )
+        return _zero_da_id_reserve_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
 
     da_net = stage_1["p_discharge"] - stage_1["p_charge"]
     da_gross = float((da_net * da_prices * dt).sum())
@@ -763,6 +842,10 @@ def solve_daily_da_id_reserve_dispatch(
         "reserve_mw": stage_2["reserve_mw"],
         "da_soc": stage_1["soc"],
         "ida_soc": stage_2["soc"],
+        "success": True,
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
     }
 
 
@@ -815,37 +898,61 @@ def solve_sequential_da_id_reserve_dispatch(
     feasible policy bounded by the global optimum).
     """
     if da_realised is None:
-        return _zero_sequential_reserve_result(0)
+        return _zero_sequential_reserve_result(
+            0, status="invalid_input", message="input: realised DA prices are missing",
+            failure_stage="input",
+        )
 
     try:
         da = np.asarray(da_realised, dtype=float).ravel()
         n = len(da)
     except (TypeError, ValueError):
-        return _zero_sequential_reserve_result(0)
+        return _zero_sequential_reserve_result(
+            0, status="invalid_input",
+            message="input: realised DA prices are not numeric", failure_stage="input",
+        )
 
     try:
         da_fc = np.asarray(da_forecast, dtype=float).ravel()
         ida_fc = np.asarray(ida_forecast, dtype=float).ravel()
         ida = np.asarray(ida_realised, dtype=float).ravel()
     except (TypeError, ValueError):
-        return _zero_sequential_reserve_result(max(n, 0))
+        return _zero_sequential_reserve_result(
+            max(n, 0), status="invalid_input",
+            message="input: DA/IDA forecast or realised prices are not numeric",
+            failure_stage="input",
+        )
 
     lengths_ok = n > 0 and all(len(arr) == n for arr in (da_fc, da, ida_fc, ida))
     has_nan = any(np.isnan(arr).any() for arr in (da_fc, da, ida_fc, ida))
     if not lengths_ok or has_nan:
-        return _zero_sequential_reserve_result(max(n, 0))
+        return _zero_sequential_reserve_result(
+            max(n, 0), status="invalid_input",
+            message="input: price vectors are empty, misaligned, or contain NaN",
+            failure_stage="input",
+        )
 
     try:
         reserve_fc = _coerce_nonnegative_interval_vector(reserve_forecast, n=n)
         reserve_real = _coerce_nonnegative_interval_vector(reserve_realised, n=n)
     except (TypeError, ValueError):
-        return _zero_sequential_reserve_result(max(n, 0))
+        return _zero_sequential_reserve_result(
+            max(n, 0), status="invalid_input",
+            message="input: reserve vectors are malformed", failure_stage="input",
+        )
 
     stage_0 = solve_daily_joint_capacity_lp(
         da_fc, dt=dt, capacity_price_eur_mw_h=reserve_fc,
         power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
         soc_init_frac=soc_init_frac, availability=availability,
     )
+    if not stage_0["success"]:
+        status, message, failure_stage = _qualified_nested_failure(
+            stage_0, "reserve_commitment",
+        )
+        return _zero_sequential_reserve_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
     reserve_mw = np.asarray(stage_0["reserve_mw"], dtype=float)
     power_cap = np.maximum(power_mw - reserve_mw, 0.0)
 
@@ -853,10 +960,22 @@ def solve_sequential_da_id_reserve_dispatch(
         da, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, soc_init_frac=soc_init_frac,
     )
+    if not stage_1["success"]:
+        status, message, failure_stage = _qualified_nested_failure(stage_1, "da")
+        return _zero_sequential_reserve_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
     stage_2_fc = solve_daily_lp(
         ida_fc, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, soc_init_frac=soc_init_frac, power_cap_mw=power_cap,
     )
+    if not stage_2_fc["success"]:
+        status, message, failure_stage = _qualified_nested_failure(
+            stage_2_fc, "ida_forecast",
+        )
+        return _zero_sequential_reserve_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
 
     da_net = stage_1["p_discharge"] - stage_1["p_charge"]
     da_gross = float((da_net * da * dt).sum())
@@ -872,12 +991,26 @@ def solve_sequential_da_id_reserve_dispatch(
         duration_hours=duration_hours, efficiency=efficiency,
         soc_init_frac=soc_init_frac, availability=availability,
     )
+    if not reserve_first["success"]:
+        status, message, failure_stage = _qualified_nested_failure(
+            reserve_first, "reserve_first",
+        )
+        return _zero_sequential_reserve_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
     global_ceiling = solve_daily_da_id_reserve_dispatch(
         da, ida, dt=dt, capacity_price_eur_mw_h=reserve_real,
         power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, soc_init_frac=soc_init_frac,
         availability=availability,
     )
+    if not global_ceiling["success"]:
+        status, message, failure_stage = _qualified_nested_failure(
+            global_ceiling, "global_ceiling",
+        )
+        return _zero_sequential_reserve_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
     # forecast_cost is SIGNED, not clamped: the reserve-first SEQUENTIAL policy
     # is not globally optimal even with perfect inputs (Stage 0 sizes reserve on
     # DA arbitrage, ignoring the IDA rebid value on the remaining headroom), so a
@@ -918,6 +1051,25 @@ def solve_sequential_da_id_reserve_dispatch(
         "ida_p_discharge": stage_2_fc["p_discharge"],
         "da_soc": stage_1["soc"],
         "ida_soc": stage_2_fc["soc"],
+        "success": True,
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
+    }
+
+
+def _zero_reserve_first_result(
+    n: int, *, status: str, message: str, failure_stage: str,
+) -> dict:
+    """Safe-shape failed result for the perfect reserve-first comparator."""
+    return {
+        "total_cash_eur": 0.0,
+        "capacity_revenue_eur": 0.0,
+        "reserve_mw": np.zeros(max(n, 0)),
+        "success": False,
+        "status": status,
+        "message": message,
+        "failure_stage": failure_stage,
     }
 
 
@@ -939,16 +1091,36 @@ def _solve_reserve_first_perfect(
         power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
         soc_init_frac=soc_init_frac, availability=availability,
     )
+    if not stage_0["success"]:
+        status, message, failure_stage = _qualified_nested_failure(
+            stage_0, "reserve_commitment",
+        )
+        return _zero_reserve_first_result(
+            len(da_prices), status=status, message=message,
+            failure_stage=failure_stage,
+        )
     reserve_mw = np.asarray(stage_0["reserve_mw"], dtype=float)
     power_cap = np.maximum(power_mw - reserve_mw, 0.0)
     stage_1 = solve_daily_lp(
         da_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, soc_init_frac=soc_init_frac,
     )
+    if not stage_1["success"]:
+        status, message, failure_stage = _qualified_nested_failure(stage_1, "da")
+        return _zero_reserve_first_result(
+            len(da_prices), status=status, message=message,
+            failure_stage=failure_stage,
+        )
     stage_2 = solve_daily_lp(
         ida_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, soc_init_frac=soc_init_frac, power_cap_mw=power_cap,
     )
+    if not stage_2["success"]:
+        status, message, failure_stage = _qualified_nested_failure(stage_2, "ida")
+        return _zero_reserve_first_result(
+            len(da_prices), status=status, message=message,
+            failure_stage=failure_stage,
+        )
     da_net = stage_1["p_discharge"] - stage_1["p_charge"]
     da_gross = float((da_net * da_prices * dt).sum())
     implicit_mtm = float((da_net * ida_prices * dt).sum())
@@ -961,10 +1133,16 @@ def _solve_reserve_first_perfect(
         "total_cash_eur": round(total, 6),
         "capacity_revenue_eur": round(capacity_revenue, 6),
         "reserve_mw": reserve_mw,
+        "success": True,
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
     }
 
 
-def _zero_sequential_reserve_result(n: int) -> dict:
+def _zero_sequential_reserve_result(
+    n: int, *, status: str, message: str, failure_stage: str,
+) -> dict:
     zeros = np.zeros(max(n, 0))
     return {
         "da_only_revenue_eur": 0.0,
@@ -987,6 +1165,10 @@ def _zero_sequential_reserve_result(n: int) -> dict:
         "ida_p_discharge": zeros,
         "da_soc": np.zeros(max(n, 0) + 1),
         "ida_soc": np.zeros(max(n, 0) + 1),
+        "success": False,
+        "status": status,
+        "message": message,
+        "failure_stage": failure_stage,
     }
 
 
@@ -1006,6 +1188,30 @@ def _schedule_value_at_prices(
     discharge_cash = ((prices - DISPATCH_VOM_COST_EUR_MWH) * p_discharge * dt).sum()
     charge_cash = ((prices + DISPATCH_VOM_COST_EUR_MWH) * p_charge * dt).sum()
     return float(discharge_cash - charge_cash)
+
+
+def _zero_sequential_da_id_result(
+    n: int, *, status: str, message: str, failure_stage: str,
+) -> dict:
+    """Safe-shape failed result for the forecast-driven DA+ID composite."""
+    zeros = np.zeros(max(n, 0))
+    return {
+        "da_only_revenue_eur": 0.0,
+        "realised_total_eur": 0.0,
+        "ceiling_total_eur": 0.0,
+        "forecast_error_cost_eur": 0.0,
+        "captured_uplift_eur": 0.0,
+        "forecast_uplift_eur": 0.0,
+        "rebid": False,
+        "da_p_charge": zeros, "da_p_discharge": zeros,
+        "ida_p_charge": zeros, "ida_p_discharge": zeros,
+        "da_soc": np.zeros(max(n, 0) + 1),
+        "ida_soc": np.zeros(max(n, 0) + 1),
+        "success": False,
+        "status": status,
+        "message": message,
+        "failure_stage": failure_stage,
+    }
 
 
 def solve_sequential_da_id_dispatch(
@@ -1067,6 +1273,8 @@ def solve_sequential_da_id_dispatch(
                                   or the DA schedule when the gate holds).
         ida_soc                 — SoC trajectory of the executed schedule.
         da_p_charge/discharge, da_soc — Stage-1 committed DA schedule.
+        success/status/message        — atomic composite solve state; a child
+                                        failure is qualified by failure_stage.
     """
     n = len(da_prices)
     lengths_ok = n > 0 and len(ida_forecast) == n and len(ida_realised) == n
@@ -1076,30 +1284,33 @@ def solve_sequential_da_id_dispatch(
         or np.isnan(ida_realised).any()
     )
     if not lengths_ok or has_nan:
-        zeros = np.zeros(max(n, 0))
-        return {
-            "da_only_revenue_eur": 0.0,
-            "realised_total_eur": 0.0,
-            "ceiling_total_eur": 0.0,
-            "forecast_error_cost_eur": 0.0,
-            "captured_uplift_eur": 0.0,
-            "forecast_uplift_eur": 0.0,
-            "rebid": False,
-            "da_p_charge": zeros, "da_p_discharge": zeros,
-            "ida_p_charge": zeros, "ida_p_discharge": zeros,
-            "da_soc": np.zeros(max(n, 0) + 1),
-            "ida_soc": np.zeros(max(n, 0) + 1),
-        }
+        return _zero_sequential_da_id_result(
+            n, status="invalid_input",
+            message="input: price vectors are empty, misaligned, or contain NaN",
+            failure_stage="input",
+        )
 
     stage_1 = solve_daily_lp(
         da_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, soc_init_frac=soc_init_frac,
     )
+    if not stage_1["success"]:
+        status, message, failure_stage = _qualified_nested_failure(stage_1, "da")
+        return _zero_sequential_da_id_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
     # Stage 2: physical re-dispatch chosen against the FORECAST.
     stage_2_fc = solve_daily_lp(
         ida_forecast, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, soc_init_frac=soc_init_frac,
     )
+    if not stage_2_fc["success"]:
+        status, message, failure_stage = _qualified_nested_failure(
+            stage_2_fc, "ida_forecast",
+        )
+        return _zero_sequential_da_id_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
 
     da_net = stage_1["p_discharge"] - stage_1["p_charge"]
     da_gross = float((da_net * da_prices * dt).sum())
@@ -1144,6 +1355,13 @@ def solve_sequential_da_id_dispatch(
         duration_hours=duration_hours, efficiency=efficiency,
         soc_init_frac=soc_init_frac,
     )
+    if not ceiling["success"]:
+        status, message, failure_stage = _qualified_nested_failure(
+            ceiling, "ceiling",
+        )
+        return _zero_sequential_da_id_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
     ceiling_total = ceiling["total_cash_eur"]
     # Clamp tiny solver-tolerance negatives; the realised-optimal schedule
     # is feasible for the forecast policy's settlement, so the ceiling is a
@@ -1164,6 +1382,10 @@ def solve_sequential_da_id_dispatch(
         "ida_p_discharge": executed["p_discharge"],
         "da_soc": stage_1["soc"],
         "ida_soc": executed["soc"],
+        "success": True,
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
     }
 
 

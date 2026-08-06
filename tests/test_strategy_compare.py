@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import src.pages.simulation_cockpit as cockpit_module
 from src.ancillary import (
     capacity_price_for_product,
     capacity_price_series_for_product,
@@ -646,6 +647,53 @@ def test_reserve_triple_totals_none_when_series_missing_or_empty() -> None:
         da, ida, pd.Series(dtype=float), **common,
     )
     assert empty_out["realistic_total"] is None
+
+
+def test_reserve_triple_totals_does_not_hide_all_solver_failure_with_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ceiling fallback is for missing forecasts, never failed optimisation."""
+    da = _price_frame(days=2)
+    ida = _ida_frame(days=2)
+    valid = set(_berlin_dates(da))
+
+    def failed_realistic(*args, **kwargs):
+        per_day = pd.DataFrame()
+        summary = {
+            "valid_days": 0,
+            "excluded_days_due_to_solver_failure": len(valid),
+            "model_available": False,
+        }
+        return per_day, summary
+
+    monkeypatch.setattr(
+        cockpit_module,
+        "simulate_sequential_da_id_reserve_batch",
+        failed_realistic,
+    )
+    monkeypatch.setattr(
+        cockpit_module,
+        "simulate_da_id_reserve_ceiling_batch",
+        lambda *args, **kwargs: pytest.fail(
+            "all-solver-failed realistic path must not fall back to ceiling"
+        ),
+    )
+    out = _reserve_triple_totals(
+        da,
+        ida,
+        pd.Series(10.0, index=da.index),
+        valid_dates=valid,
+        tz="Europe/Berlin",
+        power_mw=1.0,
+        duration_hours=2,
+        efficiency=0.88,
+        bucket="hour_of_day",
+    )
+
+    assert out["triple_total"] is None
+    assert out["realistic_total"] is None
+    assert out["solver_failed_days"] == len(valid)
+    assert out["model_available"] is False
 
 
 # ── 6c-3: cockpit cache-first capacity consumption ────────────────────────────

@@ -85,8 +85,15 @@ logger = logging.getLogger(__name__)
 _CANONICAL_TIEBREAK_TIME_LIMIT_S = 8.0
 
 
-def _empty_commitment_result(n: int, s: int) -> dict:
-    """Degenerate return for empty / invalid inputs (mirrors dispatch.py)."""
+def _empty_commitment_result(
+    n: int,
+    s: int,
+    *,
+    status: str = "invalid_input",
+    message: str = "stochastic commitment inputs are empty or invalid",
+    failure_stage: str = "stochastic_commitment",
+) -> dict:
+    """Safe-shape failed commitment result with auditable solve state."""
     zeros_n = np.zeros(max(n, 0))
     return {
         "success": False,
@@ -100,7 +107,19 @@ def _empty_commitment_result(n: int, s: int) -> dict:
         "rebid_cap_mw": float("inf"),
         "canonical_tiebreak_applied": False,
         "solve_seconds": 0.0,
+        "status": status,
+        "message": message,
+        "failure_stage": failure_stage,
     }
+
+
+def _qualified_failure(result: dict, stage: str) -> tuple[str, str, str]:
+    """Qualify one failed child result with its position in this solve graph."""
+    nested_stage = result.get("failure_stage")
+    failure_stage = f"{stage}.{nested_stage}" if nested_stage else stage
+    status = str(result.get("status", "solver_failed"))
+    detail = str(result.get("message", "nested solver failed"))
+    return status, f"{failure_stage}: {detail}", failure_stage
 
 
 def _coerce_reserve(reserve_mw: float | np.ndarray | None, n: int, power_mw: float) -> np.ndarray:
@@ -278,7 +297,13 @@ def _solve_and_unpack(
     if not result.success:
         solve_seconds = time.perf_counter() - t0
         logger.warning("stochastic commitment MILP failed: %s", result.message)
-        out = _empty_commitment_result(n, s)
+        out = _empty_commitment_result(
+            n,
+            s,
+            status="solver_failed",
+            message=str(result.message),
+            failure_stage="stochastic_commitment",
+        )
         out["solve_seconds"] = solve_seconds
         return out
 
@@ -483,6 +508,9 @@ def _unpack_solution(
         "rebid_cap_mw": cap,
         "canonical_tiebreak_applied": bool(canonical_tiebreak_applied),
         "solve_seconds": round(solve_seconds, 4),
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
     }
 
 
@@ -500,6 +528,9 @@ def stochastic_coopt_ceiling(
 ) -> float:
     """Same-cap perfect-foresight co-opt ceiling (§2.4), the binding upper bound.
 
+    Returns ``NaN`` when the underlying optimisation is unavailable; callers
+    that need diagnostics should use the structured internal result helper.
+
     Reuses :func:`solve_stochastic_da_commitment` with a SINGLE scenario equal to
     the realised IDA path, so Stage 1 and Stage 2 both optimise against the
     realised prices under the SAME ``rebid_cap_mw`` and reserve headroom. Every
@@ -513,6 +544,36 @@ def stochastic_coopt_ceiling(
     v2 contract) — same value within the tie-break's objective tolerance, one
     MILP pass cheaper.
     """
+    result = _stochastic_coopt_ceiling_result(
+        da_prices,
+        realised_ida,
+        dt,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        soc_init_frac=soc_init_frac,
+        rebid_cap_mw=rebid_cap_mw,
+        reserve_mw=reserve_mw,
+    )
+    # Public API remains a float for existing objective-only callers. NaN is the
+    # only honest scalar representation of an unavailable ceiling; returning 0
+    # would make a failed solve look like a genuine zero-value optimum.
+    return float(result["value_eur"]) if result["success"] else float("nan")
+
+
+def _stochastic_coopt_ceiling_result(
+    da_prices: np.ndarray,
+    realised_ida: np.ndarray,
+    dt: float,
+    *,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    soc_init_frac: float,
+    rebid_cap_mw: float | None,
+    reserve_mw: float | np.ndarray | None,
+) -> dict:
+    """Structured v1 ceiling solve used where failure state is load-bearing."""
     realised = np.asarray(realised_ida, dtype=float).ravel()
     res = solve_stochastic_da_commitment(
         da_prices, realised[None, :], np.array([1.0]), dt,
@@ -520,7 +581,22 @@ def stochastic_coopt_ceiling(
         soc_init_frac=soc_init_frac, rebid_cap_mw=rebid_cap_mw, reserve_mw=reserve_mw,
         canonicalize=False,
     )
-    return res["expected_total_eur"]
+    if not res["success"]:
+        status, message, failure_stage = _qualified_failure(res, "coopt_ceiling")
+        return {
+            "success": False,
+            "status": status,
+            "message": message,
+            "failure_stage": failure_stage,
+            "value_eur": float("nan"),
+        }
+    return {
+        "success": True,
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
+        "value_eur": float(res["expected_total_eur"]),
+    }
 
 
 # ── Increment B2: forecast-driven realised execution layer ────────────────────
@@ -529,7 +605,7 @@ def _solve_capped_stage2(
     da_net: np.ndarray, prices: np.ndarray, dt: float, *, power_mw: float,
     duration_hours: float, efficiency: float, soc_init_frac: float,
     rebid_cap_mw: float, reserve: np.ndarray,
-) -> dict | None:
+) -> dict:
     """Forecast-optimal Stage-2 physical schedule under the rebid cap + reserve.
 
     Maximises single-price arbitrage at ``prices`` (the base point forecast at
@@ -537,8 +613,8 @@ def _solve_capped_stage2(
     ``power_mw - reserve`` and whose net dispatch must stay within
     ``rebid_cap_mw`` of the committed Stage-1 ``da_net`` (the coupling, now with
     ``da_net`` a FIXED constant, so the cap becomes per-interval box bounds on
-    ``s2_net``). Returns ``{p_charge, p_discharge, soc}`` or ``None`` if the
-    solve fails.
+    ``s2_net``). The result always carries ``success/status/message`` so a failed
+    execution cannot be mistaken for an idle schedule.
     """
     n = prices.size
     capacity_mwh = power_mw * duration_hours
@@ -588,17 +664,33 @@ def _solve_capped_stage2(
     )
     if not result.success:
         logger.warning("capped Stage-2 execution MILP failed: %s", result.message)
-        return None
+        return {
+            "success": False,
+            "status": "solver_failed",
+            "message": str(result.message),
+            "failure_stage": "capped_stage2_execution",
+        }
     p_charge = result.x[:n]
     p_discharge = result.x[n:2 * n]
     return {
+        "success": True,
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
         "p_charge": p_charge,
         "p_discharge": p_discharge,
         "soc": _reconstruct_soc(p_charge, p_discharge, dt, sqrt_eff, soc_init),
     }
 
 
-def _empty_dispatch_result(n: int) -> dict:
+def _empty_dispatch_result(
+    n: int,
+    *,
+    status: str = "invalid_input",
+    message: str = "stochastic dispatch inputs are empty or invalid",
+    failure_stage: str = "input",
+) -> dict:
+    """Safe-shape failed execution result with stage-qualified diagnostics."""
     zeros = np.zeros(max(n, 0))
     return {
         "success": False,
@@ -614,6 +706,9 @@ def _empty_dispatch_result(n: int) -> dict:
         "da_soc": np.zeros(max(n, 0) + 1), "exec_soc": np.zeros(max(n, 0) + 1),
         "reserve_mw": zeros, "rebid_cap_mw": float("inf"),
         "canonical_tiebreak_applied": False,
+        "status": status,
+        "message": message,
+        "failure_stage": failure_stage,
     }
 
 
@@ -697,7 +792,12 @@ def solve_stochastic_da_id_dispatch(
         reserve_mw=reserve_mw,
     )
     if not commit["success"]:
-        return _empty_dispatch_result(n)
+        status, message, failure_stage = _qualified_failure(
+            commit, "stage1_commitment",
+        )
+        return _empty_dispatch_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
 
     return _execute_commitment(
         commit, da_prices, base_forecast, ida_realised, dt, n, power_mw,
@@ -741,25 +841,52 @@ def _execute_commitment(
     da_only = solve_daily_lp(
         da_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, soc_init_frac=soc_init_frac,
-    )["revenue_eur"]
-    coopt_ceiling = stochastic_coopt_ceiling(
+    )
+    if not da_only["success"]:
+        status, message, failure_stage = _qualified_failure(
+            da_only, "da_only_baseline",
+        )
+        return _empty_dispatch_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
+    ceiling_result = _stochastic_coopt_ceiling_result(
         da_prices, ida_realised, dt, power_mw=power_mw,
         duration_hours=duration_hours, efficiency=efficiency,
         soc_init_frac=soc_init_frac, rebid_cap_mw=cap, reserve_mw=reserve,
     )
+    if not ceiling_result["success"]:
+        status, message, failure_stage = _qualified_failure(
+            ceiling_result, "execution_diagnostics",
+        )
+        return _empty_dispatch_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
+    coopt_ceiling = float(ceiling_result["value_eur"])
     legacy_ceiling = solve_daily_da_id_dispatch(
         da_prices, ida_realised, dt=dt, power_mw=power_mw,
         duration_hours=duration_hours, efficiency=efficiency,
         soc_init_frac=soc_init_frac,
-    )["total_cash_eur"]
+    )
+    if not legacy_ceiling.get("success", True):
+        status, message, failure_stage = _qualified_failure(
+            legacy_ceiling, "legacy_ceiling",
+        )
+        return _empty_dispatch_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
 
     stage2_fc = _solve_capped_stage2(
         da_net, base_forecast, dt, power_mw=power_mw,
         duration_hours=duration_hours, efficiency=efficiency,
         soc_init_frac=soc_init_frac, rebid_cap_mw=cap, reserve=reserve,
     )
-    if stage2_fc is None:
-        return _empty_dispatch_result(n)
+    if not stage2_fc["success"]:
+        status, message, failure_stage = _qualified_failure(
+            stage2_fc, "stage2_execution",
+        )
+        return _empty_dispatch_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
 
     hold_fc = _schedule_value_at_prices(da_ch, da_dis, base_forecast, dt)
     rebid_fc = _schedule_value_at_prices(
@@ -791,20 +918,22 @@ def _execute_commitment(
 
     return {
         "success": True,
-        "da_only_revenue_eur": round(da_only, 6),
+        "da_only_revenue_eur": round(float(da_only["revenue_eur"]), 6),
         "realised_total_eur": round(realised_total, 6),
         "stochastic_hold_eur": round(stochastic_hold, 6),
         "capacity_revenue_eur": round(capacity_revenue, 6),
         "forecast_uplift_eur": round(forecast_uplift, 6),
         "coopt_ceiling_eur": round(coopt_ceiling, 6),
-        "legacy_ceiling_eur": round(legacy_ceiling, 6),
+        "legacy_ceiling_eur": round(float(legacy_ceiling["total_cash_eur"]), 6),
         "expected_total_eur": round(commit["expected_total_eur"], 6),
         # Per-scenario energy totals feed the batch risk block (P10/P50/P90 +
         # downside CVaR) — a dispersion diagnostic, so it EXCLUDES the certain
         # capacity constant (which only shifts location, not risk) and keeps
         # ``expected_total == mean(scenario_total)`` as a clean invariant.
         "scenario_total_eur": commit["scenario_total_eur"],
-        "captured_uplift_eur": round(realised_total - da_only, 6),
+        "captured_uplift_eur": round(
+            realised_total - float(da_only["revenue_eur"]), 6,
+        ),
         "forecast_error_cost_eur": round(forecast_error_cost, 6),
         "rebid": bool(rebid),
         "da_p_charge": da_ch, "da_p_discharge": da_dis,
@@ -814,6 +943,9 @@ def _execute_commitment(
         "exec_soc": stage2_fc["soc"] if rebid else commit["da_soc"],
         "reserve_mw": reserve, "rebid_cap_mw": cap,
         "canonical_tiebreak_applied": commit.get("canonical_tiebreak_applied"),
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
     }
 
 
@@ -872,6 +1004,13 @@ def solve_myopic_capped_da_id_dispatch(
         da_prices, dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, soc_init_frac=soc_init_frac,
     )
+    if not lp["success"]:
+        status, message, failure_stage = _qualified_failure(
+            lp, "myopic_da_commitment",
+        )
+        return _empty_dispatch_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
     commit = {
         "success": True, "rebid_cap_mw": cap, "reserve_mw": reserve,
         "da_p_charge": lp["p_charge"], "da_p_discharge": lp["p_discharge"],
@@ -912,8 +1051,14 @@ def solve_myopic_capped_da_id_dispatch(
 _CANONICAL_DEGRADATION_EPS = 1e-6
 
 
-def _empty_reserve_commitment_result(n: int) -> dict:
-    """Degenerate return for empty / invalid Stage-0 inputs."""
+def _empty_reserve_commitment_result(
+    n: int,
+    *,
+    status: str = "invalid_input",
+    message: str = "Stage-0 reserve inputs are empty or invalid",
+    failure_stage: str = "stage0_reserve_commitment",
+) -> dict:
+    """Safe-shape failed Stage-0 result with auditable solve state."""
     return {
         "success": False,
         "skipped": False,
@@ -922,6 +1067,9 @@ def _empty_reserve_commitment_result(n: int) -> dict:
         "stage0_tiebreak_stable": False,
         "rebid_cap_mw": float("inf"),
         "solve_seconds": 0.0,
+        "status": status,
+        "message": message,
+        "failure_stage": failure_stage,
     }
 
 
@@ -941,6 +1089,9 @@ def _skipped_reserve_commitment_result(n: int, cap: float) -> dict:
         "stage0_tiebreak_stable": True,
         "rebid_cap_mw": cap,
         "solve_seconds": 0.0,
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
     }
 
 
@@ -1101,7 +1252,12 @@ def _solve_stage0_and_unpack(
     if not result.success:
         solve_seconds = time.perf_counter() - t0
         logger.warning("Stage-0 reserve commitment MILP failed: %s", result.message)
-        out = _empty_reserve_commitment_result(n)
+        out = _empty_reserve_commitment_result(
+            n,
+            status="solver_failed",
+            message=str(result.message),
+            failure_stage="stage0_reserve_commitment",
+        )
         out["rebid_cap_mw"] = cap
         out["solve_seconds"] = round(solve_seconds, 4)
         return out
@@ -1127,6 +1283,9 @@ def _solve_stage0_and_unpack(
         "stage0_tiebreak_stable": bool(stable),
         "rebid_cap_mw": cap,
         "solve_seconds": round(solve_seconds, 4),
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
     }
 
 
@@ -1264,9 +1423,17 @@ def _solve_canonical_stage0_pass(
 
 # ── Increment V2-B: triple day wrapper + endogenous-reserve co-opt ceiling ─────
 
-def _empty_triple_result(n: int) -> dict:
-    """Degenerate return for empty / invalid triple-dispatch inputs."""
-    out = _empty_dispatch_result(n)
+def _empty_triple_result(
+    n: int,
+    *,
+    status: str = "invalid_input",
+    message: str = "stochastic triple-dispatch inputs are empty or invalid",
+    failure_stage: str = "input",
+) -> dict:
+    """Safe-shape failed triple result preserving its exact failed stage."""
+    out = _empty_dispatch_result(
+        n, status=status, message=message, failure_stage=failure_stage,
+    )
     out.update({
         "stage0_skipped": False,
         "stage0_tiebreak_stable": False,
@@ -1292,6 +1459,9 @@ def stochastic_coopt_ceiling_v2(
 ) -> float:
     """Same-cap perfect-foresight ceiling with ENDOGENOUS reserve (v2 §4).
 
+    Returns ``NaN`` when the underlying optimisation is unavailable; callers
+    that need diagnostics should use the structured internal result helper.
+
     Solver reuse of the Stage-0 extensive form with a single scenario equal to
     the realised IDA path, the realised DA as the (perfectly-foresighted) DA
     leg, and the REALISED reserve price on the fee term — Stage 1/2 collapse
@@ -1310,13 +1480,50 @@ def stochastic_coopt_ceiling_v2(
     well-defined at any fee (including zero, where it equals the v1 energy
     ceiling at ``r = 0``).
     """
+    result = _stochastic_coopt_ceiling_v2_result(
+        da_prices,
+        realised_ida,
+        dt,
+        reserve_price_realised_eur_mw_h=reserve_price_realised_eur_mw_h,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        soc_init_frac=soc_init_frac,
+        rebid_cap_mw=rebid_cap_mw,
+        availability=availability,
+    )
+    # Keep the public objective-only API numeric while making failure impossible
+    # to confuse with a genuine zero-value ceiling.
+    return float(result["value_eur"]) if result["success"] else float("nan")
+
+
+def _stochastic_coopt_ceiling_v2_result(
+    da_prices: np.ndarray,
+    realised_ida: np.ndarray,
+    dt: float,
+    *,
+    reserve_price_realised_eur_mw_h: float | np.ndarray | None,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    soc_init_frac: float,
+    rebid_cap_mw: float | None,
+    availability: float,
+) -> dict:
+    """Structured endogenous-reserve ceiling used by the v2 day wrapper."""
     if rebid_cap_mw is not None and rebid_cap_mw < 0:
         raise ValueError(f"rebid_cap_mw must be >= 0, got {rebid_cap_mw}")
     da = np.asarray(da_prices, dtype=float).ravel()
     realised = np.asarray(realised_ida, dtype=float).ravel()
     n = da.size
     if n == 0 or realised.size != n or np.isnan(da).any() or np.isnan(realised).any():
-        return 0.0
+        return {
+            "success": False,
+            "status": "invalid_input",
+            "message": "v2 ceiling prices are empty, misaligned, or contain NaN",
+            "failure_stage": "coopt_ceiling_v2",
+            "value_eur": float("nan"),
+        }
     cap = power_mw if rebid_cap_mw is None else float(rebid_cap_mw)
     if reserve_price_realised_eur_mw_h is None:
         reserve_price = np.zeros(n)
@@ -1334,7 +1541,22 @@ def stochastic_coopt_ceiling_v2(
         power_mw, duration_hours, efficiency, soc_init_frac, cap, availability,
         canonicalize=False,
     )
-    return res["expected_objective_eur"] if res["success"] else 0.0
+    if not res["success"]:
+        status, message, failure_stage = _qualified_failure(res, "coopt_ceiling_v2")
+        return {
+            "success": False,
+            "status": status,
+            "message": message,
+            "failure_stage": failure_stage,
+            "value_eur": float("nan"),
+        }
+    return {
+        "success": True,
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
+        "value_eur": float(res["expected_objective_eur"]),
+    }
 
 
 def solve_stochastic_triple_dispatch(
@@ -1405,7 +1627,12 @@ def solve_stochastic_triple_dispatch(
         availability=availability,
     )
     if not stage0["success"]:
-        return _empty_triple_result(n)
+        status, message, failure_stage = _qualified_failure(
+            stage0, "stage0",
+        )
+        return _empty_triple_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
 
     executed = solve_stochastic_da_id_dispatch(
         da, scenarios, weights, base_forecast, ida_realised, dt,
@@ -1417,24 +1644,37 @@ def solve_stochastic_triple_dispatch(
         always_rebid=True,  # deadband inert on all days in reserve mode (§3)
     )
     if not executed["success"]:
-        return _empty_triple_result(n)
+        status, message, failure_stage = _qualified_failure(
+            executed, "energy_execution",
+        )
+        return _empty_triple_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
 
-    ceiling_v2 = stochastic_coopt_ceiling_v2(
+    ceiling_v2 = _stochastic_coopt_ceiling_v2_result(
         da, ida_realised, dt,
         reserve_price_realised_eur_mw_h=reserve_price_realised_eur_mw_h,
         power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
         soc_init_frac=soc_init_frac, rebid_cap_mw=rebid_cap_mw,
         availability=availability,
     )
+    if not ceiling_v2["success"]:
+        status, message, failure_stage = _qualified_failure(
+            ceiling_v2, "triple_diagnostics",
+        )
+        return _empty_triple_result(
+            n, status=status, message=message, failure_stage=failure_stage,
+        )
+    ceiling_v2_eur = float(ceiling_v2["value_eur"])
 
     out = dict(executed)
     out.update({
         "stage0_skipped": bool(stage0["skipped"]),
         "stage0_tiebreak_stable": bool(stage0["stage0_tiebreak_stable"]),
         "stage0_expected_objective_eur": stage0["expected_objective_eur"],
-        "coopt_ceiling_v2_eur": round(float(ceiling_v2), 6),
+        "coopt_ceiling_v2_eur": round(ceiling_v2_eur, 6),
         "forecast_error_cost_v2_eur": round(
-            max(float(ceiling_v2) - executed["realised_total_eur"], 0.0), 6,
+            max(ceiling_v2_eur - executed["realised_total_eur"], 0.0), 6,
         ),
     })
     return out

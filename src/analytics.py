@@ -1127,15 +1127,33 @@ def calculate_two_stage_da_id_dispatch(
         ida_local[["intraday_price_eur_mwh"]], how="inner",
     )
     merged = merged.dropna()
+    columns = [
+        "date", "da_revenue", "ida_lp_value", "implicit_mtm",
+        "rebid_uplift", "total_cash", "da_n_cycles", "ida_n_cycles",
+    ]
+    observed_dates = set(pd.DatetimeIndex(da_local.index).date)
+    observed_days = len(observed_dates)
+
+    def _attach_failure_audit(
+        frame: pd.DataFrame,
+        *,
+        missing_days: int,
+        solver_failures: list[dict[str, str]],
+    ) -> pd.DataFrame:
+        frame.attrs["observed_days"] = observed_days
+        frame.attrs["valid_days"] = len(frame)
+        frame.attrs["excluded_days_due_to_missing"] = missing_days
+        frame.attrs["excluded_days_due_to_solver_failure"] = len(solver_failures)
+        frame.attrs["solver_failure_details"] = solver_failures
+        frame.attrs["model_available"] = not frame.empty
+        return frame
+
     if merged.empty:
-        out = pd.DataFrame(
-            columns=[
-                "date", "da_revenue", "ida_lp_value", "implicit_mtm",
-                "rebid_uplift", "total_cash", "da_n_cycles", "ida_n_cycles",
-            ],
+        return _attach_failure_audit(
+            pd.DataFrame(columns=columns),
+            missing_days=observed_days,
+            solver_failures=[],
         )
-        out.attrs["excluded_days_due_to_missing"] = 0
-        return out
 
     da_daily_counts = (
         da_local["price_eur_mwh"].dropna()
@@ -1146,7 +1164,10 @@ def calculate_two_stage_da_id_dispatch(
 
     records = []
     excluded = 0
+    solver_failures: list[dict[str, str]] = []
+    merged_dates: set[date] = set()
     for date, group in merged.groupby(merged.index.date):
+        merged_dates.add(date)
         sorted_group = group.sort_index()
         # Per-day completeness + dt reference. Inferring dt globally
         # collapses mixed-resolution windows (e.g. DE_LU 2025-10
@@ -1171,6 +1192,13 @@ def calculate_two_stage_da_id_dispatch(
             dt=day_dt, power_mw=power_mw, duration_hours=duration_hours,
             efficiency=efficiency, soc_init_frac=soc_init_frac,
         )
+        if not result["success"]:
+            solver_failures.append({
+                "date": str(date),
+                "status": str(result["status"]),
+                "message": str(result["message"]),
+            })
+            continue
         records.append({
             "date": date,
             "da_revenue": result["da_revenue_eur"],
@@ -1183,9 +1211,13 @@ def calculate_two_stage_da_id_dispatch(
         })
     # Reference the loop bookkeeping variable so it stays in scope.
     _ = da_series
-    out = pd.DataFrame.from_records(records)
-    out.attrs["excluded_days_due_to_missing"] = excluded
-    return out
+    excluded += len(observed_dates - merged_dates)
+    out = pd.DataFrame.from_records(records, columns=columns)
+    return _attach_failure_audit(
+        out,
+        missing_days=excluded,
+        solver_failures=solver_failures,
+    )
 
 
 def calculate_intraday_uplift(

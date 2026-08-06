@@ -101,7 +101,54 @@ _EVENT_COLUMNS = [
 ]
 
 
-def empty_simulation_result(reason: str = "") -> dict[str, Any]:
+def _solver_failure_detail(
+    local_date: date,
+    result: dict[str, Any],
+    stage: str | None = None,
+) -> dict[str, str]:
+    """Return one stable, date-level solver-failure audit record."""
+    summary = result.get("summary", {})
+    status = result.get("status", summary.get("status", "solver_failed"))
+    message = result.get("message", summary.get("message", ""))
+    failure_stage = stage or result.get(
+        "failure_stage", summary.get("failure_stage")
+    )
+    detail = {
+        "date": str(local_date),
+        "status": str(status or "solver_failed"),
+        "message": str(message or "solver returned an unsuccessful result"),
+    }
+    if failure_stage is not None:
+        detail["stage"] = str(failure_stage)
+    return detail
+
+
+def _failure_audit(
+    observed_days: int,
+    valid_days: int,
+    missing_days: int,
+    solver_failures: list[dict[str, str]],
+) -> dict[str, Any]:
+    """Build the shared replay/batch availability audit metadata."""
+    solver_failure_count = len(solver_failures)
+    return {
+        "observed_days": int(observed_days),
+        "valid_days": int(valid_days),
+        "excluded_days": int(missing_days) + solver_failure_count,
+        "excluded_days_due_to_missing": int(missing_days),
+        "excluded_days_due_to_solver_failure": solver_failure_count,
+        "solver_failure_details": list(solver_failures),
+        "model_available": int(valid_days) > 0,
+    }
+
+
+def empty_simulation_result(
+    reason: str = "",
+    *,
+    status: str = "invalid_input",
+    message: str | None = None,
+    failure_stage: str | None = None,
+) -> dict[str, Any]:
     """Return a safe empty cockpit result with stable keys."""
     summary = {
         "total_revenue_eur": 0.0,
@@ -118,6 +165,10 @@ def empty_simulation_result(reason: str = "") -> dict[str, Any]:
         "charge_vwap_eur_mwh": math.nan,
         "discharge_vwap_eur_mwh": math.nan,
         "market_vwap_available": False,
+        "success": False,
+        "status": status,
+        "message": reason if message is None else message,
+        "failure_stage": failure_stage,
         "reason": reason,
     }
     return {"summary": summary, "timeseries": pd.DataFrame(columns=_SIM_COLUMNS)}
@@ -149,6 +200,10 @@ def simulate_da_milp_replay(
         return empty_simulation_result("No price data for the selected local day.")
     if day["price_eur_mwh"].isna().any():
         return empty_simulation_result("Selected day contains missing prices.")
+    if not _is_regular_utc_day(day, local_date=simulation_date):
+        return empty_simulation_result(
+            "Selected day is incomplete or has an irregular interval grid."
+        )
 
     dt = _infer_interval_hours(pd.DatetimeIndex(day.index))
     result = solve_daily_lp(
@@ -159,6 +214,14 @@ def simulate_da_milp_replay(
         efficiency=efficiency,
         soc_init_frac=soc_init_frac,
     )
+    if not result.get("success", True):
+        message = str(result.get("message", "Dispatch solver failed."))
+        return empty_simulation_result(
+            f"DA dispatch model unavailable: {message}",
+            status=str(result.get("status", "solver_failed")),
+            message=message,
+            failure_stage="da",
+        )
     revenue = _da_interval_revenue(
         day["price_eur_mwh"].to_numpy(dtype=float),
         result["p_charge"],
@@ -171,7 +234,7 @@ def simulate_da_milp_replay(
         dt=dt,
         capacity_mwh=power_mw * duration_hours,
     )
-    return _build_result(
+    out = _build_result(
         day,
         p_charge=result["p_charge"],
         p_discharge=result["p_discharge"],
@@ -184,6 +247,13 @@ def simulate_da_milp_replay(
         capex_eur_kwh=capex_eur_kwh,
         daily_fce=daily_fce,
     )
+    out["summary"].update({
+        "success": True,
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
+    })
+    return out
 
 
 def simulate_da_id_replay(
@@ -213,6 +283,10 @@ def simulate_da_id_replay(
     ).dropna()
     if merged.empty:
         return empty_simulation_result("DA and IDA1 data have no overlapping intervals.")
+    if not _is_regular_utc_day(merged, local_date=simulation_date):
+        return empty_simulation_result(
+            "DA and IDA1 coverage is incomplete or has an irregular interval grid."
+        )
 
     dt = _infer_interval_hours(pd.DatetimeIndex(merged.index))
     result = solve_daily_da_id_dispatch(
@@ -224,6 +298,15 @@ def simulate_da_id_replay(
         efficiency=efficiency,
         soc_init_frac=soc_init_frac,
     )
+    if not result.get("success", True):
+        message = str(result.get("message", "DA + IDA1 dispatch solver failed."))
+        failure_stage = result.get("failure_stage")
+        return empty_simulation_result(
+            f"DA + IDA1 dispatch model unavailable: {message}",
+            status=str(result.get("status", "solver_failed")),
+            message=message,
+            failure_stage=str(failure_stage) if failure_stage is not None else None,
+        )
     revenue = _da_id_interval_revenue(
         da_prices=merged["price_eur_mwh"].to_numpy(dtype=float),
         ida_prices=merged["intraday_price_eur_mwh"].to_numpy(dtype=float),
@@ -284,6 +367,12 @@ def simulate_da_id_replay(
     out["summary"]["rebid_uplift_eur"] = round(
         float(result["rebid_uplift_eur"]) * capture_rate, 2
     )
+    out["summary"].update({
+        "success": True,
+        "status": "optimal",
+        "message": "",
+        "failure_stage": None,
+    })
     return out
 
 
@@ -322,13 +411,15 @@ def simulate_replay_batch(
     `batch.attrs["da_id_carry_soc_supported"]` stays `True` for parity
     with the DA-only path.
     """
-    selected_dates = dates or available_local_dates(price_df, tz=tz)
+    selected_dates = (
+        available_local_dates(price_df, tz=tz) if dates is None else dates
+    )
     has_intraday = intraday_df is not None and not intraday_df.empty
     is_da_id = mode == "DA + IDA1 Replay"
     can_continue = carry_soc and len(selected_dates) >= 2
 
     if can_continue and not is_da_id:
-        rows, excluded_days = _simulate_continuous_da_replay(
+        rows, missing_days, solver_failures = _simulate_continuous_da_replay(
             price_df,
             dates=selected_dates,
             tz=tz,
@@ -341,7 +432,7 @@ def simulate_replay_batch(
         )
         use_continuous = True
     elif can_continue and is_da_id and has_intraday:
-        rows, excluded_days = _simulate_continuous_da_id_replay(
+        rows, missing_days, solver_failures = _simulate_continuous_da_id_replay(
             price_df,
             intraday_df,  # type: ignore[arg-type]
             dates=selected_dates,
@@ -355,7 +446,7 @@ def simulate_replay_batch(
         )
         use_continuous = True
     else:
-        rows, excluded_days = _simulate_per_day_replay(
+        rows, missing_days, solver_failures = _simulate_per_day_replay(
             price_df,
             mode=mode,
             intraday_df=intraday_df,
@@ -378,7 +469,12 @@ def simulate_replay_batch(
             .sort_values("date")
             .reset_index(drop=True)
         )
-    out.attrs["excluded_days"] = excluded_days
+    out.attrs.update(_failure_audit(
+        observed_days=len(selected_dates),
+        valid_days=len(out),
+        missing_days=missing_days,
+        solver_failures=solver_failures,
+    ))
     out.attrs["carry_soc"] = carry_soc
     out.attrs["carry_mode"] = (
         "continuous_horizon" if use_continuous else "per_day_reset"
@@ -401,14 +497,15 @@ def _simulate_per_day_replay(
     capture_rate: float,
     capex_eur_kwh: float,
     soc_init_frac: float,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, list[dict[str, str]]]:
     """Legacy per-day loop. Every day starts at `soc_init_frac`."""
     rows: list[dict[str, Any]] = []
-    excluded = 0
+    missing_days = 0
+    solver_failures: list[dict[str, str]] = []
     for local_date in dates:
         if mode == "DA + IDA1 Replay":
             if intraday_df is None or intraday_df.empty:
-                excluded += 1
+                missing_days += 1
                 continue
             result = simulate_da_id_replay(
                 price_df, intraday_df,
@@ -425,11 +522,21 @@ def _simulate_per_day_replay(
                 efficiency=efficiency, capture_rate=capture_rate,
                 capex_eur_kwh=capex_eur_kwh, soc_init_frac=soc_init_frac,
             )
+        summary = result["summary"]
+        if not summary.get("success", not result["timeseries"].empty):
+            if (
+                summary.get("status") == "solver_failed"
+                or summary.get("failure_stage") is not None
+            ):
+                solver_failures.append(_solver_failure_detail(local_date, result))
+            else:
+                missing_days += 1
+            continue
         if result["timeseries"].empty:
-            excluded += 1
+            missing_days += 1
             continue
         rows.append(_summary_row(local_date, mode, result, soc_init_frac))
-    return rows, excluded
+    return rows, missing_days, solver_failures
 
 
 def _simulate_continuous_da_replay(
@@ -443,7 +550,7 @@ def _simulate_continuous_da_replay(
     capture_rate: float,
     capex_eur_kwh: float,
     soc_init_frac: float,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, list[dict[str, str]]]:
     """Solve the requested window as one MILP per contiguous clean run.
 
     Splits `dates` into maximal contiguous sequences that yield a complete
@@ -454,19 +561,16 @@ def _simulate_continuous_da_replay(
     full multi-day SoC freedom.
     """
     rows: list[dict[str, Any]] = []
-    excluded = 0
     capacity_mwh = max(power_mw * duration_hours, 1e-9)
     current_soc_frac = soc_init_frac
+    solver_failures: list[dict[str, str]] = []
 
     def build_da_day(local_date: date) -> pd.DataFrame:
         day = _select_local_day(price_df, local_date, tz)
         return day[["price_eur_mwh"]] if not day.empty else pd.DataFrame()
 
     runs = _group_clean_runs(dates=dates, build_day=build_da_day)
-    handled_dates: set[date] = set()
-
     for run_dates, slice_df, day_breaks in runs:
-        handled_dates.update(run_dates)
         prices = slice_df["price_eur_mwh"].to_numpy(dtype=float)
         dt = _infer_interval_hours(pd.DatetimeIndex(slice_df.index))
         run_result = solve_daily_lp(
@@ -477,6 +581,12 @@ def _simulate_continuous_da_replay(
             efficiency=efficiency,
             soc_init_frac=current_soc_frac,
         )
+        if not run_result.get("success", True):
+            solver_failures.extend(
+                _solver_failure_detail(local_date, run_result, stage="da")
+                for local_date in run_dates
+            )
+            continue
         full_revenue = _da_interval_revenue(
             prices,
             run_result["p_charge"],
@@ -515,8 +625,9 @@ def _simulate_continuous_da_replay(
 
         current_soc_frac = min(max(soc_start_frac, 0.0), 1.0)
 
-    excluded = sum(1 for d in dates if d not in handled_dates)
-    return rows, excluded
+    clean_dates = {d for run_dates, _, _ in runs for d in run_dates}
+    missing_days = sum(1 for d in dates if d not in clean_dates)
+    return rows, missing_days, solver_failures
 
 
 def _da_id_traded_volume(
@@ -547,7 +658,7 @@ def _simulate_continuous_da_id_replay(
     capture_rate: float,
     capex_eur_kwh: float,
     soc_init_frac: float,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, list[dict[str, str]]]:
     """Continuous-horizon DA + IDA1 replay.
 
     Mirrors `_simulate_continuous_da_replay` but feeds each contiguous
@@ -561,6 +672,7 @@ def _simulate_continuous_da_id_replay(
     rows: list[dict[str, Any]] = []
     capacity_mwh = max(power_mw * duration_hours, 1e-9)
     current_soc_frac = soc_init_frac
+    solver_failures: list[dict[str, str]] = []
 
     def build_da_id_day(local_date: date) -> pd.DataFrame:
         da_day = _select_local_day(da_prices, local_date, tz)
@@ -573,10 +685,7 @@ def _simulate_continuous_da_id_replay(
         return merged if not merged.empty else pd.DataFrame()
 
     runs = _group_clean_runs(dates=dates, build_day=build_da_id_day)
-    handled_dates: set[date] = set()
-
     for run_dates, slice_df, day_breaks in runs:
-        handled_dates.update(run_dates)
         da_arr = slice_df["price_eur_mwh"].to_numpy(dtype=float)
         ida_arr = slice_df["intraday_price_eur_mwh"].to_numpy(dtype=float)
         dt = _infer_interval_hours(pd.DatetimeIndex(slice_df.index))
@@ -585,6 +694,19 @@ def _simulate_continuous_da_id_replay(
             power_mw=power_mw, duration_hours=duration_hours,
             efficiency=efficiency, soc_init_frac=current_soc_frac,
         )
+        if not run.get("success", True):
+            failure_stage = run.get("failure_stage")
+            solver_failures.extend(
+                _solver_failure_detail(
+                    local_date,
+                    run,
+                    stage=(
+                        str(failure_stage) if failure_stage is not None else None
+                    ),
+                )
+                for local_date in run_dates
+            )
+            continue
         full_revenue = _da_id_interval_revenue(
             da_prices=da_arr, ida_prices=ida_arr, result=run,
             dt=dt, capture_rate=capture_rate,
@@ -640,8 +762,9 @@ def _simulate_continuous_da_id_replay(
 
         current_soc_frac = min(max(soc_start_frac, 0.0), 1.0)
 
-    excluded = sum(1 for d in dates if d not in handled_dates)
-    return rows, excluded
+    clean_dates = {d for run_dates, _, _ in runs for d in run_dates}
+    missing_days = sum(1 for d in dates if d not in clean_dates)
+    return rows, missing_days, solver_failures
 
 
 def _group_clean_runs(
@@ -695,7 +818,7 @@ def _group_clean_runs(
         if (
             day_df.empty
             or bool(day_df.isna().to_numpy().any())
-            or not _is_regular_utc_day(day_df)
+            or not _is_regular_utc_day(day_df, local_date=local_date)
         ):
             # Empty / NaN / sparse days break the continuous horizon. A
             # sparse day (e.g. a missing 02:00 interval that upstream
@@ -722,19 +845,44 @@ def _group_clean_runs(
     return runs
 
 
-def _is_regular_utc_day(day_df: pd.DataFrame) -> bool:
-    """True if the day's UTC index has a single uniform interval delta.
+def _is_regular_utc_day(
+    day_df: pd.DataFrame,
+    *,
+    local_date: date | None = None,
+) -> bool:
+    """True for one complete local day on a uniform UTC interval grid.
 
-    DST-safe sparsity check: a missing interval leaves a gap in the UTC
-    index (non-uniform delta), while DST transition days stay uniform in
-    UTC even though their LOCAL hour count is 23 or 25. Used to keep the
-    continuous-horizon MILP from silently compressing a sparse day.
+    A uniform-delta check alone misses a contiguous leading/trailing gap
+    (for example 01:00--23:00 hourly). This guard also pins the first interval
+    to local midnight and the final interval edge to the next local midnight.
+    The boundary check is DST-safe because the calendar-day endpoints are
+    created in the frame's local timezone while cadence is measured in UTC.
     """
-    if len(day_df) < 2:
-        return True
-    utc_index = pd.DatetimeIndex(day_df.index).tz_convert("UTC").sort_values()
+    if day_df is None or len(day_df) < 2:
+        return False
+    local_index = pd.DatetimeIndex(day_df.index).sort_values()
+    if local_index.has_duplicates:
+        return False
+    if local_index.tz is None:
+        utc_index = local_index
+    else:
+        utc_index = local_index.tz_convert("UTC")
     deltas = np.diff(utc_index.asi8)
-    return bool(np.all(deltas == deltas[0]))
+    if len(deltas) == 0 or np.any(deltas <= 0) or not np.all(deltas == deltas[0]):
+        return False
+
+    expected_date = local_date or local_index[0].date()
+    if any(ts.date() != expected_date for ts in local_index):
+        return False
+    day_start = pd.Timestamp(expected_date)
+    if local_index.tz is not None:
+        day_start = day_start.tz_localize(local_index.tz)
+    day_end = day_start + pd.DateOffset(days=1)
+    interval = pd.Timedelta(int(deltas[0]), unit="ns")
+    return bool(
+        local_index[0] == day_start
+        and local_index[-1] + interval == day_end
+    )
 
 
 _SEQ_COLUMNS = [
@@ -797,22 +945,26 @@ def simulate_sequential_da_id_batch(
     )
 
     rows: list[dict[str, Any]] = []
-    excluded = 0
+    missing_days = 0
+    solver_failures: list[dict[str, str]] = []
     if not forecast_df.empty:
         coverage_by_point = forecast_df["n_samples"] > 0
         for local_date in selected:
-            row = _sequential_day_row(
+            row, failure = _sequential_day_row(
                 da_prices, ida_prices, forecast_df, coverage_by_point,
                 local_date=local_date, tz=tz, power_mw=power_mw,
                 duration_hours=duration_hours, efficiency=efficiency,
                 min_rebid_uplift_eur=min_rebid_uplift_eur,
             )
             if row is None:
-                excluded += 1
+                if failure is None:
+                    missing_days += 1
+                else:
+                    solver_failures.append(failure)
                 continue
             rows.append(row)
     else:
-        excluded = len(selected)
+        missing_days = len(selected)
 
     if not rows:
         per_day = pd.DataFrame(columns=_SEQ_COLUMNS)
@@ -844,8 +996,9 @@ def simulate_sequential_da_id_batch(
         if total_ceiling_uplift > 1e-6 else None
     )
     summary = {
-        "valid_days": len(per_day),
-        "excluded_days": excluded,
+        **_failure_audit(
+            len(selected), len(per_day), missing_days, solver_failures,
+        ),
         "total_da_only_eur": total_da_only,
         "total_realised_eur": total_realised,
         "total_ceiling_eur": total_ceiling,
@@ -951,21 +1104,37 @@ def simulate_da_id_reserve_ceiling_batch(
         try:
             scalar_price = float(capacity_price_eur_mw_h)
         except (TypeError, ValueError):
-            return {"total_eur": 0.0, "solved_days": 0}
+            return {
+                "total_eur": 0.0,
+                "solved_days": 0,
+                **_failure_audit(len(dates), 0, len(dates), []),
+                "status": "invalid_input",
+                "message": "capacity price must be a finite scalar or Series",
+            }
         if not math.isfinite(scalar_price):
-            return {"total_eur": 0.0, "solved_days": 0}
+            return {
+                "total_eur": 0.0,
+                "solved_days": 0,
+                **_failure_audit(len(dates), 0, len(dates), []),
+                "status": "invalid_input",
+                "message": "capacity price must be a finite scalar or Series",
+            }
 
     total = 0.0
     solved_days = 0
+    missing_days = 0
+    solver_failures: list[dict[str, str]] = []
     for local_date in dates:
         da_day = _select_local_day(da_prices, local_date, tz)
         ida_day = _select_local_day(ida_prices, local_date, tz)
         if da_day.empty or ida_day.empty or "intraday_price_eur_mwh" not in ida_day.columns:
+            missing_days += 1
             continue
         merged = da_day[["price_eur_mwh"]].join(
             ida_day[["intraday_price_eur_mwh"]], how="inner",
         ).dropna()
         if merged.empty or not _is_regular_utc_day(merged):
+            missing_days += 1
             continue
         dt = _infer_interval_hours(pd.DatetimeIndex(merged.index))
         if reserve_series is not None:
@@ -984,9 +1153,20 @@ def simulate_da_id_reserve_ceiling_batch(
             efficiency=efficiency,
             availability=availability,
         )
+        if not result["success"]:
+            solver_failures.append(_solver_failure_detail(
+                local_date, result, stage="da_id_reserve_ceiling",
+            ))
+            continue
         total += result["total_cash_eur"]
         solved_days += 1
-    return {"total_eur": round(total, 6), "solved_days": solved_days}
+    return {
+        "total_eur": round(total, 6),
+        "solved_days": solved_days,
+        **_failure_audit(
+            len(dates), solved_days, missing_days, solver_failures,
+        ),
+    }
 
 
 _SEQ_RESERVE_COLUMNS = [
@@ -1005,8 +1185,7 @@ def _empty_seq_reserve_summary(forecast_mode: str, bucket: str) -> dict[str, Any
         "total_forecast_effect_eur": 0.0,
         "total_timing_cost_eur": 0.0,
         "total_full_gap_eur": 0.0,
-        "valid_days": 0,
-        "excluded_days": 0,
+        **_failure_audit(0, 0, 0, []),
         "forecast_mode": forecast_mode,
         "bucket": bucket,
     }
@@ -1043,9 +1222,10 @@ def simulate_sequential_da_id_reserve_batch(
     identity ``full_gap == forecast_effect + timing_cost`` holds per day.
     """
     if not dates:
-        return pd.DataFrame(columns=_SEQ_RESERVE_COLUMNS), _empty_seq_reserve_summary(
-            forecast_mode, bucket,
-        )
+        per_day = pd.DataFrame(columns=_SEQ_RESERVE_COLUMNS)
+        summary = _empty_seq_reserve_summary(forecast_mode, bucket)
+        per_day.attrs["summary"] = summary
+        return per_day, summary
 
     da_fc_df, _ = build_da_price_forecast(
         da_prices, target_dates=dates, tz=tz, bucket=bucket, forecast_mode=forecast_mode,
@@ -1065,18 +1245,19 @@ def simulate_sequential_da_id_reserve_batch(
         reserve_fc_series = None
 
     rows: list[dict[str, Any]] = []
-    excluded = 0
+    missing_days = 0
+    solver_failures: list[dict[str, str]] = []
     for local_date in dates:
         da_day = _select_local_day(da_prices, local_date, tz)
         ida_day = _select_local_day(ida_prices, local_date, tz)
         if da_day.empty or ida_day.empty or "intraday_price_eur_mwh" not in ida_day.columns:
-            excluded += 1
+            missing_days += 1
             continue
         merged = da_day[["price_eur_mwh"]].join(
             ida_day[["intraday_price_eur_mwh"]], how="inner",
         ).dropna()
         if merged.empty or not _is_regular_utc_day(merged):
-            excluded += 1
+            missing_days += 1
             continue
         idx = pd.DatetimeIndex(merged.index)
         da_fc = (
@@ -1089,7 +1270,7 @@ def simulate_sequential_da_id_reserve_batch(
         )
         if da_fc.isna().any() or ida_fc.isna().any():
             # No usable DA/IDA forecast for this day (e.g. walk-forward first day).
-            excluded += 1
+            missing_days += 1
             continue
         reserve_realised = align_reserve_price_to_index(reserve_price_series, idx, tz)
         reserve_forecast = align_reserve_price_to_index(reserve_fc_series, idx, tz)
@@ -1106,6 +1287,11 @@ def simulate_sequential_da_id_reserve_batch(
             efficiency=efficiency,
             availability=availability,
         )
+        if not result["success"]:
+            solver_failures.append(_solver_failure_detail(
+                local_date, result, stage="sequential_da_id_reserve",
+            ))
+            continue
         rows.append({
             "date": local_date,
             "da_only_eur": result["da_only_revenue_eur"],
@@ -1121,7 +1307,10 @@ def simulate_sequential_da_id_reserve_batch(
     per_day = pd.DataFrame(rows, columns=_SEQ_RESERVE_COLUMNS)
     if per_day.empty:
         summary = _empty_seq_reserve_summary(forecast_mode, bucket)
-        summary["excluded_days"] = excluded
+        summary.update(_failure_audit(
+            len(dates), 0, missing_days, solver_failures,
+        ))
+        per_day.attrs["summary"] = summary
         return per_day, summary
 
     per_day = per_day.sort_values("date").reset_index(drop=True)
@@ -1133,11 +1322,13 @@ def simulate_sequential_da_id_reserve_batch(
         "total_forecast_effect_eur": float(per_day["forecast_effect_eur"].sum()),
         "total_timing_cost_eur": float(per_day["timing_cost_eur"].sum()),
         "total_full_gap_eur": float(per_day["full_gap_eur"].sum()),
-        "valid_days": len(per_day),
-        "excluded_days": excluded,
+        **_failure_audit(
+            len(dates), len(per_day), missing_days, solver_failures,
+        ),
         "forecast_mode": forecast_mode,
         "bucket": bucket,
     }
+    per_day.attrs["summary"] = summary
     return per_day, summary
 
 
@@ -1153,12 +1344,12 @@ def _sequential_day_row(
     duration_hours: float,
     efficiency: float,
     min_rebid_uplift_eur: float = 0.0,
-) -> dict[str, Any] | None:
-    """Solve one day's three-way sequential comparison, or None if unusable."""
+) -> tuple[dict[str, Any] | None, dict[str, str] | None]:
+    """Solve one sequential day, separating missing data from solve failure."""
     da_day = _select_local_day(da_prices, local_date, tz)
     ida_day = _select_local_day(ida_prices, local_date, tz)
     if da_day.empty or ida_day.empty or "intraday_price_eur_mwh" not in ida_day.columns:
-        return None
+        return None, None
     merged = (
         da_day[["price_eur_mwh"]]
         .join(ida_day[["intraday_price_eur_mwh"]], how="inner")
@@ -1166,7 +1357,7 @@ def _sequential_day_row(
         .dropna()
     )
     if merged.empty or not _is_regular_utc_day(merged):
-        return None
+        return None, None
 
     dt = _infer_interval_hours(pd.DatetimeIndex(merged.index))
     result = solve_sequential_da_id_dispatch(
@@ -1176,6 +1367,10 @@ def _sequential_day_row(
         dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, min_rebid_uplift_eur=min_rebid_uplift_eur,
     )
+    if not result["success"]:
+        return None, _solver_failure_detail(
+            local_date, result, stage="sequential_da_id",
+        )
     day_coverage = float(coverage_by_point.reindex(merged.index).fillna(False).mean())
     return {
         "date": local_date,
@@ -1186,7 +1381,7 @@ def _sequential_day_row(
         "captured_eur": result["captured_uplift_eur"],
         "rebid": bool(result["rebid"]),
         "forecast_coverage": day_coverage,
-    }
+    }, None
 
 
 def build_dispatch_event_table(timeseries: pd.DataFrame) -> pd.DataFrame:
@@ -1577,24 +1772,27 @@ def _stochastic_day(
     *, local_date: date, tz: str | None, power_mw: float, duration_hours: float,
     efficiency: float, rebid_cap_mw, reserve_mw, reserve_price_eur_mw_h,
     availability: float, min_rebid_uplift_eur: float,
-) -> tuple[dict[str, Any], np.ndarray] | None:
-    """Solve one day's three-policy stochastic comparison, or None if unusable."""
+) -> tuple[
+    tuple[dict[str, Any], np.ndarray] | None,
+    dict[str, str] | None,
+]:
+    """Solve one stochastic day, separating data gaps from policy failures."""
     if bundle is None:
-        return None
+        return None, None
     da_day = _select_local_day(da_prices, local_date, tz)
     ida_day = _select_local_day(ida_prices, local_date, tz)
     if da_day.empty or ida_day.empty or IDA_VALUE_COL not in ida_day.columns:
-        return None
+        return None, None
     merged = (
         da_day[["price_eur_mwh"]]
         .join(ida_day[[IDA_VALUE_COL]], how="inner")
         .dropna()
     )
     if merged.empty or not _is_regular_utc_day(merged):
-        return None
+        return None, None
     aligned = _align_day_scenarios(bundle, pd.DatetimeIndex(merged.index))
     if aligned is None:
-        return None
+        return None, None
     base, scen = aligned
     da = merged["price_eur_mwh"].to_numpy(dtype=float)
     realised = merged[IDA_VALUE_COL].to_numpy(dtype=float)
@@ -1624,8 +1822,13 @@ def _stochastic_day(
         da, base[None, :], np.array([1.0]), base, realised, **common,
     )
     stoch = solve_stochastic_da_id_dispatch(da, scen, weights, base, realised, **common)
-    if not (myopic["success"] and coopt["success"] and stoch["success"]):
-        return None
+    for stage, arm in (
+        ("stochastic_myopic", myopic),
+        ("stochastic_deterministic_coopt", coopt),
+        ("stochastic_scenario_aware", stoch),
+    ):
+        if not arm["success"]:
+            return None, _solver_failure_detail(local_date, arm, stage=stage)
     row = {
         "date": local_date,
         "da_only_eur": stoch["da_only_revenue_eur"],
@@ -1652,7 +1855,7 @@ def _stochastic_day(
             and stoch.get("canonical_tiebreak_applied") is True
         ),
     }
-    return row, np.asarray(stoch["scenario_total_eur"], dtype=float)
+    return (row, np.asarray(stoch["scenario_total_eur"], dtype=float)), None
 
 
 def simulate_stochastic_da_id_batch(
@@ -1717,9 +1920,10 @@ def simulate_stochastic_da_id_batch(
 
     rows: list[dict[str, Any]] = []
     pooled: list[float] = []
-    excluded = 0
+    missing_days = 0
+    solver_failures: list[dict[str, str]] = []
     for local_date in selected:
-        result = _stochastic_day(
+        result, failure = _stochastic_day(
             da_prices, ida_prices, scenarios_by_date.get(local_date),
             local_date=local_date, tz=tz, power_mw=power_mw,
             duration_hours=duration_hours, efficiency=efficiency,
@@ -1728,7 +1932,10 @@ def simulate_stochastic_da_id_batch(
             availability=availability, min_rebid_uplift_eur=min_rebid_uplift_eur,
         )
         if result is None:
-            excluded += 1
+            if failure is None:
+                missing_days += 1
+            else:
+                solver_failures.append(failure)
             continue
         row, scen_totals = result
         rows.append(row)
@@ -1742,24 +1949,32 @@ def simulate_stochastic_da_id_batch(
             .sort_values("date").reset_index(drop=True)
         )
     summary = _stochastic_summary(
-        per_day, pooled, excluded, scen_meta, rebid_cap_mw, n_scenarios,
-        min_rebid_uplift_eur,
+        per_day, pooled, len(selected), missing_days, solver_failures,
+        scen_meta, rebid_cap_mw, n_scenarios, min_rebid_uplift_eur,
     )
     per_day.attrs["summary"] = summary
     return per_day, summary
 
 
 def _stochastic_summary(
-    per_day: pd.DataFrame, pooled: list[float], excluded: int, scen_meta: dict,
-    rebid_cap_mw, n_scenarios: int, min_rebid_uplift_eur: float,
+    per_day: pd.DataFrame,
+    pooled: list[float],
+    observed_days: int,
+    missing_days: int,
+    solver_failures: list[dict[str, str]],
+    scen_meta: dict,
+    rebid_cap_mw,
+    n_scenarios: int,
+    min_rebid_uplift_eur: float,
 ) -> dict[str, Any]:
     """Aggregate the per-day three-policy rows into window totals + risk block."""
     def _tot(col: str) -> float:
         return 0.0 if per_day.empty else float(per_day[col].sum())
 
     return {
-        "valid_days": len(per_day),
-        "excluded_days": excluded,
+        **_failure_audit(
+            observed_days, len(per_day), missing_days, solver_failures,
+        ),
         "total_da_only_eur": _tot("da_only_eur"),
         "total_myopic_realised_eur": _tot("myopic_realised_eur"),
         "total_coopt_realised_eur": _tot("coopt_realised_eur"),
@@ -1799,24 +2014,27 @@ def _triple_stochastic_day(
     da_prices, ida_prices, bundle, da_fc_series, reserve_fc_series,
     reserve_price_series, *, local_date, tz, power_mw, duration_hours,
     efficiency, rebid_cap_mw, availability,
-) -> tuple[dict[str, Any], np.ndarray] | None:
-    """Solve one v2 reserve-mode day across the three §3 arms, or None."""
+) -> tuple[
+    tuple[dict[str, Any], np.ndarray] | None,
+    dict[str, str] | None,
+]:
+    """Solve one v2 reserve-mode day, separating gaps from solver failures."""
     if bundle is None:
-        return None
+        return None, None
     da_day = _select_local_day(da_prices, local_date, tz)
     ida_day = _select_local_day(ida_prices, local_date, tz)
     if da_day.empty or ida_day.empty or IDA_VALUE_COL not in ida_day.columns:
-        return None
+        return None, None
     merged = (
         da_day[["price_eur_mwh"]]
         .join(ida_day[[IDA_VALUE_COL]], how="inner")
         .dropna()
     )
     if merged.empty or not _is_regular_utc_day(merged):
-        return None
+        return None, None
     aligned = _align_day_scenarios(bundle, pd.DatetimeIndex(merged.index))
     if aligned is None:
-        return None
+        return None, None
     base, scen = aligned
     idx = pd.DatetimeIndex(merged.index)
     da = merged["price_eur_mwh"].to_numpy(dtype=float)
@@ -1842,7 +2060,7 @@ def _triple_stochastic_day(
     )
     stage0_price = reserve_fc if has_reserve_gate else None
     if has_reserve_gate and np.isnan(da_fc).any():
-        return None
+        return None, None
 
     common = dict(
         power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
@@ -1861,7 +2079,9 @@ def _triple_stochastic_day(
         reserve_price_forecast_eur_mw_h=stage0_price, **common,
     )
     if not myopic_stage0["success"]:
-        return None
+        return None, _solver_failure_detail(
+            local_date, myopic_stage0, stage="stochastic_myopic_stage0",
+        )
     myopic = solve_myopic_capped_da_id_dispatch(
         da, base, realised, dt, reserve_mw=myopic_stage0["reserve_mw"],
         reserve_price_eur_mw_h=reserve_realised, always_rebid=True, **common,
@@ -1878,8 +2098,13 @@ def _triple_stochastic_day(
     stoch = solve_stochastic_triple_dispatch(
         da, scen, weights, base, realised, dt, **triple_kw,
     )
-    if not (myopic["success"] and coopt["success"] and stoch["success"]):
-        return None
+    for stage, arm in (
+        ("stochastic_myopic_execution", myopic),
+        ("stochastic_triple_deterministic_coopt", coopt),
+        ("stochastic_triple_scenario_aware", stoch),
+    ):
+        if not arm["success"]:
+            return None, _solver_failure_detail(local_date, arm, stage=stage)
     row = {
         "date": local_date,
         "da_only_eur": stoch["da_only_revenue_eur"],
@@ -1919,7 +2144,7 @@ def _triple_stochastic_day(
             and bool(stoch["stage0_tiebreak_stable"])
         ),
     }
-    return row, np.asarray(stoch["scenario_total_eur"], dtype=float)
+    return (row, np.asarray(stoch["scenario_total_eur"], dtype=float)), None
 
 
 def simulate_stochastic_triple_batch(
@@ -1994,9 +2219,10 @@ def simulate_stochastic_triple_batch(
 
     rows: list[dict[str, Any]] = []
     pooled: list[float] = []
-    excluded = 0
+    missing_days = 0
+    solver_failures: list[dict[str, str]] = []
     for local_date in selected:
-        result = _triple_stochastic_day(
+        result, failure = _triple_stochastic_day(
             da_prices, ida_prices, scenarios_by_date.get(local_date),
             da_fc_series, reserve_fc_series, reserve_price_series,
             local_date=local_date, tz=tz, power_mw=power_mw,
@@ -2004,7 +2230,10 @@ def simulate_stochastic_triple_batch(
             rebid_cap_mw=rebid_cap_mw, availability=availability,
         )
         if result is None:
-            excluded += 1
+            if failure is None:
+                missing_days += 1
+            else:
+                solver_failures.append(failure)
             continue
         row, scen_totals = result
         rows.append(row)
@@ -2022,8 +2251,9 @@ def simulate_stochastic_triple_batch(
         return 0.0 if per_day.empty else float(per_day[col].sum())
 
     summary = {
-        "valid_days": len(per_day),
-        "excluded_days": excluded,
+        **_failure_audit(
+            len(selected), len(per_day), missing_days, solver_failures,
+        ),
         "total_da_only_eur": _tot("da_only_eur"),
         "total_myopic_realised_eur": _tot("myopic_realised_eur"),
         "total_coopt_realised_eur": _tot("coopt_realised_eur"),

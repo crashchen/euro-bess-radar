@@ -43,11 +43,11 @@ all-failure result is explicitly described as unavailable.
 ## Scope boundary
 
 This v1 increment covers `solve_dispatch_batch()` and
-`solve_joint_capacity_batch()`, the two paths identified in the audit. Composite
-DA+ID/reserve and continuous-replay helpers call daily solvers through separate
-contracts; auditing and standardising their solver-failure propagation is a
-follow-up increment. Do not infer from v1 that every composite path already
-returns the same status metadata.
+`solve_joint_capacity_batch()`, the two paths identified in the first audit.
+Composite DA+ID/reserve, continuous replay, sequential, and stochastic callers
+were subsequently closed by
+[`dispatch-failure-contract-v2.md`](dispatch-failure-contract-v2.md). Read v1
+as the ordinary/joint batch foundation, not as the current whole-system scope.
 
 ## Required regression coverage
 
