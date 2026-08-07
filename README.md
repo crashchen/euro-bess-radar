@@ -14,6 +14,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 - **Auditable dispatch failures end-to-end** — ordinary/joint, composite DA+ID/reserve, replay, sequential, and stochastic paths propagate typed stage diagnostics; failed days are excluded from revenue, annualisation, risk pools, and common-policy windows instead of becoming zero revenue
 - **Separated economic semantics** — gross revenue, non-cash shadow-wear-adjusted economic margin, and cash NPV are reported as distinct layers; cash NPV does not double-count the installed CapEx as linear wear
 - **Bounded data freshness and network behavior** — Streamlit market-data caches share the persistent 24-hour TTL, and ENTSO-E calls use an explicit 30-second timeout with repository-level retry as the single retry owner
+- **Market-calendar mixed-resolution handling** — SDAC Day-Ahead windows crossing delivery day 2025-10-01 preserve the 60-minute pre-cutover and 15-minute post-cutover grids at the shared CET/CEST market boundary; cache checks and gap metrics use the same segmented physical-time basis
 - **Simulation Cockpit** for interval-level BESS dispatch replay, event tables, multi-day summaries with continuous-horizon SoC carry-over, a forecast-driven sequential DA+ID policy (vs perfect-foresight ceiling) with rebid deadband + forecast-skill report, an annualised strategy comparison (with optional DA + reserve-capacity co-optimisation, a cumulative DA + IDA1 + reserve perfect-foresight ceiling, and a Phase 9.2b forecast-driven realistic reserve-first row with a forecast-effect gap panel when ancillary capacity prices are loaded), a DA-only cycle-cap/degradation frontier with an optional user-asserted DA liquidity participation cap followed by a contracted-floor overlay that can project decaying merchant revenue against an escalating floor year by year, activation-energy and reBAP/imbalance historical replay overlays (separate, non-additive screening estimates when those streams are imported), and Excel export — plus SoC, revenue, throughput, and battery-health diagnostics
 - **Multi-zone comparison** for market screening
 - **Forward-scenario and external benchmark reconciliation** — apply a user-supplied baseload forward curve to the zone's historical DA shape, then optionally compare the resulting annual DA-only screening curve with a user-uploaded trader revenue benchmark; asset type, market scope, revenue basis, duration, cycle assumption, source, and as-of metadata stay attached so co-located/all-in/net curves cannot silently acquire a like-for-like label
@@ -84,11 +85,11 @@ euro-bess-radar/
 │   ├── activation_overlay.py # Activation-energy replay overlay (screening, non-additive)
 │   ├── imbalance_overlay.py  # reBAP/imbalance replay overlay primitive
 │   └── export.py             # Excel report generation
-├── tests/                    # 1206 passing tests, heavily mocked; 2 PDF tests may skip
+├── tests/                    # 1240 passing tests, heavily mocked; 2 PDF tests may skip
 ├── scripts/                  # Maintenance/demo scripts (seed + Netztransparenz converter)
 ├── samples/                  # Generated demo CSVs from seed_demo_9_2b.py (git-ignored)
 ├── docs/runbooks/            # Operator runbooks (9.2b + imbalance validation, manual UI smoke)
-├── docs/design/              # Locked model contracts, including solver-failure and economic semantics
+├── docs/design/              # Locked contracts, including solver failure, economic semantics, and price-resolution transitions
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads
@@ -98,7 +99,7 @@ euro-bess-radar/
 ## Key Markets
 
 Optimized for BESS investment screening in:
-- Germany (DE_LU) — 15min resolution, FCR/aFRR auto-fetch via Regelleistung REST API, plus reBAP/NRV imbalance fetch via Netztransparenz
+- Germany (DE_LU) — 15min Day-Ahead resolution since SDAC market delivery day 2025-10-01, FCR/aFRR auto-fetch via Regelleistung REST API, plus reBAP/NRV imbalance fetch via Netztransparenz
 - Finland (FI) — FCR-N/D + aFRR auto-fetch via Fingrid
 - Great Britain (GB) — Elexon MID + system prices
 - Romania (RO) — DA prices + ENTSO-E imbalance data

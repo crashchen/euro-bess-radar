@@ -34,6 +34,9 @@ from src.config import (
     NETZTRANSPARENZ_BASE_URL,
     PRICE_CACHE_TTL_HOURS,
     REGELLEISTUNG_API_URL,
+    SDAC_15MIN_DELIVERY_DATE,
+    SDAC_15MIN_ZONES,
+    SDAC_MARKET_TIMEZONE,
     get_api_key,
     get_esios_api_key,
     get_fingrid_api_key,
@@ -53,14 +56,21 @@ ENTSOE_REQUEST_TIMEOUT_SECONDS = 30
 # Repository-level retry owns logging, auth short-circuiting, and backoff.
 # entsoe-py must make one low-level attempt per outer attempt, not its default 3.
 ENTSOE_CLIENT_RETRY_COUNT = 1
-_ZONE_RESOLUTION_TRANSITIONS: dict[str, tuple[tuple[pd.Timestamp, pd.Timedelta, pd.Timedelta], ...]] = {
-    "DE_LU": (
+# Store the transition as an SDAC market delivery date and resolve it through
+# the CET/CEST market timezone. All participating zones switch at that same
+# instant; their civil timezones do not define the market cutover.
+_ZONE_RESOLUTION_TRANSITION_SPECS: dict[
+    str,
+    tuple[tuple[date, pd.Timedelta, pd.Timedelta], ...],
+] = {
+    zone: (
         (
-            pd.Timestamp("2025-10-01T00:00:00Z"),
+            SDAC_15MIN_DELIVERY_DATE,
             pd.Timedelta(hours=1),
             pd.Timedelta(minutes=15),
         ),
-    ),
+    )
+    for zone in SDAC_15MIN_ZONES
 }
 
 
@@ -202,6 +212,22 @@ def _to_local_midnight(
     if ts.tzinfo is None:
         return ts.normalize().tz_localize(timezone)
     return ts.tz_convert(timezone).normalize()
+
+
+def _zone_resolution_transitions(
+    zone: str,
+) -> tuple[tuple[pd.Timestamp, pd.Timedelta, pd.Timedelta], ...]:
+    """Resolve a zone's SDAC market-date transitions to UTC instants."""
+    return tuple(
+        (
+            _to_local_midnight(local_date, SDAC_MARKET_TIMEZONE).tz_convert("UTC"),
+            before,
+            after,
+        )
+        for local_date, before, after in _ZONE_RESOLUTION_TRANSITION_SPECS.get(
+            zone, ()
+        )
+    )
 
 
 def build_zone_query_window(
@@ -379,7 +405,7 @@ def _segment_and_reindex_prices(
         inferred = _infer_segment_freq(index, zone=zone)
         fallback = _expected_cache_interval(zone or "", index)
 
-        if zone and _ZONE_RESOLUTION_TRANSITIONS.get(zone):
+        if zone and _zone_resolution_transitions(zone):
             reindexed_segments: list[pd.DataFrame] = []
             split_points = [start, *_zone_resolution_boundaries(zone, start, end), end]
             for segment_start, segment_end in itertools.pairwise(split_points):
@@ -455,7 +481,7 @@ def _segment_and_reindex_prices(
                 sub_df = df[(df.index >= seg_start) & (df.index < seg_end)]
             if sub_df.empty:
                 continue
-            # Use zone-aware expected interval per side so a 60-min pre-DE_LU
+            # Use zone-aware expected interval per side so a 60-min pre-SDAC
             # segment isn't reindexed at 15-min, and so a row missing exactly
             # at the boundary (or right before it) is still surfaced. The
             # boundary itself anchors each side instead of the observed min/max.
@@ -520,34 +546,10 @@ def _segment_and_reindex_prices(
     return out
 
 
-def _dominant_interval_hours(index: pd.DatetimeIndex) -> float:
-    """Return the dominant interval length in hours for data-quality metrics."""
-    freq = _infer_segment_freq(index)
-    if freq is None:
-        return 1.0
-    return max(freq.total_seconds() / 3600.0, 1.0 / 60.0)
-
-
-def _max_consecutive_true(mask: pd.Series) -> int:
-    """Return the longest consecutive True run in a boolean Series."""
-    max_run = 0
-    current = 0
-    for value in mask.astype(bool).to_numpy():
-        if value:
-            current += 1
-            max_run = max(max_run, current)
-        else:
-            current = 0
-    return max_run
-
-
-def _short_internal_gap_mask(
-    missing: pd.Series,
-    max_gap_intervals: int,
-) -> pd.Series:
-    """Mark internal missing runs short enough for safe interpolation."""
-    values = missing.astype(bool).to_numpy()
-    impute = np.zeros(len(values), dtype=bool)
+def _true_runs(mask: pd.Series) -> list[tuple[int, int]]:
+    """Return half-open positional runs for True values in a boolean mask."""
+    values = mask.astype(bool).to_numpy()
+    runs: list[tuple[int, int]] = []
     pos = 0
     while pos < len(values):
         if not values[pos]:
@@ -556,14 +558,61 @@ def _short_internal_gap_mask(
         start = pos
         while pos < len(values) and values[pos]:
             pos += 1
-        end = pos
-        is_internal = start > 0 and end < len(values)
-        if is_internal and end - start <= max_gap_intervals:
+        runs.append((start, pos))
+    return runs
+
+
+def _true_run_duration_hours(
+    index: pd.DatetimeIndex,
+    start: int,
+    end: int,
+    zone: str | None = None,
+) -> float:
+    """Measure one missing run on the timestamp axis, including its last slot."""
+    if start >= end or start >= len(index):
+        return 0.0
+
+    if end < len(index):
+        duration = index[end] - index[start]
+    else:
+        fallback = _expected_cache_interval(zone or "", index)
+        if zone:
+            last_interval = _expected_interval_for_segment(
+                zone,
+                index[-1],
+                fallback,
+            )
+        elif len(index) >= 2:
+            last_interval = index[-1] - index[-2]
+            if last_interval <= pd.Timedelta(0):
+                last_interval = fallback
+        else:
+            last_interval = fallback
+        duration = (index[-1] - index[start]) + last_interval
+
+    return max(duration.total_seconds() / 3600.0, 0.0)
+
+
+def _short_internal_gap_mask(
+    missing: pd.Series,
+    max_gap_hours: float,
+    zone: str | None = None,
+) -> pd.Series:
+    """Mark internal missing runs whose real timestamp span is short enough."""
+    impute = np.zeros(len(missing), dtype=bool)
+    index = pd.DatetimeIndex(missing.index)
+    for start, end in _true_runs(missing):
+        is_internal = start > 0 and end < len(missing)
+        duration_hours = _true_run_duration_hours(index, start, end, zone=zone)
+        if is_internal and duration_hours <= max_gap_hours:
             impute[start:end] = True
     return pd.Series(impute, index=missing.index)
 
 
-def summarize_price_data_quality(df: pd.DataFrame) -> dict[str, float | int]:
+def summarize_price_data_quality(
+    df: pd.DataFrame,
+    zone: str | None = None,
+) -> dict[str, float | int]:
     """Summarise source-backed, imputed, and unresolved price intervals."""
     total = len(df)
     if total == 0 or "price_eur_mwh" not in df.columns:
@@ -590,12 +639,18 @@ def summarize_price_data_quality(df: pd.DataFrame) -> dict[str, float | int]:
         if "imputed" in df.columns
         else pd.Series(False, index=df.index)
     )
-    interval_hours = _dominant_interval_hours(pd.DatetimeIndex(df.index))
     source_gap_intervals = int(filled.sum())
     imputed_intervals = int(imputed.sum())
     missing_intervals = int(missing.sum())
     valid_intervals = int(df["price_eur_mwh"].notna().sum())
-    max_gap_hours = _max_consecutive_true(filled) * interval_hours
+    index = pd.DatetimeIndex(df.index)
+    max_gap_hours = max(
+        (
+            _true_run_duration_hours(index, start, end, zone=zone)
+            for start, end in _true_runs(filled)
+        ),
+        default=0.0,
+    )
 
     return {
         "total_intervals": total,
@@ -616,7 +671,7 @@ def _zone_resolution_boundaries(
     end: pd.Timestamp,
 ) -> list[pd.Timestamp]:
     """Return known resolution transitions that fall inside the requested window."""
-    transitions = _ZONE_RESOLUTION_TRANSITIONS.get(zone, ())
+    transitions = _zone_resolution_transitions(zone)
     return [
         boundary
         for boundary, _before, _after in transitions
@@ -633,7 +688,7 @@ def _index_spans_known_resolution_boundary(zone: str, index: pd.DatetimeIndex) -
     end = index.max()
     return any(
         start < boundary <= end
-        for boundary, _before, _after in _ZONE_RESOLUTION_TRANSITIONS.get(zone, ())
+        for boundary, _before, _after in _zone_resolution_transitions(zone)
     )
 
 
@@ -644,7 +699,7 @@ def _expected_interval_for_segment(
 ) -> pd.Timedelta:
     """Return the expected cadence for a segment start, honoring known transitions."""
     interval = fallback
-    for boundary, before, after in _ZONE_RESOLUTION_TRANSITIONS.get(zone, ()):
+    for boundary, before, after in _zone_resolution_transitions(zone):
         if segment_start < boundary:
             return before
         interval = after
@@ -712,9 +767,11 @@ def clean_prices(
         expected_end=expected_end,
     )
     missing = df["price_eur_mwh"].isna()
-    interval_hours = _dominant_interval_hours(pd.DatetimeIndex(df.index))
-    max_gap_intervals = max(round(MAX_SHORT_GAP_HOURS / interval_hours), 1)
-    impute_mask = _short_internal_gap_mask(missing, max_gap_intervals)
+    impute_mask = _short_internal_gap_mask(
+        missing,
+        MAX_SHORT_GAP_HOURS,
+        zone=zone,
+    )
 
     interpolated = df["price_eur_mwh"].interpolate(method="time", limit_area="inside")
     df["filled"] = missing
@@ -722,7 +779,7 @@ def clean_prices(
     df.loc[impute_mask, "price_eur_mwh"] = interpolated.loc[impute_mask]
     df["filled"] = df["filled"].astype(bool)
     df["imputed"] = df["imputed"].astype(bool)
-    df.attrs["data_quality"] = summarize_price_data_quality(df)
+    df.attrs["data_quality"] = summarize_price_data_quality(df, zone=zone)
     return df
 
 

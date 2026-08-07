@@ -20,6 +20,7 @@ from src.config import (
     FINGRID_BASE_URL,
     GBP_EUR_YEARLY,
     PRICE_CACHE_TTL_HOURS,
+    SDAC_15MIN_ZONES,
     is_elexon_zone,
 )
 from src.data_ingestion import (
@@ -28,6 +29,7 @@ from src.data_ingestion import (
     DataSourceAuthError,
     DataSourceNetworkError,
     DataSourceParseError,
+    _zone_resolution_transitions,
     build_zone_query_window,
     clean_prices,
     fetch_activation_energy,
@@ -447,6 +449,27 @@ class TestFetchPricesRouting:
 
 # ── Test 5: clean_prices fills gaps ──────────────────────────────────────────
 
+def _mixed_sdac_transition_frame() -> pd.DataFrame:
+    """Return an exact 60m->15m frame across the shared SDAC market midnight."""
+    hourly = pd.date_range(
+        "2025-09-30T20:00:00Z",
+        "2025-09-30T22:00:00Z",
+        freq="h",
+        inclusive="left",
+    )
+    quarter_hourly = pd.date_range(
+        "2025-09-30T22:00:00Z",
+        "2025-10-01T00:00:00Z",
+        freq="15min",
+        inclusive="left",
+    )
+    index = hourly.append(quarter_hourly)
+    index.name = "timestamp"
+    return pd.DataFrame(
+        {"price_eur_mwh": [float(value) for value in range(len(index))]},
+        index=index,
+    )
+
 class TestCleanPrices:
     def test_fills_gaps(self) -> None:
         """Short internal NaN gaps should be interpolated and flagged."""
@@ -464,89 +487,112 @@ class TestCleanPrices:
         assert result.loc[df.index[5], "price_eur_mwh"] == pytest.approx(55.0)
         assert result.loc[df.index[6], "price_eur_mwh"] == pytest.approx(56.0)
 
-    def test_transition_boundary_row_detected_when_missing(self) -> None:
-        """A row missing exactly at the transition boundary itself
-        (e.g. the first 15-min sample at 2025-10-01 00:00) must surface as
-        filled/imputed instead of silently disappearing — and the same for
-        a row missing right before the boundary.
-        """
-        # Case A: missing 00:00 (first post-transition sample)
-        idx = pd.DatetimeIndex([
-            "2025-09-30T22:00:00Z", "2025-09-30T23:00:00Z",
-            "2025-10-01T00:15:00Z", "2025-10-01T00:30:00Z",
-            "2025-10-01T00:45:00Z",
-        ], name="timestamp")
-        df = pd.DataFrame({"price_eur_mwh": [10.0, 11.0, 13.0, 14.0, 15.0]}, index=idx)
-        result = clean_prices(df, zone="DE_LU")
-        boundary_ts = pd.Timestamp("2025-10-01T00:00:00Z")
-        assert boundary_ts in result.index
-        assert bool(result.loc[boundary_ts, "filled"]) is True
+    @pytest.mark.parametrize("zone", ["DE_LU", "PL", "FI", "PT", "GR", "RO"])
+    @pytest.mark.parametrize("with_expected_window", [False, True])
+    def test_sdac_zones_preserve_shared_market_transition_grid(
+        self,
+        zone: str,
+        with_expected_window: bool,
+    ) -> None:
+        """A valid mixed grid must neither gain fake rows nor lose source rows."""
+        source = _mixed_sdac_transition_frame()
+        kwargs = (
+            {
+                "expected_start": pd.Timestamp("2025-09-30T20:00:00Z"),
+                "expected_end": pd.Timestamp("2025-10-01T00:00:00Z"),
+            }
+            if with_expected_window
+            else {}
+        )
 
-        # Case B: missing 23:00 (last pre-transition sample)
-        idx_b = pd.DatetimeIndex([
-            "2025-09-30T22:00:00Z",
-            "2025-10-01T00:00:00Z", "2025-10-01T00:15:00Z", "2025-10-01T00:30:00Z",
-        ], name="timestamp")
-        df_b = pd.DataFrame({"price_eur_mwh": [10.0, 12.0, 13.0, 14.0]}, index=idx_b)
-        result_b = clean_prices(df_b, zone="DE_LU")
-        last_pre_ts = pd.Timestamp("2025-09-30T23:00:00Z")
-        assert last_pre_ts in result_b.index
-        assert bool(result_b.loc[last_pre_ts, "filled"]) is True
+        result = clean_prices(source, zone=zone, **kwargs)
+
+        pd.testing.assert_index_equal(result.index, source.index)
+        pd.testing.assert_series_equal(
+            result["price_eur_mwh"],
+            source["price_eur_mwh"],
+        )
+        assert not result["filled"].any()
+        assert not result["imputed"].any()
+
+    @pytest.mark.parametrize(
+        "missing_timestamp",
+        ["2025-09-30T21:00:00Z", "2025-09-30T22:00:00Z"],
+    )
+    def test_transition_boundary_rows_detected_when_missing(
+        self,
+        missing_timestamp: str,
+    ) -> None:
+        """Missing last-hourly or first-quarter-hour rows remain auditable."""
+        missing = pd.Timestamp(missing_timestamp)
+        source = _mixed_sdac_transition_frame().drop(missing)
+
+        result = clean_prices(source, zone="PL")
+
+        assert missing in result.index
+        assert bool(result.loc[missing, "filled"]) is True
+        assert bool(result.loc[missing, "imputed"]) is True
 
     def test_post_transition_sparse_gap_still_detected(self) -> None:
-        """When the index crosses a known DE_LU 60->15min transition AND the
-        post-transition 15-min segment has its own sparse gap (e.g. missing
-        00:45), the per-side mode-delta heuristic must still surface that
-        gap. A blanket skip-at-transition would silently drop the 00:45 row.
-        """
-        idx = pd.DatetimeIndex([
-            "2025-09-30T22:00:00Z",
-            "2025-09-30T23:00:00Z",
-            "2025-10-01T00:00:00Z",
-            "2025-10-01T00:15:00Z",
-            "2025-10-01T00:30:00Z",
-            # 00:45 missing
-            "2025-10-01T01:00:00Z",
-            "2025-10-01T01:15:00Z",
-            "2025-10-01T01:30:00Z",
-        ], name="timestamp")
-        df = pd.DataFrame(
-            {"price_eur_mwh": [10.0, 11.0, 12.0, 13.0, 14.0, 16.0, 17.0, 18.0]},
-            index=idx,
-        )
-        result = clean_prices(df, zone="DE_LU")
-        gap_ts = pd.Timestamp("2025-10-01T00:45:00Z")
-        assert gap_ts in result.index
-        assert bool(result.loc[gap_ts, "filled"]) is True
-        # Pre-transition rows must remain untouched (no fabricated 22:15).
-        assert pd.Timestamp("2025-09-30T22:15:00Z") not in result.index
+        """A sparse 15-minute gap is surfaced without upsampling old hours."""
+        gap = pd.Timestamp("2025-09-30T22:45:00Z")
+        source = _mixed_sdac_transition_frame().drop(gap)
 
-    def test_mode_delta_skipped_at_zone_resolution_transition(self) -> None:
-        """When the index crosses a known DE_LU 60min->15min transition and
-        no expected_window is given, the modal-delta shortcut would otherwise
-        upsample the pre-transition hourly region to 15-min and fabricate
-        intra-hour prices. The transition guard must keep pre-transition
-        rows at hourly cadence.
-        """
-        idx = pd.DatetimeIndex([
-            "2025-09-30T22:00:00Z",
-            "2025-09-30T23:00:00Z",
-            "2025-10-01T00:00:00Z",
-            "2025-10-01T00:15:00Z",
-            "2025-10-01T00:30:00Z",
-            "2025-10-01T00:45:00Z",
-            "2025-10-01T01:00:00Z",
-        ], name="timestamp")
-        df = pd.DataFrame(
-            {"price_eur_mwh": [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0]},
-            index=idx,
+        result = clean_prices(source, zone="PL")
+
+        assert gap in result.index
+        assert bool(result.loc[gap, "filled"]) is True
+        assert pd.Timestamp("2025-09-30T20:15:00Z") not in result.index
+
+    @pytest.mark.parametrize(
+        ("start", "end", "expected_index"),
+        [
+            (
+                "2025-09-30T20:00:00Z",
+                "2025-09-30T22:00:00Z",
+                ["2025-09-30T20:00:00Z", "2025-09-30T21:00:00Z"],
+            ),
+            (
+                "2025-09-30T22:00:00Z",
+                "2025-09-30T23:00:00Z",
+                [
+                    "2025-09-30T22:00:00Z",
+                    "2025-09-30T22:15:00Z",
+                    "2025-09-30T22:30:00Z",
+                    "2025-09-30T22:45:00Z",
+                ],
+            ),
+            (
+                "2025-09-30T21:00:00Z",
+                "2025-09-30T22:30:00Z",
+                [
+                    "2025-09-30T21:00:00Z",
+                    "2025-09-30T22:00:00Z",
+                    "2025-09-30T22:15:00Z",
+                ],
+            ),
+        ],
+    )
+    def test_transition_partial_windows_use_each_side_cadence(
+        self,
+        start: str,
+        end: str,
+        expected_index: list[str],
+    ) -> None:
+        source = _mixed_sdac_transition_frame()
+        start_ts = pd.Timestamp(start)
+        end_ts = pd.Timestamp(end)
+        source = source[(source.index >= start_ts) & (source.index < end_ts)]
+
+        result = clean_prices(
+            source,
+            zone="PL",
+            expected_start=start_ts,
+            expected_end=end_ts,
         )
-        result = clean_prices(df, zone="DE_LU")
-        # No fabricated 22:15 / 22:30 / 22:45.
-        assert pd.Timestamp("2025-09-30T22:15:00Z") not in result.index
-        assert pd.Timestamp("2025-09-30T22:30:00Z") not in result.index
-        # Original 7 rows preserved untouched.
-        assert len(result) == 7
+
+        expected = pd.DatetimeIndex(expected_index, name="timestamp")
+        pd.testing.assert_index_equal(result.index, expected)
         assert not result["filled"].any()
 
     def test_sparse_gap_detected_without_expected_window(self) -> None:
@@ -623,29 +669,75 @@ class TestCleanPrices:
         assert quality["missing_intervals"] == 4
         assert quality["max_source_gap_hours"] == 4.0
 
-    def test_mixed_resolution_preserves_original_timestamps(self) -> None:
-        """Mixed 60-min / 15-min histories should not crash cleaning."""
-        idx = pd.DatetimeIndex(
+    def test_mixed_grid_uses_physical_gap_duration_not_modal_cadence(self) -> None:
+        """Three missing old-hour rows stay NaN while a 45m new-grid gap fills."""
+        hourly = pd.date_range(
+            "2025-09-30T12:00:00Z",
+            "2025-09-30T22:00:00Z",
+            freq="h",
+            inclusive="left",
+        )
+        quarter_hourly = pd.date_range(
+            "2025-09-30T22:00:00Z",
+            "2025-10-01T06:00:00Z",
+            freq="15min",
+            inclusive="left",
+        )
+        index = hourly.append(quarter_hourly)
+        index.name = "timestamp"
+        source = pd.DataFrame(
+            {"price_eur_mwh": [float(value) for value in range(len(index))]},
+            index=index,
+        )
+        long_gap = pd.DatetimeIndex(
             [
-                "2025-10-01T00:00:00Z",
-                "2025-10-01T01:00:00Z",
-                "2025-10-01T02:00:00Z",
-                "2025-10-01T02:15:00Z",
-                "2025-10-01T02:30:00Z",
-                "2025-10-01T02:45:00Z",
-                "2025-10-01T03:00:00Z",
+                "2025-09-30T14:00:00Z",
+                "2025-09-30T15:00:00Z",
+                "2025-09-30T16:00:00Z",
             ]
         )
-        df = pd.DataFrame(
-            {"price_eur_mwh": [50.0, 51.0, 52.0, 52.5, 53.0, 53.5, 54.0]},
-            index=idx,
+        short_gap = pd.DatetimeIndex(
+            [
+                "2025-09-30T22:15:00Z",
+                "2025-09-30T22:30:00Z",
+                "2025-09-30T22:45:00Z",
+            ]
         )
-        df.index.name = "timestamp"
+        source.loc[long_gap.append(short_gap), "price_eur_mwh"] = None
 
-        result = clean_prices(df, zone="DE_LU")
+        result = clean_prices(
+            source,
+            zone="PL",
+            expected_start=index.min(),
+            expected_end=pd.Timestamp("2025-10-01T06:00:00Z"),
+        )
 
-        assert result["price_eur_mwh"].isna().sum() == 0
-        assert set(idx).issubset(set(result.index))
+        assert result.loc[long_gap, "price_eur_mwh"].isna().all()
+        assert not result.loc[long_gap, "imputed"].any()
+        assert result.loc[short_gap, "price_eur_mwh"].notna().all()
+        assert result.loc[short_gap, "imputed"].all()
+        assert result.attrs["data_quality"]["max_source_gap_hours"] == 3.0
+
+    def test_unknown_zone_keeps_uniform_hourly_contract(self) -> None:
+        """An unknown zone must not inherit the SDAC transition implicitly."""
+        start = pd.Timestamp("2025-09-30T20:00:00Z")
+        end = pd.Timestamp("2025-10-01T00:00:00Z")
+        index = pd.date_range(start, end, freq="h", inclusive="left")
+        index.name = "timestamp"
+        source = pd.DataFrame(
+            {"price_eur_mwh": [1.0, 2.0, 3.0, 4.0]},
+            index=index,
+        )
+
+        result = clean_prices(
+            source,
+            zone="ZZ_TEST",
+            expected_start=start,
+            expected_end=end,
+        )
+
+        pd.testing.assert_index_equal(result.index, index)
+        assert not result["filled"].any()
 
     def test_requested_boundaries_reveal_head_and_tail_gaps(self) -> None:
         """Cleaning should not hide missing first/last intervals of a request."""
@@ -742,27 +834,22 @@ class TestCacheRoundtrip:
 
         assert result is None
 
-    def test_accepts_complete_mixed_resolution_cache_and_rejects_gappy_15m_segment(
-        self, tmp_path: Path,
+    @pytest.mark.parametrize("zone", ["DE_LU", "PL"])
+    @pytest.mark.parametrize(
+        "missing_timestamp",
+        ["2025-09-30T21:00:00Z", "2025-09-30T22:45:00Z"],
+    )
+    def test_accepts_complete_mixed_cache_and_rejects_gap_on_either_side(
+        self,
+        tmp_path: Path,
+        zone: str,
+        missing_timestamp: str,
     ) -> None:
-        """Mixed 60m/15m caches should validate segment-by-segment across the boundary."""
-        zone = "DE_LU"
-        start = pd.Timestamp("2025-09-30T22:00:00Z")
-        end = pd.Timestamp("2025-10-01T02:00:00Z")
-        hourly_idx = pd.date_range(start, "2025-10-01T00:00:00Z", freq="h", inclusive="left")
-        quarter_hour_idx = pd.date_range(
-            "2025-10-01T00:00:00Z",
-            end,
-            freq="15min",
-            inclusive="left",
-        )
-        full_idx = hourly_idx.append(quarter_hour_idx)
-        full_df = pd.DataFrame(
-            {"price_eur_mwh": range(len(full_idx))},
-            index=full_idx,
-        )
-        full_df.index.name = "timestamp"
-        gappy_df = full_df.drop(pd.Timestamp("2025-10-01T00:45:00Z"))
+        """Mixed caches reject gaps on either side of the transition."""
+        start = pd.Timestamp("2025-09-30T20:00:00Z")
+        end = pd.Timestamp("2025-10-01T00:00:00Z")
+        full_df = _mixed_sdac_transition_frame()
+        gappy_df = full_df.drop(pd.Timestamp(missing_timestamp))
 
         with patch("src.data_ingestion.DB_PATH", tmp_path / "valid.db"), \
              patch("src.data_ingestion.CACHE_DIR", tmp_path / "valid-cache"):
@@ -944,6 +1031,10 @@ class TestConfigZoneClassification:
         for code in ELEXON_ZONES.values():
             assert is_elexon_zone(code) is True
 
+    def test_current_sdac_zones_have_explicit_transition_coverage(self) -> None:
+        expected = set(ENTSOE_ZONES.values()) - {"IE_SEM", "CH"}
+        assert expected == SDAC_15MIN_ZONES
+
 
 class TestBuildZoneQueryWindow:
     def test_de_lu_uses_local_midnight_in_winter(self) -> None:
@@ -956,17 +1047,91 @@ class TestBuildZoneQueryWindow:
         assert start == pd.Timestamp("2025-06-30T23:00:00Z")
         assert end == pd.Timestamp("2025-07-31T23:00:00Z")
 
-    def test_de_lu_spring_forward_dst(self) -> None:
-        start, end = build_zone_query_window("DE_LU", "2025-03-30", "2025-03-30")
+    @pytest.mark.parametrize("zone", ["DE_LU", "PL"])
+    def test_cet_spring_forward_dst(self, zone: str) -> None:
+        start, end = build_zone_query_window(zone, "2025-03-30", "2025-03-30")
         assert start == pd.Timestamp("2025-03-29T23:00:00Z")
         assert end == pd.Timestamp("2025-03-30T22:00:00Z")
         assert end - start == pd.Timedelta(hours=23)
 
-    def test_de_lu_fall_back_dst(self) -> None:
-        start, end = build_zone_query_window("DE_LU", "2025-10-26", "2025-10-26")
+    @pytest.mark.parametrize("zone", ["DE_LU", "PL"])
+    def test_cet_fall_back_dst(self, zone: str) -> None:
+        start, end = build_zone_query_window(zone, "2025-10-26", "2025-10-26")
         assert start == pd.Timestamp("2025-10-25T22:00:00Z")
         assert end == pd.Timestamp("2025-10-26T23:00:00Z")
         assert end - start == pd.Timedelta(hours=25)
+
+    @pytest.mark.parametrize(
+        ("zone", "expected_boundary"),
+        [
+            ("DE_LU", "2025-09-30T22:00:00Z"),
+            ("PL", "2025-09-30T22:00:00Z"),
+            ("PT", "2025-09-30T22:00:00Z"),
+            ("FI", "2025-09-30T22:00:00Z"),
+            ("GR", "2025-09-30T22:00:00Z"),
+            ("RO", "2025-09-30T22:00:00Z"),
+        ],
+    )
+    def test_sdac_transition_resolves_from_shared_market_midnight(
+        self,
+        zone: str,
+        expected_boundary: str,
+    ) -> None:
+        transitions = _zone_resolution_transitions(zone)
+
+        assert len(transitions) == 1
+        boundary, before, after = transitions[0]
+        assert boundary == pd.Timestamp(expected_boundary)
+        assert before == pd.Timedelta(hours=1)
+        assert after == pd.Timedelta(minutes=15)
+
+    @pytest.mark.parametrize("zone", ["IE_SEM", "CH", "GB", "ZZ_TEST"])
+    def test_non_sdac_transition_zones_do_not_inherit_cutover(self, zone: str) -> None:
+        assert _zone_resolution_transitions(zone) == ()
+
+    @pytest.mark.parametrize(
+        ("start", "end", "freq", "expected_count"),
+        [
+            (
+                "2025-03-29T23:00:00Z",
+                "2025-03-30T22:00:00Z",
+                "h",
+                23,
+            ),
+            (
+                "2025-10-25T22:00:00Z",
+                "2025-10-26T23:00:00Z",
+                "15min",
+                100,
+            ),
+        ],
+    )
+    def test_pl_dst_expected_windows_preserve_source_grid(
+        self,
+        start: str,
+        end: str,
+        freq: str,
+        expected_count: int,
+    ) -> None:
+        start_ts = pd.Timestamp(start)
+        end_ts = pd.Timestamp(end)
+        index = pd.date_range(start_ts, end_ts, freq=freq, inclusive="left")
+        index.name = "timestamp"
+        source = pd.DataFrame(
+            {"price_eur_mwh": [float(value) for value in range(len(index))]},
+            index=index,
+        )
+
+        result = clean_prices(
+            source,
+            zone="PL",
+            expected_start=start_ts,
+            expected_end=end_ts,
+        )
+
+        assert len(result) == expected_count
+        pd.testing.assert_index_equal(result.index, index)
+        assert not result["filled"].any()
 
 
 # ── Test 10: Fingrid data fetcher ─────────────────────────────────────────────

@@ -1,6 +1,7 @@
 """Project configuration: bidding zones, API endpoints, paths."""
 
 import os
+from datetime import date
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -122,6 +123,25 @@ ENTSOE_ZONES: dict[str, str] = {
     "Ireland (SEM)": "IE_SEM",
     "Switzerland": "CH",
 }
+
+# SDAC changed the Day-Ahead market time unit from 60 to 15 minutes for its
+# CET/CEST delivery day 2025-10-01. The first 15-minute contract starts at the
+# same market instant in every participating zone (2025-09-30 22:00 UTC), not
+# at each country's civil midnight. Keep participation explicit so adding a
+# supported bidding zone requires a deliberate transition decision. Ireland
+# retained a 30-minute MTU; Switzerland and Great Britain are outside this
+# rollout.
+SDAC_15MIN_DELIVERY_DATE = date(2025, 10, 1)
+SDAC_MARKET_TIMEZONE = "Europe/Brussels"
+SDAC_15MIN_ZONES = frozenset(
+    {
+        "AT", "BE", "BG", "CZ", "DE_LU", "DK_1", "DK_2", "EE", "ES",
+        "FI", "FR", "GR", "HR", "HU", "IT_CALA", "IT_CNOR", "IT_CSUD",
+        "IT_NORD", "IT_SARD", "IT_SICI", "IT_SUD", "LT", "LV", "NL",
+        "NO_1", "NO_2", "NO_3", "NO_4", "NO_5", "PL", "PT", "RO",
+        "SE_1", "SE_2", "SE_3", "SE_4", "SI", "SK",
+    }
+)
 
 ELEXON_ZONES: dict[str, str] = {
     "Great Britain": "GB",
