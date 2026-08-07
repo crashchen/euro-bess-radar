@@ -80,6 +80,16 @@ def _force_canonical_tiebreak_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(stochastic_dispatch, "linprog", linprog_with_forced_pass2_timeout)
 
 
+def _forced_solver_failure(stage: str) -> dict:
+    """Minimal failed child contract for stage-propagation mutation tests."""
+    return {
+        "success": False,
+        "status": "solver_failed",
+        "message": "forced solver failure",
+        "failure_stage": stage,
+    }
+
+
 class TestStochasticCommitment:
     def test_default_path_reports_canonical_tiebreak_applied(self) -> None:
         da = _da_shape(8)
@@ -299,9 +309,12 @@ class TestStochasticCommitment:
     def test_degenerate_inputs_return_gracefully(self) -> None:
         w = np.array([1.0])
         # empty
-        assert not solve_stochastic_da_commitment(
+        empty = solve_stochastic_da_commitment(
             np.array([]), np.empty((1, 0)), w, dt=1.0,
-        )["success"]
+        )
+        assert not empty["success"]
+        assert empty["status"] == "invalid_input"
+        assert empty["message"]
         # NaN in DA
         da = _da_shape(6)
         da[2] = np.nan
@@ -316,6 +329,26 @@ class TestStochasticCommitment:
         assert not solve_stochastic_da_commitment(
             da2, np.tile(da2, (2, 1)), np.array([1.2, -0.2]), dt=1.0,
         )["success"]
+
+    def test_primary_commitment_solver_failure_has_machine_state(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        da = _da_shape(6)
+        scen, weights = _mean_centred_scenarios(da + 2.0, 2, 3.0, seed=73)
+        monkeypatch.setattr(
+            stochastic_dispatch,
+            "linprog",
+            lambda *args, **kwargs: SimpleNamespace(
+                success=False, status=2, message="forced primary failure",
+            ),
+        )
+
+        result = solve_stochastic_da_commitment(da, scen, weights, dt=1.0)
+
+        assert result["success"] is False
+        assert result["status"] == "solver_failed"
+        assert result["failure_stage"] == "stochastic_commitment"
+        assert result["message"] == "forced primary failure"
 
     @pytest.mark.slow
     def test_worst_case_15min_day_solves_within_budget(self) -> None:
@@ -575,6 +608,75 @@ class TestStochasticExecution:
         assert not solve_stochastic_da_id_dispatch(
             da, scen, np.full(6, 0.1), base, realised, dt=1.0,
         )["success"]
+
+    def test_myopic_child_failure_is_not_hardcoded_success(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        da, _, _, base, realised = self._case(seed=70)
+        monkeypatch.setattr(
+            stochastic_dispatch,
+            "solve_daily_lp",
+            lambda *args, **kwargs: _forced_solver_failure("daily_lp"),
+        )
+
+        result = solve_myopic_capped_da_id_dispatch(
+            da, base, realised, dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "solver_failed"
+        assert result["failure_stage"] == "myopic_da_commitment.daily_lp"
+        assert "forced solver failure" in result["message"]
+
+    def test_v1_ceiling_failure_invalidates_wrapper_and_is_nan_publicly(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        da, scen, w, base, realised = self._case(seed=71)
+        original = stochastic_dispatch.solve_stochastic_da_commitment
+
+        def fail_objective_only_ceiling(*args, **kwargs):
+            if kwargs.get("canonicalize") is False:
+                return _forced_solver_failure("commitment_pass1")
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(
+            stochastic_dispatch,
+            "solve_stochastic_da_commitment",
+            fail_objective_only_ceiling,
+        )
+
+        result = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised, dt=1.0,
+            power_mw=1.0, duration_hours=2.0,
+        )
+        public_ceiling = stochastic_coopt_ceiling(
+            da, realised, 1.0, power_mw=1.0, duration_hours=2.0,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "solver_failed"
+        assert result["failure_stage"] == (
+            "execution_diagnostics.coopt_ceiling.commitment_pass1"
+        )
+        assert np.isnan(public_ceiling)
+
+    def test_capped_stage2_failure_is_stage_qualified(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        da, scen, w, base, realised = self._case(seed=72)
+        monkeypatch.setattr(
+            stochastic_dispatch,
+            "_solve_capped_stage2",
+            lambda *args, **kwargs: _forced_solver_failure("stage2_milp"),
+        )
+
+        result = solve_stochastic_da_id_dispatch(
+            da, scen, w, base, realised, dt=1.0,
+            power_mw=1.0, duration_hours=2.0,
+        )
+
+        assert result["success"] is False
+        assert result["failure_stage"] == "stage2_execution.stage2_milp"
 
 
 def _force_stage0_pass_failure(
@@ -1252,6 +1354,50 @@ class TestStochasticTripleDispatch:
                 reserve_price_forecast_eur_mw_h=price,
             )
             assert not bad3["success"]
+
+        assert bad["status"] == "invalid_input"
+        assert bad["failure_stage"] == "stage0.stage0_reserve_commitment"
+
+    def test_v2_ceiling_failure_invalidates_triple_and_is_nan_publicly(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        da, da_fc, scen, w, base, realised = self._case(seed=7)
+        original = stochastic_dispatch._solve_stage0_and_unpack
+
+        def fail_objective_only_ceiling(*args, **kwargs):
+            if kwargs.get("canonicalize") is False:
+                return _forced_solver_failure("stage0_pass1")
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(
+            stochastic_dispatch,
+            "_solve_stage0_and_unpack",
+            fail_objective_only_ceiling,
+        )
+
+        result = solve_stochastic_triple_dispatch(
+            da, scen, w, base, realised, 1.0,
+            da_forecast=da_fc,
+            reserve_price_forecast_eur_mw_h=10.0,
+            reserve_price_realised_eur_mw_h=10.0,
+            power_mw=1.0,
+            duration_hours=2.0,
+        )
+        public_ceiling = stochastic_coopt_ceiling_v2(
+            da,
+            realised,
+            1.0,
+            reserve_price_realised_eur_mw_h=10.0,
+            power_mw=1.0,
+            duration_hours=2.0,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "solver_failed"
+        assert result["failure_stage"] == (
+            "triple_diagnostics.coopt_ceiling_v2.stage0_pass1"
+        )
+        assert np.isnan(public_ceiling)
 
     def test_ceiling_v2_is_selector_disabled(
         self, monkeypatch: pytest.MonkeyPatch,

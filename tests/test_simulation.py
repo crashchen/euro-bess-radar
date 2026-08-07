@@ -38,6 +38,8 @@ def _make_prices() -> pd.DataFrame:
 def test_empty_or_missing_price_day_returns_safe_result() -> None:
     empty = empty_simulation_result("empty")
     assert empty["summary"]["total_revenue_eur"] == 0.0
+    assert empty["summary"]["success"] is False
+    assert empty["summary"]["status"] == "invalid_input"
     assert empty["timeseries"].empty
 
     prices = _make_prices()
@@ -50,6 +52,73 @@ def test_empty_or_missing_price_day_returns_safe_result() -> None:
     )
     assert result["timeseries"].empty
     assert "missing" in result["summary"]["reason"].lower()
+
+
+def test_da_replay_solver_failure_is_unavailable_not_zero_timeseries(
+    monkeypatch,
+) -> None:
+    prices = _make_prices()
+
+    def fail_solver(values, **kwargs):
+        n = len(values)
+        return {
+            "revenue_eur": 0.0,
+            "p_charge": np.zeros(n),
+            "p_discharge": np.zeros(n),
+            "soc": np.full(n + 1, 0.5),
+            "n_cycles": 0.0,
+            "success": False,
+            "status": "solver_failed",
+            "message": "forced replay failure",
+        }
+
+    monkeypatch.setattr(sim, "solve_daily_lp", fail_solver)
+    result = simulate_da_milp_replay(
+        prices,
+        simulation_date=prices.index[0].date(),
+        power_mw=1.0,
+        duration_hours=2.0,
+    )
+
+    assert result["timeseries"].empty
+    assert result["summary"]["success"] is False
+    assert result["summary"]["status"] == "solver_failed"
+    assert result["summary"]["failure_stage"] == "da"
+    assert "forced replay failure" in result["summary"]["message"]
+
+
+def test_da_replay_genuine_zero_optimum_remains_available() -> None:
+    idx = pd.date_range("2026-03-19", periods=24, freq="h", tz="UTC")
+    prices = pd.DataFrame({"price_eur_mwh": 50.0}, index=idx)
+
+    result = simulate_da_milp_replay(
+        prices,
+        simulation_date=idx[0].date(),
+        power_mw=1.0,
+        duration_hours=2.0,
+    )
+
+    assert result["summary"]["success"] is True
+    assert result["summary"]["status"] == "optimal"
+    assert result["summary"]["total_revenue_eur"] == pytest.approx(0.0)
+    assert len(result["timeseries"]) == 24
+
+
+@pytest.mark.parametrize("drop_position", [0, 23])
+def test_single_day_replay_rejects_contiguous_edge_gap(drop_position: int) -> None:
+    prices = _make_prices().drop(index=_make_prices().index[drop_position])
+
+    result = simulate_da_milp_replay(
+        prices,
+        simulation_date=pd.Timestamp("2026-03-19").date(),
+        tz="UTC",
+        power_mw=1.0,
+        duration_hours=2.0,
+    )
+
+    assert result["timeseries"].empty
+    assert result["summary"]["status"] == "invalid_input"
+    assert "incomplete" in result["summary"]["reason"].lower()
 
 
 def test_available_local_dates_respects_timezone() -> None:
@@ -245,11 +314,11 @@ def test_da_id_replay_full_unwind_reports_inf_rebalancing_factor() -> None:
     it as 'Inf'.
     """
     import math
-    idx = pd.date_range("2026-03-19", periods=2, freq="h", tz="UTC")
-    da = pd.DataFrame({"price_eur_mwh": [0.0, 100.0]}, index=idx)
+    idx = pd.date_range("2026-03-19", periods=24, freq="h", tz="UTC")
+    da = pd.DataFrame({"price_eur_mwh": [0.0] * 12 + [100.0] * 12}, index=idx)
     da.index.name = "timestamp"
     # IDA flat at midpoint -> stage-2 has no profitable trade, unwinds.
-    ida = pd.DataFrame({"intraday_price_eur_mwh": [50.0, 50.0]}, index=idx)
+    ida = pd.DataFrame({"intraday_price_eur_mwh": [50.0] * 24}, index=idx)
     ida.index.name = "timestamp"
     result = simulate_da_id_replay(
         da, ida,
@@ -321,6 +390,9 @@ def test_replay_batch_excludes_days_with_missing_prices() -> None:
 
     assert len(batch) == 1
     assert batch.attrs["excluded_days"] == 1
+    assert batch.attrs["excluded_days_due_to_missing"] == 1
+    assert batch.attrs["excluded_days_due_to_solver_failure"] == 0
+    assert batch.attrs["model_available"] is True
     assert batch["date"].iloc[0] == dates[0]
 
 
@@ -339,6 +411,149 @@ def test_replay_batch_da_id_requires_intraday_data() -> None:
 
     assert batch.empty
     assert batch.attrs["excluded_days"] == len(dates)
+    assert batch.attrs["excluded_days_due_to_missing"] == len(dates)
+    assert batch.attrs["excluded_days_due_to_solver_failure"] == 0
+    assert batch.attrs["model_available"] is False
+
+
+def test_replay_batch_explicit_empty_date_set_stays_empty() -> None:
+    batch = simulate_replay_batch(_make_prices(), dates=[], tz="UTC")
+
+    assert batch.empty
+    assert batch.attrs["observed_days"] == 0
+    assert batch.attrs["valid_days"] == 0
+    assert batch.attrs["excluded_days"] == 0
+    assert batch.attrs["model_available"] is False
+
+
+def test_continuous_replay_excludes_failed_chunk_and_does_not_advance_soc(
+    monkeypatch,
+) -> None:
+    prices = pd.concat([_make_prices().shift(freq=f"{i}D") for i in range(3)])
+    dates = available_local_dates(prices, tz="UTC")
+    real_solver = sim.solve_daily_lp
+    calls = 0
+    starts: list[float] = []
+
+    def fail_middle_chunk(values, **kwargs):
+        nonlocal calls
+        calls += 1
+        starts.append(float(kwargs["soc_init_frac"]))
+        if calls == 2:
+            n = len(values)
+            return {
+                "revenue_eur": 0.0,
+                "p_charge": np.zeros(n),
+                "p_discharge": np.zeros(n),
+                # A failed schedule must never seed the next chunk.
+                "soc": np.full(n + 1, 1.8),
+                "n_cycles": 0.0,
+                "success": False,
+                "status": "solver_failed",
+                "message": "forced middle-chunk failure",
+            }
+        return real_solver(values, **kwargs)
+
+    monkeypatch.setattr(sim, "MAX_CONTINUOUS_REPLAY_INTERVALS", 24)
+    monkeypatch.setattr(sim, "solve_daily_lp", fail_middle_chunk)
+    batch = simulate_replay_batch(
+        prices,
+        dates=dates,
+        tz="UTC",
+        power_mw=1.0,
+        duration_hours=2.0,
+        carry_soc=True,
+    )
+
+    assert batch["date"].tolist() == [dates[0], dates[2]]
+    assert starts == pytest.approx([0.5, 0.5, 0.5])
+    assert batch.attrs["observed_days"] == 3
+    assert batch.attrs["valid_days"] == 2
+    assert batch.attrs["excluded_days_due_to_missing"] == 0
+    assert batch.attrs["excluded_days_due_to_solver_failure"] == 1
+    assert batch.attrs["model_available"] is True
+    assert batch.attrs["solver_failure_details"] == [{
+        "date": str(dates[1]),
+        "status": "solver_failed",
+        "message": "forced middle-chunk failure",
+        "stage": "da",
+    }]
+
+
+def test_continuous_replay_all_failed_is_unavailable_not_zero_rows(
+    monkeypatch,
+) -> None:
+    prices = pd.concat([_make_prices(), _make_prices().shift(freq="1D")])
+    dates = available_local_dates(prices, tz="UTC")
+
+    def fail_run(values, **kwargs):
+        n = len(values)
+        return {
+            "revenue_eur": 0.0,
+            "p_charge": np.zeros(n),
+            "p_discharge": np.zeros(n),
+            "soc": np.full(n + 1, 1.0),
+            "n_cycles": 0.0,
+            "success": False,
+            "status": "solver_failed",
+            "message": "forced whole-run failure",
+        }
+
+    monkeypatch.setattr(sim, "solve_daily_lp", fail_run)
+    batch = simulate_replay_batch(
+        prices, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0, carry_soc=True,
+    )
+
+    assert batch.empty
+    assert batch.attrs["observed_days"] == 2
+    assert batch.attrs["valid_days"] == 0
+    assert batch.attrs["excluded_days"] == 2
+    assert batch.attrs["excluded_days_due_to_missing"] == 0
+    assert batch.attrs["excluded_days_due_to_solver_failure"] == 2
+    assert batch.attrs["model_available"] is False
+    assert [row["date"] for row in batch.attrs["solver_failure_details"]] == [
+        str(dates[0]), str(dates[1]),
+    ]
+
+
+def test_continuous_da_id_failure_excludes_whole_solve_unit(monkeypatch) -> None:
+    da_df, ida_df = _make_da_id_overnight_pair()
+    dates = available_local_dates(da_df, tz="UTC")
+
+    def fail_composite(da_values, ida_values, **kwargs):
+        n = len(da_values)
+        zeros = np.zeros(n)
+        return {
+            "da_p_charge": zeros,
+            "da_p_discharge": zeros,
+            "ida_p_charge": zeros,
+            "ida_p_discharge": zeros,
+            "ida_soc": np.full(n + 1, 1.0),
+            "rebid_uplift_eur": 0.0,
+            "success": False,
+            "status": "solver_failed",
+            "message": "forced IDA-stage failure",
+            "failure_stage": "ida",
+        }
+
+    monkeypatch.setattr(sim, "solve_daily_da_id_dispatch", fail_composite)
+    batch = simulate_replay_batch(
+        da_df,
+        mode="DA + IDA1 Replay",
+        intraday_df=ida_df,
+        dates=dates,
+        tz="UTC",
+        power_mw=1.0,
+        duration_hours=2.0,
+        carry_soc=True,
+    )
+
+    assert batch.empty
+    assert batch.attrs["excluded_days_due_to_missing"] == 0
+    assert batch.attrs["excluded_days_due_to_solver_failure"] == len(dates)
+    assert batch.attrs["model_available"] is False
+    assert {row["stage"] for row in batch.attrs["solver_failure_details"]} == {"ida"}
 
 
 def _make_overnight_arbitrage_prices() -> pd.DataFrame:
@@ -444,7 +659,51 @@ def test_continuous_horizon_excludes_sparse_day_without_nan() -> None:
     )
     assert len(batch) == 1
     assert batch.attrs["excluded_days"] == 1
+    assert batch.attrs["excluded_days_due_to_missing"] == 1
     assert batch["n_intervals"].tolist() == [24]
+
+
+@pytest.mark.parametrize("drop_position", [24, 47])
+def test_continuous_horizon_excludes_contiguous_edge_truncated_day(
+    drop_position: int,
+) -> None:
+    """A uniform 23-row non-DST day is still incomplete at an outer edge."""
+    idx = pd.date_range("2026-03-19", periods=48, freq="h", tz="UTC")
+    df = pd.DataFrame({"price_eur_mwh": np.arange(48.0)}, index=idx).drop(
+        index=idx[drop_position]
+    )
+    dates = [idx[0].date(), idx[24].date()]
+
+    batch = simulate_replay_batch(
+        df, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0, carry_soc=True,
+    )
+
+    assert batch["date"].tolist() == [dates[0]]
+    assert batch["n_intervals"].tolist() == [24]
+    assert batch.attrs["excluded_days_due_to_missing"] == 1
+    assert batch.attrs["excluded_days_due_to_solver_failure"] == 0
+
+
+def test_continuous_da_id_rejects_edge_truncated_intraday_coverage() -> None:
+    da_df, ida_df = _make_da_id_overnight_pair()
+    dates = available_local_dates(da_df, tz="UTC")
+    ida_df = ida_df.drop(index=ida_df.index[24])
+
+    batch = simulate_replay_batch(
+        da_df,
+        mode="DA + IDA1 Replay",
+        intraday_df=ida_df,
+        dates=dates,
+        tz="UTC",
+        power_mw=1.0,
+        duration_hours=2.0,
+        carry_soc=True,
+    )
+
+    assert batch["date"].tolist() == [dates[0]]
+    assert batch.attrs["excluded_days_due_to_missing"] == 1
+    assert batch.attrs["excluded_days_due_to_solver_failure"] == 0
 
 
 def _make_da_id_overnight_pair() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -509,8 +768,13 @@ def test_da_id_continuous_total_dominates_independent_days() -> None:
 
 def test_continuous_horizon_keeps_dst_spring_forward_day() -> None:
     """A 23-local-hour DST day stays uniform in UTC and must be kept."""
-    idx = pd.date_range("2026-03-28 00:00", periods=72, freq="h", tz="UTC")
-    prices = list(np.linspace(10.0, 100.0, 72))
+    # Exact local-midnight boundaries for three complete Berlin days:
+    # Mar-28 (24h), Mar-29 spring-forward (23h), Mar-30 (24h).
+    idx = pd.date_range(
+        "2026-03-27 23:00", "2026-03-30 22:00",
+        freq="h", inclusive="left", tz="UTC",
+    )
+    prices = list(np.linspace(10.0, 100.0, len(idx)))
     df = pd.DataFrame({"price_eur_mwh": prices}, index=idx)
     df.index.name = "timestamp"
     dates = available_local_dates(df, tz="Europe/Berlin")
@@ -638,6 +902,44 @@ def test_sequential_batch_capture_rate_none_when_no_opportunity() -> None:
     assert summary["capture_rate"] is None
 
 
+def test_sequential_batch_excludes_solver_failure_and_audits_common_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import src.simulation as simulation_module
+
+    da_df, ida_df = _make_seq_history(days=3, anomaly_day=None)
+    dates = available_local_dates(da_df, tz="UTC")
+    original = simulation_module.solve_sequential_da_id_dispatch
+    calls = 0
+
+    def fail_first(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return {
+                "success": False,
+                "status": "solver_failed",
+                "message": "ida_forecast: injected failure",
+            }
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(
+        simulation_module, "solve_sequential_da_id_dispatch", fail_first,
+    )
+    per_day, summary = simulate_sequential_da_id_batch(
+        da_df, ida_df, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0,
+    )
+
+    assert len(per_day) == 2
+    assert summary["observed_days"] == 3
+    assert summary["valid_days"] == 2
+    assert summary["excluded_days_due_to_missing"] == 0
+    assert summary["excluded_days_due_to_solver_failure"] == 1
+    assert summary["model_available"] is True
+    assert summary["solver_failure_details"][0]["date"] == str(dates[0])
+
+
 def test_da_id_reserve_ceiling_batch_sums_and_dominates() -> None:
     da_df, ida_df = _make_seq_history(days=5, anomaly_day=2)
     dates = available_local_dates(da_df, tz="UTC")
@@ -650,6 +952,33 @@ def test_da_id_reserve_ceiling_batch_sums_and_dominates() -> None:
         da_df, ida_df, dates=dates, tz="UTC", power_mw=1.0, duration_hours=2.0,
     )
     assert triple["total_eur"] >= seq["total_ceiling_eur"] - 1e-6
+
+
+def test_da_id_reserve_ceiling_batch_all_solver_failures_are_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import src.simulation as simulation_module
+
+    da_df, ida_df = _make_seq_history(days=2, anomaly_day=None)
+    dates = available_local_dates(da_df, tz="UTC")
+    monkeypatch.setattr(
+        simulation_module,
+        "solve_daily_da_id_reserve_dispatch",
+        lambda *args, **kwargs: {
+            "success": False,
+            "status": "solver_failed",
+            "message": "ida_reserve: injected failure",
+        },
+    )
+    result = simulate_da_id_reserve_ceiling_batch(
+        da_df, ida_df, 8.0, dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0,
+    )
+
+    assert result["total_eur"] == 0.0
+    assert result["solved_days"] == 0
+    assert result["excluded_days_due_to_solver_failure"] == 2
+    assert result["model_available"] is False
 
 
 def test_align_reserve_price_maps_block_of_day_and_missing_to_zero() -> None:
@@ -754,6 +1083,36 @@ def test_sequential_reserve_batch_identity_and_ceiling_consistency() -> None:
     )
 
 
+def test_sequential_reserve_batch_all_solver_failures_do_not_form_partial_cash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import src.simulation as simulation_module
+
+    da_df, ida_df = _make_seq_history(days=4, anomaly_day=None)
+    dates = available_local_dates(da_df, tz="UTC")
+    monkeypatch.setattr(
+        simulation_module,
+        "solve_sequential_da_id_reserve_dispatch",
+        lambda *args, **kwargs: {
+            "success": False,
+            "status": "solver_failed",
+            "message": "reserve_first: injected failure",
+        },
+    )
+    per_day, summary = simulate_sequential_da_id_reserve_batch(
+        da_df, ida_df, _block_reserve_series(da_df), dates=dates, tz="UTC",
+        power_mw=1.0, duration_hours=2.0,
+    )
+
+    assert per_day.empty
+    assert summary["valid_days"] == 0
+    # Walk-forward has no forecast for day one; the remaining days are solve
+    # failures and must not be represented as partial revenue rows.
+    assert summary["excluded_days_due_to_missing"] == 1
+    assert summary["excluded_days_due_to_solver_failure"] == 3
+    assert summary["model_available"] is False
+
+
 def test_sequential_reserve_batch_none_reserve_commits_zero() -> None:
     da_df, ida_df = _make_seq_history(days=4, anomaly_day=None)
     dates = available_local_dates(da_df, tz="UTC")
@@ -793,7 +1152,10 @@ def test_da_id_reserve_ceiling_batch_invalid_capacity_price_returns_empty() -> N
             da_df, ida_df, bad_capacity_price, dates=dates, tz="UTC",
             power_mw=1.0, duration_hours=2.0,
         )
-        assert triple == {"total_eur": 0.0, "solved_days": 0}
+        assert triple["total_eur"] == 0.0
+        assert triple["solved_days"] == 0
+        assert triple["status"] == "invalid_input"
+        assert triple["model_available"] is False
 
 
 def test_da_id_reserve_ceiling_batch_skips_irregular_merged_day() -> None:

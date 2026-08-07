@@ -1229,9 +1229,27 @@ def _render_intraday_uplift_section(
             duration_hours=duration_hours, efficiency=efficiency,
             soc_init_frac=0.0,
         )
+        two_stage_solver_failures = int(
+            two_stage.attrs.get("excluded_days_due_to_solver_failure", 0)
+        )
         if two_stage.empty:
-            st.info("Not enough overlapping DA+IDA1 days for the MILP.")
+            if two_stage_solver_failures > 0 and not two_stage.attrs.get(
+                "model_available", False,
+            ):
+                st.error(
+                    "Two-stage DA+IDA1 model unavailable: all otherwise usable "
+                    f"days failed optimisation ({two_stage_solver_failures} day(s)). "
+                    "Failed solves were excluded, not priced at €0."
+                )
+            else:
+                st.info("Not enough overlapping DA+IDA1 days for the MILP.")
         else:
+            if two_stage_solver_failures > 0:
+                st.warning(
+                    f"Two-stage DA+IDA1 excluded {two_stage_solver_failures} "
+                    "solver-failed day(s). Totals and annualisation use valid "
+                    "days only; failures were not priced at €0."
+                )
             n_days = len(two_stage)
             total_da = float(two_stage["da_revenue"].sum())
             total_uplift = float(two_stage["rebid_uplift"].sum())

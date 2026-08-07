@@ -1170,6 +1170,49 @@ class TestTwoStageDaIdDispatch:
         ida.index.name = "timestamp"
         result = calculate_two_stage_da_id_dispatch(da, ida, tz="UTC")
         assert result.empty
+        assert result.attrs["model_available"] is False
+        assert result.attrs["excluded_days_due_to_missing"] == 1
+
+    def test_solver_failed_day_is_excluded_but_optimal_zero_day_is_valid(
+        self, monkeypatch,
+    ) -> None:
+        """A nested failure must not become a €0 observation or denominator day."""
+        import src.dispatch as dispatch_module
+
+        idx = pd.date_range("2025-01-01", periods=48, freq="h", tz="UTC")
+        da = pd.DataFrame({"price_eur_mwh": 50.0}, index=idx)
+        ida = pd.DataFrame({"intraday_price_eur_mwh": 50.0}, index=idx)
+        original = dispatch_module.solve_daily_da_id_dispatch
+        calls = 0
+
+        def fail_first(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return {
+                    "success": False,
+                    "status": "solver_failed",
+                    "message": "ida: injected failure",
+                }
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr(
+            dispatch_module, "solve_daily_da_id_dispatch", fail_first,
+        )
+        result = calculate_two_stage_da_id_dispatch(da, ida, tz="UTC")
+
+        assert len(result) == 1
+        assert result.iloc[0]["total_cash"] == pytest.approx(0.0)
+        assert result.attrs["observed_days"] == 2
+        assert result.attrs["valid_days"] == 1
+        assert result.attrs["excluded_days_due_to_missing"] == 0
+        assert result.attrs["excluded_days_due_to_solver_failure"] == 1
+        assert result.attrs["model_available"] is True
+        assert result.attrs["solver_failure_details"] == [{
+            "date": "2025-01-01",
+            "status": "solver_failed",
+            "message": "ida: injected failure",
+        }]
 
     def test_partial_ida_coverage_excludes_day(self) -> None:
         """A day with only 2 IDA periods but 24 DA periods must not be solved

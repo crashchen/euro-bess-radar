@@ -177,12 +177,11 @@ def compute_cycle_cap_frontier(
   convention); zero valid days ⇒ a TYPED empty frame + a summary with
   `valid_days=0` and NaN-free scalars (no division by zero); a solver failure
   on any day excludes that day FOR ALL caps (the co-temporal rule) and counts
-  it in `excluded_days`. **Failure observability (F-A scope)**: today
-  `solve_daily_lp` returns a zero schedule on solver failure with NO flag —
-  indistinguishable from a genuine zero-revenue day — so F-A adds a
-  `success: bool` key to its return dict (additive; existing callers
-  unaffected) and the frontier excludes days where ANY cap's solve reports
-  `success=False`. Day selection reuses the replay helpers
+  it in `excluded_days`. **Failure observability (F-A scope)**:
+  `solve_daily_lp` returns typed `success/status/message` fields under the
+  implemented dispatch-failure contract; the frontier excludes days where ANY
+  cap's solve reports `success=False`, while a valid optimal €0 day remains in
+  the common sample. Day selection reuses the replay helpers
   (`_select_local_day` + regular-UTC-day check), so DST days follow the
   existing convention.
 

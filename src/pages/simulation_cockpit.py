@@ -806,6 +806,25 @@ def _render_event_table(events: pd.DataFrame) -> None:
         )
 
 
+def _render_solver_failure_notice(summary: dict, *, label: str) -> bool:
+    """Render batch solve exclusions; return True when the model is unavailable."""
+    failed = int(summary.get("excluded_days_due_to_solver_failure", 0))
+    if failed <= 0:
+        return False
+    available = bool(summary.get("model_available", summary.get("valid_days", 0) > 0))
+    if not available:
+        st.error(
+            f"{label} unavailable: all otherwise usable optimisation days failed "
+            f"({failed} day(s)). Failed solves were excluded, not priced at €0."
+        )
+        return True
+    st.warning(
+        f"{label} excluded {failed} solver-failed day(s). Totals, risk metrics, "
+        "and annualisation use valid days only; failures were not priced at €0."
+    )
+    return False
+
+
 def _render_multi_day_summary(
     *,
     primary_df: pd.DataFrame,
@@ -870,6 +889,8 @@ def _render_multi_day_summary(
             )
 
         excluded = int(batch.attrs.get("excluded_days", 0))
+        if _render_solver_failure_notice(batch.attrs, label="Replay model"):
+            return
         if batch.empty:
             st.warning(f"No valid replay days in this sample. Excluded days: {excluded}.")
             return
@@ -2379,6 +2400,7 @@ def _reserve_triple_totals(
         "triple_total": None, "realistic_total": None,
         "seq_per_day": None, "seq_summary": None,
         "triple_valid_days": None, "triple_da_baseline": None,
+        "solver_failed_days": 0, "model_available": None,
     }
     if reserve_series is None or reserve_series.empty or not valid_dates:
         return out
@@ -2388,6 +2410,10 @@ def _reserve_triple_totals(
         duration_hours=duration_hours, efficiency=efficiency,
         bucket=bucket, forecast_mode="walk_forward",
     )
+    out["solver_failed_days"] = int(
+        summary.get("excluded_days_due_to_solver_failure", 0)
+    )
+    out["model_available"] = bool(summary.get("model_available", not per_day.empty))
     if not per_day.empty:
         out.update(
             triple_total=summary["total_global_ceiling_eur"],
@@ -2397,6 +2423,11 @@ def _reserve_triple_totals(
             seq_per_day=per_day, seq_summary=summary,
         )
         return out
+    if out["solver_failed_days"] > 0:
+        # Do not replace an all-solver-failed realistic result with a valid-looking
+        # perfect-foresight ceiling. That fallback is reserved for data/forecast
+        # gaps such as a one-day walk-forward window.
+        return out
     # 9.2b excluded every day (e.g. a 1-day walk-forward window): fall back to
     # the standalone 9.2a ceiling over the DA/IDA window, still per-interval
     # priced. No realistic row in this degenerate case.
@@ -2405,8 +2436,16 @@ def _reserve_triple_totals(
         tz=tz, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency,
     )
+    ceiling_solver_failures = int(
+        ceiling.get("excluded_days_due_to_solver_failure", 0)
+    )
+    if ceiling_solver_failures > 0:
+        out["solver_failed_days"] = ceiling_solver_failures
+        out["model_available"] = bool(ceiling.get("model_available", False))
+        return out
     if ceiling["solved_days"] > 0:
         out["triple_total"] = ceiling["total_eur"]
+        out["model_available"] = True
     return out
 
 
@@ -3105,6 +3144,8 @@ def _render_forecast_policy_section(
                 min_rebid_uplift_eur=min_rebid_uplift_eur,
             )
 
+        if _render_solver_failure_notice(summary, label="Forecast-policy model"):
+            return
         if per_day.empty:
             st.warning(
                 f"No valid forecast-policy days in this sample. "
@@ -3155,6 +3196,15 @@ def _render_forecast_policy_section(
             valid_dates=valid_dates, tz=zone_tz, power_mw=power_mw,
             duration_hours=duration_hours, efficiency=efficiency, bucket=bucket,
         )
+        if int(triple.get("solver_failed_days", 0)) > 0:
+            _render_solver_failure_notice(
+                {
+                    "excluded_days_due_to_solver_failure": triple["solver_failed_days"],
+                    "model_available": triple.get("model_available", False),
+                    "valid_days": triple.get("triple_valid_days") or 0,
+                },
+                label="DA+IDA1+reserve model",
+            )
         triple_label = (
             f"DA + IDA1 + {reserve_product} (co-opt ceiling)"
             if triple["triple_total"] is not None else None
@@ -3197,6 +3247,14 @@ def _render_forecast_policy_section(
                         min_rebid_uplift_eur=min_rebid_uplift_eur,
                     )
                 )
+            _render_solver_failure_notice(
+                stoch_summary,
+                label=(
+                    "Stochastic DA+IDA1+reserve comparison"
+                    if stoch_reserve_mode
+                    else "Stochastic DA+IDA1 comparison"
+                ),
+            )
         policy_value_total = None
         policy_value_valid_days = None
         policy_value_label = None

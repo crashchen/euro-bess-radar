@@ -20,6 +20,41 @@ from src.dispatch import (
 )
 
 
+def _forced_lp_failure(n: int, message: str = "forced LP failure") -> dict:
+    """Full legacy-safe shape: catches code that keeps using failed values."""
+    zeros = np.zeros(n)
+    return {
+        "revenue_eur": 0.0,
+        "p_charge": zeros,
+        "p_discharge": zeros,
+        "soc": np.zeros(n + 1),
+        "n_cycles": 0.0,
+        "success": False,
+        "status": "solver_failed",
+        "message": message,
+        "tiebreak_applied": None,
+    }
+
+
+def _forced_joint_failure(n: int, message: str = "forced joint failure") -> dict:
+    """Full legacy-safe shape: catches partial composite cash aggregation."""
+    zeros = np.zeros(n)
+    return {
+        "total_revenue_eur": 0.0,
+        "da_revenue_eur": 0.0,
+        "capacity_revenue_eur": 0.0,
+        "p_charge": zeros,
+        "p_discharge": zeros,
+        "reserve_mw": zeros,
+        "soc": np.zeros(n + 1),
+        "n_cycles": 0.0,
+        "avg_reserve_mw": 0.0,
+        "success": False,
+        "status": "solver_failed",
+        "message": message,
+    }
+
+
 class TestSolveDailyLp:
     def test_flat_prices_yield_zero_revenue(self) -> None:
         """Flat prices offer no arbitrage; revenue should be ~0."""
@@ -640,6 +675,42 @@ class TestSolveDailyDaIdDispatch:
             r["da_revenue_eur"] + r["rebid_uplift_eur"], abs=0.01,
         )
 
+    @pytest.mark.parametrize(("failed_call", "expected_stage"), [(1, "da"), (2, "ida")])
+    def test_nested_failure_invalidates_whole_composite(
+        self, monkeypatch, failed_call: int, expected_stage: str,
+    ) -> None:
+        """A child zero-shape failure must not become plausible partial cash."""
+        real_solver = solve_daily_lp
+        calls = 0
+
+        def fail_selected(prices, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == failed_call:
+                return _forced_lp_failure(len(prices), f"forced {expected_stage}")
+            return real_solver(prices, **kwargs)
+
+        monkeypatch.setattr("src.dispatch.solve_daily_lp", fail_selected)
+        da = np.array([10.0] * 12 + [80.0] * 12)
+        ida = np.array([90.0] * 12 + [5.0] * 12)
+        result = solve_daily_da_id_dispatch(
+            da, ida, dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "solver_failed"
+        assert result["failure_stage"] == expected_stage
+        assert expected_stage in result["message"]
+        assert result["total_cash_eur"] == 0.0
+
+    def test_flat_zero_is_successful_composite(self) -> None:
+        flat = np.full(24, 50.0)
+        result = solve_daily_da_id_dispatch(flat, flat, dt=1.0)
+
+        assert result["success"] is True
+        assert result["status"] == "optimal"
+        assert result["total_cash_eur"] == 0.0
+
 
 _RESERVE_KW = {"dt": 1.0, "power_mw": 1.0, "duration_hours": 2.0, "efficiency": 0.88}
 
@@ -713,6 +784,51 @@ class TestSolveDailyDaIdReserveDispatch:
             assert solve_daily_da_id_reserve_dispatch(
                 da, ida, capacity_price_eur_mw_h=bad_capacity_price, **_RESERVE_KW,
             )["total_cash_eur"] == 0.0
+
+    def test_da_failure_does_not_leave_stage2_partial_revenue(
+        self, monkeypatch,
+    ) -> None:
+        da, ida = _da_id_reserve_prices()
+        monkeypatch.setattr(
+            "src.dispatch.solve_daily_lp",
+            lambda prices, **kwargs: _forced_lp_failure(len(prices)),
+        )
+        result = solve_daily_da_id_reserve_dispatch(
+            da, ida, capacity_price_eur_mw_h=8.0, **_RESERVE_KW,
+        )
+
+        assert result["success"] is False
+        assert result["failure_stage"] == "da"
+        assert result["total_cash_eur"] == 0.0
+        assert result["capacity_revenue_eur"] == 0.0
+
+    def test_ida_reserve_failure_invalidates_whole_composite(
+        self, monkeypatch,
+    ) -> None:
+        da, ida = _da_id_reserve_prices()
+        monkeypatch.setattr(
+            "src.dispatch.solve_daily_joint_capacity_lp",
+            lambda prices, **kwargs: _forced_joint_failure(len(prices)),
+        )
+        result = solve_daily_da_id_reserve_dispatch(
+            da, ida, capacity_price_eur_mw_h=8.0, **_RESERVE_KW,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "solver_failed"
+        assert result["failure_stage"] == "ida_reserve"
+        assert "ida_reserve" in result["message"]
+        assert result["total_cash_eur"] == 0.0
+
+    def test_flat_zero_without_reserve_is_successful(self) -> None:
+        flat = np.full(24, 50.0)
+        result = solve_daily_da_id_reserve_dispatch(
+            flat, flat, capacity_price_eur_mw_h=0.0, **_RESERVE_KW,
+        )
+
+        assert result["success"] is True
+        assert result["status"] == "optimal"
+        assert result["total_cash_eur"] == 0.0
 
 
 class TestSolveSequentialDaIdReserveDispatch:
@@ -821,6 +937,89 @@ class TestSolveSequentialDaIdReserveDispatch:
             np.ones(5), self._RESERVE, **_RESERVE_KW,
         )["realised_total_eur"] == 0.0
 
+    @pytest.mark.parametrize(
+        ("failed_call", "expected_stage"),
+        [
+            (1, "reserve_commitment"),
+            (2, "reserve_first.reserve_commitment"),
+            (3, "global_ceiling.ida_reserve"),
+        ],
+    )
+    def test_each_nested_joint_failure_is_stage_qualified_and_atomic(
+        self, monkeypatch, failed_call: int, expected_stage: str,
+    ) -> None:
+        real_solver = solve_daily_joint_capacity_lp
+        calls = 0
+
+        def fail_selected(prices, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == failed_call:
+                return _forced_joint_failure(len(prices), f"forced joint {failed_call}")
+            return real_solver(prices, **kwargs)
+
+        monkeypatch.setattr(
+            "src.dispatch.solve_daily_joint_capacity_lp", fail_selected,
+        )
+        result = solve_sequential_da_id_reserve_dispatch(
+            self._DA, self._DA, self._IDA, self._IDA,
+            self._RESERVE, self._RESERVE, **_RESERVE_KW,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "solver_failed"
+        assert result["failure_stage"] == expected_stage
+        assert expected_stage in result["message"]
+        assert result["realised_total_eur"] == 0.0
+        assert result["global_ceiling_eur"] == 0.0
+
+    @pytest.mark.parametrize(
+        ("failed_call", "expected_stage"),
+        [
+            (1, "da"),
+            (2, "ida_forecast"),
+            (3, "reserve_first.da"),
+            (4, "reserve_first.ida"),
+            (5, "global_ceiling.da"),
+        ],
+    )
+    def test_each_nested_lp_failure_is_stage_qualified_and_atomic(
+        self, monkeypatch, failed_call: int, expected_stage: str,
+    ) -> None:
+        real_solver = solve_daily_lp
+        calls = 0
+
+        def fail_selected(prices, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == failed_call:
+                return _forced_lp_failure(len(prices), f"forced LP {failed_call}")
+            return real_solver(prices, **kwargs)
+
+        monkeypatch.setattr("src.dispatch.solve_daily_lp", fail_selected)
+        result = solve_sequential_da_id_reserve_dispatch(
+            self._DA, self._DA, self._IDA, self._IDA,
+            self._RESERVE, self._RESERVE, **_RESERVE_KW,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "solver_failed"
+        assert result["failure_stage"] == expected_stage
+        assert expected_stage in result["message"]
+        assert result["realised_total_eur"] == 0.0
+        assert result["full_gap_eur"] == 0.0
+
+    def test_flat_zero_without_reserve_is_successful(self) -> None:
+        flat = np.full(24, 50.0)
+        zero = np.zeros(24)
+        result = solve_sequential_da_id_reserve_dispatch(
+            flat, flat, flat, flat, zero, zero, **_RESERVE_KW,
+        )
+
+        assert result["success"] is True
+        assert result["status"] == "optimal"
+        assert result["realised_total_eur"] == 0.0
+
     def test_none_da_realised_returns_zero_without_len_crash(self) -> None:
         r = solve_sequential_da_id_reserve_dispatch(
             self._DA, None, self._IDA, self._IDA,
@@ -876,6 +1075,49 @@ class TestSolveSequentialDaIdDispatch:
             r["ceiling_total_eur"], abs=1e-6,
         )
         assert r["forecast_error_cost_eur"] == pytest.approx(0.0, abs=1e-6)
+
+    @pytest.mark.parametrize(
+        ("failed_call", "expected_stage"),
+        [
+            (1, "da"),
+            (2, "ida_forecast"),
+            (3, "ceiling.da"),
+            (4, "ceiling.ida"),
+        ],
+    )
+    def test_each_nested_failure_invalidates_sequential_result(
+        self, monkeypatch, failed_call: int, expected_stage: str,
+    ) -> None:
+        real_solver = solve_daily_lp
+        calls = 0
+
+        def fail_selected(prices, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == failed_call:
+                return _forced_lp_failure(len(prices), f"forced LP {failed_call}")
+            return real_solver(prices, **kwargs)
+
+        monkeypatch.setattr("src.dispatch.solve_daily_lp", fail_selected)
+        result = solve_sequential_da_id_dispatch(
+            self._DA, self._REALISED, self._REALISED,
+            dt=1.0, power_mw=1.0, duration_hours=2.0,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "solver_failed"
+        assert result["failure_stage"] == expected_stage
+        assert expected_stage in result["message"]
+        assert result["realised_total_eur"] == 0.0
+        assert result["ceiling_total_eur"] == 0.0
+
+    def test_flat_zero_is_successful_sequential_result(self) -> None:
+        flat = np.full(24, 50.0)
+        result = solve_sequential_da_id_dispatch(flat, flat, flat, dt=1.0)
+
+        assert result["success"] is True
+        assert result["status"] == "optimal"
+        assert result["realised_total_eur"] == 0.0
 
     def test_naive_forecast_loses_full_rebid_value(self) -> None:
         # Forecasting IDA == DA gives no rebid signal: the desk just

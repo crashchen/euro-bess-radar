@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import src.simulation as simulation_module
 import src.stochastic_dispatch as stochastic_dispatch
 from src.simulation import (
     simulate_sequential_da_id_batch,
@@ -247,6 +248,31 @@ class TestStochasticBatch:
         assert per_day.empty
         assert summ["valid_days"] == 0
         assert summ["excluded_days"] == 1
+
+    def test_solver_failed_arm_excludes_common_day_and_risk_pool(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        da_df, ida_df = _history(days=4, seed=91)
+        monkeypatch.setattr(
+            simulation_module,
+            "solve_stochastic_da_id_dispatch",
+            lambda *args, **kwargs: {
+                "success": False,
+                "status": "solver_failed",
+                "message": "stage1_commitment: injected failure",
+            },
+        )
+        per_day, summ = simulate_stochastic_da_id_batch(
+            da_df, ida_df, n_scenarios=3, seed=1, **_KW,
+        )
+
+        assert per_day.empty
+        assert summ["observed_days"] == 4
+        assert summ["valid_days"] == 0
+        assert summ["excluded_days_due_to_missing"] == 0
+        assert summ["excluded_days_due_to_solver_failure"] == 4
+        assert summ["model_available"] is False
+        assert summ["risk_block"]["n"] == 0
 
     def test_negative_rebid_cap_raises(self) -> None:
         da_df, ida_df = _history(seed=13)
@@ -502,4 +528,35 @@ class TestStochasticTripleBatch:
         )
         assert per_day.empty
         assert summ["valid_days"] == 0
+        assert summ["risk_block"]["n"] == 0
+
+    def test_stage0_solver_failures_are_not_reported_as_missing_or_zero_policy(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from src.simulation import simulate_stochastic_triple_batch
+
+        da_df, ida_df = _history(days=4, seed=92)
+        monkeypatch.setattr(
+            simulation_module,
+            "solve_stochastic_reserve_commitment",
+            lambda *args, **kwargs: {
+                "success": False,
+                "status": "solver_failed",
+                "message": "stage0: injected failure",
+            },
+        )
+        per_day, summ = simulate_stochastic_triple_batch(
+            da_df, ida_df, _reserve_series(da_df.index),
+            n_scenarios=3, seed=2, rebid_cap_mw=0.8, **_KW,
+        )
+
+        assert per_day.empty
+        assert summ["valid_days"] == 0
+        assert summ["excluded_days_due_to_solver_failure"] > 0
+        assert (
+            summ["excluded_days_due_to_missing"]
+            + summ["excluded_days_due_to_solver_failure"]
+            == summ["observed_days"]
+        )
+        assert summ["model_available"] is False
         assert summ["risk_block"]["n"] == 0
