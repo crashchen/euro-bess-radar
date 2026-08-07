@@ -1,6 +1,6 @@
 # Dispatch failure contract v2
 
-Status: **implemented; CC-approved; draft PR #75 pending CI**
+Status: **implemented; CC-approved; merged in PR #75**
 
 Implementation date: 2026-08-06
 
