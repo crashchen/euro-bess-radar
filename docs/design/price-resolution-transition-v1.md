@@ -1,6 +1,6 @@
 # Price-resolution transition contract v1
 
-Status: **implemented; local review candidate**
+Status: **implemented; CC-approved; merged in PR #76**
 
 Implementation date: 2026-08-07
 
