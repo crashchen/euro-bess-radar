@@ -1,11 +1,12 @@
 # Project Case v1 — unified pre-tax unlevered lifecycle cash NPV
 
 Status: **candidate** (design-contract round — NOT locked. Revised after Codex
-artifact review rounds 1–5 and a Gemini adversarial review. Round 5 closed the
-enforceability gaps two independent Codex passes raised on `629088d` (Gemini
-APPROVE'd that hash, but the field-name defects were real). Pending a fresh
-co-review of THIS commit by both Codex and Gemini — only a dual APPROVE on the
-same hash flips `Status: locked`.)
+artifact review rounds 1–6 and a Gemini adversarial review. On `7baf26c` Gemini
+APPROVE'd and Codex raised three enforceability gaps (fingerprint losslessness,
+reserve-coverage field, `availability` domain) — two of them defects from the
+round-5 edits — now closed in round 6. Pending a fresh co-review of THIS commit by
+both Codex and Gemini — only a dual APPROVE on the same hash flips `Status:
+locked`.)
 
 Decision date: 2026-08-09
 
@@ -237,18 +238,32 @@ It carries:
   screening assumption `source EUR treated as base-year real` — never a silent mix;
 - kind-specific provenance: a **`ForecastAudit`** per forecast leg (DA and IDA
   separately, not one `walk_forward` label) carrying `forecast_mode` + bucket +
-  deadband; `reserve_product` + `reserve_source` + `availability`; (scenario
-  provenance does not apply — no v1-eligible strategy is the stochastic batch, §5);
-- a **`CoverageAudit`** (per `dispatch-failure-contract-v2`): three **immutable
-  canonical date sets** — `observed_dates`, `valid_dates` (the local dates that
-  actually produced a cash value), `missing_dates`, `solver_failed_dates` — plus
-  per-day failure details. The audit is machine-checkable:
+  deadband; `reserve_product` + `reserve_source` + `availability` (validated
+  **finite and ∈ [0, 1]**, default `config.ANCILLARY_CAPACITY_AVAILABILITY = 0.95`
+  — it multiplies straight into reserve cash at `dispatch.py:429`, so an
+  out-of-range `availability` would inflate revenue and must be rejected, Codex
+  review 6); (scenario provenance does not apply — no v1-eligible strategy is the
+  stochastic batch, §5);
+- for reserve-bearing kinds (`DA_RESERVE_COOPT`, `DA_ID_RESERVE_REALISED`) a
+  **`ReserveCoverageAudit`**: the canonical set of **required 4-hour product
+  blocks** for the window and the **present** / **missing** block sets (missing
+  reserve blocks are zero-filled upstream at `simulation.py:~1024`, which would
+  otherwise pass silently as a valid low-reserve day). A day is
+  reserve-cash-valid **only if fully covered** (`missing_blocks == ∅`); a
+  partially-covered day is excluded from `valid_dates` (or the result is
+  unavailable). This is what the §5 no-relabel rule refers to;
+- a **`CoverageAudit`** (per `dispatch-failure-contract-v2`): a canonical
+  **`observed_dates`** universe partitioned by three **immutable, pairwise-disjoint
+  canonical date sets** — `valid_dates` (the local dates that actually produced a
+  cash value), `missing_dates`, `solver_failed_dates`. Machine-checkable:
   `valid_dates ∪ missing_dates ∪ solver_failed_dates == observed_dates`, the three
-  are **pairwise disjoint**, and `daily_realised_cash_series` dates equal
-  `valid_dates` exactly (counts alone cannot detect an overlapping mis-assignment).
-  An all-failure or empty-`valid_dates` result is *unavailable*, never a €0 series;
-- reproducibility: `source_data_content_hash`, `calculator_version`, and a
-  content `fingerprint` over all of the above.
+  pairwise disjoint, and `daily_realised_cash_series` dates equal `valid_dates`
+  exactly (counts alone cannot detect an overlapping mis-assignment). An
+  all-failure or empty-`valid_dates` result is *unavailable*, never a €0 series;
+- reproducibility: `source_data_content_hash`, `calculator_version`, and a content
+  **`fingerprint` computed with the identical canonical serialization + SHA-256 as
+  the `RunResult` fingerprint** (§4.8) — the nested fingerprint algorithm is not a
+  separate, unspecified one.
 
 `validate()` (§4.6) checks `StrategyRunResult.power_mw == AssetCase.power_mw`
 (and duration/RTE), so the revenue and the asset describe the same battery.
@@ -386,14 +401,20 @@ strategy is the stochastic batch (§5), so **`scenario_count` is not a live doma
 in v1** — the earlier "stochastic cap" is moot. A NaN/Inf/out-of-range value in
 any live scalar is rejected before §6.
 
-**Deterministic fingerprint (Codex review 5).** The `RunResult.input_fingerprint`
-is a `schema_version`-prefixed **SHA-256** over a **canonical serialization** so
-two implementations agree byte-for-byte on the same inputs: keys sorted, dates as
-ISO-8601 `YYYY-MM-DD` strings, enums by **name**, floats via a fixed
-`repr`/`%.12g` formatting, sets serialized as sorted lists, and every case
-included in a fixed order (Asset, Lifecycle, Market+StrategyRunResult fingerprint,
-Valuation, Bootstrap). Nothing outside this canonical form (dict insertion order,
-pandas index identity, object ids) may influence the hash.
+**Deterministic fingerprint (Codex reviews 5–6).** The `RunResult.input_fingerprint`
+is a `schema_version`-prefixed **SHA-256** over a **canonical, lossless
+serialization** so two implementations agree byte-for-byte on the same inputs, and
+distinct inputs never collide: keys sorted; dates as ISO-8601 `YYYY-MM-DD` strings;
+enums by **name**; **floats as their exact IEEE-754 double big-endian 8 bytes
+(`struct.pack(">d", x)`)** — a single lossless encoding, **not** `repr`/`%.12g`
+(which is ambiguous — two options — and lossy: `1234567890123.0` and
+`…124.0` both render `1.23456789012e+12`, so different CapEx would share a
+fingerprint and serve a stale result); sets serialized as sorted lists; and every
+case in a fixed order (Asset, Lifecycle, Market + nested `StrategyRunResult`
+fingerprint, Valuation, Bootstrap). The nested `StrategyRunResult.fingerprint`
+(§4.3) uses this **same** algorithm — there is exactly one fingerprint spec.
+Nothing outside this canonical form (dict insertion order, pandas index identity,
+object ids, NaN payloads) may influence the hash.
 
 ## 5. Cashflow-eligible strategies (producer allowlist / denylist)
 
@@ -424,7 +445,7 @@ this open.
 
 **DA-only parity/reproducibility settings (Codex review 5):** `simulate_replay_batch`
 defaults `mode="DA MILP Replay"`, `soc_init_frac=0.5`, `carry_soc=True`
-(`simulation.py:23-33`) — which is a *different* daily basis from the shipped
+(`simulation.py:379-392`) — which is a *different* daily basis from the shipped
 Revenue tab's standalone ordered-spread days. The `DA_ONLY` adapter therefore
 **pins its call settings** (recorded in provenance) so its series is deterministic
 and reproducible; it does **not** attempt to equal the tab's ordered-spread series
@@ -438,12 +459,14 @@ per-leg `ForecastAudit` (§4.3). Two adapter rules close the last gap:
   data missing/out-of-window (`simulation.py:~1024/1236` aligns missing blocks to
   zero), (b) a valid published zero reserve price, (c) the optimiser choosing
   `0 MW` on valid data. Only (b)/(c) are legitimate `DA_ID_RESERVE_REALISED`
-  results and must carry a **reserve-coverage identity** proving the reserve data
-  covered the window. Case (a) makes the day **excluded** (dropped from
-  `valid_dates`) or the whole result **unavailable** — it is **never** re-emitted
-  as `DA_ID_FORECAST` (that kind is bound exclusively to `PC_ADP_DA_ID`; relabel
-  is forbidden). Producing a genuine DA+ID result requires **re-running**
-  `PC_ADP_DA_ID`, not relabelling.
+  results, and the **`ReserveCoverageAudit`** (§4.3) proves it: a reserve day is
+  cash-valid only when its required 4-hour product blocks are **fully covered**
+  (`missing_blocks == ∅`), which distinguishes (a) a missing block (zero-filled
+  upstream) from (b) a genuine published zero price. Case (a) makes the day
+  **excluded** (dropped from `valid_dates`) or the whole result **unavailable** —
+  it is **never** re-emitted as `DA_ID_FORECAST` (that kind is bound exclusively to
+  `PC_ADP_DA_ID`; relabel is forbidden). Producing a genuine DA+ID result requires
+  **re-running** `PC_ADP_DA_ID`, not relabelling.
 - **The stochastic batch has no adapter.** `simulate_stochastic_da_id_batch`
   *does* accept reserve MW/prices (`simulation.py:1875-1876`), so its realised
   totals can include reserve capacity — but its cockpit-surfaced product is a
@@ -552,10 +575,12 @@ never a failure signal (§4.6).
 15. **All numeric inputs bounded (concrete constants)** — event costs/residuals/
     decommissioning/O&M/CapEx finite ≥ 0, multipliers finite ≥ 0 with year 1 = 1.0
     and full-length, `capacity_restored_frac ∈ [0,1]`, `power_mw/duration_hours > 0`,
-    `0 < RTE ≤ 1`, decay `d ∈ [0,1)` / floor `∈ [0,1]`, `seed` a non-negative int,
-    `n_simulations ∈ [1000, 50000]` (default 5000), `project_life_years ∈
-    [1, MAX_PROJECT_LIFE_YEARS=100]`; a NaN/Inf/out-of-range input is rejected
-    before §6 (§4.2, §4.7, §4.8). No "e.g." constants survive in the locked text.
+    `0 < RTE ≤ 1`, decay `d ∈ [0,1)` / floor `∈ [0,1]`, reserve `availability ∈
+    [0,1]` (default 0.95 — it multiplies into reserve cash, `dispatch.py:429`),
+    `seed` a non-negative int, `n_simulations ∈ [1000, 50000]` (default 5000),
+    `project_life_years ∈ [1, MAX_PROJECT_LIFE_YEARS=100]`; a NaN/Inf/out-of-range
+    input is rejected before §6 (§4.2, §4.7, §4.8). No "e.g." constants survive in
+    the locked text.
 16. **Screening excludes O&M** — `no_lifecycle_cost_screening_npv` is revenue −
     CapEx only (`opex = augment = terminal = 0`); fixed O&M is a lifecycle cash
     cost and appears only in `lifecycle_cash_npv` (§3, §6).
@@ -570,10 +595,14 @@ never a failure signal (§4.6).
 19. **Currency basis matches valuation** — `currency_basis.target_base_year ==
     ValuationCase.base_year` (fail-closed); deflator `factor` finite `> 0` (§4.3,
     §4.4).
-20. **Deterministic fingerprint** — `schema_version`-prefixed SHA-256 over a
-    canonical serialization (sorted keys, ISO dates, enums by name, fixed float
-    format, sorted sets, fixed case order); nothing else influences the hash
-    (§4.8).
+20. **Deterministic, lossless fingerprint** — `schema_version`-prefixed SHA-256
+    over a canonical serialization with floats as exact IEEE-754 8-byte encoding
+    (never a lossy `%.12g`); one spec shared by the `RunResult` and nested
+    `StrategyRunResult` fingerprints; nothing else influences the hash (§4.8).
+21. **Reserve days must be fully covered** — a `DA_ID_RESERVE_REALISED` /
+    `DA_RESERVE_COOPT` day is cash-valid only when its `ReserveCoverageAudit` shows
+    no missing 4-hour blocks; a zero-filled missing block never passes as a valid
+    low-reserve day (§4.3, §5).
 
 ## 8. Rejected alternatives
 
@@ -651,6 +680,16 @@ never a failure signal (§4.6).
 - **"e.g." simulation bounds and an unpinned fingerprint.** Locked to
   `[1000, 50000]` default 5000 and a canonical-serialization SHA-256; a locked
   contract carries no example constants or non-deterministic hash (Codex review 5).
+- **A lossy/ambiguous float fingerprint (`repr` or `%.12g`).** `%.12g` collides
+  distinct CapEx (`…123.0`/`…124.0` → same string) and `repr`-vs-`%.12g` is two
+  encodings; pinned to exact IEEE-754 bytes, one spec for both fingerprints (Codex
+  review 6).
+- **A "reserve-coverage identity" named but never defined.** §5 referenced it with
+  no schema field; added `ReserveCoverageAudit` (required/present/missing 4-hour
+  blocks) with a full-coverage rule (Codex review 6).
+- **Unbounded reserve `availability`.** It multiplies straight into reserve cash
+  (`dispatch.py:429`), so `availability=2` doubled revenue and passed; pinned to
+  finite `[0,1]`, default 0.95 (Codex review 6).
 - **Endogenous fade → augmentation / a fade-driven revenue multiplier.**
   Deferred to v1.1; v1 augmentation is a dated schedule with a declared
   maintenance basis.
@@ -667,9 +706,11 @@ never a failure signal (§4.6).
   exclusion + no-relabel/degraded-reserve-excluded, walk-forward gate, three-state
   `capacity_maintenance_basis` + schedule consistency (source/as-of required;
   `UNKNOWN`→unavailable), augmentation admissibility, the audit date-set partition
-  (disjoint + covering), `currency_basis.target_base_year == base_year`, all-input
+  (disjoint + covering), `ReserveCoverageAudit` full-coverage for reserve days,
+  `availability ∈ [0,1]`, `currency_basis.target_base_year == base_year`, all-input
   domains (concrete constants), fail-closed, engineering match, floor-not-consumed,
-  decay-mode gate, immutable tuple series, fingerprint determinism.
+  decay-mode gate, immutable tuple series, and the lossless IEEE-754
+  canonical-serialization fingerprint (one spec for both fingerprints).
 - **PC-B** — bootstrap + lifecycle cash-flow + both NPV **distributions** (pure
   calc). Pins: no-shadow-wear, gross basis, VOM-once, no MW re-scale, **screening
   excludes O&M**, the per-draw `lifecycle − screening` identity, year-by-year
@@ -774,3 +815,19 @@ real, so they were fixed):
 26. **Concrete constants + deterministic fingerprint** — `n_simulations ∈
     [1000, 50000]` default 5000, `MAX_PROJECT_LIFE_YEARS = 100`, `scenario_count`
     N/A in v1; SHA-256 over a canonical serialization (§4.8).
+
+Resolved in Codex review round 6 (final enforceability closure — dual co-review
+of `7baf26c`: Gemini APPROVE, Codex CHANGES REQUESTED on three real gaps, two of
+them defects introduced by the round-5 edits):
+
+27. **Lossless fingerprint** — floats are exact IEEE-754 8-byte encoding, not the
+    ambiguous/lossy `repr`/`%.12g` (which collided distinct CapEx); one spec shared
+    by the `RunResult` and nested `StrategyRunResult` fingerprints (§4.8).
+28. **`ReserveCoverageAudit` is a real field** — required/present/missing 4-hour
+    block sets; a reserve day is cash-valid only when fully covered, so a
+    zero-filled missing block cannot pass as a valid low-reserve day (§4.3, §5).
+29. **Reserve `availability` bounded** — finite `[0,1]` (default 0.95); it
+    multiplies into reserve cash (`dispatch.py:429`), so an out-of-range value can
+    no longer inflate revenue past validation (§4.3, red-line #15).
+30. **Wording/citation nits** — the audit is `observed_dates` (universe) + a
+    three-set partition; the replay-defaults citation is `simulation.py:379-392`.
