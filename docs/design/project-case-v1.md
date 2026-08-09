@@ -1,12 +1,14 @@
 # Project Case v1 — unified pre-tax unlevered lifecycle cash NPV
 
 Status: **candidate** (design-contract round — NOT locked. Revised after Codex
-artifact review rounds 1–7 and a Gemini adversarial review. Gemini has APPROVE'd
-the last three hashes; Codex's findings have narrowed from architecture to
-implementation-grade enforcement (round 7 on `d39e8cb`: reserve-coverage per-day
-partition, complete-day classification, canonical-CBOR serialization) — all closed
-here. Pending a fresh co-review of THIS commit by both Codex and Gemini — only a
-dual APPROVE on the same hash flips `Status: locked`.)
+artifact review rounds 1–8 and a Gemini adversarial review. Gemini has APPROVE'd
+four consecutive hashes; round 8 closed the last four contract-level items the
+user's Codex raised on `94241a5` (fingerprint self-contradiction, expected-grid
+completeness, DA-only `carry_soc=False`, floor out of `RunResult`). The final
+co-review applies the **§11 blocking bar** — a finding blocks only if it changes an
+output number, cash basis, eligible dates, available/unavailable status, public
+schema/fingerprint, or a red-line; everything else is non-blocking PC-A/PC-B
+implementation debt. Pending that co-review of THIS commit.)
 
 Decision date: 2026-08-09
 
@@ -127,8 +129,10 @@ RunResult (immutable, fingerprinted, schema-versioned)
 ├── cashflow table     (year → revenue draw stats, opex, augmentation, residual, net, PV)
 ├── no_lifecycle_cost_screening_npv  {p10,p50,p90,prob_positive}
 ├── lifecycle_cash_npv          {p10,p50,p90,prob_positive}
-├── floor_comparator?           (external, never summed into the NPVs)
 └── provenance         (per-case sources + solver audit + red-line assertions held)
+
+FloorComparatorResult (separate; NOT part of RunResult or its fingerprint; §4.5)
+└── the wear-net contracted-floor overlay, a presentation-only comparator
 ```
 
 ### 4.1 `AssetCase` — engineering nameplate + cash O&M
@@ -236,9 +240,10 @@ It carries:
   (`{method, vintage, factor}` with `factor` finite `> 0`) the adapter applied to
   convert historical settlement EUR to base-year real EUR, **or** the explicit
   screening assumption `source EUR treated as base-year real` — never a silent mix;
-- kind-specific provenance: a **`ForecastAudit`** per forecast leg (DA and IDA
-  separately, not one `walk_forward` label) carrying `forecast_mode` + bucket +
-  deadband; `reserve_product` + `reserve_source` + `availability` (validated
+- kind-specific provenance: a **`ForecastAudit`** per forecast leg — DA, IDA, and
+  (for `DA_ID_RESERVE_REALISED`) the **reserve-price forecast** leg separately, not
+  one `walk_forward` label — carrying `forecast_mode` + bucket + deadband;
+  `reserve_product` + `reserve_source` + `availability` (validated
   **finite and ∈ [0, 1]**, default `config.ANCILLARY_CAPACITY_AVAILABILITY = 0.95`
   — it multiplies straight into reserve cash at `dispatch.py:429`, so an
   out-of-range `availability` would inflate revenue and must be rejected, Codex
@@ -258,19 +263,25 @@ It carries:
   reserve-cash-valid **only if `missing_blocks == ∅` AND `present_blocks ==
   required_blocks`**; any other day is `missing_dates` (or the result is
   unavailable). This is what the §5 no-relabel rule refers to;
-- a **`CoverageAudit`** (per `dispatch-failure-contract-v2`): a canonical
-  **`observed_dates`** universe partitioned by three **immutable, pairwise-disjoint
-  canonical date sets** — `valid_dates` (the local dates that actually produced a
-  cash value), `missing_dates`, `solver_failed_dates`. Machine-checkable:
-  `valid_dates ∪ missing_dates ∪ solver_failed_dates == observed_dates`, the three
-  pairwise disjoint, and `daily_realised_cash_series` dates equal `valid_dates`
-  exactly (counts alone cannot detect an overlapping mis-assignment). **A day is
-  `valid` only if it is a complete, regular local calendar day** (full expected
-  interval grid, DST-safe per `_is_regular_utc_day`); an incomplete/edge day (e.g.
-  a clean 12-hour boundary day that `solve_joint_capacity_batch` would accept —
-  `dispatch.py:490` rejects NaNs but not short days) is `missing_dates`, never
-  bootstrapped as one full daily observation. An all-failure or empty-`valid_dates`
-  result is *unavailable*, never a €0 series;
+- a **`CoverageAudit`** (per `dispatch-failure-contract-v2`): the universe
+  **`observed_dates`** is the `evaluation_dates` generated from
+  `sample_window + timezone` (**not** the dates that happen to survive in the data,
+  so a fully-missing day still appears in the universe and cannot be silently
+  dropped before classification). It is partitioned into three **immutable,
+  pairwise-disjoint canonical date sets** — `valid_dates`, `missing_dates`,
+  `solver_failed_dates`. Machine-checkable: `valid_dates ∪ missing_dates ∪
+  solver_failed_dates == observed_dates`, pairwise disjoint, and
+  `daily_realised_cash_series` dates equal `valid_dates` exactly. **Completeness is
+  checked against an EXPECTED grid, not inferred cadence:** a day is `valid` only if
+  its interval timestamps equal the expected set built from
+  `(zone, delivery_date, resolution registry)` and exact-matched. Delegating to
+  `_is_regular_utc_day` (`simulation.py:848`) is insufficient — it infers cadence
+  from surviving rows via `np.diff`, so a 12-row `00:00…22:00` every-2-hours day
+  passes as "regular". **Classification order is pinned:** (1) data-completeness
+  gate (expected-grid match) and (2) reserve-coverage gate (§ `ReserveCoverageAudit`)
+  run first → a failing day is `missing_dates`; only a day that PASSES the data
+  gates and then fails the solver is `solver_failed_dates`. An all-failure or
+  empty-`valid_dates` result is *unavailable*, never a €0 series;
 - reproducibility: `source_data_content_hash`, `calculator_version`, and a content
   **`fingerprint` computed with the identical canonical serialization + SHA-256 as
   the `RunResult` fingerprint** (§4.8) — the nested fingerprint algorithm is not a
@@ -325,10 +336,15 @@ Feeding that into cash NPV would re-import the linear shadow-wear deduction
 through the `max(M, F)` top-up — re-creating the exact CapEx-vs-wear double-count
 economic-semantics-v1 removed.
 
-Therefore in v1 `ContractCase` is **not** part of the `ProjectCase` aggregator.
-The floor is rendered as a separate `floor_comparator` beside the NPV
-distributions and is **never** summed into them. ProjectCase must not read
-`floor_protected_cashflow_eur` / `floor_protected_pv_eur`.
+Therefore in v1 `ContractCase` is **not** part of the `ProjectCase` aggregator,
+and — for the same reason — its output is **not** carried inside `RunResult`
+either (Codex review 8): putting a `floor_comparator?` field in the only object
+UI/export reads would give the floor an implicit home with no ProjectCase owner
+and no place in the `input_fingerprint`. Instead the overlay is a **separate
+`FloorComparatorResult`** (a presentation sibling, its own inputs and provenance),
+rendered beside the NPV distributions and **never** summed into them. ProjectCase
+must not read `floor_protected_cashflow_eur` / `floor_protected_pv_eur`, and
+`RunResult` neither contains nor fingerprints the floor.
 
 v1.1 hook (not built): a `ContractCase.settlement_basis` recomputing
 `max(M_t, F_t)` per year from a **gross** cash merchant base, which would then be
@@ -412,24 +428,34 @@ strategy is the stochastic batch (§5), so **`scenario_count` is not a live doma
 in v1** — the earlier "stochastic cap" is moot. A NaN/Inf/out-of-range value in
 any live scalar is rejected before §6.
 
-**Deterministic fingerprint (Codex reviews 5–7).** The `RunResult.input_fingerprint`
+**Deterministic fingerprint (Codex reviews 5–8).** The `RunResult.input_fingerprint`
 is **SHA-256** over a **complete canonical binary serialization** so two
 independent implementations produce the identical byte stream (and hence hash) for
-the same inputs, with no structural collisions. v1 pins **canonical CBOR
-(RFC 8949 §4.2 deterministic encoding)** — which fully specifies type tags,
-integer/string/container encoding, length framing, and **sorted map keys** — as
-the wire format, rather than an ad-hoc rule list (an unframed field concatenation
-could hash `["a","b"]` and `["ab"]` alike). On top of the CBOR core three things
-are pinned: **float64 is always the 64-bit double form** (CBOR major type 7,
-additional 27 — never CBOR's shortest-float, so encoding stays lossless and
-collision-free, e.g. `…123.0` ≠ `…124.0`); **dates are tagged text strings**
-(ISO-8601 `YYYY-MM-DD`) and **enums are tagged by name**; and the whole map is
-wrapped with a `schema_version` field so a schema change cannot alias an old hash.
-Cases serialize in a fixed order (Asset, Lifecycle, Market + nested
-`StrategyRunResult` fingerprint, Valuation, Bootstrap). The nested
-`StrategyRunResult.fingerprint` (§4.3) uses this **same** format — exactly one
-spec. Nothing outside this canonical form (dict insertion order, pandas index
-identity, object ids, NaN payloads) may influence the hash.
+the same inputs, with no structural collisions. v1 pins a **named local profile
+`PC-CBOR-F64-v1`** — it uses CBOR framing (type tags, length-prefixed
+strings/arrays/maps) but deliberately **does not claim RFC 8949 §4.2 *core*
+deterministic encoding**, because that mandates the shortest float that preserves
+value (`§4.2.1`), which conflicts with our lossless-collision-free requirement.
+`PC-CBOR-F64-v1` fully pins every type:
+
+- **float64 always the 64-bit double form** (major type 7, additional 27) — never
+  shortest-float, so `…123.0` ≠ `…124.0`; non-finite floats are disallowed
+  upstream (§4.6) so NaN/Inf never reach the encoder;
+- **integers** as the smallest CBOR unsigned/negative int head (canonical int
+  rule); **map keys sorted** by their encoded bytes; **no CBOR native `set`** —
+  every set is emitted as a **sorted array** (Round 7 dropped this rule; it is
+  restored, else two equal date sets could differ);
+- **dates** as text `YYYY-MM-DD`, **enums by name** as text, **`None`/optional**
+  as a fixed sentinel (absent key ≡ explicit null pinned to one form);
+- the top map is wrapped with a `schema_version` field so a schema bump cannot
+  alias an old hash; cases serialize in a fixed order (Asset, Lifecycle, Market +
+  nested `StrategyRunResult` fingerprint, Valuation, Bootstrap).
+
+The spec ships with **golden test vectors** (input → exact hex hash) so any
+re-implementation is byte-verified. The nested `StrategyRunResult.fingerprint`
+(§4.3) uses this **same** profile — exactly one spec. Nothing outside this
+canonical form (dict insertion order, pandas index identity, object ids) may
+influence the hash.
 
 ## 5. Cashflow-eligible strategies (producer allowlist / denylist)
 
@@ -458,13 +484,24 @@ per-day `degradation_cost_eur` (`simulation.py:81`); the `DA_ONLY` adapter reads
 named red-line, since the vague "realised per-day cash" wording previously left
 this open.
 
-**DA-only parity/reproducibility settings (Codex review 5):** `simulate_replay_batch`
-defaults `mode="DA MILP Replay"`, `soc_init_frac=0.5`, `carry_soc=True`
-(`simulation.py:379-392`) — which is a *different* daily basis from the shipped
-Revenue tab's standalone ordered-spread days. The `DA_ONLY` adapter therefore
-**pins its call settings** (recorded in provenance) so its series is deterministic
-and reproducible; it does **not** attempt to equal the tab's ordered-spread series
-(the parity claim is a pure NPV-kernel test, §3, not "adapter reproduces tab").
+**DA-only adapter settings — concrete pinned values (Codex reviews 5, 8).**
+`simulate_replay_batch` defaults `mode="DA MILP Replay"`, `soc_init_frac=0.5`,
+`carry_soc=True` (`simulation.py:379-392`). The `DA_ONLY` adapter **pins** (and
+records in provenance) the exact values the daily bootstrap requires:
+
+- `mode = "DA MILP Replay"`;
+- **`carry_soc = False`** — this is load-bearing, not cosmetic: `carry_soc=True`
+  transfers stored energy across days, so day *N*'s cash depends on day *N−1*'s
+  ending SoC. Bootstrapping each day's cash **independently** (§6) assumes i.i.d.
+  daily draws, which cross-day carry violates. v1's daily bootstrap therefore
+  **requires** standalone terminal-neutral days (`carry_soc=False`); a carry-over
+  basis would need block/horizon bootstrapping and is out of v1 scope;
+- a pinned `soc_init_frac` (the standalone terminal-neutral value);
+- the **capture haircut** owner is named: it is applied by the adapter (recorded
+  in `cash_basis`, §4.3) exactly once, and PC never re-applies it.
+
+The adapter does **not** attempt to equal the tab's ordered-spread series (the
+parity claim is a pure NPV-kernel test, §3, not "adapter reproduces tab").
 
 `DA_ID_FORECAST` / `DA_ID_RESERVE_REALISED` are **walk-forward only** and record a
 per-leg `ForecastAudit` (§4.3). Two adapter rules close the last gap:
@@ -599,10 +636,13 @@ never a failure signal (§4.6).
 16. **Screening excludes O&M** — `no_lifecycle_cost_screening_npv` is revenue −
     CapEx only (`opex = augment = terminal = 0`); fixed O&M is a lifecycle cash
     cost and appears only in `lifecycle_cash_npv` (§3, §6).
-17. **Audit carries a date-set partition** — `observed_dates` / `valid_dates` /
-    `missing_dates` / `solver_failed_dates` are canonical sets; they partition
-    `observed_dates` (disjoint + covering) and the series equals `valid_dates`; a
-    zero or negative cash value is valid, never a failure signal (§4.3, §4.6).
+17. **Audit partition over an expected universe** — `observed_dates` is the
+    `evaluation_dates` from `sample_window + timezone`; `valid`/`missing`/
+    `solver_failed` partition it (disjoint + covering) and the series equals
+    `valid_dates`. Completeness is an **expected-grid exact match** (from `(zone,
+    date, resolution registry)`), not inferred cadence; classification order is
+    data/reserve gates first, then `solver_failed`. A zero or negative cash value
+    is valid, never a failure signal (§4.3, §4.6).
 18. **One adapter, one field** — each `StrategyKind` binds a fixed
     (`ProducerAdapterId`, source function, per-day cash field, excluded fields)
     tuple with real column names; a degraded reserve→0 run is excluded or
@@ -610,14 +650,22 @@ never a failure signal (§4.6).
 19. **Currency basis matches valuation** — `currency_basis.target_base_year ==
     ValuationCase.base_year` (fail-closed); deflator `factor` finite `> 0` (§4.3,
     §4.4).
-20. **Deterministic, lossless fingerprint** — `schema_version`-prefixed SHA-256
-    over a canonical serialization with floats as exact IEEE-754 8-byte encoding
-    (never a lossy `%.12g`); one spec shared by the `RunResult` and nested
-    `StrategyRunResult` fingerprints; nothing else influences the hash (§4.8).
+20. **Deterministic, lossless fingerprint** — SHA-256 over the named
+    `PC-CBOR-F64-v1` profile (float64 always 64-bit, sets as sorted arrays,
+    `schema_version` wrapper, golden vectors); it does **not** claim RFC 8949 core
+    deterministic encoding (which mandates shortest-float); one spec shared by the
+    `RunResult` and nested `StrategyRunResult` fingerprints (§4.8).
 21. **Reserve days must be fully covered** — a `DA_ID_RESERVE_REALISED` /
     `DA_RESERVE_COOPT` day is cash-valid only when its `ReserveCoverageAudit` shows
-    no missing 4-hour blocks; a zero-filled missing block never passes as a valid
-    low-reserve day (§4.3, §5).
+    `present_blocks == required_blocks` (partition-checked, derived before scalar
+    collapse/fill); a zero-filled missing block never passes as a valid low-reserve
+    day (§4.3, §5).
+22. **Daily-bootstrap i.i.d. basis** — the `DA_ONLY` adapter pins `carry_soc=False`;
+    a cross-day carry basis breaks the independent-daily-draw assumption of §6 and
+    would need block/horizon bootstrapping (out of v1). The capture haircut is
+    applied once by the adapter (§5).
+23. **Floor stays out of `RunResult`** — the wear-net comparator is a separate
+    `FloorComparatorResult`, not a field of the fingerprinted `RunResult` (§4.5).
 
 ## 8. Rejected alternatives
 
@@ -716,8 +764,25 @@ never a failure signal (§4.6).
   requires complete-regular-day classification, else `missing_dates` (Codex review 7).
 - **An under-specified canonical serialization.** Listing sort/float rules still
   let two implementations frame bytes differently (or collide `["a","b"]` vs
-  `["ab"]`); v1 pins **canonical CBOR (RFC 8949 §4.2)** with float64 always 64-bit
-  and a `schema_version` wrapper (Codex review 7).
+  `["ab"]`); v1 pins a complete CBOR-framed profile with `schema_version`
+  (Codex review 7).
+- **Claiming RFC 8949 §4.2 *core* deterministic CBOR while forcing 64-bit
+  floats.** RFC core deterministic mandates shortest-float (§4.2.1), which
+  conflicts with lossless 64-bit; and CBOR has no native set, so the dropped
+  "sets as sorted arrays" rule reopened set-hash divergence. v1 defines its own
+  named `PC-CBOR-F64-v1` profile (not claiming RFC core) + golden vectors, and
+  restores sorted-array sets (Codex review 8).
+- **Delegating day-completeness to `_is_regular_utc_day`.** It infers cadence via
+  `np.diff` (`simulation.py:848`), so a 12-row every-2-hours day passes; v1
+  requires an expected-grid exact match from `(zone, date, resolution registry)`,
+  `observed_dates == evaluation_dates`, and a pinned classification order
+  (Codex review 8).
+- **Leaving the DA-only cash basis at `carry_soc=True`.** Cross-day SoC carry
+  breaks the independent-daily-draw bootstrap; v1 pins `carry_soc=False` and the
+  concrete replay settings (Codex review 8).
+- **A `floor_comparator?` field inside `RunResult`.** It gave the excluded floor
+  an implicit home with no owner and no fingerprint entry; moved to a separate
+  `FloorComparatorResult` (Codex review 8).
 - **Endogenous fade → augmentation / a fade-driven revenue multiplier.**
   Deferred to v1.1; v1 augmentation is a dated schedule with a declared
   maintenance basis.
@@ -874,8 +939,51 @@ Resolved in Codex review round 7 (deep enforceability — dual co-review of
     complete regular local calendar day; a clean 12-hour edge day that
     `solve_joint_capacity_batch` would accept (`dispatch.py:490`) is not
     bootstrapped as a full observation (§4.3).
-33. **Complete canonical serialization** — pinned to canonical CBOR (RFC 8949
-    §4.2) with float64 always 64-bit and a `schema_version` wrapper, so two
-    implementations cannot frame bytes differently or create structural collisions
-    (§4.8).
+33. **Complete canonical serialization** — pinned to a CBOR-framed profile with
+    float64 always 64-bit and a `schema_version` wrapper (refined in round 8 to the
+    named `PC-CBOR-F64-v1`, §4.8).
 34. **Tuple-arity reconciliation** — §8/§10 now say the authoritative §5 5-tuple.
+
+Resolved in Codex review round 8 (narrow contract closure — dual co-review of
+`94241a5`: Gemini APPROVE, the user's Codex CHANGES REQUESTED on four items that
+still change cash results or audit validity):
+
+35. **Fingerprint self-contradiction removed** — RFC 8949 core deterministic
+    mandates shortest-float, conflicting with the forced 64-bit; v1 now names its
+    own `PC-CBOR-F64-v1` profile (no RFC-core claim), restores sets-as-sorted-arrays
+    (CBOR has no native set), and requires golden vectors (§4.8).
+36. **Completeness from an expected grid** — `_is_regular_utc_day` infers cadence
+    and passes a 12-row every-2-hours day; v1 requires an expected-grid exact match
+    from `(zone, date, resolution registry)`, `observed_dates == evaluation_dates`,
+    and a pinned data-gates-before-solver classification order (§4.3).
+37. **DA-only `carry_soc=False` pinned** — cross-day SoC carry breaks the
+    independent-daily-draw bootstrap; concrete replay settings + capture-haircut
+    owner are pinned (§5).
+38. **Floor out of `RunResult`** — the wear-net comparator moves to a separate
+    `FloorComparatorResult`; `RunResult` neither contains nor fingerprints it (§4.5).
+39. **Reserve-price forecast leg audited** — `ForecastAudit` covers the DA, IDA,
+    and reserve-price legs separately for `DA_ID_RESERVE_REALISED` (§4.3).
+
+## 11. Lock exit rule and procedure
+
+To converge (Gemini has APPROVE'd four consecutive hashes while Codex refines
+detail), the final same-hash co-review applies an explicit **blocking bar** — a
+finding blocks the lock **only** if it would change any of:
+
+- an **output number** or the **cash basis** (revenue/opex/augmentation/residual
+  discounting, double-counting, non-additivity);
+- the set of **eligible dates** or a result's **available/unavailable** status;
+- the **public schema, `StrategyKind`, or the fingerprint format**;
+- a **red-line** (§7).
+
+Everything else is recorded as **PC-A/PC-B implementation debt, non-blocking** for
+the contract lock (and handled inside those dual-reviewed PRs): helper placement,
+library choice (e.g. which CBOR encoder), performance, logging/UI copy, test-fixture
+design, and docstring wording.
+
+**Lock procedure** (only when a single hash gets a dual APPROVE, or only
+implementation-debt items remain under the bar above): record
+`approved_content_hash: <that hash>` here, make a **metadata-only** lock commit
+that flips `Status:` to **locked** and relabels §10 from "Open decisions … proposed
+resolutions folded in" to **"Accepted v1 decisions"**, then open the docs-only PR.
+Implementation (PC-A first) starts only after that PR merges.
