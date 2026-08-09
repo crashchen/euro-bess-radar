@@ -1,8 +1,9 @@
 # Project Case v1 — unified pre-tax unlevered lifecycle cash NPV
 
 Status: **candidate** (design-contract round — NOT locked. Revised after Codex
-artifact review rounds 1–2 and a Gemini adversarial review (all `CHANGES
-REQUESTED`); pending a final Codex diff review before `Status: locked`.)
+artifact review rounds 1–3 and a Gemini adversarial review (all `CHANGES
+REQUESTED`); pending a re-review of the round-3 revisions before `Status:
+locked`.)
 
 Decision date: 2026-08-09
 
@@ -64,17 +65,19 @@ v1 reports two figures, each a Monte-Carlo **distribution** (P10 / P50 / P90 /
 `P(NPV>0)`), not a single ambiguous value. Both are built by bootstrapping the
 chosen strategy's **daily realised cash series** (§4.3) with
 `scenario.bootstrap_annual_revenue`, and **both use the same
-`ValuationCase.project_life_years` horizon** so the only difference between them
-is the lifecycle-cost layer (§6):
+`LifecycleCase.project_life_years` horizon and the same per-year projection
+multiplier** (§4.7) so the only difference between them is the lifecycle-cost
+layer (§6):
 
-1. **`No-lifecycle-cost screening NPV`** — the bootstrapped revenue annuity minus
-   upfront CapEx over the project horizon, with the shadow-wear cash deduction
-   held at zero (`cash_npv_includes_shadow_wear=False`, per economic-semantics-v1)
-   and **no** dated lifecycle events. Retained for continuity.
+1. **`No-lifecycle-cost screening NPV`** — the bootstrapped revenue discounted
+   year-by-year with the projection multiplier, minus upfront CapEx over the
+   project horizon, with the shadow-wear cash deduction held at zero
+   (`cash_npv_includes_shadow_wear=False`, per economic-semantics-v1) and **no**
+   dated lifecycle events. Retained for continuity.
 2. **`Pre-tax unlevered lifecycle cash NPV`** — the same bootstrapped revenue
-   annuity over the same horizon, minus upfront CapEx, minus cash fixed O&M,
-   minus the **explicit dated** augmentation/replacement schedule, plus residual
-   value, all discounted. No shadow wear. No tax. No debt.
+   over the same horizon and multiplier, minus upfront CapEx, minus cash fixed
+   O&M, minus the **explicit dated** augmentation/replacement schedule, plus
+   residual value, all discounted year-by-year. No shadow wear. No tax. No debt.
 
 **No general "exact parity" claim.** The shipped Revenue-tab NPV is built on
 DA daily revenue, the sidebar capture haircut, and a *cycle-derived, fractional*
@@ -84,9 +87,12 @@ assertion v1 makes is **kernel-level** (Gemini review): the DA-only adapter's
 annual-revenue distribution, passed through the **same** underlying
 `calculate_npv_distribution` primitive with the tab's own inputs (capture
 haircut and the tab's *fractional* effective life), reproduces the shipped
-screening NPV. That test exercises the shared calculation kernel, **not** a full
-`ProjectCase` (whose integer-life headline is deliberately a distinct figure).
-Every other configuration is a new figure, not a reproduction.
+screening NPV. That test exercises the shipped kernel — which internally uses the
+aggregated `decaying_annuity_pv_factor` — **not** a full `ProjectCase` (whose
+integer-life headline discounts year-by-year, §6). The two coincide for a flat or
+geometric projection over an integer life, but ProjectCase never *depends* on the
+annuity closed form (it would be wrong for a non-geometric multiplier curve or
+lumpy events). Every other configuration is a new figure, not a reproduction.
 
 We deliberately do **not** call figure 2 "bankable NPV." Without tax, debt
 service, DSCR, and financing-fee models it would over-promise. economic-
@@ -144,9 +150,15 @@ capacity_restored_frac, residual_value_eur}`; an end-of-life `residual_value_eur
 and `decommissioning_cost_eur`. LifecycleCase is the **sole owner** of residual,
 disposal, and decommissioning; no other case models them.
 
-Time/units pinned: event `year ∈ 1…project_life_years`; cash timing is
-**end-of-year** (§4.4); all CapEx / O&M / event / residual / decommissioning
-amounts are the same **base-year real EUR** as the ValuationCase. **Residual
+Domains pinned (`validate()`, §4.6): every `cost_eur`, `residual_value_eur`,
+`decommissioning_cost_eur`, `fixed_om_eur_per_mw_yr`, and `installed_capex_eur`
+is **finite and ≥ 0** (a cost/residual is never negative or NaN); event `year` is
+an **integer in `1…project_life_years`**; `capacity_restored_frac ∈ [0, 1]`. A
+NaN/Inf/negative in any of these is rejected — it must never reach the §6 sum.
+
+Time/units pinned: cash timing is **end-of-year** (§4.4); all CapEx / O&M /
+event / residual / decommissioning amounts are the same **base-year real EUR** as
+the ValuationCase. **Residual
 timing (Gemini review):** an augmentation/replacement **event's**
 `residual_value_eur` is the salvage of the equipment that event *replaces*,
 realised as a cash **inflow in the event year** (netted against that event's
@@ -224,17 +236,21 @@ capital counted once as capital.
 
 ### 4.4 `ValuationCase` — discounting (real, unlevered)
 
-Fields: `discount_rate` interpreted as a **real** rate; `base_year` fixing the
-EUR value basis. **Discounting split (Gemini review):** the aggregated annuity
-factor `scenario.decaying_annuity_pv_factor` is a PV *scalar* valid only for a
-smooth (flat or geometric) stream, so it is reused **only** for the
-`No-lifecycle-cost screening NPV` (§3.1, no lumpy events). The
-`Pre-tax unlevered lifecycle cash NPV` contains lumpy `augment_t` / residual
-events, so it is **not** an annuity — PC-B discounts each year's net cash flow
-**explicitly** year-by-year (§6). The per-year projection multiplier is computed
-from the documented spread-decay weight `max((1−d)^(t−1), floor)` (a small
-explicit weight-series helper — the aggregated factor does **not** expose
-per-year weights), never by dividing the scalar factor.
+Fields: `discount_rate` interpreted as a **real** rate — validated finite and
+`> -1` (typical screening range `[0, 1)`; a rate `≤ -1` breaks the discount
+denominator); `base_year` fixing the EUR value basis. **Discounting (Codex review
+3):** **both** ProjectCase NPVs discount each year's net cash flow **explicitly
+year-by-year** (§6) using the per-year projection multiplier (§4.7) — the
+screening NPV simply omits the lifecycle events. This is uniform across all three
+projection modes, including a non-geometric `ExplicitAnnualMultiplierCurve` and
+the lumpy lifecycle stream, neither of which the aggregated
+`scenario.decaying_annuity_pv_factor` scalar can represent. The aggregated factor
+is therefore used in **exactly one place** — the shipped-tab **parity kernel**
+(§3), which reproduces the shipped screening NPV. The per-year multiplier for
+`DAOnlySpreadDecay` is the documented spread-decay weight
+`max((1−d)^(t−1), floor)` from a small explicit weight-series helper (the
+aggregated factor exposes no per-year weights), never obtained by dividing the
+scalar factor.
 **Convention lock:** revenue projection (§4.7) and discounting are both in
 **real, base-year EUR** — decay and discount must not mix a nominal and a real
 convention. Cash timing follows an explicit **end-of-year** convention anchored
@@ -266,12 +282,17 @@ cash-NPV-eligible and rejoin the aggregator.
 ### 4.6 `ProjectCase` aggregator + `RunResult`
 
 `ProjectCase` holds the cases and a `validate()` enforcing: engineering match
-(§4.3); `strategy_id` in the §5 allowlist and its StrategyRunResult
-solver-available with a non-empty valid-day audit; projection mode compatible
-with the strategy (§4.7); every augmentation `year ≤ project_life_years`; CapEx
-matches the sidebar. **Fail-closed:** if the referenced strategy result is
-invalid/unavailable, `validate()` raises — no silent fallback to a lesser
-strategy or to €0 (`dispatch-failure-contract-v2`).
+(§4.3); `strategy_kind` (§4.3) in the §5 allowlist and its StrategyRunResult
+solver-available; projection mode compatible with the strategy (§4.7); the §4.2
+lifecycle domains; and CapEx matches the sidebar. **Series/audit invariant (Codex
+review 3):** the `daily_realised_cash_series` must be **non-empty**, every value
+**finite**, dates **unique**, and the series dates **exactly equal** the audited
+valid days — so an "available" result can never be silently thinned into the
+prohibited €0 fallback that `bootstrap_annual_revenue` would produce if all
+values were non-finite (`scenario.py:128`). **Fail-closed:** if the referenced
+strategy result is invalid/unavailable, or the series/audit invariant fails,
+`validate()` raises — no silent fallback to a lesser strategy or to €0
+(`dispatch-failure-contract-v2`).
 
 `RunResult` is immutable, carries a `schema_version`, is serialisable, and holds
 an `input_fingerprint` over every case **plus the bootstrap `seed`, the
@@ -301,11 +322,12 @@ when `strategy_kind == DA_ONLY`**; every multi-stream strategy is
 - **`DAOnlySpreadDecay`** — the `spread-decay-v1` decayed **weight** (year 1 =
   `1.0`); `DA_ONLY` only. `validate()` rejects it otherwise.
 - **`ExplicitAnnualMultiplierCurve`** — a user-supplied per-year **multiplier**
-  vector, `DA_ONLY` only, constrained to **year 1 = `1.0`** and to cover the
-  **full** `project_life_years`, and carrying a **machine-checkable `source` +
-  `as_of`** (same strictness as the §4.2 capacity assertion; a bare float array
-  is rejected — it would destroy `RunResult` auditability). It scales the annual
-  draw exactly like the other modes (§6). A per-stream decay split, and an
+  vector, `DA_ONLY` only, constrained to **year 1 = `1.0`**, every entry
+  **finite and ≥ 0**, and covering **exactly** `project_life_years` entries, and
+  carrying a **machine-checkable `source` + `as_of`** (same strictness as the
+  §4.2 capacity assertion; a bare float array, a wrong-length vector, or a
+  NaN/negative entry is rejected — it would destroy `RunResult` auditability or
+  break §6). It scales the annual draw exactly like the other modes (§6). A per-stream decay split, and an
   **absolute per-year EUR** revenue curve (with its own uncertainty), are
   deferred — v1's three modes are all "one multiplier × bootstrap draw".
 
@@ -327,8 +349,11 @@ these realised, internally-co-optimised gross totals only:
 - `DA_ID_RESERVE_REALISED` — DA + IDA1 + reserve forecast-driven **realised**
   total: the 9.2b reserve-first sequential heuristic
   (`simulate_sequential_da_id_reserve_batch` / `_REALISTIC_DEFAULT`), **not** the
-  stochastic batch (which is DA+IDA only and emits an ineligible delta) —
-  **walk-forward only**.
+  stochastic batch — **walk-forward only**. (`simulate_stochastic_da_id_batch`
+  *does* accept reserve MW/prices, `simulation.py:1875-1876`, so its realised
+  totals can include reserve capacity; it is nonetheless ineligible because its
+  cockpit-surfaced product is a **policy-value delta**, not a realised total —
+  eligibility is by producer/`StrategyKind`, §4.3, not by stream coverage.)
 
 **No adapter exists** (hence unrepresentable as cash revenue) for: any
 perfect-foresight ceiling (the `_CEILING` / `_TRIPLE_DEFAULT` / `coopt_ceiling*`
@@ -339,8 +364,8 @@ the external-trader benchmark; or any solver-unavailable / no-valid-day result.
 **Forecast-mode rule:** forecast-driven strategies are cash-eligible **only in
 `walk_forward`** mode. `in_sample` is diagnostics-only; `loo` (leave-one-out) is
 an unbiased *skill* estimate that peeks at future days and is therefore too
-optimistic for a cash figure — v1 rejects both for the cash NPV. (This is
-slightly stricter than "reject in-sample only"; see §10.6 for the review.)
+optimistic for a cash figure — v1 rejects both for the cash NPV (walk-forward
+only; resolved §10.6).
 
 ## 6. Lifecycle cash-flow construction
 
@@ -359,14 +384,16 @@ net_{d,t}     = revenue_{d,t} − opex_t − augment_t + terminal_t
 ```
 
 `lifecycle_cash_npv` for draw `d` is the **explicit year-by-year** sum
-`−installed_capex_eur + Σ_{t=1..L} net_{d,t} / (1+discount_rate)^t` (no annuity
-factor — the lumpy events forbid it, §4.4); over all draws this yields the
-P10/P50/P90/`P(NPV>0)` distribution. `no_lifecycle_cost_screening_npv` is the
-smooth-stream case (no dated events) and **does** reuse the aggregated
-`decaying_annuity_pv_factor` over the same integer horizon, so the two figures
-differ only by the lifecycle-cost layer (§3). Shadow wear appears **nowhere**;
-VOM is not re-deducted; the series is not re-scaled by MW. All cash amounts are
-base-year real EUR (§4.4).
+`−installed_capex_eur + Σ_{t=1..L} net_{d,t} / (1+discount_rate)^t`; over all
+draws this yields the P10/P50/P90/`P(NPV>0)` distribution.
+`no_lifecycle_cost_screening_npv` is the **same** year-by-year sum with
+`augment_t = terminal_t = 0` (no dated events), so the two figures differ only by
+the lifecycle-cost layer (§3) **by construction** — same bootstrap draws, same
+`projection_multiplier_t`, same horizon, same discounting. Neither uses the
+aggregated annuity factor (it cannot express a non-geometric multiplier curve or
+lumpy events, §4.4); that factor lives only in the parity kernel (§3). Shadow
+wear appears **nowhere**; VOM is not re-deducted; the series is not re-scaled by
+MW. All cash amounts are base-year real EUR (§4.4).
 
 ## 7. Red lines
 
@@ -395,16 +422,23 @@ base-year real EUR (§4.4).
    multiplier on a composite total conflates stream-specific cannibalisation.
 10. **Forecast = walk-forward** for any cash-eligible forecast-driven strategy;
     `loo` and `in_sample` are ineligible for the cash NPV.
-11. **Fail-closed** — an invalid/unavailable strategy raises; no silent fallback,
-    no €0 substitution.
+11. **Fail-closed** — an invalid/unavailable strategy, or a series that is empty /
+    non-finite / not exactly the audited valid days, raises; no silent fallback,
+    no €0 substitution (never the empty-bootstrap zero, §4.6).
 12. **One real, base-year-EUR convention** — all CapEx / O&M / events / residual /
-    decommissioning and the discount rate share the same base-year real EUR; the
-    daily series is an immutable `(date, value)` tuple, never a mutable Series.
+    decommissioning and the discount rate (finite, `> -1`) share the same
+    base-year real EUR; the daily series is an immutable `(date, value)` tuple,
+    never a mutable Series.
 13. **CapEx once** — single sidebar source.
-14. **Lifecycle NPV is discounted year-by-year** — the aggregated annuity factor
-    is used only for the smooth screening NPV; the lumpy lifecycle stream is
-    summed `Σ net_t/(1+r)^t` explicitly (§4.4, §6). Event salvage is an inflow in
-    the event year; terminal residual/decommissioning only in year `L`.
+14. **Both NPVs discounted year-by-year** — neither uses the aggregated annuity
+    factor (it cannot express a non-geometric multiplier or lumpy events); that
+    factor lives only in the parity kernel (§3). The two NPVs differ only by the
+    lifecycle-cost layer, by construction (§6). Event salvage is an inflow in the
+    event year; terminal residual/decommissioning only in year `L`.
+15. **All numeric inputs bounded** — event costs/residuals/decommissioning/O&M/
+    CapEx finite ≥ 0, multipliers finite ≥ 0 with year 1 = 1.0 and full-length,
+    `capacity_restored_frac ∈ [0,1]`; a NaN/Inf/out-of-range input is rejected
+    before §6 (§4.2, §4.7).
 
 ## 8. Rejected alternatives
 
@@ -435,9 +469,19 @@ base-year real EUR (§4.4).
 - **A single decay/multiplier on a multi-stream total.** Conflates DA and
   reserve/IDA cannibalisation physics; non-flat projections are DA-only
   (Gemini review).
-- **An annuity PV factor for the lifecycle NPV.** Invalid for lumpy
-  augmentation/residual events; the lifecycle NPV is discounted year-by-year
-  (Gemini review).
+- **An annuity PV factor for either ProjectCase NPV.** It cannot express a
+  non-geometric `ExplicitAnnualMultiplierCurve` or lumpy events, and splitting
+  the two NPVs across annuity-vs-explicit paths broke the "differ only by
+  lifecycle cost" guarantee; **both** NPVs now discount year-by-year and the
+  factor is confined to the parity kernel (Codex review 3).
+- **Unbounded numeric inputs.** `discount_rate ≤ -1`, `cost_eur = NaN`, or a
+  `[1, NaN]` multiplier satisfied the prose but broke §6 — v1 pins finite/sign
+  domains and rejects at `validate()` (Codex review 3).
+- **Relying on the audit flag alone for the fail-closed guarantee.**
+  `bootstrap_annual_revenue` silently drops non-finite values and returns a €0
+  distribution, so an "available" audit could become the prohibited €0 fallback;
+  v1 requires the series be non-empty/finite/unique and exactly the valid days
+  (Codex review 3).
 - **Endogenous fade → augmentation / a fade-driven revenue multiplier.**
   Deferred to v1.1; v1 augmentation is a dated schedule with a declared
   maintenance basis.
@@ -452,9 +496,11 @@ base-year real EUR (§4.4).
   augmentation admissibility, fail-closed, engineering match, floor-not-consumed,
   decay-mode gate, immutable tuple series.
 - **PC-B** — bootstrap + lifecycle cash-flow + both NPV **distributions** (pure
-  calc). Pins: no-shadow-wear, gross basis, VOM-once, no MW re-scale, projection
-  multipliers (year 1 = 1.0), terminal-year residual/decommissioning, dated
-  augmentation timing, and the narrow **DA-only** screening-NPV parity (§3).
+  calc). Pins: no-shadow-wear, gross basis, VOM-once, no MW re-scale, year-by-year
+  discounting for both NPVs (annuity factor only in the parity kernel), projection
+  multipliers (year 1 = 1.0, finite ≥ 0, full-length), event-salvage vs
+  terminal-year residual/decommissioning, input-domain rejection, and the narrow
+  **DA-only kernel** screening-NPV parity (§3).
 - **PC-C** — Revenue-tab/cockpit UI + Excel export (RunResult-driven,
   self-documenting assumptions sheet; floor rendered as separate comparator).
 - **PC-D (v1.1)** — `ContractCase.settlement_basis` gross floor composition,
@@ -487,7 +533,24 @@ Resolved in the Gemini adversarial round:
    at the shared `calculate_npv_distribution` **kernel** with the tab's own
    (fractional) effective life; the integer-life `ProjectCase` headline is a
    distinct figure and makes no cross-parity claim (§3).
-10. **Lifecycle discounting method** — *resolved:* explicit year-by-year sum for
-    the lumpy lifecycle NPV; the annuity factor is screening-only (§4.4, §6).
+10. **Lifecycle discounting method** — *resolved (Codex round 3):* **both** NPVs
+    discount year-by-year with the shared multiplier; the annuity factor is
+    confined to the parity kernel (§3, §4.4, §6). (Superseded the Gemini-round
+    "screening-only annuity" split, which broke the ExplicitAnnualMultiplierCurve
+    screening path.)
 11. **Event vs terminal residual** — *resolved:* event salvage is an inflow in
     the event year; terminal residual/decommissioning only in year `L` (§4.2, §6).
+
+Resolved in Codex review round 3 (validation/consistency closure):
+
+12. **Input domains** — all cost/residual/O&M/CapEx finite ≥ 0; `discount_rate`
+    finite `> -1`; multipliers finite ≥ 0, year 1 = 1.0, full-length (§4.2, §4.4,
+    §4.7).
+13. **Series/audit invariant** — the daily series must be non-empty, finite,
+    unique-dated, and exactly the audited valid days, so the empty-bootstrap €0
+    can never masquerade as a result (§4.6).
+14. **Identifier ownership** — `project_life_years` on `LifecycleCase`;
+    `strategy_kind` (not `strategy_id`) is the validated identity (§3, §4.6).
+15. **Stochastic-batch eligibility rationale** — ineligible because it surfaces a
+    policy-value **delta**, not because it is DA+IDA-only (it can carry reserve),
+    §5.
