@@ -1,9 +1,11 @@
 # Project Case v1 — unified pre-tax unlevered lifecycle cash NPV
 
 Status: **candidate** (design-contract round — NOT locked. Revised after Codex
-artifact review rounds 1–4 and a Gemini adversarial review (all `CHANGES
-REQUESTED`); pending a co-review of THIS commit by both Codex and Gemini — only a
-dual APPROVE on the same hash flips `Status: locked`.)
+artifact review rounds 1–5 and a Gemini adversarial review. Round 5 closed the
+enforceability gaps two independent Codex passes raised on `629088d` (Gemini
+APPROVE'd that hash, but the field-name defects were real). Pending a fresh
+co-review of THIS commit by both Codex and Gemini — only a dual APPROVE on the
+same hash flips `Status: locked`.)
 
 Decision date: 2026-08-09
 
@@ -79,20 +81,23 @@ layer (§6):
    O&M, minus the **explicit dated** augmentation/replacement schedule, plus
    residual value, all discounted year-by-year. No shadow wear. No tax. No debt.
 
-**No general "exact parity" claim.** The shipped Revenue-tab NPV is built on
-DA daily revenue, the sidebar capture haircut, and a *cycle-derived, fractional*
-effective life — whereas `project_life_years` is a positive **integer** (§4.2),
-so a full ProjectCase run cannot reproduce the tab in general. The only parity
-assertion v1 makes is **kernel-level** (Gemini review): the DA-only adapter's
-annual-revenue distribution, passed through the **same** underlying
-`calculate_npv_distribution` primitive with the tab's own inputs (capture
-haircut and the tab's *fractional* effective life), reproduces the shipped
-screening NPV. That test exercises the shipped kernel — which internally uses the
-aggregated `decaying_annuity_pv_factor` — **not** a full `ProjectCase` (whose
-integer-life headline discounts year-by-year, §6). The two coincide for a flat or
-geometric projection over an integer life, but ProjectCase never *depends* on the
-annuity closed form (it would be wrong for a non-geometric multiplier curve or
-lumpy events). Every other configuration is a new figure, not a reproduction.
+**No general "exact parity" claim, and the parity test is a pure NPV-kernel test
+(Codex review 5).** The shipped Revenue-tab NPV is built on DA **ordered-spread**
+daily revenue (`analytics.calculate_daily_spreads` /
+`estimate_annual_arbitrage_revenue`), the sidebar capture haircut, and a
+*cycle-derived, fractional* effective life — whereas the `DA_ONLY` adapter's daily
+series comes from the **MILP replay** (`simulate_replay_batch`, §5) and
+`project_life_years` is a positive **integer** (§4.2), so a full ProjectCase run
+does not reproduce the tab. The only parity assertion v1 makes is about the
+shared **NPV primitive itself**: feeding an **identical annual-revenue array**
+into `scenario.calculate_npv_distribution` with the tab's own capture/effective-
+life inputs returns the shipped screening NPV. That test pins the kernel — which
+internally uses the aggregated `decaying_annuity_pv_factor` — and is **independent
+of which adapter produced ProjectCase's daily series** (it does not run the
+`DA_ONLY` MILP adapter at all). ProjectCase's own headline discounts year-by-year
+(§6) and never depends on the annuity closed form (wrong for a non-geometric
+multiplier curve or lumpy events). Every ProjectCase configuration is a new
+figure, not a reproduction of the tab.
 
 We deliberately do **not** call figure 2 "bankable NPV." Without tax, debt
 service, DSCR, and financing-fee models it would over-promise. economic-
@@ -224,22 +229,24 @@ It carries:
   whether the **capture haircut** and **liquidity cap** are already applied
   (so PC never re-applies either);
 - engineering binding: `power_mw`, `duration_hours`, `round_trip_efficiency`;
-- market binding: `zone`, `sample_window`; a **`currency_basis`** stating either a
-  recorded `deflator` the adapter applied to convert historical settlement EUR to
-  ValuationCase base-year real EUR, **or** the explicit screening assumption
-  `source EUR treated as base-year real` — never a silent mix (§4.4);
+- market binding: `zone`, `sample_window`; a **`currency_basis`** with a
+  `target_base_year` (which `validate()` requires to equal `ValuationCase.base_year`
+  — a mismatch is fail-closed, §4.4) and **either** a recorded `deflator`
+  (`{method, vintage, factor}` with `factor` finite `> 0`) the adapter applied to
+  convert historical settlement EUR to base-year real EUR, **or** the explicit
+  screening assumption `source EUR treated as base-year real` — never a silent mix;
 - kind-specific provenance: a **`ForecastAudit`** per forecast leg (DA and IDA
   separately, not one `walk_forward` label) carrying `forecast_mode` + bucket +
-  deadband; `reserve_product` + `reserve_source` + `availability`; stochastic
-  `seed` + `scenario_count` + `tie_break_fallback` (where applicable);
-- a **`CoverageAudit`** (per `dispatch-failure-contract-v2`): `observed_days` /
-  `solver_failed_days` / `missing_days` counts, per-day failure details, **and an
-  immutable canonical `valid_dates`** (the sorted set of local calendar dates that
-  actually produced a cash value). The audit self-checks
-  `observed = len(valid_dates) + missing + solver_failed`, the three date sets are
-  mutually exclusive, and `daily_realised_cash_series` dates equal `valid_dates`
-  exactly. An all-failure or empty-`valid_dates` result is *unavailable*, never a
-  €0 series;
+  deadband; `reserve_product` + `reserve_source` + `availability`; (scenario
+  provenance does not apply — no v1-eligible strategy is the stochastic batch, §5);
+- a **`CoverageAudit`** (per `dispatch-failure-contract-v2`): three **immutable
+  canonical date sets** — `observed_dates`, `valid_dates` (the local dates that
+  actually produced a cash value), `missing_dates`, `solver_failed_dates` — plus
+  per-day failure details. The audit is machine-checkable:
+  `valid_dates ∪ missing_dates ∪ solver_failed_dates == observed_dates`, the three
+  are **pairwise disjoint**, and `daily_realised_cash_series` dates equal
+  `valid_dates` exactly (counts alone cannot detect an overlapping mis-assignment).
+  An all-failure or empty-`valid_dates` result is *unavailable*, never a €0 series;
 - reproducibility: `source_data_content_hash`, `calculator_version`, and a
   content `fingerprint` over all of the above.
 
@@ -270,8 +277,11 @@ scalar factor.
 **real, base-year EUR** — decay and discount must not mix a nominal and a real
 convention. The historical StrategyRunResult cash is reconciled to this basis via
 the `StrategyRunResult.currency_basis` (§4.3): either the adapter applied a
-recorded `deflator`, or the explicit screening assumption "source EUR treated as
-base-year real" is stamped — a silent mix is rejected. In v1 the **COD and the
+recorded `deflator` (`{method, vintage, factor > 0}`), or the explicit screening
+assumption "source EUR treated as base-year real" is stamped — a silent mix is
+rejected. **`validate()` requires `currency_basis.target_base_year ==
+ValuationCase.base_year`** (fail-closed): a result deflated to a different base
+year can never be discounted against this valuation. In v1 the **COD and the
 valuation date are the same date** (year 0); a separate pre-COD construction
 schedule is out of scope. Cash timing follows an explicit **end-of-year**
 convention; year 0 = `−installed_capex_eur`.
@@ -304,15 +314,16 @@ cash-NPV-eligible and rejoin the aggregator.
 (§4.3); `strategy_kind` (§4.3) in the §5 allowlist and its StrategyRunResult
 solver-available; projection mode compatible with the strategy (§4.7); the §4.2
 lifecycle domains; and CapEx matches the sidebar. **Series/audit invariant (Codex
-reviews 3–4):** `daily_realised_cash_series` must be **non-empty**, every value
+reviews 3–5):** `daily_realised_cash_series` must be **non-empty**, every value
 **finite**, dates **unique**, and the series dates must **exactly equal**
-`CoverageAudit.valid_dates` (§4.3); the audit's own count identity
-(`observed = len(valid_dates) + missing + solver_failed`, mutually-exclusive date
-sets) must hold. This closes the hole where an "available" result is silently
-thinned into the prohibited €0 fallback that `bootstrap_annual_revenue` produces
-when all values are non-finite (`scenario.py:128`). A **zero or negative** cash
-value is a legitimate market outcome and is **never** treated as failure — the
-gate is finiteness and date-set identity, never `value == 0`. **Fail-closed:** if
+`CoverageAudit.valid_dates` (§4.3); the audit's **date-set partition** must hold —
+`valid_dates ∪ missing_dates ∪ solver_failed_dates == observed_dates` with the
+three **pairwise disjoint** (canonical date sets, not counts, so an overlapping
+mis-assignment cannot pass). This closes the hole where an "available" result is
+silently thinned into the prohibited €0 fallback that `bootstrap_annual_revenue`
+produces when all values are non-finite (`scenario.py:128`). A **zero or negative**
+cash value is a legitimate market outcome and is **never** treated as failure —
+the gate is finiteness and date-set identity, never `value == 0`. **Fail-closed:** if
 the referenced strategy result is invalid/unavailable, or the series/audit
 invariant fails, `validate()` raises — no silent fallback to a lesser strategy or
 to €0 (`dispatch-failure-contract-v2`).
@@ -359,18 +370,30 @@ when `strategy_kind == DA_ONLY`**; every multi-stream strategy is
 
 The bootstrap `seed` and `n_simulations` are not free-floating fingerprint
 entries; they are a typed, owned case so their domains are validated and their
-values are reproducible. Fields: `seed` (a **non-negative int**; `bool`/`None`/
-float rejected — `True` must not slip in as `1`); `n_simulations` (a positive int
-in `[MIN_SIMULATIONS, MAX_SIMULATIONS]`, e.g. `[1000, 100000]`, bounding compute);
-`bootstrap_algorithm_version`. All three enter the `RunResult` fingerprint (§4.6).
+values are reproducible. Fields (concrete locked constants, Codex review 5 — no
+"e.g."): `seed` (a **non-negative int**; `bool`/`None`/float rejected — `True`
+must not slip in as `1`); `n_simulations` (a positive int in
+`[MIN_SIMULATIONS, MAX_SIMULATIONS] = [1000, 50000]`, **default 5000** to match
+the shipped `scenario.bootstrap_annual_revenue`); `bootstrap_algorithm_version`.
+All three enter the `RunResult` fingerprint (§4.6).
 
 **Remaining numeric domains (Codex review 4).** `validate()` also bounds every
 other live scalar so red-line #15 ("all numeric inputs bounded") is real, not
 aspirational: `AssetCase.power_mw > 0`, `duration_hours > 0`,
 `0 < round_trip_efficiency ≤ 1`; `DAOnlySpreadDecay` `annual_decay_rate ∈ [0, 1)`
-and `decay_floor_share ∈ [0, 1]` (the `spread-decay-v1` domains); any
-`StrategyRunResult.scenario_count` a positive int within the stochastic cap. A
-NaN/Inf/out-of-range value in any of these is rejected before §6.
+and `decay_floor_share ∈ [0, 1]` (the `spread-decay-v1` domains). No v1-eligible
+strategy is the stochastic batch (§5), so **`scenario_count` is not a live domain
+in v1** — the earlier "stochastic cap" is moot. A NaN/Inf/out-of-range value in
+any live scalar is rejected before §6.
+
+**Deterministic fingerprint (Codex review 5).** The `RunResult.input_fingerprint`
+is a `schema_version`-prefixed **SHA-256** over a **canonical serialization** so
+two implementations agree byte-for-byte on the same inputs: keys sorted, dates as
+ISO-8601 `YYYY-MM-DD` strings, enums by **name**, floats via a fixed
+`repr`/`%.12g` formatting, sets serialized as sorted lists, and every case
+included in a fixed order (Asset, Lifecycle, Market+StrategyRunResult fingerprint,
+Valuation, Bootstrap). Nothing outside this canonical form (dict insertion order,
+pandas index identity, object ids) may influence the hash.
 
 ## 5. Cashflow-eligible strategies (producer allowlist / denylist)
 
@@ -379,31 +402,52 @@ consumer-attached label. The strategy-comparison table (`strategy_compare.py`)
 mixes totals, ceilings, and deltas in one frame, so it is never a ProjectCase
 input.
 
-**A `StrategyKind` alone is not enough** (Codex review 4): one producer function
-returns realised, ceiling, and delta figures side by side, so a mislabelled
-column could still reach the cash line. Each adapter is therefore a pinned
-4-tuple `ProducerAdapterId ↔ StrategyKind ↔ source function ↔ exact output field`,
-and the adapter reads **only** that field:
+**A `StrategyKind` alone is not enough** (Codex reviews 4–5): one producer
+function returns realised, ceiling, and delta figures side by side, so a
+mislabelled column could still reach the cash line. Each adapter is a pinned
+**5-tuple** `ProducerAdapterId → StrategyKind → source function → per-day cash
+field → excluded fields`, and the adapter reads **only** the per-day cash field.
+The field names below are the actual per-day DataFrame columns (Codex review 5):
 
-| StrategyKind | source function | output field |
-|---|---|---|
-| `DA_ONLY` | `simulate_replay_batch` (DA-only) | realised per-day cash |
-| `DA_ID_FORECAST` | `simulate_sequential_da_id_batch` | `realised_total` (**not** `ceiling_total`) |
-| `DA_RESERVE_COOPT` | `solve_joint_capacity_batch` | `joint_total_revenue` (reserve fee already inside the joint MILP) |
-| `DA_ID_RESERVE_REALISED` | `simulate_sequential_da_id_reserve_batch` | realised (**not** `total_global_ceiling_eur`) |
+| ProducerAdapterId | StrategyKind | source function | per-day cash field | must NOT read |
+|---|---|---|---|---|
+| `PC_ADP_DA_ONLY` | `DA_ONLY` | `simulate_replay_batch` (DA-only) | `total_revenue_eur` | `degradation_cost_eur` (shadow wear) |
+| `PC_ADP_DA_ID` | `DA_ID_FORECAST` | `simulate_sequential_da_id_batch` | `realised_eur` | `ceiling_eur` |
+| `PC_ADP_RESERVE_COOPT` | `DA_RESERVE_COOPT` | `solve_joint_capacity_batch` | `joint_total_revenue` | — |
+| `PC_ADP_DA_ID_RESERVE` | `DA_ID_RESERVE_REALISED` | `simulate_sequential_da_id_reserve_batch` | `realised_eur` | `reserve_first_ceiling_eur`, `global_ceiling_eur` |
+
+**Shadow-wear ingress (Codex review 5):** `simulate_replay_batch` also exposes a
+per-day `degradation_cost_eur` (`simulation.py:81`); the `DA_ONLY` adapter reads
+**only** `total_revenue_eur` (the gross market cash) and never that column — a
+named red-line, since the vague "realised per-day cash" wording previously left
+this open.
+
+**DA-only parity/reproducibility settings (Codex review 5):** `simulate_replay_batch`
+defaults `mode="DA MILP Replay"`, `soc_init_frac=0.5`, `carry_soc=True`
+(`simulation.py:23-33`) — which is a *different* daily basis from the shipped
+Revenue tab's standalone ordered-spread days. The `DA_ONLY` adapter therefore
+**pins its call settings** (recorded in provenance) so its series is deterministic
+and reproducible; it does **not** attempt to equal the tab's ordered-spread series
+(the parity claim is a pure NPV-kernel test, §3, not "adapter reproduces tab").
 
 `DA_ID_FORECAST` / `DA_ID_RESERVE_REALISED` are **walk-forward only** and record a
 per-leg `ForecastAudit` (§4.3). Two adapter rules close the last gap:
 
-- **No relabelling a degraded result.** If a reserve-first run silently degrades
-  to `reserve_mw = 0` (reserve source missing/out-of-window,
-  `simulation.py:~1218`), the adapter must **not** emit it as
-  `DA_ID_RESERVE_REALISED`; it either emits `DA_ID_FORECAST` (its true content) or
-  raises — never a reserve label on a no-reserve result.
+- **No relabelling — degraded reserve fails, it does not become another kind.**
+  A degraded reserve-first run must distinguish three cases: (a) reserve
+  data missing/out-of-window (`simulation.py:~1024/1236` aligns missing blocks to
+  zero), (b) a valid published zero reserve price, (c) the optimiser choosing
+  `0 MW` on valid data. Only (b)/(c) are legitimate `DA_ID_RESERVE_REALISED`
+  results and must carry a **reserve-coverage identity** proving the reserve data
+  covered the window. Case (a) makes the day **excluded** (dropped from
+  `valid_dates`) or the whole result **unavailable** — it is **never** re-emitted
+  as `DA_ID_FORECAST` (that kind is bound exclusively to `PC_ADP_DA_ID`; relabel
+  is forbidden). Producing a genuine DA+ID result requires **re-running**
+  `PC_ADP_DA_ID`, not relabelling.
 - **The stochastic batch has no adapter.** `simulate_stochastic_da_id_batch`
   *does* accept reserve MW/prices (`simulation.py:1875-1876`), so its realised
   totals can include reserve capacity — but its cockpit-surfaced product is a
-  **policy-value delta**, so no 4-tuple maps to it and it is unrepresentable as
+  **policy-value delta**, so no tuple maps to it and it is unrepresentable as
   cash revenue.
 
 **No adapter exists** (hence unrepresentable as cash revenue) for: any
@@ -479,7 +523,9 @@ never a failure signal (§4.6).
    `floor_protected_cashflow_eur` / `_pv_eur`.
 6. **Gross, producer-issued revenue** — eligibility is a `StrategyKind`/adapter
    property; ceilings, deltas, overlays, gross-additive references, benchmarks,
-   and unavailable results are unrepresentable as cash revenue.
+   and unavailable results are unrepresentable as cash revenue. The `DA_ONLY`
+   adapter reads only `total_revenue_eur`, never the co-exposed
+   `degradation_cost_eur` (shadow-wear ingress, §5).
 7. **VOM counted once** — embedded in the solver (0.5 EUR/MWh); recorded in
    provenance; never re-deducted in §6. No AssetCase VOM knob.
 8. **MW counted once** — the strategy series is already total EUR for the modelled
@@ -503,22 +549,31 @@ never a failure signal (§4.6).
     factor lives only in the parity kernel (§3). The two NPVs differ only by the
     lifecycle-cost layer, by construction (§6). Event salvage is an inflow in the
     event year; terminal residual/decommissioning only in year `L`.
-15. **All numeric inputs bounded** — event costs/residuals/decommissioning/O&M/
-    CapEx finite ≥ 0, multipliers finite ≥ 0 with year 1 = 1.0 and full-length,
-    `capacity_restored_frac ∈ [0,1]`, `power_mw/duration_hours > 0`,
+15. **All numeric inputs bounded (concrete constants)** — event costs/residuals/
+    decommissioning/O&M/CapEx finite ≥ 0, multipliers finite ≥ 0 with year 1 = 1.0
+    and full-length, `capacity_restored_frac ∈ [0,1]`, `power_mw/duration_hours > 0`,
     `0 < RTE ≤ 1`, decay `d ∈ [0,1)` / floor `∈ [0,1]`, `seed` a non-negative int,
-    `n_simulations` a bounded positive int, `project_life_years ≤
-    MAX_PROJECT_LIFE_YEARS`; a NaN/Inf/out-of-range input is rejected before §6
-    (§4.2, §4.7, §4.8).
+    `n_simulations ∈ [1000, 50000]` (default 5000), `project_life_years ∈
+    [1, MAX_PROJECT_LIFE_YEARS=100]`; a NaN/Inf/out-of-range input is rejected
+    before §6 (§4.2, §4.7, §4.8). No "e.g." constants survive in the locked text.
 16. **Screening excludes O&M** — `no_lifecycle_cost_screening_npv` is revenue −
     CapEx only (`opex = augment = terminal = 0`); fixed O&M is a lifecycle cash
     cost and appears only in `lifecycle_cash_npv` (§3, §6).
-17. **Audit carries date identities** — `CoverageAudit.valid_dates` is the
-    canonical set the series must equal; the count identity self-checks; a zero or
-    negative cash value is valid, never a failure signal (§4.3, §4.6).
+17. **Audit carries a date-set partition** — `observed_dates` / `valid_dates` /
+    `missing_dates` / `solver_failed_dates` are canonical sets; they partition
+    `observed_dates` (disjoint + covering) and the series equals `valid_dates`; a
+    zero or negative cash value is valid, never a failure signal (§4.3, §4.6).
 18. **One adapter, one field** — each `StrategyKind` binds a fixed
-    (adapter, source function, output field) 4-tuple; a degraded reserve→0 run is
-    never relabelled `DA_ID_RESERVE_REALISED` (§5).
+    (`ProducerAdapterId`, source function, per-day cash field, excluded fields)
+    tuple with real column names; a degraded reserve→0 run is excluded or
+    unavailable, never relabelled to another kind (§5).
+19. **Currency basis matches valuation** — `currency_basis.target_base_year ==
+    ValuationCase.base_year` (fail-closed); deflator `factor` finite `> 0` (§4.3,
+    §4.4).
+20. **Deterministic fingerprint** — `schema_version`-prefixed SHA-256 over a
+    canonical serialization (sorted keys, ISO dates, enums by name, fixed float
+    format, sorted sets, fixed case order); nothing else influences the hash
+    (§4.8).
 
 ## 8. Rejected alternatives
 
@@ -536,8 +591,9 @@ never a failure signal (§4.6).
   contamination (§4.5).
 - **Call it "bankable NPV."** Over-promises absent financing/tax.
 - **Claim exact parity with the shipped Revenue NPV for any strategy.** Its DA/
-  capture/cycle-life basis differs; parity is asserted only for the DA-only
-  adapter at matching params (§3) (Codex review 2).
+  capture/cycle-life basis differs; parity is asserted only as a pure
+  `calculate_npv_distribution` **kernel** test on identical annual inputs,
+  independent of any adapter (§3) (Codex reviews 2, 5).
 - **Warning-and-proceed on missing augmentation.** Replaced by the three-state
   `capacity_maintenance_basis`; `UNKNOWN` → lifecycle NPV unavailable (Codex
   review 2).
@@ -577,6 +633,24 @@ never a failure signal (§4.6).
 - **Silently treating source settlement EUR as base-year real.** The adapter must
   record a `deflator` or stamp the explicit "treat as base-year real" assumption
   (`currency_basis`, Codex review 4).
+- **Wrong/vague per-day field names in the producer table.** Round-4 names
+  (`realised_total`, "realised per-day cash") did not match code; the table now
+  uses the real per-day columns (`total_revenue_eur`, `realised_eur`,
+  `joint_total_revenue`) + `ProducerAdapterId` + excluded columns, and pins the
+  DA-only call settings (Codex review 5).
+- **Relabelling a degraded reserve run as `DA_ID_FORECAST`.** That is a relabel to
+  another producer's kind; a degraded reserve day is excluded or the result is
+  unavailable, and a real DA+ID figure requires re-running `PC_ADP_DA_ID`
+  (Codex review 5).
+- **A `CoverageAudit` with only `valid_dates` + counts.** The disjoint-and-covering
+  partition needs `observed_dates`/`missing_dates`/`solver_failed_dates` as
+  canonical sets (Codex review 5).
+- **`currency_basis` without a `target_base_year`.** A 2024-real result could be
+  discounted against a 2026 valuation; v1 pins equality with
+  `ValuationCase.base_year` (Codex review 5).
+- **"e.g." simulation bounds and an unpinned fingerprint.** Locked to
+  `[1000, 50000]` default 5000 and a canonical-serialization SHA-256; a locked
+  contract carries no example constants or non-deterministic hash (Codex review 5).
 - **Endogenous fade → augmentation / a fade-driven revenue multiplier.**
   Deferred to v1.1; v1 augmentation is a dated schedule with a declared
   maintenance basis.
@@ -585,14 +659,17 @@ never a failure signal (§4.6).
 
 - **PC-A** — typed schema (`AssetCase`/`LifecycleCase`/`MarketCase`/
   `ValuationCase`/`BootstrapCase`/`ProjectCase`/`RunResult`) + public
-  `StrategyKind` + the (adapter, function, field) 4-tuple **solver adapters**
-  emitting `StrategyRunResult` (with `CoverageAudit.valid_dates`, per-leg
-  `ForecastAudit`, `currency_basis`) + `validate()` + fingerprint. Pure, no UI.
-  Pins: producer-typed eligibility + no-relabel, walk-forward gate, three-state
+  `StrategyKind` + the pinned `ProducerAdapterId` 5-tuple **solver adapters**
+  emitting `StrategyRunResult` (with the `CoverageAudit` date-set partition, per-leg
+  `ForecastAudit`, `currency_basis` incl. `target_base_year`) + `validate()` +
+  a deterministic canonical-serialization fingerprint. Pure, no UI. Pins:
+  producer-typed eligibility + real per-day field names + `degradation_cost_eur`
+  exclusion + no-relabel/degraded-reserve-excluded, walk-forward gate, three-state
   `capacity_maintenance_basis` + schedule consistency (source/as-of required;
-  `UNKNOWN`→unavailable), augmentation admissibility, series/audit date-identity
-  invariant + count identity, all-input domains, fail-closed, engineering match,
-  floor-not-consumed, decay-mode gate, immutable tuple series.
+  `UNKNOWN`→unavailable), augmentation admissibility, the audit date-set partition
+  (disjoint + covering), `currency_basis.target_base_year == base_year`, all-input
+  domains (concrete constants), fail-closed, engineering match, floor-not-consumed,
+  decay-mode gate, immutable tuple series, fingerprint determinism.
 - **PC-B** — bootstrap + lifecycle cash-flow + both NPV **distributions** (pure
   calc). Pins: no-shadow-wear, gross basis, VOM-once, no MW re-scale, **screening
   excludes O&M**, the per-draw `lifecycle − screening` identity, year-by-year
@@ -675,3 +752,25 @@ Resolved in Codex review round 4 (contract closure):
 21. **Currency basis** — `StrategyRunResult.currency_basis` records the applied
     deflator or the explicit "source EUR treated as base-year real" assumption;
     no silent mix (§4.3, §4.4).
+
+Resolved in Codex review round 5 (enforceability closure — dual co-review of
+`629088d` by both Codex passes; Gemini APPROVE'd but the field-name defects were
+real, so they were fixed):
+
+22. **Producer table matches code** — real per-day columns (`total_revenue_eur` /
+    `realised_eur` / `realised_eur` / `joint_total_revenue`), `ProducerAdapterId`
+    column, explicit `degradation_cost_eur`/ceiling exclusions, pinned DA-only call
+    settings; the parity claim is a pure NPV-kernel test independent of the adapter
+    (§3, §5).
+23. **Reserve degradation is not a relabel** — a missing-reserve day is excluded or
+    the result is unavailable (with a reserve-coverage identity separating
+    missing-data from a valid zero price and from an optimiser 0 MW); it is never
+    re-emitted as `DA_ID_FORECAST` (§5).
+24. **Audit is a verifiable partition** — `observed`/`valid`/`missing`/
+    `solver_failed` are canonical date sets that partition `observed_dates`, not
+    counts (§4.3, §4.6).
+25. **Currency + valuation base year pinned** — `target_base_year ==
+    ValuationCase.base_year`, deflator `factor > 0` (§4.3, §4.4).
+26. **Concrete constants + deterministic fingerprint** — `n_simulations ∈
+    [1000, 50000]` default 5000, `MAX_PROJECT_LIFE_YEARS = 100`, `scenario_count`
+    N/A in v1; SHA-256 over a canonical serialization (§4.8).
