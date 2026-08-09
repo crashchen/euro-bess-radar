@@ -1,12 +1,12 @@
 # Project Case v1 — unified pre-tax unlevered lifecycle cash NPV
 
 Status: **candidate** (design-contract round — NOT locked. Revised after Codex
-artifact review rounds 1–6 and a Gemini adversarial review. On `7baf26c` Gemini
-APPROVE'd and Codex raised three enforceability gaps (fingerprint losslessness,
-reserve-coverage field, `availability` domain) — two of them defects from the
-round-5 edits — now closed in round 6. Pending a fresh co-review of THIS commit by
-both Codex and Gemini — only a dual APPROVE on the same hash flips `Status:
-locked`.)
+artifact review rounds 1–7 and a Gemini adversarial review. Gemini has APPROVE'd
+the last three hashes; Codex's findings have narrowed from architecture to
+implementation-grade enforcement (round 7 on `d39e8cb`: reserve-coverage per-day
+partition, complete-day classification, canonical-CBOR serialization) — all closed
+here. Pending a fresh co-review of THIS commit by both Codex and Gemini — only a
+dual APPROVE on the same hash flips `Status: locked`.)
 
 Decision date: 2026-08-09
 
@@ -245,12 +245,18 @@ It carries:
   review 6); (scenario provenance does not apply — no v1-eligible strategy is the
   stochastic batch, §5);
 - for reserve-bearing kinds (`DA_RESERVE_COOPT`, `DA_ID_RESERVE_REALISED`) a
-  **`ReserveCoverageAudit`**: the canonical set of **required 4-hour product
-  blocks** for the window and the **present** / **missing** block sets (missing
-  reserve blocks are zero-filled upstream at `simulation.py:~1024`, which would
-  otherwise pass silently as a valid low-reserve day). A day is
-  reserve-cash-valid **only if fully covered** (`missing_blocks == ∅`); a
-  partially-covered day is excluded from `valid_dates` (or the result is
+  **`ReserveCoverageAudit`**, keyed **per local date**, with three canonical
+  4-hour-block sets per day — `required_blocks`, `present_blocks`,
+  `missing_blocks`. It is derived from the **date-qualified raw reserve series
+  BEFORE any scalar collapse or zero-fill** (`PC_ADP_RESERVE_COOPT` passes only a
+  scalar `capacity_price_eur_mw_h` to `solve_joint_capacity_batch`,
+  `dispatch.py:474`, and missing blocks are zero-filled at `simulation.py:~1024`;
+  neither can reconstruct coverage after the fact — the adapter must capture it
+  upstream). Machine-checkable per day: `present_blocks ∪ missing_blocks ==
+  required_blocks` and `present_blocks ∩ missing_blocks == ∅` (so a
+  `required=6, present=5, missing=∅` inconsistency cannot pass). A day is
+  reserve-cash-valid **only if `missing_blocks == ∅` AND `present_blocks ==
+  required_blocks`**; any other day is `missing_dates` (or the result is
   unavailable). This is what the §5 no-relabel rule refers to;
 - a **`CoverageAudit`** (per `dispatch-failure-contract-v2`): a canonical
   **`observed_dates`** universe partitioned by three **immutable, pairwise-disjoint
@@ -258,8 +264,13 @@ It carries:
   cash value), `missing_dates`, `solver_failed_dates`. Machine-checkable:
   `valid_dates ∪ missing_dates ∪ solver_failed_dates == observed_dates`, the three
   pairwise disjoint, and `daily_realised_cash_series` dates equal `valid_dates`
-  exactly (counts alone cannot detect an overlapping mis-assignment). An
-  all-failure or empty-`valid_dates` result is *unavailable*, never a €0 series;
+  exactly (counts alone cannot detect an overlapping mis-assignment). **A day is
+  `valid` only if it is a complete, regular local calendar day** (full expected
+  interval grid, DST-safe per `_is_regular_utc_day`); an incomplete/edge day (e.g.
+  a clean 12-hour boundary day that `solve_joint_capacity_batch` would accept —
+  `dispatch.py:490` rejects NaNs but not short days) is `missing_dates`, never
+  bootstrapped as one full daily observation. An all-failure or empty-`valid_dates`
+  result is *unavailable*, never a €0 series;
 - reproducibility: `source_data_content_hash`, `calculator_version`, and a content
   **`fingerprint` computed with the identical canonical serialization + SHA-256 as
   the `RunResult` fingerprint** (§4.8) — the nested fingerprint algorithm is not a
@@ -401,20 +412,24 @@ strategy is the stochastic batch (§5), so **`scenario_count` is not a live doma
 in v1** — the earlier "stochastic cap" is moot. A NaN/Inf/out-of-range value in
 any live scalar is rejected before §6.
 
-**Deterministic fingerprint (Codex reviews 5–6).** The `RunResult.input_fingerprint`
-is a `schema_version`-prefixed **SHA-256** over a **canonical, lossless
-serialization** so two implementations agree byte-for-byte on the same inputs, and
-distinct inputs never collide: keys sorted; dates as ISO-8601 `YYYY-MM-DD` strings;
-enums by **name**; **floats as their exact IEEE-754 double big-endian 8 bytes
-(`struct.pack(">d", x)`)** — a single lossless encoding, **not** `repr`/`%.12g`
-(which is ambiguous — two options — and lossy: `1234567890123.0` and
-`…124.0` both render `1.23456789012e+12`, so different CapEx would share a
-fingerprint and serve a stale result); sets serialized as sorted lists; and every
-case in a fixed order (Asset, Lifecycle, Market + nested `StrategyRunResult`
-fingerprint, Valuation, Bootstrap). The nested `StrategyRunResult.fingerprint`
-(§4.3) uses this **same** algorithm — there is exactly one fingerprint spec.
-Nothing outside this canonical form (dict insertion order, pandas index identity,
-object ids, NaN payloads) may influence the hash.
+**Deterministic fingerprint (Codex reviews 5–7).** The `RunResult.input_fingerprint`
+is **SHA-256** over a **complete canonical binary serialization** so two
+independent implementations produce the identical byte stream (and hence hash) for
+the same inputs, with no structural collisions. v1 pins **canonical CBOR
+(RFC 8949 §4.2 deterministic encoding)** — which fully specifies type tags,
+integer/string/container encoding, length framing, and **sorted map keys** — as
+the wire format, rather than an ad-hoc rule list (an unframed field concatenation
+could hash `["a","b"]` and `["ab"]` alike). On top of the CBOR core three things
+are pinned: **float64 is always the 64-bit double form** (CBOR major type 7,
+additional 27 — never CBOR's shortest-float, so encoding stays lossless and
+collision-free, e.g. `…123.0` ≠ `…124.0`); **dates are tagged text strings**
+(ISO-8601 `YYYY-MM-DD`) and **enums are tagged by name**; and the whole map is
+wrapped with a `schema_version` field so a schema change cannot alias an old hash.
+Cases serialize in a fixed order (Asset, Lifecycle, Market + nested
+`StrategyRunResult` fingerprint, Valuation, Bootstrap). The nested
+`StrategyRunResult.fingerprint` (§4.3) uses this **same** format — exactly one
+spec. Nothing outside this canonical form (dict insertion order, pandas index
+identity, object ids, NaN payloads) may influence the hash.
 
 ## 5. Cashflow-eligible strategies (producer allowlist / denylist)
 
@@ -654,8 +669,9 @@ never a failure signal (§4.6).
   invariant was unimplementable; the audit now carries a canonical `valid_dates`
   set (Codex review 4).
 - **`StrategyKind` as the sole eligibility guard.** One producer returns realised
-  + ceiling + delta; each kind now binds a fixed (adapter, function, field)
-  4-tuple and a degraded reserve→0 run cannot be relabelled (Codex review 4).
+  + ceiling + delta; each kind now binds a fixed `ProducerAdapterId` 5-tuple
+  (adapter, kind, function, per-day field, excluded fields) and a degraded
+  reserve→0 run cannot be relabelled (Codex reviews 4–5).
 - **Free-floating `seed`/`n_simulations` in the fingerprint only.** Promoted to a
   typed `BootstrapCase` with domains; the remaining scalar domains are closed
   (Codex review 4).
@@ -690,6 +706,18 @@ never a failure signal (§4.6).
 - **Unbounded reserve `availability`.** It multiplies straight into reserve cash
   (`dispatch.py:429`), so `availability=2` doubled revenue and passed; pinned to
   finite `[0,1]`, default 0.95 (Codex review 6).
+- **A `ReserveCoverageAudit` that only checks `missing == ∅`.**
+  `required=6, present=5, missing=∅` could pass; v1 requires the per-day partition
+  `present ∪ missing == required`, disjoint, derived from raw blocks **before**
+  scalar collapse/zero-fill (Codex review 7).
+- **Counting an incomplete calendar day as a full observation.**
+  `solve_joint_capacity_batch` accepts a clean 12-hour edge day
+  (`dispatch.py:490` rejects only NaNs), which would bootstrap as one full day; v1
+  requires complete-regular-day classification, else `missing_dates` (Codex review 7).
+- **An under-specified canonical serialization.** Listing sort/float rules still
+  let two implementations frame bytes differently (or collide `["a","b"]` vs
+  `["ab"]`); v1 pins **canonical CBOR (RFC 8949 §4.2)** with float64 always 64-bit
+  and a `schema_version` wrapper (Codex review 7).
 - **Endogenous fade → augmentation / a fade-driven revenue multiplier.**
   Deferred to v1.1; v1 augmentation is a dated schedule with a declared
   maintenance basis.
@@ -706,11 +734,13 @@ never a failure signal (§4.6).
   exclusion + no-relabel/degraded-reserve-excluded, walk-forward gate, three-state
   `capacity_maintenance_basis` + schedule consistency (source/as-of required;
   `UNKNOWN`→unavailable), augmentation admissibility, the audit date-set partition
-  (disjoint + covering), `ReserveCoverageAudit` full-coverage for reserve days,
-  `availability ∈ [0,1]`, `currency_basis.target_base_year == base_year`, all-input
-  domains (concrete constants), fail-closed, engineering match, floor-not-consumed,
-  decay-mode gate, immutable tuple series, and the lossless IEEE-754
-  canonical-serialization fingerprint (one spec for both fingerprints).
+  (disjoint + covering) + complete-regular-day classification, `ReserveCoverageAudit`
+  per-day block partition (`present ∪ missing == required`, derived before fill) +
+  full-coverage for reserve days, `availability ∈ [0,1]`,
+  `currency_basis.target_base_year == base_year`, all-input domains (concrete
+  constants), fail-closed, engineering match, floor-not-consumed, decay-mode gate,
+  immutable tuple series, and the canonical-CBOR (RFC 8949 §4.2) fingerprint (one
+  spec for both fingerprints).
 - **PC-B** — bootstrap + lifecycle cash-flow + both NPV **distributions** (pure
   calc). Pins: no-shadow-wear, gross basis, VOM-once, no MW re-scale, **screening
   excludes O&M**, the per-draw `lifecycle − screening` identity, year-by-year
@@ -783,9 +813,10 @@ Resolved in Codex review round 4 (contract closure):
 18. **Bootstrap ownership + full domains** — new `BootstrapCase` (typed
     `seed`/`n_simulations`/algo version); `power`/`duration`/`RTE`/decay/
     scenario/life domains closed (§4.8, red-line #15).
-19. **Producer→field binding** — each `StrategyKind` binds a fixed (adapter,
-    function, field) 4-tuple; a degraded reserve→0 run cannot be relabelled
-    `DA_ID_RESERVE_REALISED`; per-leg `ForecastAudit` recorded (§5, §4.3).
+19. **Producer→field binding** — each `StrategyKind` binds a fixed
+    `ProducerAdapterId` 5-tuple (adapter, kind, function, per-day field, excluded
+    fields); a degraded reserve→0 run cannot be relabelled `DA_ID_RESERVE_REALISED`;
+    per-leg `ForecastAudit` recorded (§5, §4.3).
 20. **Lifecycle cross-fields** — `SCHEDULED_NAMEPLATE_MAINTENANCE` needs a
     non-empty positive-restoration schedule, `NO_AUGMENTATION_REQUIRED_ASSERTED`
     an empty one; `eol_residual_value_eur` naming unified with §6; all-zero/
@@ -831,3 +862,20 @@ them defects introduced by the round-5 edits):
     no longer inflate revenue past validation (§4.3, red-line #15).
 30. **Wording/citation nits** — the audit is `observed_dates` (universe) + a
     three-set partition; the replay-defaults citation is `simulation.py:379-392`.
+
+Resolved in Codex review round 7 (deep enforceability — dual co-review of
+`d39e8cb`: Gemini APPROVE, Codex CHANGES REQUESTED on three deeper gaps):
+
+31. **`ReserveCoverageAudit` is a checkable per-day partition** — `present ∪
+    missing == required` + disjoint, derived from raw blocks **before** scalar
+    collapse/zero-fill (a `required=6/present=5/missing=∅` inconsistency can no
+    longer pass); a day is cash-valid only when `present == required` (§4.3, §5).
+32. **Incomplete days are `missing_dates`** — a day is `valid` only if it is a
+    complete regular local calendar day; a clean 12-hour edge day that
+    `solve_joint_capacity_batch` would accept (`dispatch.py:490`) is not
+    bootstrapped as a full observation (§4.3).
+33. **Complete canonical serialization** — pinned to canonical CBOR (RFC 8949
+    §4.2) with float64 always 64-bit and a `schema_version` wrapper, so two
+    implementations cannot frame bytes differently or create structural collisions
+    (§4.8).
+34. **Tuple-arity reconciliation** — §8/§10 now say the authoritative §5 5-tuple.
