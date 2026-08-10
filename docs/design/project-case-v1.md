@@ -1,22 +1,24 @@
 # Project Case v1 — unified pre-tax unlevered lifecycle cash NPV
 
-Status: **candidate** (design-contract round — NOT locked. Revised through review
-round 10. The final same-hash co-review of `230b8c0` returned Codex **CHANGES
-REQUESTED** (two bar-(c) fingerprint blockers) and Gemini **CHANGES REQUESTED**
-(three schema items + one non-blocking); CC independently confirmed the two
-fingerprint blockers and folded the editorial reconciliations. Round 10 closes both
-confirmed fingerprint blockers (`reserve_coverage_audit` entry-date domain;
-`adapter_provenance.capture_rate` null-matrix), strengthens the `prob_positive` /
-`solver_failure_details` fingerprint pins, and reconciles the currency-basis /
-reserve-audit-shape / per-draw-bootstrap-read wording — recorded as `R10-01…08`
-below.
-The next review applies the **§11 blocking bar** — a finding blocks only if it
-changes an output number, cash basis, eligible dates, available/unavailable status,
-public schema/fingerprint, or a red-line; everything else is non-blocking PC-A/PC-B
-implementation debt. Pending independent review of the commit containing this
-text.)
+Status: **locked** (design-contract — LOCKED by a dual **APPROVE** on the round-10
+candidate `7b8b547`: Codex **APPROVE** and Gemini **APPROVE**, alongside CC's
+independent machine-verification of the two encoder golden vectors and the
+code-fact claims. Round 10 closed the two round-9 bar-(c) fingerprint blockers
+(`reserve_coverage_audit` entry-date domain; `adapter_provenance.capture_rate`
+null-matrix), strengthened the `prob_positive` / `solver_failure_details`
+fingerprint pins, and reconciled the currency-basis / reserve-audit-shape /
+per-draw-bootstrap-read wording — recorded as `R10-01…08` below. Implementation
+(PC-A first) begins once this docs-only lock PR merges.)
 
-Draft decision date: 2026-08-10
+Locked on: 2026-08-10
+
+Review metadata (lock):
+
+```
+reviewed_candidate_commit: 7b8b547a56690848b4f9ac7ad98797ffa9332c64
+lock_basis: dual_approve
+locked_on: 2026-08-10
+```
 
 Extends: [`economic-semantics-v1.md`](./economic-semantics-v1.md) — its "Next
 financial-model increment" section defers augmentation/replacement cash flows and
@@ -1365,39 +1367,39 @@ candidate commit):
     **blocking → resolved** (eligible-date basis). Supported zone codes now resolve
     exactly to `config.ZONE_TIMEZONES[zone]`; caller-selected IANA zones are
     invalid. Target: PC-A zone/timezone mismatch + DST date-universe tests (§4.3,
-    red-line #17). Owner acceptance: pending final candidate review.
+    red-line #17). Owner acceptance: accepted (round-10 dual-approve lock, 2026-08-10).
 49. **`R9-FINAL-02` — forecast tagged union/deadband** — disposition:
     **blocking → resolved** (cash output + public fingerprint). The per-kind
     required/null matrix, exact bucket literals, and finite non-negative
     `min_rebid_uplift_eur` binding are normative. Target: PC-A per-adapter matrix,
     invalid-domain, and fingerprint mutation tests (§4.3, §4.8).
-    Owner acceptance: pending final candidate review.
+    Owner acceptance: accepted (round-10 dual-approve lock, 2026-08-10).
 50. **`R9-FINAL-03` — one reserve-failure branch** — disposition:
     **blocking → resolved** (eligible dates + availability). Every per-day raw
     coverage failure is `missing_dates`; whole-result unavailable occurs only when
     final `valid_dates` is empty. Target: PC-A partial-day vs all-day failure tests
-    (§4.3, §5). Owner acceptance: pending final candidate review.
+    (§4.3, §5). Owner acceptance: accepted (round-10 dual-approve lock, 2026-08-10).
 51. **`R9-FINAL-04` — typed partial NPV availability** — disposition:
     **blocking → resolved** (public RunResult schema + availability). Both metrics
     use `NpvOutcome`; `UNKNOWN` keeps screening available and returns the fixed
     lifecycle-unavailable envelope. Target: PC-B schema/UNKNOWN/UI-branch tests
-    (§3, §4.6). Owner acceptance: pending final candidate review.
+    (§3, §4.6). Owner acceptance: accepted (round-10 dual-approve lock, 2026-08-10).
 52. **`R9-FINAL-05` — fingerprint-visible scalar/literal closure** — disposition:
     **blocking → resolved** (public fingerprint). Text/date wire types, projection
     union literals/nulls, currency mode, reserve aggregation literal, and adapter
     row values are pinned. Target: PC-A full-object golden vectors + union mutation
-    tests (§4.8). Owner acceptance: pending final candidate review.
+    tests (§4.8). Owner acceptance: accepted (round-10 dual-approve lock, 2026-08-10).
 53. **`R9-FINAL-06` — VOM provenance must be true** — disposition:
     **blocking → resolved** (cash-basis red-line). Every adapter validates
     `post_vom=true` and the embedded dispatch constant `0.5`. Target: PC-A wrong/
     missing-VOM rejection tests (§4.8, §5, red-line #7).
-    Owner acceptance: pending final candidate review.
+    Owner acceptance: accepted (round-10 dual-approve lock, 2026-08-10).
 54. **`R9-FINAL-07` — finite unique expected-grid values** — disposition:
     **blocking → resolved** (eligible-date classification). Every consumed market
     leg must have exactly one finite value per required point before a solver can
     fail; duplicate/NaN/Inf is `missing_dates`. Target: PC-A per-leg duplicate/
     NaN/Inf/missing mutation tests (§4.3, red-line #17).
-    Owner acceptance: pending final candidate review.
+    Owner acceptance: accepted (round-10 dual-approve lock, 2026-08-10).
 55. **`R9-FINAL-08` — expected grids are market-leg-specific** — disposition:
     **blocking → resolved** (eligible dates). DA and IDA require separate explicit
     `(leg, zone, delivery_date)` registry calendars; reserve uses its product-block
@@ -1405,7 +1407,7 @@ candidate commit):
     unsupported leg/zone/date makes the adapter unavailable rather than invoking
     cadence inference or IE/CH/GB fallback. Target: PC-A mixed DA/IDA cadence,
     missing-registry, and fingerprint-mutation tests (§4.3, §4.8, red-line #17).
-    Owner acceptance: pending final candidate review.
+    Owner acceptance: accepted (round-10 dual-approve lock, 2026-08-10).
 
 Resolved in review round 10 (final same-hash co-review of `230b8c0`: Codex
 **CHANGES REQUESTED** on two bar-(c) fingerprint blockers, Gemini **CHANGES
