@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses as dc
+import datetime as dt
 
 import pytest
 
@@ -21,17 +22,25 @@ from src.project_case import (
     LifecycleCase,
     LiquidityBasis,
     MarketCase,
+    NpvDistribution,
+    NpvOutcome,
+    ProducerAdapterId,
     ProjectCase,
     ProjectCaseValidationError,
     Projection,
     ProjectionKind,
+    ReserveCoverageAudit,
+    ReserveCoverageEntry,
+    RunResult,
     SampleWindow,
     SolverFailureDetail,
     ValuationCase,
+    grid,
 )
 from tests import pc_case_fixtures as fx
 
 D1, D2 = fx.D1, fx.D2
+D3 = dt.date(2026, 3, 12)
 
 
 # --- AssetCase / numeric domains (red-line #15) ------------------------------
@@ -338,3 +347,99 @@ def test_lifecycle_available_flag():
     assert fx.project_case().lifecycle_case.lifecycle_available is True
     unknown = LifecycleCase(15, CapacityMaintenanceBasis.UNKNOWN, None, None, (), 0.0, 0.0)
     assert unknown.lifecycle_available is False
+
+
+# --- Producer 5-tuple lock (§5, red-line #6/#18) -----------------------------
+def test_producer_source_function_locked():
+    srr = fx.da_only_srr()
+    bad = dc.replace(srr.adapter_provenance, source_function="totally_wrong")
+    with pytest.raises(ProjectCaseValidationError):
+        dc.replace(srr, adapter_provenance=bad)
+
+
+def test_producer_excluded_fields_locked():
+    srr = fx.da_only_srr()
+    # DA-only must exclude degradation_cost_eur (shadow wear), not ceiling_eur.
+    bad = dc.replace(srr.adapter_provenance, excluded_fields=("ceiling_eur",))
+    with pytest.raises(ProjectCaseValidationError):
+        dc.replace(srr, adapter_provenance=bad)
+
+
+def test_producer_kind_must_match_adapter_id():
+    srr = fx.da_only_srr()
+    bad = dc.replace(srr.adapter_provenance, producer_adapter_id=ProducerAdapterId.PC_ADP_DA_ID)
+    with pytest.raises(ProjectCaseValidationError):
+        dc.replace(srr, adapter_provenance=bad)
+
+
+# --- Deep immutability of fingerprint-bearing objects ------------------------
+def test_reserve_entry_duration_map_is_immutable():
+    entry = fx.da_id_reserve_srr().reserve_coverage_audit.entries[0]
+    with pytest.raises(TypeError):
+        entry.settlement_duration_hours_by_block[entry.required_blocks[0]] = 9.0
+
+
+def test_provenance_grid_profiles_immutable_and_fingerprint_stable():
+    srr = fx.da_only_srr()
+    fp = srr.fingerprint()
+    with pytest.raises(TypeError):
+        srr.adapter_provenance.expected_grid_profiles["da"] = "hacked"
+    assert srr.fingerprint() == fp
+
+
+# --- Reserve: uncovered day cannot be solver_failed (§5, no-relabel) ----------
+def _covered_entry(d: dt.date) -> ReserveCoverageEntry:
+    blocks = grid.reserve_blocks("DE_LU", d)
+    ids = tuple(b for b, _ in blocks)
+    return ReserveCoverageEntry(d, ids, ids, (), {b: 4.0 for b, _ in blocks})
+
+
+def _uncovered_entry(d: dt.date) -> ReserveCoverageEntry:
+    blocks = grid.reserve_blocks("DE_LU", d)
+    ids = tuple(b for b, _ in blocks)
+    return ReserveCoverageEntry(d, ids, ids[:5], (ids[5],), {b: 4.0 for b, _ in blocks})
+
+
+def test_reserve_solver_failed_date_must_be_covered():
+    with pytest.raises(ProjectCaseValidationError):
+        dc.replace(
+            fx.da_id_reserve_srr(),
+            sample_window=SampleWindow(D1, D3, "Europe/Berlin"),
+            daily_realised_cash_series=((D1, 300.0),),
+            coverage_audit=CoverageAudit(
+                (D1, D2, D3), (D1,), (D3,), (D2,),
+                (SolverFailureDetail(D2, "s", "m", "st"),),
+            ),
+            reserve_coverage_audit=ReserveCoverageAudit(
+                (_covered_entry(D1), _uncovered_entry(D2), _uncovered_entry(D3))
+            ),
+        )
+
+
+# --- RunResult / NpvOutcome scaffold (§3, §4.6) ------------------------------
+def test_npv_outcome_and_run_result_shapes():
+    dist = NpvDistribution(1.0, 2.0, 3.0, 0.5)
+    ok = NpvOutcome.ok(dist)
+    assert ok.available and ok.status == "ok" and ok.message is None
+    un = NpvOutcome.unavailable("capacity_maintenance_unknown", "unknown basis")
+    assert not un.available and un.distribution is None
+    with pytest.raises(ProjectCaseValidationError):
+        NpvOutcome(True, "ok", "msg", dist)  # available cannot carry a message
+    with pytest.raises(ProjectCaseValidationError):
+        NpvOutcome(False, "x", "m", dist)  # unavailable cannot carry a distribution
+    with pytest.raises(ProjectCaseValidationError):
+        NpvDistribution(1.0, 2.0, 3.0, 1.5)  # prob_positive out of [0,1]
+    rr = RunResult(
+        input_fingerprint="ab" * 32,
+        no_lifecycle_cost_screening_npv=ok,
+        lifecycle_cash_npv=un,
+        provenance={"note": "pc-b fills this"},
+    )
+    assert rr.schema_version == "project-case-v1"
+    with pytest.raises(ProjectCaseValidationError):
+        RunResult(
+            input_fingerprint="nothex",
+            no_lifecycle_cost_screening_npv=ok,
+            lifecycle_cash_npv=un,
+            provenance={},
+        )

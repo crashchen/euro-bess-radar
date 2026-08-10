@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+import pandas as pd
 import pytest
 
 from src.project_case import grid
@@ -26,6 +27,18 @@ def test_da_dst_transitions_counts():
     assert len(grid.expected_da_timestamps("DE_LU", dt.date(2025, 10, 26))) == 100
     # CH stays 60-min, so its fall-back day is 25 hourly stamps.
     assert len(grid.expected_da_timestamps("CH", dt.date(2025, 10, 26))) == 25
+
+
+def test_da_cutover_days_are_mixed_resolution():
+    # SDAC switches at the SHARED market instant 2025-09-30T22:00Z, not each zone's
+    # civil midnight — so a straddling local day is genuinely mixed (review blocker).
+    fi = grid.expected_da_timestamps("FI", dt.date(2025, 10, 1))
+    assert len(fi) == 93  # 1 hourly (21:00Z) + 92 quarter-hours from 22:00Z
+    assert (fi[1] - fi[0]) == pd.Timedelta(hours=1)
+    assert (fi[2] - fi[1]) == pd.Timedelta(minutes=15)
+    pt = grid.expected_da_timestamps("PT", dt.date(2025, 9, 30))
+    assert len(pt) == 27  # 23 hourly + 4 quarter-hours into the cutover
+    assert (pt[-1] - pt[-2]) == pd.Timedelta(minutes=15)
 
 
 def test_da_profiles_and_unsupported_gb():

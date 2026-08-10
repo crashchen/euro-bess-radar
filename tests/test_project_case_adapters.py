@@ -11,6 +11,8 @@ import pytest
 from src.project_case import (
     SPECS,
     AdapterUnavailableError,
+    CurrencyBasis,
+    CurrencyBasisMode,
     ProducerAdapterId,
     StrategyKind,
     bootstrap_annual_sums,
@@ -199,6 +201,59 @@ def test_bootstrap_rejects_non_finite_and_bool_seed():
         bootstrap_annual_sums(np.array([1.0, float("nan")]), seed=1, n_simulations=10)
     with pytest.raises(ValueError):
         bootstrap_annual_sums(np.array([1.0]), seed=True, n_simulations=10)
+
+
+# --- Currency deflator actually converts cash (§4.3, red-line #19) -----------
+def test_deflator_factor_scales_daily_cash():
+    def emit(factor):
+        cb = CurrencyBasis(CurrencyBasisMode.DEFLATOR_APPLIED, 2025, "cpi", "2025", factor)
+        srr = emit_da_only(
+            fx.da_frame(ZONE, DAYS), zone=ZONE, first_delivery_date=DAYS[0],
+            last_delivery_date=DAYS[-1], power_mw=10.0, duration_hours=2.0, efficiency=0.88,
+            currency_basis=cb, runner=fx.fake_runner("total_revenue_eur", [(d, 100.0) for d in DAYS]),
+        )
+        return dict(srr.daily_realised_cash_series)
+    at1, at2 = emit(1.0), emit(2.0)
+    assert at1[DAYS[0]] == 100.0
+    assert at2[DAYS[0]] == 200.0  # factor 2 is actually applied, not just stamped
+
+
+# --- soc_init_frac is BOUND, not inherited (red-line #22) --------------------
+def test_da_id_adapter_binds_soc_init_frac(monkeypatch):
+    import src.simulation as sim
+
+    captured: dict = {}
+
+    def spy(*_args, **kwargs):
+        captured.update(kwargs)
+        return pd.DataFrame({"date": [DAYS[1], DAYS[2]], "realised_eur": [1.0, 1.0]}), {}
+
+    monkeypatch.setattr(sim, "simulate_sequential_da_id_batch", spy)
+    emit_da_id(
+        fx.da_frame(ZONE, DAYS), fx.ida_frame(ZONE, DAYS), zone=ZONE,
+        first_delivery_date=DAYS[0], last_delivery_date=DAYS[-1], power_mw=10.0,
+        duration_hours=2.0, efficiency=0.88, currency_basis=CB, bucket="hour_of_day",
+        min_rebid_uplift_eur=0.0,  # runner=None -> real default runner (spied batch)
+    )
+    assert captured.get("soc_init_frac") == 0.5
+
+
+# --- A bad input day never sinks the whole result (source-hash NaN safety) ----
+def test_nan_input_day_does_not_crash_result():
+    frame = fx.da_frame(ZONE, DAYS)
+    frame.loc[grid.expected_da_timestamps(ZONE, DAYS[1])[0], "price_eur_mwh"] = float("nan")
+    srr = emit_da_only(
+        frame, zone=ZONE, first_delivery_date=DAYS[0], last_delivery_date=DAYS[-1],
+        power_mw=10.0, duration_hours=2.0, efficiency=0.88, currency_basis=CB,
+        runner=fx.fake_runner("total_revenue_eur", [(DAYS[0], 1.0), (DAYS[2], 1.0)]),
+    )
+    assert DAYS[1] in srr.coverage_audit.missing_dates
+    assert len(srr.source_data_content_hash) == 64  # computed, no NaN-encode crash
+
+
+def test_specs_registry_is_immutable():
+    with pytest.raises(TypeError):
+        SPECS[ProducerAdapterId.PC_ADP_DA_ONLY] = None  # type: ignore[index]
 
 
 # --- Slow real-solver integration -------------------------------------------

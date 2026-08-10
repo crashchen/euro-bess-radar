@@ -18,7 +18,6 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 from collections.abc import Callable
-from dataclasses import dataclass
 
 import pandas as pd
 
@@ -36,10 +35,11 @@ from src.project_case.enums import (
     DA_ID_BUCKETS,
     RESERVE_PRICE_AGGREGATION_V1,
     WALK_FORWARD,
+    CurrencyBasisMode,
     ProducerAdapterId,
-    StrategyKind,
 )
 from src.project_case.fingerprint import encode_value
+from src.project_case.producer_specs import SPECS, AdapterSpec
 from src.project_case.schema import (
     AdapterProvenance,
     CaptureBasis,
@@ -63,58 +63,17 @@ _IDA_COL = "intraday_price_eur_mwh"
 
 Runner = Callable[[list[_dt.date]], pd.DataFrame]
 
-
-@dataclass(frozen=True)
-class AdapterSpec:
-    """Pinned producer 5-tuple (§5). ``source_function`` is provenance, not a call."""
-
-    producer_adapter_id: ProducerAdapterId
-    strategy_kind: StrategyKind
-    source_function: str
-    per_day_cash_field: str
-    excluded_fields: tuple[str, ...]
-    consumes_ida: bool
-    consumes_reserve: bool
-
-
-SPECS: dict[ProducerAdapterId, AdapterSpec] = {
-    ProducerAdapterId.PC_ADP_DA_ONLY: AdapterSpec(
-        ProducerAdapterId.PC_ADP_DA_ONLY,
-        StrategyKind.DA_ONLY,
-        "simulate_replay_batch",
-        "total_revenue_eur",
-        ("degradation_cost_eur",),
-        consumes_ida=False,
-        consumes_reserve=False,
-    ),
-    ProducerAdapterId.PC_ADP_DA_ID: AdapterSpec(
-        ProducerAdapterId.PC_ADP_DA_ID,
-        StrategyKind.DA_ID_FORECAST,
-        "simulate_sequential_da_id_batch",
-        "realised_eur",
-        ("ceiling_eur",),
-        consumes_ida=True,
-        consumes_reserve=False,
-    ),
-    ProducerAdapterId.PC_ADP_RESERVE_COOPT: AdapterSpec(
-        ProducerAdapterId.PC_ADP_RESERVE_COOPT,
-        StrategyKind.DA_RESERVE_COOPT,
-        "solve_joint_capacity_batch",
-        "joint_total_revenue",
-        (),
-        consumes_ida=False,
-        consumes_reserve=True,
-    ),
-    ProducerAdapterId.PC_ADP_DA_ID_RESERVE: AdapterSpec(
-        ProducerAdapterId.PC_ADP_DA_ID_RESERVE,
-        StrategyKind.DA_ID_RESERVE_REALISED,
-        "simulate_sequential_da_id_reserve_batch",
-        "realised_eur",
-        ("reserve_first_ceiling_eur", "global_ceiling_eur"),
-        consumes_ida=True,
-        consumes_reserve=True,
-    ),
-}
+# SPECS / AdapterSpec are the canonical immutable producer 5-tuples (§5), imported
+# from ``producer_specs`` so schema validation and the adapters share one source.
+__all__ = [
+    "PC_A_CALCULATOR_VERSION",
+    "SPECS",
+    "AdapterSpec",
+    "emit_da_id",
+    "emit_da_id_reserve",
+    "emit_da_only",
+    "emit_reserve_coopt",
+]
 
 
 # --------------------------------------------------------------------------- #
@@ -141,13 +100,19 @@ def _restrict_frame(df: pd.DataFrame, tz: str, dates: frozenset[_dt.date]) -> pd
 
 
 def _content_hash(series: dict[str, pd.Series]) -> str:
-    """Deterministic SHA-256 over the consumed raw data (sorted UTC pairs)."""
-    payload: dict[str, list[list]] = {}
+    """Deterministic SHA-256 over the consumed raw data (sorted UTC pairs).
+
+    Values are stringified with ``repr`` so a raw NaN/Inf on a (correctly
+    classified) missing day yields a stable token and never trips the encoder's
+    non-finite-float rejection — the source hash is opaque provenance, and a bad
+    input day must not sink the whole result (a valid day still produces cash).
+    """
+    payload: dict[str, list[list[str]]] = {}
     for leg, s in sorted(series.items()):
         idx = pd.DatetimeIndex(s.index)
         idx = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
         pairs = sorted(
-            [ts.strftime("%Y-%m-%dT%H:%M:%SZ"), float(v)]
+            [ts.strftime("%Y-%m-%dT%H:%M:%SZ"), repr(float(v))]
             for ts, v in zip(idx, s.to_numpy(dtype=float), strict=True)
         )
         payload[leg] = pairs
@@ -180,20 +145,38 @@ def _partition(
             value = float(row[cash_field])
             if d in gate and pd.notna(value) and d not in outputs:
                 outputs[d] = value
+    # Preserve the batch's real per-day solver-failure audit (dispatch-failure
+    # contract) where the batch exposes it in attrs["solver_failure_details"];
+    # fall back to an honest generic detail otherwise (never fabricate status).
+    real_details: dict[_dt.date, dict] = {}
+    for rec in (getattr(per_day, "attrs", {}) or {}).get("solver_failure_details", []) or []:
+        try:
+            rec_date = pd.Timestamp(rec.get("date")).date()
+        except (ValueError, TypeError):
+            continue
+        real_details[rec_date] = rec
     valid = tuple(sorted(d for d in gate if d in outputs))
     series = tuple((d, outputs[d]) for d in valid)
     solver_failed = tuple(sorted(d for d in gate if d not in outputs))
     missing = tuple(sorted(d for d in observed if d not in gate))
-    details = tuple(
-        SolverFailureDetail(
-            date=d,
-            status="no_solver_output",
-            message="solver/policy produced no valid cash row for this data-complete day",
-            stage=stage,
-        )
-        for d in solver_failed
-    )
+    details = tuple(_failure_detail(d, real_details.get(d), stage) for d in solver_failed)
     return series, valid, missing, solver_failed, details
+
+
+def _failure_detail(d: _dt.date, rec: dict | None, stage: str) -> SolverFailureDetail:
+    """Honest ``SolverFailureDetail`` — real batch record when present, else generic."""
+    if rec is not None:
+        status = (str(rec.get("status") or "").strip()) or "solver_failed"
+        message = (str(rec.get("message") or "").strip()) or "solver failure (no message)"
+        return SolverFailureDetail(d, status, message, stage)
+    return SolverFailureDetail(
+        d,
+        "no_output_for_data_complete_day",
+        "data-complete day produced no per-day cash row: a solver failure, or a "
+        "forecast-driven policy could not score it (e.g. walk-forward's first day "
+        "has no prior-day history)",
+        stage,
+    )
 
 
 def _build_result(
@@ -228,6 +211,12 @@ def _build_result(
         raise AdapterUnavailableError(
             f"{spec.producer_adapter_id.value}: no valid dates (result unavailable)"
         )
+    # Currency basis actually converts the cash: DEFLATOR_APPLIED means the adapter
+    # scales historical settlement EUR to base-year real EUR by the recorded factor
+    # (a stamped-but-unapplied deflator would be a lie; §4.3, red-line #19).
+    if currency_basis.mode is CurrencyBasisMode.DEFLATOR_APPLIED:
+        factor = float(currency_basis.deflator_factor)
+        series = tuple((d, v * factor) for d, v in series)
     coverage = CoverageAudit(observed, valid, missing, solver_failed, details)
     profiles = {
         "da": grid.da_profile_id(zone),
@@ -374,6 +363,7 @@ def emit_da_id(
             power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
             bucket=bucket, forecast_mode=WALK_FORWARD,
             min_rebid_uplift_eur=min_rebid_uplift_eur,
+            soc_init_frac=0.5,  # bound explicitly (red-line #22), not inherited
         )
         return per_day
 
@@ -517,6 +507,7 @@ def emit_da_id_reserve(
             dates=list(gate_dates), tz=tz, power_mw=power_mw,
             duration_hours=duration_hours, efficiency=efficiency,
             availability=availability, bucket=bucket, forecast_mode=WALK_FORWARD,
+            soc_init_frac=0.5,  # bound explicitly (red-line #22), not inherited
         )
         return per_day
 

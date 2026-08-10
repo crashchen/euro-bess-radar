@@ -15,6 +15,7 @@ import datetime as _dt
 import math
 import re
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from src import config
@@ -40,10 +41,12 @@ from src.project_case.enums import (
     StrategyKind,
 )
 from src.project_case.fingerprint import (
+    SCHEMA_VERSION,
     encode_value,
     fingerprint_hex,
     sorted_by_encoding,
 )
+from src.project_case.producer_specs import canonical_spec
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -399,7 +402,10 @@ class ReserveCoverageEntry:
         object.__setattr__(self, "required_blocks", tuple(sorted(req)))
         object.__setattr__(self, "present_blocks", tuple(sorted(pres)))
         object.__setattr__(self, "missing_blocks", tuple(sorted(miss)))
-        object.__setattr__(self, "settlement_duration_hours_by_block", durations)
+        # Read-only view so a fingerprint-bearing object stays deeply immutable.
+        object.__setattr__(
+            self, "settlement_duration_hours_by_block", MappingProxyType(durations)
+        )
 
     @property
     def fully_covered(self) -> bool:
@@ -590,6 +596,10 @@ class AdapterProvenance:
         for leg, prof in self.expected_grid_profiles.items():
             if prof is not None:
                 _text(prof, f"expected_grid_profiles.{leg}")
+        # Read-only view so a fingerprint-bearing object stays deeply immutable.
+        object.__setattr__(
+            self, "expected_grid_profiles", MappingProxyType(dict(self.expected_grid_profiles))
+        )
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -731,11 +741,20 @@ class StrategyRunResult:
                     "reserve_coverage_audit must have exactly one entry per observed date"
                 )
             # A reserve day is cash-valid only when fully covered (red-line #21).
+            # BOTH valid AND solver-failed days must have passed the reserve gate:
+            # an uncovered reserve day is deterministically missing_dates, never
+            # solver_failed (§4.3/§5, no-relabel).
             covered = self.reserve_coverage_audit.covered_dates
             for d in self.coverage_audit.valid_dates:
                 if d not in covered:
                     raise ProjectCaseValidationError(
                         f"reserve valid date {d} is not fully covered (red-line #21)"
+                    )
+            for d in self.coverage_audit.solver_failed_dates:
+                if d not in covered:
+                    raise ProjectCaseValidationError(
+                        f"reserve solver-failed date {d} is not fully covered; an "
+                        "uncovered reserve day must be missing_dates, not solver_failed (§5)"
                     )
         else:
             for name, val in (
@@ -788,6 +807,29 @@ class StrategyRunResult:
 
     def _validate_provenance_consistency(self) -> None:
         prov = self.adapter_provenance
+        # Producer eligibility is the pinned 5-tuple (§5, red-line #6/#18): a
+        # StrategyRunResult whose provenance disagrees with the canonical
+        # (kind, source function, per-day cash field, excluded fields) for its
+        # adapter id is unconstructible — a mislabelled column can never reach cash.
+        spec = canonical_spec(prov.producer_adapter_id)
+        if self.strategy_kind is not spec.strategy_kind:
+            raise ProjectCaseValidationError(
+                f"strategy_kind {self.strategy_kind.value} is not bound to adapter "
+                f"{prov.producer_adapter_id.value} (expected {spec.strategy_kind.value})"
+            )
+        if prov.source_function != spec.source_function:
+            raise ProjectCaseValidationError(
+                f"source_function must be {spec.source_function!r} for {prov.producer_adapter_id.value}"
+            )
+        if prov.per_day_cash_field != spec.per_day_cash_field:
+            raise ProjectCaseValidationError(
+                f"per_day_cash_field must be {spec.per_day_cash_field!r} for "
+                f"{prov.producer_adapter_id.value}"
+            )
+        if tuple(sorted(prov.excluded_fields)) != tuple(sorted(spec.excluded_fields)):
+            raise ProjectCaseValidationError(
+                f"excluded_fields must be {spec.excluded_fields!r} for {prov.producer_adapter_id.value}"
+            )
         # capture_rate null-matrix (R10-02): non-null only for PC_ADP_DA_ONLY, and
         # equal to cash_basis.capture.rate there.
         if prov.producer_adapter_id is ProducerAdapterId.PC_ADP_DA_ONLY:
@@ -1287,3 +1329,105 @@ class ProjectCase:
 
     def input_fingerprint(self) -> str:
         return fingerprint_hex("ProjectCase", self.to_payload())
+
+
+# --------------------------------------------------------------------------- #
+# RunResult envelope (§3, §4.6) — typed scaffold; PC-B populates the NPVs      #
+# --------------------------------------------------------------------------- #
+# PC-A ships the immutable output-envelope TYPES so downstream (PC-B compute,
+# PC-C UI/export) has one schema to fill; PC-A itself computes NO NPV. Partial
+# availability is typed, never inferred from null arithmetic (§4.6).
+@dataclass(frozen=True)
+class NpvDistribution:
+    """``{p10, p50, p90, prob_positive}`` (§3). All finite; prob_positive ∈ [0,1]."""
+
+    p10: float
+    p50: float
+    p90: float
+    prob_positive: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "p10", _finite_float(self.p10, "p10"))
+        object.__setattr__(self, "p50", _finite_float(self.p50, "p50"))
+        object.__setattr__(self, "p90", _finite_float(self.p90, "p90"))
+        object.__setattr__(self, "prob_positive", _ratio_float(self.prob_positive, "prob_positive"))
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "p10": float(self.p10),
+            "p50": float(self.p50),
+            "p90": float(self.p90),
+            "prob_positive": float(self.prob_positive),
+        }
+
+
+@dataclass(frozen=True)
+class NpvOutcome:
+    """Typed NPV outcome envelope ``{available, status, message, distribution}`` (§3)."""
+
+    available: bool
+    status: str
+    message: str | None
+    distribution: NpvDistribution | None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.available, bool):
+            raise ProjectCaseValidationError("NpvOutcome.available must be bool")
+        _text(self.status, "NpvOutcome.status")
+        if self.available:
+            if self.status != "ok" or self.message is not None or self.distribution is None:
+                raise ProjectCaseValidationError(
+                    "an available NpvOutcome is {available:true, status:'ok', message:null, "
+                    "distribution:<NpvDistribution>}"
+                )
+            if not isinstance(self.distribution, NpvDistribution):
+                raise ProjectCaseValidationError("NpvOutcome.distribution must be an NpvDistribution")
+        else:
+            if self.distribution is not None:
+                raise ProjectCaseValidationError("unavailable NpvOutcome must have null distribution")
+            _text(self.message, "NpvOutcome.message")
+
+    @classmethod
+    def ok(cls, distribution: NpvDistribution) -> NpvOutcome:
+        return cls(True, "ok", None, distribution)
+
+    @classmethod
+    def unavailable(cls, status: str, message: str) -> NpvOutcome:
+        return cls(False, status, message, None)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "available": self.available,
+            "status": self.status,
+            "message": self.message,
+            "distribution": None if self.distribution is None else self.distribution.to_payload(),
+        }
+
+
+@dataclass(frozen=True)
+class RunResult:
+    """Immutable, input-fingerprinted result envelope (§4.6).
+
+    PC-A ships this typed container; PC-B computes/populates the two ``NpvOutcome``
+    slots and the cashflow tables. ``input_fingerprint`` is the ProjectCase digest
+    the result carries; the RunResult itself is not separately fingerprinted. The
+    floor comparator is deliberately NOT a field here (red-line #23, §4.5).
+    """
+
+    input_fingerprint: str
+    no_lifecycle_cost_screening_npv: NpvOutcome
+    lifecycle_cash_npv: NpvOutcome
+    provenance: MappingProxyType
+    schema_version: str = SCHEMA_VERSION
+    screening_cashflow_table: Any = None
+    lifecycle_cashflow_table: Any = None
+
+    def __post_init__(self) -> None:
+        _hex64(self.input_fingerprint, "input_fingerprint")
+        if self.schema_version != SCHEMA_VERSION:
+            raise ProjectCaseValidationError(f"schema_version must be {SCHEMA_VERSION!r}")
+        for name in ("no_lifecycle_cost_screening_npv", "lifecycle_cash_npv"):
+            if not isinstance(getattr(self, name), NpvOutcome):
+                raise ProjectCaseValidationError(f"{name} must be an NpvOutcome")
+        if not isinstance(self.provenance, MappingProxyType):
+            object.__setattr__(self, "provenance", MappingProxyType(dict(self.provenance)))

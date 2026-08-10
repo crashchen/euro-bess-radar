@@ -909,6 +909,7 @@ def simulate_sequential_da_id_batch(
     bucket: str = "hour_of_day",
     forecast_mode: str = "loo",
     min_rebid_uplift_eur: float = 0.0,
+    soc_init_frac: float = 0.5,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Per-day three-way DA+ID comparison under an imperfect IDA forecast.
 
@@ -955,6 +956,7 @@ def simulate_sequential_da_id_batch(
                 local_date=local_date, tz=tz, power_mw=power_mw,
                 duration_hours=duration_hours, efficiency=efficiency,
                 min_rebid_uplift_eur=min_rebid_uplift_eur,
+                soc_init_frac=soc_init_frac,
             )
             if row is None:
                 if failure is None:
@@ -1204,6 +1206,7 @@ def simulate_sequential_da_id_reserve_batch(
     availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
     bucket: str = "hour_of_day",
     forecast_mode: str = "walk_forward",
+    soc_init_frac: float = 0.5,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Forecast-driven reserve-first DA+IDA+reserve policy over a window.
 
@@ -1286,6 +1289,7 @@ def simulate_sequential_da_id_reserve_batch(
             duration_hours=duration_hours,
             efficiency=efficiency,
             availability=availability,
+            soc_init_frac=soc_init_frac,
         )
         if not result["success"]:
             solver_failures.append(_solver_failure_detail(
@@ -1344,6 +1348,7 @@ def _sequential_day_row(
     duration_hours: float,
     efficiency: float,
     min_rebid_uplift_eur: float = 0.0,
+    soc_init_frac: float = 0.5,
 ) -> tuple[dict[str, Any] | None, dict[str, str] | None]:
     """Solve one sequential day, separating missing data from solve failure."""
     da_day = _select_local_day(da_prices, local_date, tz)
@@ -1366,6 +1371,7 @@ def _sequential_day_row(
         merged["intraday_price_eur_mwh"].to_numpy(dtype=float),
         dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, min_rebid_uplift_eur=min_rebid_uplift_eur,
+        soc_init_frac=soc_init_frac,
     )
     if not result["success"]:
         return None, _solver_failure_detail(

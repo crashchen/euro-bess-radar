@@ -124,3 +124,13 @@ def test_reserve_scalar_duration_weighted():
 def test_reserve_scalar_raises_on_incomplete_pre_gate():
     with pytest.raises(AdapterUnavailableError):
         reserve_scalar_price(_reserve_series(DAY, 5), zone=ZONE, pricing_dates=(DAY,))
+
+
+def test_reserve_extra_non_canonical_row_makes_day_uncovered():
+    # 6 clean blocks PLUS an extra non-canonical row -> malformed day -> fully
+    # uncovered (no pass-through as "fully covered", red-line #17/#21).
+    s = _reserve_series(DAY, 6)
+    extra = pd.Series([5.0], index=pd.DatetimeIndex([s.index[0] + pd.Timedelta(hours=1)]))
+    audit = build_reserve_coverage_audit(pd.concat([s, extra]), zone=ZONE, evaluation_dates=(DAY,))
+    assert not audit.entries[0].fully_covered
+    assert audit.entries[0].present_blocks == ()

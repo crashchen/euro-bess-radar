@@ -68,15 +68,34 @@ def _grid(start: pd.Timestamp, end: pd.Timestamp, minutes: int) -> tuple[pd.Time
     return tuple(out)
 
 
-def _da_resolution_minutes(zone: str, delivery_date: _dt.date) -> int:
+# SDAC switched the DA market time unit 60->15min at ONE shared market instant —
+# the CET/CEST market midnight of delivery day 2025-10-01 = 2025-09-30T22:00:00Z —
+# NOT at each zone's civil midnight (price-resolution-transition-v1.md). A local
+# delivery day that straddles that instant is genuinely mixed-resolution: e.g.
+# FI 2025-10-01 (local start 21:00Z) is 1 hourly point + 92 quarter-hours = 93, and
+# PT 2025-09-30 (local end 23:00Z) is 23 hourly + 4 quarter-hours = 27. Resolving
+# the cutover through each civil date would mis-exclude these real days.
+_SDAC_CUTOVER_UTC = (
+    pd.Timestamp(config.SDAC_15MIN_DELIVERY_DATE)
+    .tz_localize(config.SDAC_MARKET_TIMEZONE)
+    .tz_convert("UTC")
+)
+
+
+def _segmented_da_grid(
+    zone: str, start: pd.Timestamp, end: pd.Timestamp
+) -> tuple[pd.Timestamp, ...]:
+    """Expected DA timestamps for one UTC ``[start, end)`` window, cutover-aware."""
     if zone == "IE_SEM":
-        return 30
+        return _grid(start, end, 30)  # 30-min throughout (outside SDAC rollout)
     if zone == "CH":
-        return 60
-    # SDAC zone: 60-min before the 15-min delivery day, 15-min from it.
-    if delivery_date >= config.SDAC_15MIN_DELIVERY_DATE:
-        return 15
-    return 60
+        return _grid(start, end, 60)  # 60-min throughout (outside SDAC rollout)
+    cut = _SDAC_CUTOVER_UTC
+    if end <= cut:
+        return _grid(start, end, 60)
+    if start >= cut:
+        return _grid(start, end, 15)
+    return _grid(start, cut, 60) + _grid(cut, end, 15)
 
 
 def da_profile_id(zone: str) -> str | None:
@@ -111,7 +130,7 @@ def expected_da_timestamps(zone: str, delivery_date: _dt.date) -> tuple[pd.Times
     if zone not in _DA_ZONES:
         return None
     start, end = _local_day_bounds_utc(zone, delivery_date)
-    return _grid(start, end, _da_resolution_minutes(zone, delivery_date))
+    return _segmented_da_grid(zone, start, end)
 
 
 def expected_ida_timestamps(zone: str, delivery_date: _dt.date) -> tuple[pd.Timestamp, ...] | None:

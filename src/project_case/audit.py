@@ -105,6 +105,8 @@ def build_reserve_coverage_audit(
         )
     s = _utc_series(block_price_series, "reserve block price series")
     counts = Counter(s.index)
+    tz = grid._zone_tz(zone)
+    local = _local_dates(s.index, tz)
     entries: list[ReserveCoverageEntry] = []
     for target in evaluation_dates:
         blocks = grid.reserve_blocks(zone, target)
@@ -112,14 +114,16 @@ def build_reserve_coverage_audit(
             raise AdapterUnavailableError(f"no reserve blocks for {zone} {target}")
         required = tuple(bid for bid, _ in blocks)
         durations = {bid: float(dur) for bid, dur in blocks}
-        present: list[str] = []
-        for bid in required:
-            ts = pd.Timestamp(bid)
-            if counts.get(ts, 0) != 1:
-                continue  # missing or duplicate row
-            value = float(s.loc[ts])
-            if math.isfinite(value) and value >= 0.0:
-                present.append(bid)
+        canonical_starts = {pd.Timestamp(bid) for bid in required}
+        day_ts = s.index[local == target]
+        if any(ts not in canonical_starts for ts in day_ts):
+            # A day carrying any non-canonical / extra reserve row is malformed and
+            # untrustworthy -> fully uncovered (red-line #17/#21, no pass-through).
+            present: list[str] = []
+        else:
+            present = [
+                bid for bid in required if _block_is_present(s, counts, pd.Timestamp(bid))
+            ]
         present_set = frozenset(present)
         missing = tuple(b for b in required if b not in present_set)
         entries.append(
@@ -132,6 +136,14 @@ def build_reserve_coverage_audit(
             )
         )
     return ReserveCoverageAudit(tuple(entries))
+
+
+def _block_is_present(s: pd.Series, counts: Counter, ts: pd.Timestamp) -> bool:
+    """A block is present iff exactly one canonical row with finite price >= 0."""
+    if counts.get(ts, 0) != 1:
+        return False  # missing or duplicate row
+    value = float(s.loc[ts])
+    return math.isfinite(value) and value >= 0.0
 
 
 def reserve_scalar_price(
