@@ -1,17 +1,22 @@
 # Project Case v1 — unified pre-tax unlevered lifecycle cash NPV
 
 Status: **candidate** (design-contract round — NOT locked. Revised through review
-round 9. The bounded co-review of `6b217e7` returned Gemini **APPROVE** (its fifth
-consecutive approval) / Codex **CHANGES REQUESTED** on four §11 blockers; round 9
-closes those items, the bounded cash-basis/fingerprint lane findings, and the
-eight final-bar findings recorded as `R9-FINAL-01…08` below.
+round 10. The final same-hash co-review of `230b8c0` returned Codex **CHANGES
+REQUESTED** (two bar-(c) fingerprint blockers) and Gemini **CHANGES REQUESTED**
+(three schema items + one non-blocking); CC independently confirmed the two
+fingerprint blockers and folded the editorial reconciliations. Round 10 closes both
+confirmed fingerprint blockers (`reserve_coverage_audit` entry-date domain;
+`adapter_provenance.capture_rate` null-matrix), strengthens the `prob_positive` /
+`solver_failure_details` fingerprint pins, and reconciles the currency-basis /
+reserve-audit-shape / per-draw-bootstrap-read wording — recorded as `R10-01…08`
+below.
 The next review applies the **§11 blocking bar** — a finding blocks only if it
 changes an output number, cash basis, eligible dates, available/unavailable status,
 public schema/fingerprint, or a red-line; everything else is non-blocking PC-A/PC-B
 implementation debt. Pending independent review of the commit containing this
 text.)
 
-Draft decision date: 2026-08-09
+Draft decision date: 2026-08-10
 
 Extends: [`economic-semantics-v1.md`](./economic-semantics-v1.md) — its "Next
 financial-model increment" section defers augmentation/replacement cash flows and
@@ -264,12 +269,15 @@ It carries:
   `get_zone_timezone()` is not allowed. Its canonical form is two ISO
   `YYYY-MM-DD` strings plus that registry-owned IANA name; it generates every
   local date in the inclusive interval as `evaluation_dates`. A
-  **`currency_basis`** with a
+  **`currency_basis`** — its wire form is the flat `{mode, target_base_year,
+  deflator_method, deflator_vintage, deflator_factor}` of §4.8 — with a
   `target_base_year` (which `validate()` requires to equal `ValuationCase.base_year`
-  — a mismatch is fail-closed, §4.4) and **either** a recorded `deflator`
-  (`{method, vintage, factor}` with `factor` finite `> 0`) the adapter applied to
-  convert historical settlement EUR to base-year real EUR, **or** the explicit
-  screening assumption `source EUR treated as base-year real` — never a silent mix;
+  — a mismatch is fail-closed, §4.4) and **either** `mode = DEFLATOR_APPLIED` with a
+  recorded `deflator_method` / `deflator_vintage` / `deflator_factor` (`factor`
+  finite `> 0`) the adapter applied to convert historical settlement EUR to
+  base-year real EUR, **or** `mode = SOURCE_EUR_TREATED_AS_BASE_YEAR_REAL` (the
+  explicit screening assumption; the three deflator members null) — never a silent
+  mix;
 - kind-specific provenance: a **`ForecastAudit`** per forecast leg — DA, IDA, and
   (for `DA_ID_RESERVE_REALISED`) the **reserve-price forecast** leg separately, not
   one `walk_forward` label — carrying `forecast_mode` + `bucket` + `deadband`.
@@ -297,11 +305,16 @@ It carries:
   `reserve_coverage_audit`: all are non-null for the two reserve-bearing kinds
   and all are null otherwise. Required text values are non-empty after trimming.
 - for reserve-bearing kinds (`DA_RESERVE_COOPT`, `DA_ID_RESERVE_REALISED`) a
-  **`ReserveCoverageAudit`**, keyed **per local date**, with three canonical
-  4-hour-block sets per day — `required_blocks`, `present_blocks`,
+  **`ReserveCoverageAudit`**: a **sorted array with exactly one entry per
+  `CoverageAudit.observed_dates` member** — entry dates unique and sorted, and the
+  entry date-set **equals `observed_dates` exactly**, so a fully-missing day is
+  retained with `present_blocks = ∅` and `missing_blocks = required_blocks`, never
+  dropped (it is not a date-keyed map — that shape was ambiguous for the
+  fingerprint). For non-reserve kinds the whole field is `null`. Each entry carries
+  three canonical 4-hour-block sets — `required_blocks`, `present_blocks`,
   `missing_blocks` — plus `settlement_duration_hours_by_block` from the product
   calendar (finite `> 0`; normally 4h, explicit rather than inferred across gaps).
-  Its keys equal `required_blocks` exactly. A block is `present` only when the raw
+  Its duration-map keys equal `required_blocks` exactly. A block is `present` only when the raw
   input has **exactly one** row for that ID with a finite
   `block_price_eur_mw_h ≥ 0`; duplicates, NaN/Inf, negative prices (unsupported by
   the v1 solver), or a missing/extra duration key fail the data gate and classify
@@ -327,7 +340,10 @@ It carries:
   so a fully-missing day still appears in the universe and cannot be silently
   dropped before classification). It is partitioned into three **immutable,
   pairwise-disjoint canonical date sets** — `valid_dates`, `missing_dates`,
-  `solver_failed_dates`. Machine-checkable: `valid_dates ∪ missing_dates ∪
+  `solver_failed_dates` — plus a `solver_failure_details` array carrying **exactly
+  one** `{date, status, message, stage}` record per `solver_failed_dates` member
+  (its date-set equals `solver_failed_dates`; an empty array when there are no
+  solver failures). Machine-checkable: `valid_dates ∪ missing_dates ∪
   solver_failed_dates == observed_dates`, pairwise disjoint, and
   `daily_realised_cash_series` dates equal `valid_dates` exactly. **Completeness is
   checked against an EXPECTED grid, not inferred cadence:** for **every consumed
@@ -383,9 +399,9 @@ scalar factor.
 **Convention lock:** revenue projection (§4.7) and discounting are both in
 **real, base-year EUR** — decay and discount must not mix a nominal and a real
 convention. The historical StrategyRunResult cash is reconciled to this basis via
-the `StrategyRunResult.currency_basis` (§4.3): either the adapter applied a
-recorded `deflator` (`{method, vintage, factor > 0}`), or the explicit screening
-assumption "source EUR treated as base-year real" is stamped — a silent mix is
+the `StrategyRunResult.currency_basis` (§4.3): either `mode = DEFLATOR_APPLIED`
+with the recorded `deflator_method` / `deflator_vintage` / `deflator_factor` (`> 0`),
+or `mode = SOURCE_EUR_TREATED_AS_BASE_YEAR_REAL` is stamped — a silent mix is
 rejected. **`validate()` requires `currency_basis.target_base_year ==
 ValuationCase.base_year`** (fail-closed): a result deflated to a different base
 year can never be discounted against this valuation. In v1 the **COD and the
@@ -578,7 +594,14 @@ The StrategyKind-specific forecast/reserve null matrix is exactly the table in
 §4.3. `reserve_price_aggregation` is either null or the sole v1 literal
 `duration_weighted_mean_complete_blocks_v1`; it and non-empty
 `reserve_pricing_dates` plus `reserve_scalar_price_eur_mw_h` are non-null only for
-`PC_ADP_RESERVE_COOPT`. `currency_basis.mode` and its branch nullability are
+`PC_ADP_RESERVE_COOPT`. `adapter_provenance.capture_rate` is non-null **only for
+`PC_ADP_DA_ONLY`** — there it equals **both** `cash_basis.capture.rate` **and** the
+exact value passed to `simulate_replay_batch` — and is **`null` for the other three
+adapters**, whose `cash_basis.capture` stays `{applied:false, rate:1.0,
+source:"not_applied"}`. So `capture_rate` records the actually-existing
+solver-adapter parameter while `cash_basis.capture` remains the single cash-basis
+owner (the two never disagree, and the non-DA adapters do not fabricate a
+non-existent parameter). `currency_basis.mode` and its branch nullability are
 pinned below.
 
 **Production payload registry.** Public typed field names below are the exact
@@ -624,15 +647,19 @@ optional key is still present-null under the rule above:
   the latter branch and non-null in the former (`deflator_vintage` is text).
 - `forecast_audits` has exactly `{da, ida, reserve}`; each non-null leg has
   exactly `{forecast_mode, bucket, deadband}`. `reserve_coverage_audit` is null for
-  non-reserve kinds, otherwise an array sorted by local date whose entries have
+  non-reserve kinds, otherwise an array sorted by local date with **exactly one
+  entry per `coverage_audit.observed_dates` member** (the entry date-set equals
+  `observed_dates` exactly), whose entries have
   exactly `{date, required_blocks, present_blocks, missing_blocks,
   settlement_duration_hours_by_block}`. A block ID is its UTC interval start as
   `YYYY-MM-DDTHH:MM:SSZ`; the three block arrays and duration-map keys use those
   exact strings.
 - `coverage_audit` has exactly `{observed_dates, valid_dates, missing_dates,
-  solver_failed_dates, solver_failure_details}`. Each failure detail has exactly
-  `{date, status, message, stage}` and the array sorts by
-  `(date, stage, status, message)`.
+  solver_failed_dates, solver_failure_details}`. `solver_failure_details` carries
+  **exactly one entry per `solver_failed_dates` member** (its date-set equals
+  `solver_failed_dates` exactly; an empty array when there are no solver failures).
+  Each failure detail has exactly `{date, status, message, stage}` and the array
+  sorts by `(date, stage, status, message)`.
 - `adapter_provenance` has exactly `{producer_adapter_id, source_function,
   per_day_cash_field, excluded_fields, mode, carry_soc, soc_init_frac,
   capture_rate, reserve_price_aggregation, reserve_pricing_dates,
@@ -810,8 +837,10 @@ only; resolved §10.6).
 
 The chosen strategy's `daily_realised_cash_series` is **already total EUR for the
 modelled MW** (§4.3) — it is **not** re-scaled by `power_mw` here (doing so would
-double-count MW). It is bootstrapped to an annual-revenue distribution via
-`scenario.bootstrap_annual_revenue`. For draw `d` and year
+double-count MW). Its per-day values are bootstrapped by
+`scenario.bootstrap_annual_revenue`, and PC reads the **per-draw `["simulations"]`
+array** (the raw `n_simulations` annual sums, not the percentile summary) as
+`annual_revenue_draw_d`. For draw `d` and year
 `t = 1 … project_life_years`:
 
 ```
@@ -829,8 +858,12 @@ lifecycle-unavailable outcome in §3; it does not assume zero augmentation.
 
 `lifecycle_cash_npv` for draw `d` is the **explicit year-by-year** sum
 `−installed_capex_eur + Σ_{t=1..L} net_{d,t} / (1+discount_rate)^t`, with
-`net_{d,t} = revenue_{d,t} − opex_t − augment_t + terminal_t`; over all draws this
-yields the P10/P50/P90/`P(NPV>0)` distribution.
+`net_{d,t} = revenue_{d,t} − opex_t − augment_t + terminal_t`; over all
+`n_simulations` draws this yields the distribution, where **`p10/p50/p90 =
+percentile(npv_draws, {10,50,90}, method="linear")`** and **`prob_positive =
+mean(npv_draws > 0.0)`** — the fraction of **all** `n_simulations` draws with a
+strictly positive NPV, no draw dropped. `no_lifecycle_cost_screening_npv` uses the
+identical summary over its own draws.
 
 `no_lifecycle_cost_screening_npv` is the **same** year-by-year sum with **`opex_t
 = augment_t = terminal_t = 0`** (revenue and CapEx only — §3.1 defines it as
@@ -1373,6 +1406,52 @@ candidate commit):
     cadence inference or IE/CH/GB fallback. Target: PC-A mixed DA/IDA cadence,
     missing-registry, and fingerprint-mutation tests (§4.3, §4.8, red-line #17).
     Owner acceptance: pending final candidate review.
+
+Resolved in review round 10 (final same-hash co-review of `230b8c0`: Codex
+**CHANGES REQUESTED** on two bar-(c) fingerprint blockers, Gemini **CHANGES
+REQUESTED** on three schema items + one non-blocking; CC independently verified each
+against the §11 bar, confirmed the two fingerprint blockers, and folded the
+editorial reconciliations into this candidate):
+
+56. **`R10-01` — reserve-coverage entry-date domain** — disposition:
+    **blocking → resolved** (public fingerprint). `reserve_coverage_audit` is a
+    sorted array with **exactly one entry per `observed_dates` member** (entry
+    date-set == `observed_dates`; a fully-missing day retained with `present=∅`,
+    `missing=required`); `null` for non-reserve kinds. Closes the Codex
+    unpinned-membership fork (array membership could otherwise diverge across
+    conformant encoders) (§4.3, §4.8, red-line #21).
+57. **`R10-02` — `adapter_provenance.capture_rate` null-matrix** — disposition:
+    **blocking → resolved** (public fingerprint). Non-null **only** for
+    `PC_ADP_DA_ONLY` (== `cash_basis.capture.rate` == the value passed to
+    `simulate_replay_batch`); `null` for the other three, whose `cash_basis.capture`
+    stays `{applied:false, rate:1.0, source:"not_applied"}`. `cash_basis.capture`
+    remains the sole cash-basis owner. Closes the Gemini null-vs-1.0 ambiguity
+    (§4.8, red-line #22).
+58. **`R10-03` — `prob_positive` pinned** — disposition:
+    **output number → resolved.** `prob_positive = mean(npv_draws > 0.0)` over
+    **all** `n_simulations` draws, no draw dropped; `p10/p50/p90 =
+    percentile(npv_draws, {10,50,90}, method="linear")` (§3, §6, §4.8).
+59. **`R10-04` — `solver_failure_details` fingerprint membership** — disposition:
+    **public fingerprint → resolved.** Exactly one `{date, status, message, stage}`
+    per `solver_failed_dates` member (date-set equality; empty array when none),
+    sorted by `(date, stage, status, message)` (§4.3, §4.8).
+60. **`R10-05` — currency-basis wire reconciliation** — disposition:
+    **non-blocking (editorial) → applied.** §4.3/§4.4 prose now uses the flat
+    `{mode, deflator_method, deflator_vintage, deflator_factor}` wire form of §4.8,
+    not the nested `{method, vintage, factor}` notation (Gemini).
+61. **`R10-06` — reserve-audit shape reconciliation** — disposition:
+    **non-blocking (editorial) → applied.** §4.3 now describes `ReserveCoverageAudit`
+    as an explicit sorted array (was "keyed per local date", which read as a map),
+    consistent with §4.8 (Gemini; folded with `R10-01`).
+62. **`R10-07` — per-draw bootstrap read** — disposition:
+    **non-blocking (clarity) → applied.** §6 reads the per-draw
+    `bootstrap_annual_revenue(...)["simulations"]` array, not the percentile
+    summary, for `annual_revenue_draw_d`.
+63. **`R10-08` — cashflow-table schema is PC-C scope** — disposition:
+    **non-blocking (PC-C implementation debt).** The NPV *numbers* are pinned by §6
+    + the §3 `NpvOutcome`/distribution shape + the §4.8 bootstrap golden vector; the
+    `screening_cashflow_table` / `lifecycle_cashflow_table` row/column layout is
+    PC-C UI/export presentation and is not input-fingerprinted (Codex).
 
 ## 11. Lock exit rule and procedure
 
