@@ -14,11 +14,13 @@ literal (and calculator version), never an in-place mutation (§4.8).
 from __future__ import annotations
 
 import datetime as _dt
+from types import MappingProxyType
 
 import pandas as pd
 
 from src import config
 from src.project_case.enums import EXPECTED_GRID_REGISTRY_VERSION
+from src.time_utils import wallclock_block_start_utc
 
 REGISTRY_VERSION = EXPECTED_GRID_REGISTRY_VERSION
 
@@ -29,15 +31,29 @@ DA_PROFILE_CH = "pc-da-ch-60min-v1"
 IDA_PROFILE = "pc-ida-sidc-15min-v1"
 RESERVE_PROFILE = "pc-reserve-block-of-day-4h-v1"
 
+# The only legal profile id per leg — a fingerprinted field, so the schema
+# validates ``adapter_provenance.expected_grid_profiles`` against this closed set
+# (a bogus/typo'd profile id must not pass, review r2 #3).
+PROFILE_IDS_BY_LEG = MappingProxyType(
+    {
+        "da": frozenset({DA_PROFILE_SDAC, DA_PROFILE_IE_SEM, DA_PROFILE_CH}),
+        "ida": frozenset({IDA_PROFILE}),
+        "reserve": frozenset({RESERVE_PROFILE}),
+    }
+)
+
 # v1 leg support (registry policy; every code is validated against config below).
 _DA_ZONES = frozenset(config.ENTSOE_ZONES.values())  # EUR ENTSO-E zones (excludes GB)
 _IDA_ZONES = frozenset({"DE_LU", "NL", "BE", "FR", "AT", "IT_NORD"})
 _RESERVE_ZONES = frozenset({"DE_LU", "FI"})
 
-# 4-hour product blocks per local delivery day: canonical settlement duration 4.0h
-# each ("normally 4h, explicit rather than inferred across gaps", §4.3).
+# 4-hour product blocks per local delivery day, defined by WALL-CLOCK local start
+# hours (00:00, 04:00, … — the German product definition), explicit rather than
+# inferred across gaps (§4.3). Settlement duration is the ACTUAL elapsed hours
+# between consecutive wall-clock boundaries: 4h on a normal day, but 3h / 5h for
+# the block spanning a spring-forward / fall-back transition (so the six blocks
+# tile the 23h / 25h civil day exactly). See review r2 #5.
 _RESERVE_BLOCK_START_HOURS = (0, 4, 8, 12, 16, 20)
-_RESERVE_BLOCK_DURATION_H = 4.0
 
 # Fail fast if the local support lists drift from the supported-zone registry.
 _all_codes = frozenset(config.ALL_ZONES.values())
@@ -153,15 +169,23 @@ def reserve_blocks(
 ) -> tuple[tuple[str, float], ...] | None:
     """Return ``((block_id, settlement_duration_hours), ...)`` for the day, or None.
 
-    A block id is its UTC interval start as ``YYYY-MM-DDTHH:MM:SSZ`` (§4.8).
+    A block id is its UTC interval start as ``YYYY-MM-DDTHH:MM:SSZ`` (§4.8), built
+    from the WALL-CLOCK local start hour via the shared
+    :func:`~src.time_utils.wallclock_block_start_utc` (the same construction the
+    Regelleistung ingestion parser uses, so imported reserve prices align on DST
+    days). ``settlement_duration_hours`` is the actual elapsed hours to the next
+    boundary — 4h normally, 3h / 5h for the DST-transition block.
     """
     if zone not in _RESERVE_ZONES:
         return None
     tz = _zone_tz(zone)
-    base = pd.Timestamp(delivery_date)
+    starts = [
+        wallclock_block_start_utc(delivery_date, hour, 0, tz)
+        for hour in _RESERVE_BLOCK_START_HOURS
+    ]
+    bounds = [*starts, wallclock_block_start_utc(delivery_date, 24, 0, tz)]
     out: list[tuple[str, float]] = []
-    for hour in _RESERVE_BLOCK_START_HOURS:
-        start_utc = (base + pd.Timedelta(hours=hour)).tz_localize(tz).tz_convert("UTC")
-        block_id = start_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
-        out.append((block_id, _RESERVE_BLOCK_DURATION_H))
+    for i, start_utc in enumerate(starts):
+        duration_h = (bounds[i + 1] - bounds[i]).total_seconds() / 3600.0
+        out.append((start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"), duration_h))
     return tuple(out)

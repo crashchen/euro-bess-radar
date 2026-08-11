@@ -89,7 +89,7 @@ def da_only_srr() -> StrategyRunResult:
 def _reserve_entry(d: dt.date) -> ReserveCoverageEntry:
     blocks = grid.reserve_blocks(ZONE, d)
     ids = tuple(b for b, _ in blocks)
-    return ReserveCoverageEntry(d, ids, ids, (), {b: 4.0 for b, _ in blocks})
+    return ReserveCoverageEntry(d, ids, ids, (), {b: dur for b, dur in blocks})
 
 
 def da_id_reserve_srr() -> StrategyRunResult:
@@ -187,21 +187,46 @@ def reserve_series(zone: str, days_blocks: list[tuple[dt.date, int]]) -> pd.Seri
     return pd.Series(vals, index=pd.DatetimeIndex(idx))
 
 
-def fake_runner(cash_field: str, dates_values: list[tuple[dt.date, float]]):
-    """A per-day-frame runner for adapter unit tests (no real MILP)."""
+def fake_runner(
+    cash_field: str,
+    dates_values: list[tuple[dt.date, float]],
+    *,
+    failures: list[dict] | None = None,
+    nested_failures: list[dict] | None = None,
+):
+    """A per-day-frame seam replacement for adapter unit tests (no real MILP).
 
-    def _run(_gate_dates):
-        return pd.DataFrame(
+    ``failures`` attaches a batch-style ``attrs['solver_failure_details']`` (the
+    DA-only / joint-capacity convention); ``nested_failures`` attaches
+    ``attrs['summary']['solver_failure_details']`` (the sequential-batch
+    convention) so both audit-read paths can be exercised. Signature-agnostic so it
+    can replace any ``adapters._run_*`` seam via monkeypatch.
+    """
+
+    def _run(*_args, **_kwargs):
+        df = pd.DataFrame(
             {"date": [d for d, _ in dates_values], cash_field: [v for _, v in dates_values]}
         )
+        if failures is not None:
+            df.attrs["solver_failure_details"] = list(failures)
+        if nested_failures is not None:
+            df.attrs["summary"] = {"solver_failure_details": list(nested_failures)}
+        return df
 
     return _run
 
 
-def fake_coopt_runner(dates_values: list[tuple[dt.date, float]]):
-    def _run(_gate_dates, _scalar):
-        return pd.DataFrame(
+def fake_coopt_runner(
+    dates_values: list[tuple[dt.date, float]],
+    *,
+    failures: list[dict] | None = None,
+):
+    def _run(*_args, **_kwargs):
+        df = pd.DataFrame(
             {"date": [d for d, _ in dates_values], "joint_total_revenue": [v for _, v in dates_values]}
         )
+        if failures is not None:
+            df.attrs["solver_failure_details"] = list(failures)
+        return df
 
     return _run

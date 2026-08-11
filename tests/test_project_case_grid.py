@@ -66,6 +66,33 @@ def test_reserve_blocks_shape_and_ids():
     assert grid.reserve_blocks("FR", dt.date(2026, 1, 5)) is None
 
 
+def test_reserve_blocks_dst_durations_are_actual_elapsed():
+    # Wall-clock 4h blocks tile the civil day exactly, so the transition block is
+    # 3h (spring) / 5h (fall), not a nominal 4h (review r2 #5).
+    spring = grid.reserve_blocks("DE_LU", dt.date(2025, 3, 30))
+    assert [dur for _, dur in spring] == [3.0, 4.0, 4.0, 4.0, 4.0, 4.0]
+    assert sum(dur for _, dur in spring) == 23.0
+    fall = grid.reserve_blocks("DE_LU", dt.date(2025, 10, 26))
+    assert [dur for _, dur in fall] == [5.0, 4.0, 4.0, 4.0, 4.0, 4.0]
+    assert sum(dur for _, dur in fall) == 25.0
+
+
+def test_reserve_blocks_agree_with_ingestion_parser_on_dst_days():
+    # The registry and the shipped Regelleistung block parser must build the SAME
+    # UTC block-start instants, or an imported reserve price is misclassified as
+    # wholly missing on DST days (review r2 #5).
+    from src.time_utils import parse_regelleistung_time_block_start
+
+    for day in (dt.date(2025, 3, 30), dt.date(2025, 10, 26), dt.date(2025, 6, 1)):
+        for hour, (bid, _dur) in zip(
+            (0, 4, 8, 12, 16, 20), grid.reserve_blocks("DE_LU", day), strict=True
+        ):
+            parsed = parse_regelleistung_time_block_start(
+                day, f"{hour:02d}:00", timezone="Europe/Berlin"
+            )
+            assert parsed.strftime("%Y-%m-%dT%H:%M:%SZ") == bid
+
+
 def test_registry_version_literal():
     assert grid.REGISTRY_VERSION == "pc-market-grid-v1"
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 import datetime as _dt
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
@@ -46,6 +47,7 @@ from src.project_case.fingerprint import (
     fingerprint_hex,
     sorted_by_encoding,
 )
+from src.project_case.grid import PROFILE_IDS_BY_LEG
 from src.project_case.producer_specs import canonical_spec
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -177,6 +179,23 @@ class CaptureBasis:
             raise ProjectCaseValidationError("capture.applied must be bool")
         object.__setattr__(self, "rate", _ratio_float(self.rate, "capture.rate"))
         _text(self.source, "capture.source")
+        # The three fields are not independent (§4.3): the producer emits
+        # ``{applied: rate != 1.0, rate, source}``, and a non-applied haircut is
+        # exactly ``{false, 1.0, "not_applied"}``. Enforce that coupling so a
+        # stamped-but-sourceless haircut (rate 0.9 with source "not_applied") or a
+        # mislabelled ``applied`` flag is unconstructible (review r2 #6).
+        if self.applied != (float(self.rate) != 1.0):
+            raise ProjectCaseValidationError(
+                "capture.applied must equal (rate != 1.0)"
+            )
+        if self.applied and self.source == "not_applied":
+            raise ProjectCaseValidationError(
+                "an applied capture haircut requires a real source, not 'not_applied'"
+            )
+        if not self.applied and self.source != "not_applied":
+            raise ProjectCaseValidationError(
+                "a non-applied capture must have source 'not_applied'"
+            )
 
     def to_payload(self) -> dict[str, Any]:
         return {"applied": self.applied, "rate": float(self.rate), "source": self.source}
@@ -560,6 +579,9 @@ class AdapterProvenance:
             raise ProjectCaseValidationError("producer_adapter_id invalid")
         _text(self.source_function, "source_function")
         _text(self.per_day_cash_field, "per_day_cash_field")
+        # Own an immutable copy so a caller that passed (and still holds) a list
+        # cannot mutate a fingerprinted field after construction (review r2 #2).
+        object.__setattr__(self, "excluded_fields", tuple(self.excluded_fields))
         for f in self.excluded_fields:
             _text(f, "excluded_fields[]")
         if self.mode is not None:
@@ -596,6 +618,13 @@ class AdapterProvenance:
         for leg, prof in self.expected_grid_profiles.items():
             if prof is not None:
                 _text(prof, f"expected_grid_profiles.{leg}")
+                # A fingerprinted field: the value must be a real registry profile
+                # id for that leg, not an arbitrary/typo'd string (review r2 #3).
+                if prof not in PROFILE_IDS_BY_LEG[leg]:
+                    raise ProjectCaseValidationError(
+                        f"expected_grid_profiles.{leg}={prof!r} is not a registered "
+                        f"{leg} profile id"
+                    )
         # Read-only view so a fingerprint-bearing object stays deeply immutable.
         object.__setattr__(
             self, "expected_grid_profiles", MappingProxyType(dict(self.expected_grid_profiles))
@@ -1404,23 +1433,125 @@ class NpvOutcome:
         }
 
 
+def _deep_freeze(value: Any) -> Any:
+    """Recursively wrap mappings/sequences in read-only views (deep immutability)."""
+    if isinstance(value, Mapping):
+        return MappingProxyType({k: _deep_freeze(v) for k, v in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_deep_freeze(v) for v in value)
+    return value
+
+
+def _deep_thaw(value: Any) -> Any:
+    """Inverse of :func:`_deep_freeze` — plain dict/list/scalars for serialisation."""
+    if isinstance(value, Mapping):
+        return {k: _deep_thaw(v) for k, v in value.items()}
+    if isinstance(value, tuple):
+        return [_deep_thaw(v) for v in value]
+    return value
+
+
+@dataclass(frozen=True)
+class CashflowRow:
+    """One project-year cash-flow row (§6). PC-B populates the numbers; PC-A ships
+    the immutable typed shape so a RunResult can never hold an untyped table."""
+
+    year: int
+    revenue_eur: float
+    opex_eur: float
+    augmentation_eur: float
+    terminal_eur: float
+    net_eur: float
+    discount_factor: float
+    discounted_net_eur: float
+
+    def __post_init__(self) -> None:
+        if isinstance(self.year, bool) or not isinstance(self.year, int):
+            raise ProjectCaseValidationError("cashflow row year must be an int")
+        if not 1 <= self.year <= MAX_PROJECT_LIFE_YEARS:
+            raise ProjectCaseValidationError(
+                f"cashflow row year must be in [1, {MAX_PROJECT_LIFE_YEARS}]"
+            )
+        for name in (
+            "revenue_eur", "opex_eur", "augmentation_eur", "terminal_eur",
+            "net_eur", "discounted_net_eur",
+        ):
+            object.__setattr__(self, name, _finite_float(getattr(self, name), f"cashflow.{name}"))
+        object.__setattr__(
+            self, "discount_factor", _finite_float(self.discount_factor, "cashflow.discount_factor")
+        )
+        if self.discount_factor <= 0.0:
+            raise ProjectCaseValidationError("cashflow discount_factor must be > 0")
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "year": self.year,
+            "revenue_eur": float(self.revenue_eur),
+            "opex_eur": float(self.opex_eur),
+            "augmentation_eur": float(self.augmentation_eur),
+            "terminal_eur": float(self.terminal_eur),
+            "net_eur": float(self.net_eur),
+            "discount_factor": float(self.discount_factor),
+            "discounted_net_eur": float(self.discounted_net_eur),
+        }
+
+
+_CASHFLOW_TABLE_BASES = frozenset({"screening", "lifecycle"})
+
+
+@dataclass(frozen=True)
+class CashflowTable:
+    """Immutable year-by-year cash-flow table (§6). ``basis`` ∈ {screening, lifecycle}."""
+
+    basis: str
+    rows: tuple[CashflowRow, ...]
+
+    def __post_init__(self) -> None:
+        if self.basis not in _CASHFLOW_TABLE_BASES:
+            raise ProjectCaseValidationError(
+                "cashflow table basis must be 'screening' or 'lifecycle'"
+            )
+        object.__setattr__(self, "rows", tuple(self.rows))
+        if not self.rows:
+            raise ProjectCaseValidationError("cashflow table must have at least one row")
+        for r in self.rows:
+            if not isinstance(r, CashflowRow):
+                raise ProjectCaseValidationError("cashflow table rows must be CashflowRow")
+        years = [r.year for r in self.rows]
+        if years != sorted(years) or len(set(years)) != len(years):
+            raise ProjectCaseValidationError(
+                "cashflow table years must be unique and ascending"
+            )
+
+    def to_payload(self) -> dict[str, Any]:
+        return {"basis": self.basis, "rows": [r.to_payload() for r in self.rows]}
+
+
 @dataclass(frozen=True)
 class RunResult:
     """Immutable, input-fingerprinted result envelope (§4.6).
 
-    PC-A ships this typed container; PC-B computes/populates the two ``NpvOutcome``
-    slots and the cashflow tables. ``input_fingerprint`` is the ProjectCase digest
-    the result carries; the RunResult itself is not separately fingerprinted. The
-    floor comparator is deliberately NOT a field here (red-line #23, §4.5).
+    PC-A ships this typed container and enforces the §4.6 **state matrix**; PC-B
+    computes/populates the two ``NpvOutcome`` slots and the cash-flow tables.
+    ``input_fingerprint`` is the ProjectCase digest the result carries; the
+    RunResult itself is not separately fingerprinted. The floor comparator is
+    deliberately NOT a field here (red-line #23, §4.5).
+
+    **State matrix** — a cash-flow table is present *iff* its NpvOutcome is
+    available: ``screening_cashflow_table`` iff the screening NPV is available
+    (always, after a successful ProjectCase validation), ``lifecycle_cashflow_table``
+    iff the lifecycle NPV is available (null under an ``UNKNOWN``
+    capacity-maintenance basis; §4.6). Contradictory states are unconstructible.
+    ``provenance`` is deep-frozen so no nested dict/list stays mutable.
     """
 
     input_fingerprint: str
     no_lifecycle_cost_screening_npv: NpvOutcome
     lifecycle_cash_npv: NpvOutcome
-    provenance: MappingProxyType
+    provenance: Mapping[str, Any]
     schema_version: str = SCHEMA_VERSION
-    screening_cashflow_table: Any = None
-    lifecycle_cashflow_table: Any = None
+    screening_cashflow_table: CashflowTable | None = None
+    lifecycle_cashflow_table: CashflowTable | None = None
 
     def __post_init__(self) -> None:
         _hex64(self.input_fingerprint, "input_fingerprint")
@@ -1429,5 +1560,40 @@ class RunResult:
         for name in ("no_lifecycle_cost_screening_npv", "lifecycle_cash_npv"):
             if not isinstance(getattr(self, name), NpvOutcome):
                 raise ProjectCaseValidationError(f"{name} must be an NpvOutcome")
-        if not isinstance(self.provenance, MappingProxyType):
-            object.__setattr__(self, "provenance", MappingProxyType(dict(self.provenance)))
+        self._validate_table_state(
+            "screening_cashflow_table", self.no_lifecycle_cost_screening_npv
+        )
+        self._validate_table_state("lifecycle_cashflow_table", self.lifecycle_cash_npv)
+        if not isinstance(self.provenance, Mapping):
+            raise ProjectCaseValidationError("provenance must be a mapping")
+        object.__setattr__(self, "provenance", _deep_freeze(dict(self.provenance)))
+
+    def _validate_table_state(self, attr: str, outcome: NpvOutcome) -> None:
+        table = getattr(self, attr)
+        if table is not None and not isinstance(table, CashflowTable):
+            raise ProjectCaseValidationError(f"{attr} must be a CashflowTable or None")
+        if outcome.available and table is None:
+            raise ProjectCaseValidationError(
+                f"{attr} must be present when its NPV outcome is available"
+            )
+        if not outcome.available and table is not None:
+            raise ProjectCaseValidationError(
+                f"{attr} must be null when its NPV outcome is unavailable"
+            )
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "input_fingerprint": self.input_fingerprint,
+            "no_lifecycle_cost_screening_npv": self.no_lifecycle_cost_screening_npv.to_payload(),
+            "lifecycle_cash_npv": self.lifecycle_cash_npv.to_payload(),
+            "screening_cashflow_table": (
+                None if self.screening_cashflow_table is None
+                else self.screening_cashflow_table.to_payload()
+            ),
+            "lifecycle_cashflow_table": (
+                None if self.lifecycle_cashflow_table is None
+                else self.lifecycle_cashflow_table.to_payload()
+            ),
+            "provenance": _deep_thaw(self.provenance),
+        }

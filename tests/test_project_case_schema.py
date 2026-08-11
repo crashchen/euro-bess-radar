@@ -8,12 +8,15 @@ import datetime as dt
 import pytest
 
 from src.project_case import (
+    AdapterProvenance,
     AssetCase,
     AugmentationEvent,
     BootstrapCase,
     CapacityMaintenanceBasis,
     CaptureBasis,
     CashBasis,
+    CashflowRow,
+    CashflowTable,
     CoverageAudit,
     CurrencyBasis,
     CurrencyBasisMode,
@@ -417,7 +420,17 @@ def test_reserve_solver_failed_date_must_be_covered():
 
 
 # --- RunResult / NpvOutcome scaffold (§3, §4.6) ------------------------------
-def test_npv_outcome_and_run_result_shapes():
+def _cashflow_table(basis: str) -> CashflowTable:
+    return CashflowTable(
+        basis,
+        (
+            CashflowRow(1, 100.0, 10.0, 0.0, 0.0, 90.0, 0.9259, 83.3),
+            CashflowRow(2, 100.0, 10.0, 0.0, 0.0, 90.0, 0.8573, 77.2),
+        ),
+    )
+
+
+def test_npv_outcome_shapes():
     dist = NpvDistribution(1.0, 2.0, 3.0, 0.5)
     ok = NpvOutcome.ok(dist)
     assert ok.available and ok.status == "ok" and ok.message is None
@@ -429,17 +442,99 @@ def test_npv_outcome_and_run_result_shapes():
         NpvOutcome(False, "x", "m", dist)  # unavailable cannot carry a distribution
     with pytest.raises(ProjectCaseValidationError):
         NpvDistribution(1.0, 2.0, 3.0, 1.5)  # prob_positive out of [0,1]
+
+
+def test_run_result_state_matrix_and_serialisation():
+    ok = NpvOutcome.ok(NpvDistribution(1.0, 2.0, 3.0, 0.5))
+    un = NpvOutcome.unavailable("capacity_maintenance_unknown", "unknown basis")
+    # Valid: screening available + table present; lifecycle unavailable + null table.
     rr = RunResult(
         input_fingerprint="ab" * 32,
         no_lifecycle_cost_screening_npv=ok,
         lifecycle_cash_npv=un,
-        provenance={"note": "pc-b fills this"},
+        provenance={"note": "pc-b fills this", "nested": {"a": [1, 2]}},
+        screening_cashflow_table=_cashflow_table("screening"),
     )
     assert rr.schema_version == "project-case-v1"
+    payload = rr.to_payload()
+    assert payload["lifecycle_cashflow_table"] is None
+    assert payload["screening_cashflow_table"]["rows"][0]["year"] == 1
+    assert payload["provenance"]["nested"]["a"] == [1, 2]  # round-trips to plain list
+
+
+def test_run_result_rejects_contradictory_states():
+    ok = NpvOutcome.ok(NpvDistribution(1.0, 2.0, 3.0, 0.5))
+    un = NpvOutcome.unavailable("capacity_maintenance_unknown", "x")
+    # Available NPV but a null table is a contradiction.
+    with pytest.raises(ProjectCaseValidationError):
+        RunResult("ab" * 32, ok, un, provenance={})
+    # Unavailable NPV but a present table is a contradiction.
     with pytest.raises(ProjectCaseValidationError):
         RunResult(
-            input_fingerprint="nothex",
-            no_lifecycle_cost_screening_npv=ok,
-            lifecycle_cash_npv=un,
-            provenance={},
+            "ab" * 32, ok, un, provenance={},
+            screening_cashflow_table=_cashflow_table("screening"),
+            lifecycle_cashflow_table=_cashflow_table("lifecycle"),
         )
+    with pytest.raises(ProjectCaseValidationError):
+        RunResult("nothex", ok, un, provenance={}, screening_cashflow_table=_cashflow_table("screening"))
+
+
+def test_run_result_provenance_is_deep_frozen():
+    ok = NpvOutcome.ok(NpvDistribution(1.0, 2.0, 3.0, 0.5))
+    un = NpvOutcome.unavailable("capacity_maintenance_unknown", "x")
+    src = {"solver": {"failures": [1, 2]}}
+    rr = RunResult(
+        "ab" * 32, ok, un, provenance=src,
+        screening_cashflow_table=_cashflow_table("screening"),
+    )
+    src["solver"]["failures"].append(3)  # mutating the caller's dict must not leak in
+    assert rr.provenance["solver"]["failures"] == (1, 2)
+    with pytest.raises(TypeError):
+        rr.provenance["solver"] = None  # deep-frozen
+
+
+def test_cashflow_table_rejects_bad_rows():
+    with pytest.raises(ProjectCaseValidationError):
+        CashflowTable("bogus", (CashflowRow(1, 0, 0, 0, 0, 0, 1.0, 0),))  # bad basis
+    with pytest.raises(ProjectCaseValidationError):
+        CashflowTable("screening", ())  # empty
+    with pytest.raises(ProjectCaseValidationError):  # duplicate/unsorted years
+        CashflowTable(
+            "screening",
+            (CashflowRow(2, 0, 0, 0, 0, 0, 1.0, 0), CashflowRow(2, 0, 0, 0, 0, 0, 1.0, 0)),
+        )
+    with pytest.raises(ProjectCaseValidationError):
+        CashflowRow(1, float("nan"), 0, 0, 0, 0, 1.0, 0)  # non-finite cash
+
+
+# --- Capture basis coupling (review r2 #6) -----------------------------------
+def test_capture_basis_applied_flag_and_source_are_coupled():
+    CaptureBasis(True, 0.9, "da_slippage")          # ok
+    CaptureBasis(False, 1.0, "not_applied")         # ok
+    with pytest.raises(ProjectCaseValidationError):
+        CaptureBasis(True, 0.9, "not_applied")      # applied haircut needs a source
+    with pytest.raises(ProjectCaseValidationError):
+        CaptureBasis(True, 1.0, "da_slippage")      # applied must mean rate != 1.0
+    with pytest.raises(ProjectCaseValidationError):
+        CaptureBasis(False, 0.9, "da_slippage")     # rate != 1.0 must be applied
+
+
+# --- AdapterProvenance immutability + profile validation (review r2 #2/#3) ----
+def _provenance(excluded, profiles) -> AdapterProvenance:
+    return AdapterProvenance(
+        ProducerAdapterId.PC_ADP_DA_ONLY, "simulate_replay_batch", "total_revenue_eur",
+        excluded, "DA MILP Replay", False, 0.5, 0.9, None, None, None,
+        "pc-market-grid-v1", profiles,
+    )
+
+
+def test_adapter_provenance_excluded_fields_is_owned_tuple():
+    lst = ["degradation_cost_eur"]
+    prov = _provenance(lst, {"da": grid.da_profile_id("DE_LU"), "ida": None, "reserve": None})
+    lst.append("SNUCK_IN")  # mutating the caller's list must not change the object
+    assert prov.excluded_fields == ("degradation_cost_eur",)
+
+
+def test_adapter_provenance_rejects_bogus_profile_id():
+    with pytest.raises(ProjectCaseValidationError):
+        _provenance(("degradation_cost_eur",), {"da": "bogus-profile", "ida": None, "reserve": None})
