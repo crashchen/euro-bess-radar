@@ -362,6 +362,7 @@ def _run_reserve_coopt(
         restricted, capacity_price_eur_mw_h=reserve_scalar, power_mw=power_mw,
         duration_hours=duration_hours, efficiency=efficiency, tz=tz,
         soc_init_frac=0.5, availability=availability,
+        capacity_nominal_block_hours=4,
     )
 
 
@@ -385,6 +386,7 @@ def _run_da_id_reserve(
         tz=tz, power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
         availability=availability, bucket=bucket, forecast_mode=WALK_FORWARD,
         soc_init_frac=0.5,  # bound explicitly (red-line #22), not inherited
+        capacity_nominal_block_hours=4,
     )
     return per_day
 

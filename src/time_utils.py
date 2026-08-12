@@ -8,6 +8,7 @@ from datetime import date as date_type
 from datetime import datetime
 from datetime import time as time_type
 
+import numpy as np
 import pandas as pd
 
 
@@ -43,6 +44,58 @@ def wallclock_block_start_utc(
     naive = naive_midnight + pd.Timedelta(hours=int(hour), minutes=int(minute))
     localized = naive.tz_localize(timezone, nonexistent="shift_forward", ambiguous=True)
     return localized.tz_convert("UTC")
+
+
+def nominal_block_settlement_factors(
+    target_index: pd.DatetimeIndex,
+    *,
+    timezone: str,
+    nominal_block_hours: int,
+) -> np.ndarray:
+    """Rescale capacity prices so nominal block cash survives DST.
+
+    German reserve block prices are normalised by the nominal four-hour product
+    length, while dispatch and SoC must stay on the physical 23/25-hour delivery
+    axis.  The returned factor is ``nominal_hours / physical_hours`` for each
+    wall-clock block, so only capacity settlement is adjusted; energy ``dt`` is
+    untouched.  Callers opt in at the German market boundary.
+    """
+    if (
+        isinstance(nominal_block_hours, bool)
+        or not isinstance(nominal_block_hours, int)
+        or nominal_block_hours <= 0
+        or 24 % nominal_block_hours != 0
+    ):
+        raise ValueError("nominal_block_hours must be a positive integer dividing 24")
+
+    idx = pd.DatetimeIndex(target_index)
+    if len(idx) == 0:
+        return np.array([], dtype=float)
+    if idx.tz is None:
+        idx = idx.tz_localize("UTC")
+    local = idx.tz_convert(timezone)
+
+    factors = np.empty(len(local), dtype=float)
+    cache: dict[tuple[date_type, int], float] = {}
+    for pos, ts in enumerate(local):
+        local_date = ts.date()
+        start_hour = (int(ts.hour) // nominal_block_hours) * nominal_block_hours
+        key = (local_date, start_hour)
+        factor = cache.get(key)
+        if factor is None:
+            start = wallclock_block_start_utc(
+                local_date, start_hour, timezone=timezone,
+            )
+            end = wallclock_block_start_utc(
+                local_date, start_hour + nominal_block_hours, timezone=timezone,
+            )
+            physical_hours = float((end - start) / pd.Timedelta(hours=1))
+            if not np.isfinite(physical_hours) or physical_hours <= 0.0:
+                raise ValueError("wall-clock reserve block has invalid physical duration")
+            factor = float(nominal_block_hours) / physical_hours
+            cache[key] = factor
+        factors[pos] = factor
+    return factors
 
 
 def gb_settlement_period_to_utc(

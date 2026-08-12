@@ -1027,6 +1027,8 @@ def align_reserve_price_to_index(
     reserve_series: pd.Series | None,
     target_index: pd.DatetimeIndex,
     tz: str | None,
+    *,
+    nominal_block_hours: int | None = None,
 ) -> np.ndarray:
     """Per-interval reserve price for target intervals via (local date, 4h block).
 
@@ -1065,7 +1067,18 @@ def align_reserve_price_to_index(
         .to_dict()
     )
     tgt_keys = zip(tgt_idx.date, np.asarray(tgt_idx.hour) // 4, strict=True)
-    return np.array([lookup.get(key, 0.0) for key in tgt_keys], dtype=float)
+    out = np.array([lookup.get(key, 0.0) for key in tgt_keys], dtype=float)
+    if nominal_block_hours is not None:
+        if tz is None:
+            raise ValueError("tz is required for nominal block settlement")
+        from src.time_utils import nominal_block_settlement_factors
+
+        out *= nominal_block_settlement_factors(
+            target,
+            timezone=tz,
+            nominal_block_hours=nominal_block_hours,
+        )
+    return out
 
 
 def simulate_da_id_reserve_ceiling_batch(
@@ -1207,6 +1220,7 @@ def simulate_sequential_da_id_reserve_batch(
     bucket: str = "hour_of_day",
     forecast_mode: str = "walk_forward",
     soc_init_frac: float = 0.5,
+    capacity_nominal_block_hours: int | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Forecast-driven reserve-first DA+IDA+reserve policy over a window.
 
@@ -1217,6 +1231,11 @@ def simulate_sequential_da_id_reserve_batch(
     :func:`align_reserve_price_to_index`), and solves
     ``dispatch.solve_sequential_da_id_reserve_dispatch`` per day. Aggregates the
     gap attribution. Returns ``(per_day_df, summary)``.
+
+    ``capacity_nominal_block_hours`` is an opt-in settlement transform used by
+    the German ProjectCase adapter: it rescales capacity prices within the DST
+    transition block while leaving physical energy/SoC interval duration intact.
+    Generic cockpit callers retain the historical physical-hour behaviour.
 
     Days missing a usable DA/IDA forecast (e.g. walk-forward's first day) or
     without DA/IDA overlap are excluded; a day with no reserve forecast simply
@@ -1275,8 +1294,14 @@ def simulate_sequential_da_id_reserve_batch(
             # No usable DA/IDA forecast for this day (e.g. walk-forward first day).
             missing_days += 1
             continue
-        reserve_realised = align_reserve_price_to_index(reserve_price_series, idx, tz)
-        reserve_forecast = align_reserve_price_to_index(reserve_fc_series, idx, tz)
+        reserve_realised = align_reserve_price_to_index(
+            reserve_price_series, idx, tz,
+            nominal_block_hours=capacity_nominal_block_hours,
+        )
+        reserve_forecast = align_reserve_price_to_index(
+            reserve_fc_series, idx, tz,
+            nominal_block_hours=capacity_nominal_block_hours,
+        )
         result = solve_sequential_da_id_reserve_dispatch(
             da_fc.to_numpy(dtype=float),
             merged["price_eur_mwh"].to_numpy(dtype=float),

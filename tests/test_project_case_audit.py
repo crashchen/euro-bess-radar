@@ -78,6 +78,16 @@ def test_unsupported_leg_raises_unavailable():
         classify_leg_complete_dates(s, zone="ES", leg="ida", evaluation_dates=(DAY,))
 
 
+def test_fi_hourly_reserve_fails_closed_in_four_hour_v1_registry():
+    # A complete Fingrid local day is 24 hourly capacity-price rows, not six
+    # German blocks. Until the hourly contract/profile lands, it is unsupported
+    # rather than silently coerced into the wrong calendar.
+    idx = pd.date_range("2025-06-04T21:00:00Z", periods=24, freq="h", tz="UTC")
+    prices = pd.Series(10.0, index=idx)
+    with pytest.raises(AdapterUnavailableError, match="no reserve calendar"):
+        build_reserve_coverage_audit(prices, zone="FI", evaluation_dates=(DAY,))
+
+
 # --- Reserve coverage --------------------------------------------------------
 def _reserve_series(day, n_blocks, price=12.0):
     idx, vals = [], []

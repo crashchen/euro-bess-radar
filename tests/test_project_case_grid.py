@@ -58,11 +58,15 @@ def test_ida_support_and_resolution():
 
 
 def test_reserve_blocks_shape_and_ids():
-    for z in ("DE_LU", "FI"):
-        blocks = grid.reserve_blocks(z, dt.date(2026, 1, 5))
-        assert len(blocks) == 6
-        assert all(dur == 4.0 for _, dur in blocks)
-        assert all(bid.endswith("Z") and "T" in bid for bid, _ in blocks)
+    blocks = grid.reserve_blocks("DE_LU", dt.date(2026, 1, 5))
+    assert len(blocks) == 6
+    assert all(dur == 4.0 for _, dur in blocks)
+    assert all(bid.endswith("Z") and "T" in bid for bid, _ in blocks)
+    # Fingrid is hourly. PC-A v1's locked six-slice/4h reserve profile must not
+    # pretend that FI follows the German product calendar.
+    assert grid.reserve_profile_id("FI") is None
+    assert grid.reserve_blocks("FI", dt.date(2026, 1, 5)) is None
+    assert len(grid.expected_da_timestamps("FI", dt.date(2026, 1, 5))) == 96
     assert grid.reserve_blocks("FR", dt.date(2026, 1, 5)) is None
 
 

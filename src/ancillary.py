@@ -179,7 +179,9 @@ def generate_capacity_import_template_csv() -> str:
         "# direction: up | down | symmetric (FCR is symmetric; aFRR/mFRR up or down).\n"
         "# capacity_price_eur_mw_h: PER-HOUR capacity price in EUR/MW/h -- NOT a 4h\n"
         "#   block total. One row per pricing block (e.g. 4h) is fine; give the\n"
-        "#   hourly rate, not the block sum.\n"
+        "#   hourly rate, not the block sum. For DE 4h products, use the NOMINAL\n"
+        "#   4h equivalent (block total / 4), including DST clock-change days; the\n"
+        "#   ProjectCase adapter keeps capacity settlement separate from physical dt.\n"
     )
     writer = csv.writer(buf)
     writer.writerow(CAPACITY_IMPORT_COLUMNS)

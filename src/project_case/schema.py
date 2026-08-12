@@ -16,6 +16,7 @@ import contextvars
 import datetime as _dt
 import math
 import re
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -79,16 +80,34 @@ class ProjectCaseValidationError(ValueError):
 # closes that door. ``__post_init__`` requires it, and it is NOT a field, so
 # ``dataclasses.replace`` (which reconstructs from fields only) cannot carry a prior
 # authorisation forward. Only the adapters (and the golden-vector fixtures standing
-# in for them) enter the context; a naive UI construct/replace fails closed.
-_STRATEGY_ISSUANCE: contextvars.ContextVar[bool] = contextvars.ContextVar(
-    "_pc_strategy_issuance", default=False
+# in for them) enter the context; a naive UI construct/replace fails closed. The
+# permit is shared across copied async contexts and can be claimed exactly once; a
+# boolean flag would remain reusable in a task created during construction.
+class _StrategyIssuancePermit:
+    __slots__ = ("_claimed", "_lock")
+
+    def __init__(self) -> None:
+        self._claimed = False
+        self._lock = threading.Lock()
+
+    def consume(self) -> bool:
+        """Atomically claim this permit once across all copied contexts."""
+        with self._lock:
+            if self._claimed:
+                return False
+            self._claimed = True
+            return True
+
+
+_STRATEGY_ISSUANCE: contextvars.ContextVar[_StrategyIssuancePermit | None] = (
+    contextvars.ContextVar("_pc_strategy_issuance", default=None)
 )
 
 
 @contextlib.contextmanager
 def _issue_strategy_run_result():
     """Authorise exactly one producer StrategyRunResult construction (§4.3)."""
-    token = _STRATEGY_ISSUANCE.set(True)
+    token = _STRATEGY_ISSUANCE.set(_StrategyIssuancePermit())
     try:
         yield
     finally:
@@ -718,8 +737,13 @@ class StrategyRunResult:
     def __post_init__(self) -> None:
         # Producer-issued only (§4.3, red-line #6/#18): a bare construction or a
         # ``dataclasses.replace`` that forges the cash series is rejected unless it
-        # runs inside an adapter's ``_issue_strategy_run_result`` context.
-        if not _STRATEGY_ISSUANCE.get():
+        # runs inside an adapter's ``_issue_strategy_run_result`` context. Consume
+        # the permit before touching or coercing ANY user-controlled field:
+        # numeric subclasses may execute callbacks from ``__float__``, and async
+        # tasks copy ContextVar values.
+        permit = _STRATEGY_ISSUANCE.get()
+        _STRATEGY_ISSUANCE.set(None)
+        if permit is None or not permit.consume():
             raise ProjectCaseValidationError(
                 "StrategyRunResult is producer-issued only: emit it via a "
                 "src.project_case.adapters.emit_* adapter, never by direct "

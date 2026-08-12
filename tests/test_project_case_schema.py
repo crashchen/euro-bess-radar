@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses as dc
 import datetime as dt
 
@@ -424,6 +425,71 @@ def test_strategy_run_result_is_producer_issued_only():
     # Re-issuing the identical result through the producer context succeeds and is
     # byte-identical (the guard adds no state to the fingerprint).
     assert _reissue(srr).fingerprint() == srr.fingerprint()
+
+
+def test_issuance_permit_is_consumed_before_numeric_callbacks():
+    """A numeric subclass cannot re-enter construction while an adapter-issued
+    result is validating its fields (the original ContextVar-bool bypass)."""
+    srr = fx.da_only_srr()
+    blocked: list[ProjectCaseValidationError] = []
+
+    class ReentrantFloat(float):
+        def __float__(self):
+            if not blocked:
+                try:
+                    dc.replace(
+                        srr,
+                        daily_realised_cash_series=((D1, 9.99e99), (D2, 9.99e99)),
+                    )
+                except ProjectCaseValidationError as exc:
+                    blocked.append(exc)
+            return super().__float__()
+
+    with _issue_strategy_run_result():
+        issued = dc.replace(srr, power_mw=ReentrantFloat(srr.power_mw))
+    assert issued.power_mw == srr.power_mw
+    assert len(blocked) == 1
+    assert "producer-issued only" in str(blocked[0])
+
+
+def test_issuance_permit_cannot_be_reused_by_copied_async_context():
+    """A task that copied the issuance ContextVar still shares the consumed
+    one-shot permit and cannot forge a second result after the issuer returns."""
+
+    async def exercise() -> tuple[object, list[ProjectCaseValidationError]]:
+        srr = fx.da_only_srr()
+        release = asyncio.Event()
+        blocked: list[ProjectCaseValidationError] = []
+
+        with _issue_strategy_run_result():
+            async def attack() -> None:
+                await release.wait()
+                try:
+                    dc.replace(
+                        srr,
+                        daily_realised_cash_series=((D1, 8.88e88), (D2, 8.88e88)),
+                    )
+                except ProjectCaseValidationError as exc:
+                    blocked.append(exc)
+
+            task = asyncio.create_task(attack())  # copies the still-live context
+            issued = dc.replace(srr)              # atomically consumes its permit
+            release.set()
+            await task
+        return issued, blocked
+
+    issued, blocked = asyncio.run(exercise())
+    assert issued.fingerprint() == fx.da_only_srr().fingerprint()
+    assert len(blocked) == 1
+    assert "producer-issued only" in str(blocked[0])
+
+
+def test_one_issuance_context_authorises_exactly_one_result():
+    srr = fx.da_only_srr()
+    with _issue_strategy_run_result():
+        dc.replace(srr)
+        with pytest.raises(ProjectCaseValidationError, match="producer-issued only"):
+            dc.replace(srr)
 
 
 # --- Deep immutability of fingerprint-bearing objects ------------------------

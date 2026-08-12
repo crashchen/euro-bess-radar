@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from src.data_ingestion import _parse_regelleistung_xlsx
 from src.project_case import (
     SPECS,
     AdapterUnavailableError,
@@ -30,6 +31,33 @@ from tests import pc_case_fixtures as fx
 ZONE = "DE_LU"
 DAYS = [dt.date(2025, 6, 5), dt.date(2025, 6, 6), dt.date(2025, 6, 7)]
 CB = fx.CURRENCY_SOURCE
+
+
+def _regelleistung_block_series(day: dt.date, total_eur_mw: float = 80.0) -> pd.Series:
+    """Parse a real current-export-shaped six-block Regelleistung XLSX."""
+    from io import BytesIO
+
+    import openpyxl
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append([
+        "DATE_FROM",
+        "PRODUCT_TYPE",
+        "PRODUCTNAME",
+        "GERMANY_SETTLEMENTCAPACITY_PRICE_[EUR/MW]",
+    ])
+    for start in range(0, 24, 4):
+        end = start + 4
+        ws.append([
+            day.isoformat(), "FCR", f"NEGPOS_{start:02d}_{end:02d}", total_eur_mw,
+        ])
+    buf = BytesIO()
+    wb.save(buf)
+    wb.close()
+    parsed = _parse_regelleistung_xlsx(buf.getvalue(), "FCR", day.isoformat())
+    assert len(parsed) == 6
+    return parsed.set_index("timestamp")["capacity_price_eur_mw"].sort_index()
 
 
 # --- Pinned 5-tuple registry (§5) --------------------------------------------
@@ -261,6 +289,19 @@ def test_reserve_coopt_all_days_uncovered_unavailable():
         )
 
 
+def test_fi_hourly_reserve_market_is_not_mislabelled_as_german_blocks():
+    day = dt.date(2026, 1, 5)
+    start = pd.Timestamp(day).tz_localize("Europe/Helsinki").tz_convert("UTC")
+    hourly = pd.Series(10.0, index=pd.date_range(start, periods=24, freq="h"))
+    with pytest.raises(AdapterUnavailableError, match="no reserve calendar"):
+        emit_reserve_coopt(
+            fx.da_frame("FI", [day]), hourly, zone="FI",
+            first_delivery_date=day, last_delivery_date=day,
+            power_mw=1.0, duration_hours=1.0, efficiency=0.88,
+            currency_basis=CB, reserve_product="FCR-N", reserve_source="fingrid",
+        )
+
+
 # --- DA_ID_RESERVE -----------------------------------------------------------
 def test_da_id_reserve_null_reserve_scalar_members(monkeypatch):
     rs = fx.reserve_series(ZONE, [(DAYS[0], 6), (DAYS[1], 6), (DAYS[2], 5)])
@@ -397,6 +438,49 @@ def test_reserve_coopt_real_solver_integration():
     assert srr.coverage_audit.valid_dates == tuple(DAYS)
     assert srr.adapter_provenance.reserve_scalar_price_eur_mw_h == 12.0
     assert srr.reserve_coverage_audit.covered_dates == frozenset(DAYS)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "target",
+    [dt.date(2025, 3, 30), dt.date(2025, 6, 5), dt.date(2025, 10, 26)],
+)
+def test_regelleistung_xlsx_to_public_adapter_conserves_nominal_block_cash(target):
+    """Six published €80/MW blocks settle to €480/MW on 23/24/25h days.
+
+    This is the load-bearing end-to-end regression: current XLSX parser -> raw
+    reserve coverage -> public adapter -> real MILP. The energy/SoC clock remains
+    physical; only the German nominal capacity settlement is DST-normalised.
+    """
+    da_idx = grid.expected_da_timestamps(ZONE, target)
+    da = pd.DataFrame({"price_eur_mwh": 0.0}, index=pd.DatetimeIndex(da_idx))
+    reserve = _regelleistung_block_series(target)
+    assert reserve.tolist() == pytest.approx([20.0] * 6)  # €80 / nominal 4h
+
+    coopt = emit_reserve_coopt(
+        da, reserve, zone=ZONE, first_delivery_date=target,
+        last_delivery_date=target, power_mw=1.0, duration_hours=1.0,
+        efficiency=0.88, currency_basis=CB, reserve_product="FCR",
+        reserve_source="regelleistung", availability=1.0,
+    )
+    assert dict(coopt.daily_realised_cash_series)[target] == pytest.approx(480.0)
+
+    if target.month in (3, 10):
+        days = [target - dt.timedelta(days=2), target - dt.timedelta(days=1), target]
+        da_idx = [ts for day in days for ts in grid.expected_da_timestamps(ZONE, day)]
+        ida_idx = [ts for day in days for ts in grid.expected_ida_timestamps(ZONE, day)]
+        da = pd.DataFrame({"price_eur_mwh": 0.0}, index=pd.DatetimeIndex(da_idx))
+        ida = pd.DataFrame(
+            {"intraday_price_eur_mwh": 0.0}, index=pd.DatetimeIndex(ida_idx),
+        )
+        reserve = pd.concat([_regelleistung_block_series(day) for day in days])
+        triple = emit_da_id_reserve(
+            da, ida, reserve, zone=ZONE, first_delivery_date=days[0],
+            last_delivery_date=days[-1], power_mw=1.0, duration_hours=1.0,
+            efficiency=0.88, currency_basis=CB, reserve_product="FCR",
+            reserve_source="regelleistung", availability=1.0, bucket="hour_of_day",
+        )
+        assert dict(triple.daily_realised_cash_series)[target] == pytest.approx(480.0)
 
 
 def _zone_da_frame(zone, tz, days):

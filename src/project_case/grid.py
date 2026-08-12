@@ -45,7 +45,11 @@ PROFILE_IDS_BY_LEG = MappingProxyType(
 # v1 leg support (registry policy; every code is validated against config below).
 _DA_ZONES = frozenset(config.ENTSOE_ZONES.values())  # EUR ENTSO-E zones (excludes GB)
 _IDA_ZONES = frozenset({"DE_LU", "NL", "BE", "FR", "AT", "IT_NORD"})
-_RESERVE_ZONES = frozenset({"DE_LU", "FI"})
+# PC-A v1's locked reserve audit/forecast contract is a six-slice 4-hour product
+# calendar. That matches Germany, but NOT Fingrid's hourly reserve market. FI DA
+# remains supported; FI reserve fails closed until a separate hourly profile and
+# forecast bucket are introduced in a contract increment.
+_RESERVE_ZONES = frozenset({"DE_LU"})
 
 # 4-hour product blocks per local delivery day, defined by WALL-CLOCK local start
 # hours (00:00, 04:00, … — the German product definition), explicit rather than
@@ -54,9 +58,10 @@ _RESERVE_ZONES = frozenset({"DE_LU", "FI"})
 # each published block-total to a per-hour rate by dividing by the block's nominal
 # label hours (always 4), and the German product is settled as MW x EUR/MW/h x 4h
 # six times per day, so the per-hour rate must be re-multiplied by 4h to conserve the
-# block-total. Weighting it by an ELAPSED 3h/5h duration on a DST day would turn an
-# €80 block into €60 (spring) / €100 (fall-back). Only the block START is
-# DST-adjusted (via ``wallclock_block_start_utc``); the duration is a fixed 4h.
+# block-total. The adapter's explicit nominal-settlement overlay does that without
+# changing the physical energy/SoC ``dt``; omitting it would turn an €80 block into
+# €60 (spring) / €100 (fall-back). Only the block START is DST-adjusted here (via
+# ``wallclock_block_start_utc``); the audited settlement duration is a fixed 4h.
 _RESERVE_BLOCK_START_HOURS = (0, 4, 8, 12, 16, 20)
 _RESERVE_BLOCK_DURATION_HOURS = 4.0
 
@@ -180,8 +185,9 @@ def reserve_blocks(
     Regelleistung ingestion parser uses, so imported reserve prices align on DST
     days). ``settlement_duration_hours`` is the NOMINAL 4h product-block duration on
     every day — matching the ingestion's ``price /= nominal_block_hours`` — so the
-    published block-total is conserved through ingestion → scalar price on DST days
-    (review r3 #2); only the block START is DST-adjusted.
+    published block-total is conserved through ingestion → scalar/interval price →
+    the adapter's nominal-capacity-settlement overlay on DST days (review r4); only
+    the block START is DST-adjusted in this registry.
     """
     if zone not in _RESERVE_ZONES:
         return None
