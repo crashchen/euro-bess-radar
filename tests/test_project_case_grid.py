@@ -66,15 +66,18 @@ def test_reserve_blocks_shape_and_ids():
     assert grid.reserve_blocks("FR", dt.date(2026, 1, 5)) is None
 
 
-def test_reserve_blocks_dst_durations_are_actual_elapsed():
-    # Wall-clock 4h blocks tile the civil day exactly, so the transition block is
-    # 3h (spring) / 5h (fall), not a nominal 4h (review r2 #5).
+def test_reserve_blocks_dst_durations_are_nominal_4h():
+    # Settlement duration is the NOMINAL 4h product block on EVERY day, DST
+    # included (review r3 #2), matching the ingestion's ``price /= nominal_hours``
+    # (always 4). Weighting the per-hour rate back by an elapsed 3h/5h duration on a
+    # DST day would break block-total conservation (€80 -> €60 spring / €100 fall).
     spring = grid.reserve_blocks("DE_LU", dt.date(2025, 3, 30))
-    assert [dur for _, dur in spring] == [3.0, 4.0, 4.0, 4.0, 4.0, 4.0]
-    assert sum(dur for _, dur in spring) == 23.0
     fall = grid.reserve_blocks("DE_LU", dt.date(2025, 10, 26))
-    assert [dur for _, dur in fall] == [5.0, 4.0, 4.0, 4.0, 4.0, 4.0]
-    assert sum(dur for _, dur in fall) == 25.0
+    assert [dur for _, dur in spring] == [4.0] * 6
+    assert [dur for _, dur in fall] == [4.0] * 6
+    # The block START is still DST-adjusted even though the nominal duration is 4h:
+    # the 04:00-local block starts at a different UTC instant on the two DST days.
+    assert spring[1][0] != fall[1][0]
 
 
 def test_reserve_blocks_agree_with_ingestion_parser_on_dst_days():

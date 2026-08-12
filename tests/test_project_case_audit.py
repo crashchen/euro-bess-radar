@@ -126,6 +126,33 @@ def test_reserve_scalar_raises_on_incomplete_pre_gate():
         reserve_scalar_price(_reserve_series(DAY, 5), zone=ZONE, pricing_dates=(DAY,))
 
 
+def test_reserve_block_total_conserved_across_dst():
+    # Review r3 #2 (ingestion -> alignment -> cash known-answer). The Regelleistung
+    # ingestion divides each published block-total by its NOMINAL label hours
+    # (always 4, DST-independent). Grid settlement duration is therefore also 4h, so
+    # per_hour x duration reconstructs the SAME block-total on a DST day; weighting
+    # by an elapsed 3h/5h duration would turn an €80 block into €60 (spring) / €100
+    # (fall) — a cash leak. Different block prices make the weighting discriminating.
+    spring, fall, normal = dt.date(2025, 3, 30), dt.date(2025, 10, 26), dt.date(2025, 6, 5)
+    published_totals = [80.0] + [120.0] * 5  # €80 for the transition block, €120 rest
+    expected_scalar = sum(published_totals) / (4.0 * 6)  # nominal-4h weighted mean
+    for day in (spring, fall, normal):
+        blocks = grid.reserve_blocks(ZONE, day)
+        # Ingestion output: per-hour rate = published block-total / nominal 4h.
+        per_hour = {
+            pd.Timestamp(bid): total / 4.0
+            for (bid, _), total in zip(blocks, published_totals, strict=True)
+        }
+        s = pd.Series(per_hour)
+        # Cash side is DST-invariant (would be 28.70 spring / 28.0 fall under 3/5h).
+        assert reserve_scalar_price(s, zone=ZONE, pricing_dates=(day,)) == pytest.approx(
+            expected_scalar
+        )
+        # Per-block conservation: per_hour x grid_duration == the published total.
+        for (bid, dur), total in zip(blocks, published_totals, strict=True):
+            assert per_hour[pd.Timestamp(bid)] * dur == pytest.approx(total)
+
+
 def test_reserve_extra_non_canonical_row_makes_day_uncovered():
     # 6 clean blocks PLUS an extra non-canonical row -> malformed day -> fully
     # uncovered (no pass-through as "fully covered", red-line #17/#21).

@@ -397,3 +397,44 @@ def test_reserve_coopt_real_solver_integration():
     assert srr.coverage_audit.valid_dates == tuple(DAYS)
     assert srr.adapter_provenance.reserve_scalar_price_eur_mw_h == 12.0
     assert srr.reserve_coverage_audit.covered_dates == frozenset(DAYS)
+
+
+def _zone_da_frame(zone, tz, days):
+    idx, vals = [], []
+    for d in days:
+        for ts in grid.expected_da_timestamps(zone, d):
+            h = ts.tz_convert(tz).hour
+            vals.append(10.0 if 2 <= h <= 5 else (120.0 if 18 <= h <= 21 else 55.0))
+            idx.append(ts)
+    return pd.DataFrame({"price_eur_mwh": vals}, index=pd.DatetimeIndex(idx))
+
+
+def _zone_ida_frame(zone, tz, days):
+    idx, vals = [], []
+    for d in days:
+        for ts in grid.expected_ida_timestamps(zone, d):
+            h = ts.tz_convert(tz).hour
+            vals.append(12.0 if 2 <= h <= 5 else (118.0 if 18 <= h <= 21 else 56.0))
+            idx.append(ts)
+    return pd.DataFrame({"intraday_price_eur_mwh": vals}, index=pd.DatetimeIndex(idx))
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("zone,tz", [("DE_LU", "Europe/Berlin"), ("FR", "Europe/Paris")])
+def test_da_id_real_solver_integration_non_utc_zone(zone, tz):
+    # Regression for review r3 #1: the DA+ID sequential batch folded the UTC IDA
+    # forecast into the DA/IDA join, flipping the merged index to UTC, so
+    # ``_is_regular_utc_day`` (which pins first/last interval to LOCAL midnight)
+    # rejected EVERY day on a non-UTC zone — fully-complete DE_LU/FR input returned
+    # "no valid dates". This drives the REAL solver end-to-end on both zones.
+    srr = emit_da_id(
+        _zone_da_frame(zone, tz, DAYS), _zone_ida_frame(zone, tz, DAYS), zone=zone,
+        first_delivery_date=DAYS[0], last_delivery_date=DAYS[-1], power_mw=10.0,
+        duration_hours=2.0, efficiency=0.88, currency_basis=CB,
+        bucket="hour_of_day", min_rebid_uplift_eur=0.0,
+    )
+    # Walk-forward: the first day has no prior history (missing), the rest are valid.
+    assert srr.coverage_audit.valid_dates == (DAYS[1], DAYS[2])
+    assert srr.coverage_audit.missing_dates == (DAYS[0],)
+    assert all(np.isfinite(v) for _, v in srr.daily_realised_cash_series)
+    assert srr.fingerprint()  # fingerprints without error

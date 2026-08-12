@@ -49,11 +49,16 @@ _RESERVE_ZONES = frozenset({"DE_LU", "FI"})
 
 # 4-hour product blocks per local delivery day, defined by WALL-CLOCK local start
 # hours (00:00, 04:00, … — the German product definition), explicit rather than
-# inferred across gaps (§4.3). Settlement duration is the ACTUAL elapsed hours
-# between consecutive wall-clock boundaries: 4h on a normal day, but 3h / 5h for
-# the block spanning a spring-forward / fall-back transition (so the six blocks
-# tile the 23h / 25h civil day exactly). See review r2 #5.
+# inferred across gaps (§4.3). Settlement duration is the NOMINAL 4h product block
+# on every day, DST included (review r3 #2): the Regelleistung ingestion converts
+# each published block-total to a per-hour rate by dividing by the block's nominal
+# label hours (always 4), and the German product is settled as MW x EUR/MW/h x 4h
+# six times per day, so the per-hour rate must be re-multiplied by 4h to conserve the
+# block-total. Weighting it by an ELAPSED 3h/5h duration on a DST day would turn an
+# €80 block into €60 (spring) / €100 (fall-back). Only the block START is
+# DST-adjusted (via ``wallclock_block_start_utc``); the duration is a fixed 4h.
 _RESERVE_BLOCK_START_HOURS = (0, 4, 8, 12, 16, 20)
+_RESERVE_BLOCK_DURATION_HOURS = 4.0
 
 # Fail fast if the local support lists drift from the supported-zone registry.
 _all_codes = frozenset(config.ALL_ZONES.values())
@@ -173,19 +178,20 @@ def reserve_blocks(
     from the WALL-CLOCK local start hour via the shared
     :func:`~src.time_utils.wallclock_block_start_utc` (the same construction the
     Regelleistung ingestion parser uses, so imported reserve prices align on DST
-    days). ``settlement_duration_hours`` is the actual elapsed hours to the next
-    boundary — 4h normally, 3h / 5h for the DST-transition block.
+    days). ``settlement_duration_hours`` is the NOMINAL 4h product-block duration on
+    every day — matching the ingestion's ``price /= nominal_block_hours`` — so the
+    published block-total is conserved through ingestion → scalar price on DST days
+    (review r3 #2); only the block START is DST-adjusted.
     """
     if zone not in _RESERVE_ZONES:
         return None
     tz = _zone_tz(zone)
-    starts = [
-        wallclock_block_start_utc(delivery_date, hour, 0, tz)
+    return tuple(
+        (
+            wallclock_block_start_utc(delivery_date, hour, 0, tz).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+            _RESERVE_BLOCK_DURATION_HOURS,
+        )
         for hour in _RESERVE_BLOCK_START_HOURS
-    ]
-    bounds = [*starts, wallclock_block_start_utc(delivery_date, 24, 0, tz)]
-    out: list[tuple[str, float]] = []
-    for i, start_utc in enumerate(starts):
-        duration_h = (bounds[i + 1] - bounds[i]).total_seconds() / 3600.0
-        out.append((start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"), duration_h))
-    return tuple(out)
+    )

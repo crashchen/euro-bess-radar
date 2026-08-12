@@ -38,6 +38,7 @@ from src.project_case import (
     ValuationCase,
     grid,
 )
+from src.project_case.schema import _issue_strategy_run_result
 
 ZONE = "DE_LU"
 TZ = "Europe/Berlin"
@@ -48,42 +49,48 @@ CURRENCY_SOURCE = CurrencyBasis(CurrencyBasisMode.SOURCE_EUR_TREATED_AS_BASE_YEA
 
 
 def da_only_srr() -> StrategyRunResult:
-    """Canonical DA_ONLY StrategyRunResult (golden-vector fixture)."""
-    return StrategyRunResult(
-        strategy_kind=StrategyKind.DA_ONLY,
-        daily_realised_cash_series=((D1, 123.5), (D2, -12.0)),
-        cash_basis=CashBasis(True, CaptureBasis(True, 0.9, "da_slippage"), LiquidityBasis(False)),
-        power_mw=10.0,
-        duration_hours=2.0,
-        round_trip_efficiency=0.88,
-        zone=ZONE,
-        sample_window=SampleWindow(D1, D2, TZ),
-        currency_basis=CURRENCY_DEFLATOR,
-        forecast_audits=ForecastAudits(),
-        reserve_product=None,
-        reserve_source=None,
-        availability=None,
-        reserve_coverage_audit=None,
-        coverage_audit=CoverageAudit((D1, D2), (D1, D2), (), (), ()),
-        adapter_provenance=AdapterProvenance(
-            ProducerAdapterId.PC_ADP_DA_ONLY,
-            "simulate_replay_batch",
-            "total_revenue_eur",
-            ("degradation_cost_eur",),
-            "DA MILP Replay",
-            False,
-            0.5,
-            0.9,
-            None,
-            None,
-            None,
-            "pc-market-grid-v1",
-            {"da": grid.da_profile_id(ZONE), "ida": None, "reserve": None},
-        ),
-        embedded_vom_cost_eur_mwh=0.5,
-        source_data_content_hash="ab" * 32,
-        calculator_version="pc-a-v1",
-    )
+    """Canonical DA_ONLY StrategyRunResult (golden-vector fixture).
+
+    Constructed inside the producer-issuance context: the fixture stands in for an
+    ``emit_*`` adapter (the only legal issuer, §4.3), so it must issue through the
+    same guarded path a real adapter uses (review r3 #5).
+    """
+    with _issue_strategy_run_result():
+        return StrategyRunResult(
+            strategy_kind=StrategyKind.DA_ONLY,
+            daily_realised_cash_series=((D1, 123.5), (D2, -12.0)),
+            cash_basis=CashBasis(True, CaptureBasis(True, 0.9, "da_slippage"), LiquidityBasis(False)),
+            power_mw=10.0,
+            duration_hours=2.0,
+            round_trip_efficiency=0.88,
+            zone=ZONE,
+            sample_window=SampleWindow(D1, D2, TZ),
+            currency_basis=CURRENCY_DEFLATOR,
+            forecast_audits=ForecastAudits(),
+            reserve_product=None,
+            reserve_source=None,
+            availability=None,
+            reserve_coverage_audit=None,
+            coverage_audit=CoverageAudit((D1, D2), (D1, D2), (), (), ()),
+            adapter_provenance=AdapterProvenance(
+                ProducerAdapterId.PC_ADP_DA_ONLY,
+                "simulate_replay_batch",
+                "total_revenue_eur",
+                ("degradation_cost_eur",),
+                "DA MILP Replay",
+                False,
+                0.5,
+                0.9,
+                None,
+                None,
+                None,
+                "pc-market-grid-v1",
+                {"da": grid.da_profile_id(ZONE), "ida": None, "reserve": None},
+            ),
+            embedded_vom_cost_eur_mwh=0.5,
+            source_data_content_hash="ab" * 32,
+            calculator_version="pc-a-v1",
+        )
 
 
 def _reserve_entry(d: dt.date) -> ReserveCoverageEntry:
@@ -93,50 +100,54 @@ def _reserve_entry(d: dt.date) -> ReserveCoverageEntry:
 
 
 def da_id_reserve_srr() -> StrategyRunResult:
-    """Canonical DA_ID_RESERVE_REALISED StrategyRunResult (golden-vector fixture)."""
-    return StrategyRunResult(
-        strategy_kind=StrategyKind.DA_ID_RESERVE_REALISED,
-        daily_realised_cash_series=((D1, 300.0), (D2, 250.0)),
-        cash_basis=CashBasis(True, CaptureBasis(False, 1.0, "not_applied"), LiquidityBasis(False)),
-        power_mw=10.0,
-        duration_hours=2.0,
-        round_trip_efficiency=0.88,
-        zone=ZONE,
-        sample_window=SampleWindow(D1, D2, TZ),
-        currency_basis=CURRENCY_DEFLATOR,
-        forecast_audits=ForecastAudits(
-            da=ForecastAudit("walk_forward", "hour_of_day", None),
-            ida=ForecastAudit("walk_forward", "hour_of_day", None),
-            reserve=ForecastAudit("walk_forward", "block_of_day_4h", None),
-        ),
-        reserve_product="aFRR",
-        reserve_source="regelleistung",
-        availability=0.95,
-        reserve_coverage_audit=ReserveCoverageAudit((_reserve_entry(D1), _reserve_entry(D2))),
-        coverage_audit=CoverageAudit((D1, D2), (D1, D2), (), (), ()),
-        adapter_provenance=AdapterProvenance(
-            ProducerAdapterId.PC_ADP_DA_ID_RESERVE,
-            "simulate_sequential_da_id_reserve_batch",
-            "realised_eur",
-            ("global_ceiling_eur", "reserve_first_ceiling_eur"),
-            None,
-            False,
-            0.5,
-            None,
-            None,
-            None,
-            None,
-            "pc-market-grid-v1",
-            {
-                "da": grid.da_profile_id(ZONE),
-                "ida": grid.ida_profile_id(ZONE),
-                "reserve": grid.reserve_profile_id(ZONE),
-            },
-        ),
-        embedded_vom_cost_eur_mwh=0.5,
-        source_data_content_hash="cd" * 32,
-        calculator_version="pc-a-v1",
-    )
+    """Canonical DA_ID_RESERVE_REALISED StrategyRunResult (golden-vector fixture).
+
+    Issued through the producer-issuance context, like ``da_only_srr`` (§4.3).
+    """
+    with _issue_strategy_run_result():
+        return StrategyRunResult(
+            strategy_kind=StrategyKind.DA_ID_RESERVE_REALISED,
+            daily_realised_cash_series=((D1, 300.0), (D2, 250.0)),
+            cash_basis=CashBasis(True, CaptureBasis(False, 1.0, "not_applied"), LiquidityBasis(False)),
+            power_mw=10.0,
+            duration_hours=2.0,
+            round_trip_efficiency=0.88,
+            zone=ZONE,
+            sample_window=SampleWindow(D1, D2, TZ),
+            currency_basis=CURRENCY_DEFLATOR,
+            forecast_audits=ForecastAudits(
+                da=ForecastAudit("walk_forward", "hour_of_day", None),
+                ida=ForecastAudit("walk_forward", "hour_of_day", None),
+                reserve=ForecastAudit("walk_forward", "block_of_day_4h", None),
+            ),
+            reserve_product="aFRR",
+            reserve_source="regelleistung",
+            availability=0.95,
+            reserve_coverage_audit=ReserveCoverageAudit((_reserve_entry(D1), _reserve_entry(D2))),
+            coverage_audit=CoverageAudit((D1, D2), (D1, D2), (), (), ()),
+            adapter_provenance=AdapterProvenance(
+                ProducerAdapterId.PC_ADP_DA_ID_RESERVE,
+                "simulate_sequential_da_id_reserve_batch",
+                "realised_eur",
+                ("global_ceiling_eur", "reserve_first_ceiling_eur"),
+                None,
+                False,
+                0.5,
+                None,
+                None,
+                None,
+                None,
+                "pc-market-grid-v1",
+                {
+                    "da": grid.da_profile_id(ZONE),
+                    "ida": grid.ida_profile_id(ZONE),
+                    "reserve": grid.reserve_profile_id(ZONE),
+                },
+            ),
+            embedded_vom_cost_eur_mwh=0.5,
+            source_data_content_hash="cd" * 32,
+            calculator_version="pc-a-v1",
+        )
 
 
 def project_case(srr: StrategyRunResult | None = None) -> ProjectCase:

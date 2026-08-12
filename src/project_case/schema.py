@@ -11,6 +11,8 @@ PC-A is pure schema + adapters + fingerprint; it computes no NPV (PC-B).
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import datetime as _dt
 import math
 import re
@@ -26,6 +28,8 @@ from src.project_case.enums import (
     BUCKET_BLOCK_OF_DAY_4H,
     DA_ID_BUCKETS,
     EXPECTED_GRID_REGISTRY_VERSION,
+    LIFECYCLE_UNKNOWN_MESSAGE,
+    LIFECYCLE_UNKNOWN_STATUS,
     MAINTENANCE_PROVENANCE_MODE,
     MAX_BASE_YEAR,
     MAX_PROJECT_LIFE_YEARS,
@@ -47,7 +51,7 @@ from src.project_case.fingerprint import (
     fingerprint_hex,
     sorted_by_encoding,
 )
-from src.project_case.grid import PROFILE_IDS_BY_LEG
+from src.project_case.grid import PROFILE_IDS_BY_LEG, profile_id
 from src.project_case.producer_specs import canonical_spec
 
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -61,6 +65,34 @@ _RESERVE_KINDS = frozenset(
 
 class ProjectCaseValidationError(ValueError):
     """Raised for any schema/domain/cross-invariant violation (fail-closed)."""
+
+
+# --------------------------------------------------------------------------- #
+# Producer-issuance guard (§4.3, red-line #6/#18)                             #
+# --------------------------------------------------------------------------- #
+# ``StrategyRunResult`` is the ONLY cash-eligible revenue input and is emitted
+# ONLY by a ``src.project_case.adapters`` emit_* adapter, which runs the real
+# private solver seam. Removing the public ``runner=`` (review r2 #1) was not
+# enough: a caller could still ``dataclasses.replace()`` an issued result, swap in
+# a forged cash series, keep the canonical provenance, and re-validate into a valid
+# fingerprint — turning an arbitrary number into "eligible" cash. This context flag
+# closes that door. ``__post_init__`` requires it, and it is NOT a field, so
+# ``dataclasses.replace`` (which reconstructs from fields only) cannot carry a prior
+# authorisation forward. Only the adapters (and the golden-vector fixtures standing
+# in for them) enter the context; a naive UI construct/replace fails closed.
+_STRATEGY_ISSUANCE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "_pc_strategy_issuance", default=False
+)
+
+
+@contextlib.contextmanager
+def _issue_strategy_run_result():
+    """Authorise exactly one producer StrategyRunResult construction (§4.3)."""
+    token = _STRATEGY_ISSUANCE.set(True)
+    try:
+        yield
+    finally:
+        _STRATEGY_ISSUANCE.reset(token)
 
 
 # --------------------------------------------------------------------------- #
@@ -684,6 +716,15 @@ class StrategyRunResult:
     calculator_version: str
 
     def __post_init__(self) -> None:
+        # Producer-issued only (§4.3, red-line #6/#18): a bare construction or a
+        # ``dataclasses.replace`` that forges the cash series is rejected unless it
+        # runs inside an adapter's ``_issue_strategy_run_result`` context.
+        if not _STRATEGY_ISSUANCE.get():
+            raise ProjectCaseValidationError(
+                "StrategyRunResult is producer-issued only: emit it via a "
+                "src.project_case.adapters.emit_* adapter, never by direct "
+                "construction or dataclasses.replace (§4.3, red-line #6/#18)"
+            )
         if not isinstance(self.strategy_kind, StrategyKind):
             raise ProjectCaseValidationError("strategy_kind invalid")
         object.__setattr__(self, "power_mw", _pos_float(self.power_mw, "power_mw"))
@@ -935,6 +976,17 @@ class StrategyRunResult:
             if not is_required and prof is not None:
                 raise ProjectCaseValidationError(
                     f"expected_grid_profiles.{leg} must be null for {kind.value}"
+                )
+            # Bind the profile to THIS (leg, zone), not merely the leg's profile
+            # set: a DE_LU result carrying the CH DA profile (both are "da"
+            # profiles) must be rejected (review r3 #3). ``profile_id`` returns the
+            # single legal registry id for the zone, or None when the zone has no
+            # registry calendar for that leg (then a non-null profile is invalid).
+            if prof is not None and prof != profile_id(leg, self.zone):
+                raise ProjectCaseValidationError(
+                    f"expected_grid_profiles.{leg}={prof!r} is not the registry "
+                    f"profile for zone {self.zone} (expected "
+                    f"{profile_id(leg, self.zone)!r})"
                 )
 
     def validate(self) -> None:
@@ -1433,13 +1485,39 @@ class NpvOutcome:
         }
 
 
-def _deep_freeze(value: Any) -> Any:
-    """Recursively wrap mappings/sequences in read-only views (deep immutability)."""
+def _freeze_provenance(value: Any, path: str = "provenance") -> Any:
+    """Deep-freeze RunResult provenance into a closed, serialisable, immutable tree.
+
+    The admissible domain is exactly a JSON/CBOR-serialisable tree: mappings with
+    **string keys**, lists/tuples, and ``str`` / finite ``float`` / ``int`` /
+    ``bool`` / ``None`` scalars. A ``set``, ``bytes``, ``bytearray``, or an
+    arbitrary object is **rejected** (review r3 #4) — the old ``_deep_freeze`` left
+    such values untouched, so an external handle could mutate the RunResult after
+    construction (e.g. a shared ``set``) and ``to_payload`` could emit a
+    non-serialisable value. Validating the recursive domain here makes provenance a
+    closed, deeply-immutable, round-trippable field.
+    """
     if isinstance(value, Mapping):
-        return MappingProxyType({k: _deep_freeze(v) for k, v in value.items()})
+        out: dict[str, Any] = {}
+        for k, v in value.items():
+            if not isinstance(k, str):
+                raise ProjectCaseValidationError(
+                    f"{path} mapping keys must be strings (got {type(k).__name__})"
+                )
+            out[k] = _freeze_provenance(v, f"{path}.{k}")
+        return MappingProxyType(out)
     if isinstance(value, (list, tuple)):
-        return tuple(_deep_freeze(v) for v in value)
-    return value
+        return tuple(_freeze_provenance(v, f"{path}[]") for v in value)
+    if value is None or isinstance(value, (str, bool, int)):
+        return value  # bool is an int subclass; both are admissible scalars
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ProjectCaseValidationError(f"{path} float must be finite")
+        return value
+    raise ProjectCaseValidationError(
+        f"{path} has unsupported type {type(value).__name__}; provenance must be a "
+        "JSON-serialisable tree (mappings with str keys, lists, str/int/float/bool/null)"
+    )
 
 
 def _deep_thaw(value: Any) -> Any:
@@ -1560,18 +1638,47 @@ class RunResult:
         for name in ("no_lifecycle_cost_screening_npv", "lifecycle_cash_npv"):
             if not isinstance(getattr(self, name), NpvOutcome):
                 raise ProjectCaseValidationError(f"{name} must be an NpvOutcome")
+        # §4.6 state matrix — the screening NPV is ALWAYS available after a
+        # successful ProjectCase (review r3 #4): a screening-unavailable /
+        # lifecycle-available result is unrepresentable.
+        if not self.no_lifecycle_cost_screening_npv.available:
+            raise ProjectCaseValidationError(
+                "no_lifecycle_cost_screening_npv must be available: the screening "
+                "NPV is always present after a successful ProjectCase (§4.6)"
+            )
+        # An unavailable lifecycle NPV must be EXACTLY the locked UNKNOWN envelope
+        # (§3/§4.6); any other status/message is not a valid RunResult state.
+        life = self.lifecycle_cash_npv
+        if not life.available and (
+            life.status != LIFECYCLE_UNKNOWN_STATUS
+            or life.message != LIFECYCLE_UNKNOWN_MESSAGE
+        ):
+            raise ProjectCaseValidationError(
+                "an unavailable lifecycle_cash_npv must be exactly "
+                f"{{status: {LIFECYCLE_UNKNOWN_STATUS!r}, message: "
+                f"{LIFECYCLE_UNKNOWN_MESSAGE!r}}} (§4.6)"
+            )
         self._validate_table_state(
-            "screening_cashflow_table", self.no_lifecycle_cost_screening_npv
+            "screening_cashflow_table", self.no_lifecycle_cost_screening_npv, "screening"
         )
-        self._validate_table_state("lifecycle_cashflow_table", self.lifecycle_cash_npv)
+        self._validate_table_state(
+            "lifecycle_cashflow_table", self.lifecycle_cash_npv, "lifecycle"
+        )
         if not isinstance(self.provenance, Mapping):
             raise ProjectCaseValidationError("provenance must be a mapping")
-        object.__setattr__(self, "provenance", _deep_freeze(dict(self.provenance)))
+        object.__setattr__(self, "provenance", _freeze_provenance(dict(self.provenance)))
 
-    def _validate_table_state(self, attr: str, outcome: NpvOutcome) -> None:
+    def _validate_table_state(self, attr: str, outcome: NpvOutcome, basis: str) -> None:
         table = getattr(self, attr)
-        if table is not None and not isinstance(table, CashflowTable):
-            raise ProjectCaseValidationError(f"{attr} must be a CashflowTable or None")
+        if table is not None:
+            if not isinstance(table, CashflowTable):
+                raise ProjectCaseValidationError(f"{attr} must be a CashflowTable or None")
+            # Bind the table to its slot's basis so a lifecycle table filed under
+            # the screening slot (or vice versa) is rejected (review r3 #4).
+            if table.basis != basis:
+                raise ProjectCaseValidationError(
+                    f"{attr} must carry basis {basis!r}, got {table.basis!r}"
+                )
         if outcome.available and table is None:
             raise ProjectCaseValidationError(
                 f"{attr} must be present when its NPV outcome is available"

@@ -56,6 +56,7 @@ from src.project_case.schema import (
     SampleWindow,
     SolverFailureDetail,
     StrategyRunResult,
+    _issue_strategy_run_result,
 )
 
 PC_A_CALCULATOR_VERSION = "pc-a-v1"
@@ -268,27 +269,30 @@ def _build_result(
         expected_grid_registry_version=grid.REGISTRY_VERSION,
         expected_grid_profiles=profiles,
     )
-    return StrategyRunResult(
-        strategy_kind=spec.strategy_kind,
-        daily_realised_cash_series=series,
-        cash_basis=cash_basis,
-        power_mw=power_mw,
-        duration_hours=duration_hours,
-        round_trip_efficiency=efficiency,
-        zone=zone,
-        sample_window=sample_window,
-        currency_basis=currency_basis,
-        forecast_audits=forecast_audits,
-        reserve_product=reserve_product,
-        reserve_source=reserve_source,
-        availability=availability,
-        reserve_coverage_audit=reserve_coverage_audit,
-        coverage_audit=coverage,
-        adapter_provenance=provenance,
-        embedded_vom_cost_eur_mwh=float(DISPATCH_VOM_COST_EUR_MWH),
-        source_data_content_hash=source_data_content_hash,
-        calculator_version=PC_A_CALCULATOR_VERSION,
-    )
+    # This adapter is the producer: authorise the one guarded construction (§4.3,
+    # red-line #6/#18). Outside this context, direct construction / replace fails.
+    with _issue_strategy_run_result():
+        return StrategyRunResult(
+            strategy_kind=spec.strategy_kind,
+            daily_realised_cash_series=series,
+            cash_basis=cash_basis,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            round_trip_efficiency=efficiency,
+            zone=zone,
+            sample_window=sample_window,
+            currency_basis=currency_basis,
+            forecast_audits=forecast_audits,
+            reserve_product=reserve_product,
+            reserve_source=reserve_source,
+            availability=availability,
+            reserve_coverage_audit=reserve_coverage_audit,
+            coverage_audit=coverage,
+            adapter_provenance=provenance,
+            embedded_vom_cost_eur_mwh=float(DISPATCH_VOM_COST_EUR_MWH),
+            source_data_content_hash=source_data_content_hash,
+            calculator_version=PC_A_CALCULATOR_VERSION,
+        )
 
 
 # --------------------------------------------------------------------------- #

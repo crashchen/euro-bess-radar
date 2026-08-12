@@ -19,6 +19,8 @@ __all__ = [
     "DA_ID_BUCKETS",
     "DEFAULT_SIMULATIONS",
     "EXPECTED_GRID_REGISTRY_VERSION",
+    "LIFECYCLE_UNKNOWN_MESSAGE",
+    "LIFECYCLE_UNKNOWN_STATUS",
     "MAINTENANCE_PROVENANCE_MODE",
     "MAX_BASE_YEAR",
     "MAX_PROJECT_LIFE_YEARS",
@@ -87,6 +89,13 @@ RESERVE_PRICE_AGGREGATION_V1 = "duration_weighted_mean_complete_blocks_v1"
 
 # The pinned provenance ``mode`` string for the DA-only adapter (§4.8).
 MAINTENANCE_PROVENANCE_MODE = "DA MILP Replay"
+
+# The ONLY legal lifecycle-unavailable envelope, returned when the
+# capacity-maintenance basis is UNKNOWN (§3, §4.6). Screening stays available;
+# the lifecycle NpvOutcome is fixed to exactly this status + message (no other
+# unavailable status/message is a valid RunResult state).
+LIFECYCLE_UNKNOWN_STATUS = "capacity_maintenance_unknown"
+LIFECYCLE_UNKNOWN_MESSAGE = "Engineering capacity-maintenance basis is unknown."
 
 # Forecast-mode gate (§5, red-line #10): cash-eligible only in walk-forward.
 WALK_FORWARD = "walk_forward"

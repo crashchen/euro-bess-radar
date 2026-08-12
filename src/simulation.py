@@ -1355,19 +1355,31 @@ def _sequential_day_row(
     ida_day = _select_local_day(ida_prices, local_date, tz)
     if da_day.empty or ida_day.empty or "intraday_price_eur_mwh" not in ida_day.columns:
         return None, None
+    # Merge DA+IDA ONLY so ``merged`` keeps the zone's LOCAL tz index (both come
+    # from ``_select_local_day``). Folding the UTC ``forecast_df`` into this join
+    # silently flips the merged index to UTC, and ``_is_regular_utc_day`` — which
+    # pins the first/last interval to LOCAL midnight — then rejects every day on any
+    # non-UTC zone (DE_LU, FR, …), so a fully-complete input returns no valid dates.
+    # The forecast is aligned by ``reindex`` instead (matches on the absolute
+    # instant across tz), exactly as the DA+ID+reserve batch and ``_stochastic_day``.
     merged = (
         da_day[["price_eur_mwh"]]
         .join(ida_day[["intraday_price_eur_mwh"]], how="inner")
-        .join(forecast_df[[FORECAST_COL]], how="inner")
         .dropna()
     )
     if merged.empty or not _is_regular_utc_day(merged):
         return None, None
+    idx = pd.DatetimeIndex(merged.index)
+    forecast = forecast_df[FORECAST_COL].reindex(idx)
+    if forecast.isna().any():
+        # No usable IDA forecast for this day (e.g. walk-forward's first day): a
+        # data-side drop classified missing, never a solver failure.
+        return None, None
 
-    dt = _infer_interval_hours(pd.DatetimeIndex(merged.index))
+    dt = _infer_interval_hours(idx)
     result = solve_sequential_da_id_dispatch(
         merged["price_eur_mwh"].to_numpy(dtype=float),
-        merged[FORECAST_COL].to_numpy(dtype=float),
+        forecast.to_numpy(dtype=float),
         merged["intraday_price_eur_mwh"].to_numpy(dtype=float),
         dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, min_rebid_uplift_eur=min_rebid_uplift_eur,
