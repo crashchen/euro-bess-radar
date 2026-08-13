@@ -1,4 +1,4 @@
-"""Project Case v1 (PC-A): typed lifecycle-cash-NPV schema, adapters, fingerprint.
+"""Project Case v1: typed inputs/adapters (PC-A) and lifecycle valuation (PC-B).
 
 This package implements the PC-A increment of ``docs/design/project-case-v1.md``
 (the locked contract): the typed case schema, the public ``StrategyKind`` /
@@ -6,9 +6,9 @@ This package implements the PC-A increment of ``docs/design/project-case-v1.md``
 ``StrategyRunResult``, ``validate()``, the leg-specific market-grid registry, and
 the deterministic ``PC-CBOR-F64-v1`` canonical-serialisation fingerprint.
 
-PC-A is pure (no UI, no Streamlit) and computes **no** NPV — the bootstrap and the
-two lifecycle cash-NPV outcomes are PC-B. Everything here is the input schema, the
-adapters that build it, its audit, and its fingerprint.
+The package remains pure (no UI or Streamlit). PC-A owns the input schema,
+producer adapters, audit and fingerprint; PC-B owns the bootstrap-driven,
+year-by-year lifecycle cash-flow and the two typed NPV outcomes.
 """
 
 from __future__ import annotations
@@ -71,11 +71,13 @@ from src.project_case.schema import (
     StrategyRunResult,
     ValuationCase,
 )
+from src.project_case.valuation import PC_B_CALCULATOR_VERSION, compute_project_case
 
 __all__ = [
     "BOOTSTRAP_ALGORITHM_V1",
     "EXPECTED_GRID_REGISTRY_VERSION",
     "PC_A_CALCULATOR_VERSION",
+    "PC_B_CALCULATOR_VERSION",
     "PROFILE",
     "SCHEMA_VERSION",
     "SPECS",
@@ -117,6 +119,7 @@ __all__ = [
     "StrategyRunResult",
     "ValuationCase",
     "bootstrap_annual_sums",
+    "compute_project_case",
     "emit_da_id",
     "emit_da_id_reserve",
     "emit_da_only",
