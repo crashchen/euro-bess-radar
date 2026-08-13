@@ -8,6 +8,7 @@ from datetime import date as date_type
 from datetime import datetime
 from datetime import time as time_type
 
+import numpy as np
 import pandas as pd
 
 
@@ -17,6 +18,84 @@ def _local_midnight(value, timezone: str) -> pd.Timestamp:
     if ts.tzinfo is None:
         return ts.normalize().tz_localize(timezone)
     return ts.tz_convert(timezone).normalize()
+
+
+def wallclock_block_start_utc(
+    target_date,
+    hour: int,
+    minute: int = 0,
+    timezone: str = "Europe/Berlin",
+) -> pd.Timestamp:
+    """UTC instant of the wall-clock local ``hour:minute`` on ``target_date``.
+
+    German reserve product blocks (00:00, 04:00, … local) are defined by
+    **wall-clock** local time, so their UTC start is the *localised wall time* —
+    never local midnight plus ``hour`` absolute hours, which drifts by an hour on
+    the two annual DST-transition days. ``hour == 24`` is the following local
+    midnight. This is the single source of truth shared by the Regelleistung
+    ingestion parser and the Project Case reserve-grid registry so an imported
+    reserve price and the expected grid agree on DST days.
+
+    Non-existent/ambiguous wall times are only reachable by off-grid inputs (the
+    4-hour block starts never land in the 02:00-03:00 transition window); they
+    resolve forward / to the DST occurrence so the parser stays total.
+    """
+    naive_midnight = _local_midnight(target_date, timezone).tz_localize(None)
+    naive = naive_midnight + pd.Timedelta(hours=int(hour), minutes=int(minute))
+    localized = naive.tz_localize(timezone, nonexistent="shift_forward", ambiguous=True)
+    return localized.tz_convert("UTC")
+
+
+def nominal_block_settlement_factors(
+    target_index: pd.DatetimeIndex,
+    *,
+    timezone: str,
+    nominal_block_hours: int,
+) -> np.ndarray:
+    """Rescale capacity prices so nominal block cash survives DST.
+
+    German reserve block prices are normalised by the nominal four-hour product
+    length, while dispatch and SoC must stay on the physical 23/25-hour delivery
+    axis.  The returned factor is ``nominal_hours / physical_hours`` for each
+    wall-clock block, so only capacity settlement is adjusted; energy ``dt`` is
+    untouched.  Callers opt in at the German market boundary.
+    """
+    if (
+        isinstance(nominal_block_hours, bool)
+        or not isinstance(nominal_block_hours, int)
+        or nominal_block_hours <= 0
+        or 24 % nominal_block_hours != 0
+    ):
+        raise ValueError("nominal_block_hours must be a positive integer dividing 24")
+
+    idx = pd.DatetimeIndex(target_index)
+    if len(idx) == 0:
+        return np.array([], dtype=float)
+    if idx.tz is None:
+        idx = idx.tz_localize("UTC")
+    local = idx.tz_convert(timezone)
+
+    factors = np.empty(len(local), dtype=float)
+    cache: dict[tuple[date_type, int], float] = {}
+    for pos, ts in enumerate(local):
+        local_date = ts.date()
+        start_hour = (int(ts.hour) // nominal_block_hours) * nominal_block_hours
+        key = (local_date, start_hour)
+        factor = cache.get(key)
+        if factor is None:
+            start = wallclock_block_start_utc(
+                local_date, start_hour, timezone=timezone,
+            )
+            end = wallclock_block_start_utc(
+                local_date, start_hour + nominal_block_hours, timezone=timezone,
+            )
+            physical_hours = float((end - start) / pd.Timedelta(hours=1))
+            if not np.isfinite(physical_hours) or physical_hours <= 0.0:
+                raise ValueError("wall-clock reserve block has invalid physical duration")
+            factor = float(nominal_block_hours) / physical_hours
+            cache[key] = factor
+        factors[pos] = factor
+    return factors
 
 
 def gb_settlement_period_to_utc(
@@ -92,11 +171,16 @@ def parse_regelleistung_time_block_start(
     *,
     timezone: str = "Europe/Berlin",
 ) -> pd.Timestamp:
-    """Parse a Regelleistung delivery block start into a UTC timestamp."""
-    local_start = _local_midnight(target_date, timezone)
+    """Parse a Regelleistung delivery block start into a UTC timestamp.
 
+    Block starts are wall-clock local times, so the mapping is DST-correct: the
+    ``04:00`` block is 04:00 *wall clock*, not midnight plus 4 absolute hours
+    (which drifts an hour on the two annual DST-transition days). The construction
+    is shared with the Project Case reserve-grid registry via
+    :func:`wallclock_block_start_utc`.
+    """
     if time_block is None or pd.isna(time_block):
-        return local_start.tz_convert("UTC")
+        return wallclock_block_start_utc(target_date, 0, 0, timezone)
 
     parsed_time: tuple[int, int] | None
     if isinstance(time_block, pd.Timestamp):
@@ -113,8 +197,8 @@ def parse_regelleistung_time_block_start(
 
     hour, minute = parsed_time
     if hour == 24 and minute == 0:
-        return (local_start + pd.Timedelta(days=1)).tz_convert("UTC")
+        return wallclock_block_start_utc(target_date, 24, 0, timezone)
     if not (0 <= hour <= 23 and 0 <= minute <= 59):
         raise ValueError(f"Invalid Regelleistung time block: {time_block!r}")
 
-    return (local_start + pd.Timedelta(hours=hour, minutes=minute)).tz_convert("UTC")
+    return wallclock_block_start_utc(target_date, hour, minute, timezone)

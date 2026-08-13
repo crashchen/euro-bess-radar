@@ -43,6 +43,11 @@ The single format for all zones. Columns:
   FCR/aFRR blocks are defined in local time — convert, or tell us the zone.
 - **Unit**: `capacity_price_eur_mw_h` is a per-hour rate. A 4h block that cleared
   at, say, 12.5 EUR/MW/h is `12.50` repeated across the block, not `50`.
+- **German DST convention**: for DE 4h reserve products, this is the **nominal
+  4h-equivalent** rate. If the source publishes a whole-block EUR/MW amount,
+  divide it by 4 even for the clock-change `00-04` slice. The ProjectCase adapter
+  applies the product-settlement factor separately, while energy dispatch and SoC
+  remain on the physical 23/25-hour time axis.
 
 ## 3. Activation energy CSV (unified, zone-tagged)
 

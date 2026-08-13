@@ -478,8 +478,15 @@ def solve_joint_capacity_batch(
     tz: str | None = None,
     soc_init_frac: float = 0.5,
     availability: float = 0.95,
+    capacity_nominal_block_hours: int | None = None,
 ) -> pd.DataFrame:
-    """Run joint DA + reserve-capacity MILP for each local calendar day."""
+    """Run joint DA + reserve-capacity MILP for each local calendar day.
+
+    ``capacity_nominal_block_hours`` is an explicit market-settlement overlay.
+    When set, capacity prices are rescaled inside each wall-clock block so nominal
+    block cash is conserved across DST, while DA energy and SoC continue to use
+    physical interval duration.
+    """
     local = _to_local(price_df, tz)
     prices = local["price_eur_mwh"]
 
@@ -497,10 +504,19 @@ def solve_joint_capacity_batch(
         # (e.g. DE_LU crossing the 2025-10 60min→15min boundary) solve
         # each side at its native cadence instead of the frame mode.
         dt = _infer_interval_hours(sorted_group.index)
+        capacity_price: float | np.ndarray = capacity_price_eur_mw_h
+        if capacity_nominal_block_hours is not None:
+            from src.time_utils import nominal_block_settlement_factors
+
+            capacity_price = capacity_price_eur_mw_h * nominal_block_settlement_factors(
+                pd.DatetimeIndex(sorted_group.index),
+                timezone=str(sorted_group.index.tz),
+                nominal_block_hours=capacity_nominal_block_hours,
+            )
         result = solve_daily_joint_capacity_lp(
             sorted_group.values,
             dt=dt,
-            capacity_price_eur_mw_h=capacity_price_eur_mw_h,
+            capacity_price_eur_mw_h=capacity_price,
             power_mw=power_mw,
             duration_hours=duration_hours,
             efficiency=efficiency,

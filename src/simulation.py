@@ -909,6 +909,7 @@ def simulate_sequential_da_id_batch(
     bucket: str = "hour_of_day",
     forecast_mode: str = "loo",
     min_rebid_uplift_eur: float = 0.0,
+    soc_init_frac: float = 0.5,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Per-day three-way DA+ID comparison under an imperfect IDA forecast.
 
@@ -955,6 +956,7 @@ def simulate_sequential_da_id_batch(
                 local_date=local_date, tz=tz, power_mw=power_mw,
                 duration_hours=duration_hours, efficiency=efficiency,
                 min_rebid_uplift_eur=min_rebid_uplift_eur,
+                soc_init_frac=soc_init_frac,
             )
             if row is None:
                 if failure is None:
@@ -1025,6 +1027,8 @@ def align_reserve_price_to_index(
     reserve_series: pd.Series | None,
     target_index: pd.DatetimeIndex,
     tz: str | None,
+    *,
+    nominal_block_hours: int | None = None,
 ) -> np.ndarray:
     """Per-interval reserve price for target intervals via (local date, 4h block).
 
@@ -1063,7 +1067,18 @@ def align_reserve_price_to_index(
         .to_dict()
     )
     tgt_keys = zip(tgt_idx.date, np.asarray(tgt_idx.hour) // 4, strict=True)
-    return np.array([lookup.get(key, 0.0) for key in tgt_keys], dtype=float)
+    out = np.array([lookup.get(key, 0.0) for key in tgt_keys], dtype=float)
+    if nominal_block_hours is not None:
+        if tz is None:
+            raise ValueError("tz is required for nominal block settlement")
+        from src.time_utils import nominal_block_settlement_factors
+
+        out *= nominal_block_settlement_factors(
+            target,
+            timezone=tz,
+            nominal_block_hours=nominal_block_hours,
+        )
+    return out
 
 
 def simulate_da_id_reserve_ceiling_batch(
@@ -1204,6 +1219,8 @@ def simulate_sequential_da_id_reserve_batch(
     availability: float = ANCILLARY_CAPACITY_AVAILABILITY,
     bucket: str = "hour_of_day",
     forecast_mode: str = "walk_forward",
+    soc_init_frac: float = 0.5,
+    capacity_nominal_block_hours: int | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Forecast-driven reserve-first DA+IDA+reserve policy over a window.
 
@@ -1214,6 +1231,11 @@ def simulate_sequential_da_id_reserve_batch(
     :func:`align_reserve_price_to_index`), and solves
     ``dispatch.solve_sequential_da_id_reserve_dispatch`` per day. Aggregates the
     gap attribution. Returns ``(per_day_df, summary)``.
+
+    ``capacity_nominal_block_hours`` is an opt-in settlement transform used by
+    the German ProjectCase adapter: it rescales capacity prices within the DST
+    transition block while leaving physical energy/SoC interval duration intact.
+    Generic cockpit callers retain the historical physical-hour behaviour.
 
     Days missing a usable DA/IDA forecast (e.g. walk-forward's first day) or
     without DA/IDA overlap are excluded; a day with no reserve forecast simply
@@ -1272,8 +1294,14 @@ def simulate_sequential_da_id_reserve_batch(
             # No usable DA/IDA forecast for this day (e.g. walk-forward first day).
             missing_days += 1
             continue
-        reserve_realised = align_reserve_price_to_index(reserve_price_series, idx, tz)
-        reserve_forecast = align_reserve_price_to_index(reserve_fc_series, idx, tz)
+        reserve_realised = align_reserve_price_to_index(
+            reserve_price_series, idx, tz,
+            nominal_block_hours=capacity_nominal_block_hours,
+        )
+        reserve_forecast = align_reserve_price_to_index(
+            reserve_fc_series, idx, tz,
+            nominal_block_hours=capacity_nominal_block_hours,
+        )
         result = solve_sequential_da_id_reserve_dispatch(
             da_fc.to_numpy(dtype=float),
             merged["price_eur_mwh"].to_numpy(dtype=float),
@@ -1286,6 +1314,7 @@ def simulate_sequential_da_id_reserve_batch(
             duration_hours=duration_hours,
             efficiency=efficiency,
             availability=availability,
+            soc_init_frac=soc_init_frac,
         )
         if not result["success"]:
             solver_failures.append(_solver_failure_detail(
@@ -1344,28 +1373,42 @@ def _sequential_day_row(
     duration_hours: float,
     efficiency: float,
     min_rebid_uplift_eur: float = 0.0,
+    soc_init_frac: float = 0.5,
 ) -> tuple[dict[str, Any] | None, dict[str, str] | None]:
     """Solve one sequential day, separating missing data from solve failure."""
     da_day = _select_local_day(da_prices, local_date, tz)
     ida_day = _select_local_day(ida_prices, local_date, tz)
     if da_day.empty or ida_day.empty or "intraday_price_eur_mwh" not in ida_day.columns:
         return None, None
+    # Merge DA+IDA ONLY so ``merged`` keeps the zone's LOCAL tz index (both come
+    # from ``_select_local_day``). Folding the UTC ``forecast_df`` into this join
+    # silently flips the merged index to UTC, and ``_is_regular_utc_day`` — which
+    # pins the first/last interval to LOCAL midnight — then rejects every day on any
+    # non-UTC zone (DE_LU, FR, …), so a fully-complete input returns no valid dates.
+    # The forecast is aligned by ``reindex`` instead (matches on the absolute
+    # instant across tz), exactly as the DA+ID+reserve batch and ``_stochastic_day``.
     merged = (
         da_day[["price_eur_mwh"]]
         .join(ida_day[["intraday_price_eur_mwh"]], how="inner")
-        .join(forecast_df[[FORECAST_COL]], how="inner")
         .dropna()
     )
     if merged.empty or not _is_regular_utc_day(merged):
         return None, None
+    idx = pd.DatetimeIndex(merged.index)
+    forecast = forecast_df[FORECAST_COL].reindex(idx)
+    if forecast.isna().any():
+        # No usable IDA forecast for this day (e.g. walk-forward's first day): a
+        # data-side drop classified missing, never a solver failure.
+        return None, None
 
-    dt = _infer_interval_hours(pd.DatetimeIndex(merged.index))
+    dt = _infer_interval_hours(idx)
     result = solve_sequential_da_id_dispatch(
         merged["price_eur_mwh"].to_numpy(dtype=float),
-        merged[FORECAST_COL].to_numpy(dtype=float),
+        forecast.to_numpy(dtype=float),
         merged["intraday_price_eur_mwh"].to_numpy(dtype=float),
         dt=dt, power_mw=power_mw, duration_hours=duration_hours,
         efficiency=efficiency, min_rebid_uplift_eur=min_rebid_uplift_eur,
+        soc_init_frac=soc_init_frac,
     )
     if not result["success"]:
         return None, _solver_failure_detail(
