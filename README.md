@@ -76,7 +76,8 @@ euro-bess-radar/
 │   ├── da_forecast.py        # Screening DA-price climatology forecast (Phase 9.2b Stage-0 prep)
 │   ├── degradation.py        # Throughput-based degradation and lifetime metrics
 │   ├── scenario.py           # Bootstrap NPV, sensitivity, and merchant-revenue decay factors
-│   ├── project_case/         # PC-A typed inputs/adapters/audit/fingerprint + PC-B lifecycle valuation
+│   ├── project_case/         # PC-A/B typed case, producer adapters, lifecycle valuation + PC-C CSV imports
+│   ├── pages/project_case.py # PC-C RunResult-driven UI, strategy gate and cache
 │   ├── contracted_floor.py   # Floor-protected merchant cash-flow comparison
 │   ├── liquidity.py          # DA executable-power participation-cap calculation
 │   ├── forward_curve.py      # Forward-price parsing and historical-shape synthesis
@@ -85,8 +86,8 @@ euro-bess-radar/
 │   ├── ancillary_fetchers.py # Auto-fetch registry per zone
 │   ├── activation_overlay.py # Activation-energy replay overlay (screening, non-additive)
 │   ├── imbalance_overlay.py  # reBAP/imbalance replay overlay primitive
-│   └── export.py             # Excel report generation
-├── tests/                    # 1401 passing tests (20 solver-heavy); 2 PDF tests may skip
+│   └── export.py             # Excel/PDF reports + PC-C Project Case workbook sheets
+├── tests/                    # 1471 passing tests (21 solver-heavy); 2 PDF tests may skip
 ├── scripts/                  # Maintenance/demo scripts (seed + Netztransparenz converter)
 ├── samples/                  # Generated demo CSVs from seed_demo_9_2b.py (git-ignored)
 ├── docs/runbooks/            # Operator runbooks (9.2b + imbalance validation, manual UI smoke)

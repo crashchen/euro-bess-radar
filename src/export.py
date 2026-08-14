@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import math
 import tempfile
+from collections.abc import Mapping
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,15 @@ from src.analytics import (
 )
 from src.config import CACHE_DIR
 from src.data_ingestion import summarize_price_data_quality
+from src.project_case import (
+    EXPECTED_GRID_REGISTRY_VERSION,
+    PC_A_CALCULATOR_VERSION,
+    PC_B_CALCULATOR_VERSION,
+    CashflowTable,
+    NpvOutcome,
+    RunResult,
+    fingerprint_hex,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +42,73 @@ _HEADER_FONT = Font(bold=True, color="FFFFFF", size=11)
 _HEADER_FILL = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
 _PRICE_FMT = "#,##0.00"
 _PCT_FMT = "0.0%"
+_PROJECT_CASE_NPV_SHEET = "Project Case NPVs"
+_SCREENING_CASHFLOW_SHEET = "Screening Cash Flow"
+_LIFECYCLE_CASHFLOW_SHEET = "Lifecycle Cash Flow"
+_PROJECT_CASE_ASSUMPTIONS_SHEET = "Assumptions & Provenance"
+_PROJECT_CASE_RED_LINES = {
+    "cash_npv_includes_shadow_wear": False,
+    "vom_rededucted": False,
+    "mw_rescaled": False,
+    "floor_included": False,
+    "pre_tax_unlevered": True,
+    "tax_included": False,
+    "debt_included": False,
+    "financing_fees_included": False,
+}
+_PROJECT_CASE_PROVENANCE_KEYS = frozenset(
+    {
+        "calculator_version",
+        "project_case_input_fingerprint",
+        "strategy_run_fingerprint",
+        "project_case",
+        "strategy_run_result",
+        "bootstrap",
+        "projection",
+        "valuation",
+        "capacity_maintenance_basis",
+        "cashflow_table_statistic",
+        "red_line_assertions",
+    }
+)
+_PROJECT_CASE_PAYLOAD_KEYS = frozenset(
+    {
+        "asset_case",
+        "lifecycle_case",
+        "market_case",
+        "valuation_case",
+        "bootstrap_case",
+    }
+)
+_MARKET_CASE_PAYLOAD_KEYS = frozenset(
+    {"strategy_run_fingerprint", "projection"}
+)
+_STRATEGY_RUN_RESULT_PAYLOAD_KEYS = frozenset(
+    {
+        "strategy_kind",
+        "daily_realised_cash_series",
+        "cash_basis",
+        "power_mw",
+        "duration_hours",
+        "round_trip_efficiency",
+        "zone",
+        "sample_window",
+        "currency_basis",
+        "forecast_audits",
+        "reserve_product",
+        "reserve_source",
+        "availability",
+        "reserve_coverage_audit",
+        "coverage_audit",
+        "adapter_provenance",
+        "embedded_vom_cost_eur_mwh",
+        "source_data_content_hash",
+        "calculator_version",
+    }
+)
+_EXCEL_CELL_TEXT_LIMIT = 32_767
+_AUDIT_TEXT_PLAIN = "plain-utf8"
+_AUDIT_TEXT_BASE64 = "base64-utf8-surrogatepass"
 
 # Strings whose first non-whitespace character is one of these are
 # interpreted by Excel / LibreOffice Calc / Google Sheets as a formula. A
@@ -303,6 +381,483 @@ def _build_heatmap_sheet(ws, title: str, heatmap: pd.DataFrame) -> None:
     _auto_column_width(ws)
 
 
+# ── Project Case (PC-C) sheet builders ─────────────────────────────────────
+
+def _project_case_red_lines(result: RunResult) -> Mapping[str, Any]:
+    """Return PC-B assertions, failing closed on any cash-basis contradiction."""
+    if not isinstance(result, RunResult):
+        raise TypeError("project_case_result must be a RunResult")
+    provenance = result.provenance
+    if set(provenance) != _PROJECT_CASE_PROVENANCE_KEYS:
+        missing = sorted(_PROJECT_CASE_PROVENANCE_KEYS - set(provenance))
+        extra = sorted(set(provenance) - _PROJECT_CASE_PROVENANCE_KEYS)
+        raise ValueError(
+            "RunResult provenance must match the exact current PC-B schema "
+            f"(missing={missing}, extra={extra})"
+        )
+
+    assertions = provenance.get("red_line_assertions")
+    if not isinstance(assertions, Mapping):
+        raise ValueError("RunResult provenance has no red_line_assertions mapping")
+    if set(assertions) != set(_PROJECT_CASE_RED_LINES):
+        missing = sorted(set(_PROJECT_CASE_RED_LINES) - set(assertions))
+        extra = sorted(set(assertions) - set(_PROJECT_CASE_RED_LINES))
+        raise ValueError(
+            "RunResult red_line_assertions must match the exact current PC-B schema "
+            f"(missing={missing}, extra={extra})"
+        )
+    for key, required in _PROJECT_CASE_RED_LINES.items():
+        if assertions.get(key) is not required:
+            raise ValueError(
+                f"Project Case export requires red_line_assertions.{key}={required!r}"
+            )
+    if provenance.get("calculator_version") != PC_B_CALCULATOR_VERSION:
+        raise ValueError("Project Case export requires the current PC-B calculator")
+
+    strategy = provenance.get("strategy_run_result")
+    if not isinstance(strategy, Mapping):
+        raise ValueError("RunResult provenance has no strategy_run_result mapping")
+    if set(strategy) != _STRATEGY_RUN_RESULT_PAYLOAD_KEYS:
+        raise ValueError(
+            "RunResult provenance strategy_run_result must match the exact PC-A payload schema"
+        )
+    computed_strategy_fingerprint = fingerprint_hex("StrategyRunResult", strategy)
+    if provenance.get("strategy_run_fingerprint") != computed_strategy_fingerprint:
+        raise ValueError(
+            "RunResult provenance StrategyRunResult fingerprint does not match its payload"
+        )
+
+    project_case = provenance.get("project_case")
+    if not isinstance(project_case, Mapping):
+        raise ValueError("RunResult provenance has no project_case mapping")
+    if set(project_case) != _PROJECT_CASE_PAYLOAD_KEYS:
+        raise ValueError(
+            "RunResult provenance project_case must match the exact ProjectCase payload schema"
+        )
+    market_case = project_case.get("market_case")
+    if not isinstance(market_case, Mapping) or set(market_case) != _MARKET_CASE_PAYLOAD_KEYS:
+        raise ValueError(
+            "RunResult provenance project_case.market_case must match the exact MarketCase payload schema"
+        )
+    if market_case.get("strategy_run_fingerprint") != computed_strategy_fingerprint:
+        raise ValueError(
+            "RunResult provenance ProjectCase does not link to its StrategyRunResult payload"
+        )
+    computed_project_case_fingerprint = fingerprint_hex("ProjectCase", project_case)
+    if (
+        provenance.get("project_case_input_fingerprint")
+        != computed_project_case_fingerprint
+        or result.input_fingerprint != computed_project_case_fingerprint
+    ):
+        raise ValueError(
+            "RunResult provenance ProjectCase fingerprint does not match its payload/result"
+        )
+
+    if strategy.get("calculator_version") != PC_A_CALCULATOR_VERSION:
+        raise ValueError("Project Case export requires the current PC-A producer")
+    adapter = strategy.get("adapter_provenance")
+    if not isinstance(adapter, Mapping) or (
+        adapter.get("expected_grid_registry_version")
+        != EXPECTED_GRID_REGISTRY_VERSION
+    ):
+        raise ValueError("Project Case export requires the current market-grid registry")
+
+    return assertions
+
+
+def _strategy_coverage_summary(result: RunResult) -> dict[str, Any]:
+    """Return typed producer/coverage facts for the visible NPV summary."""
+    strategy = result.provenance["strategy_run_result"]
+    adapter = strategy["adapter_provenance"]
+    audit = strategy.get("coverage_audit")
+    if not isinstance(audit, Mapping):
+        raise ValueError("RunResult provenance has no coverage_audit mapping")
+    date_sets: dict[str, tuple[Any, ...]] = {}
+    for key in (
+        "observed_dates",
+        "valid_dates",
+        "missing_dates",
+        "solver_failed_dates",
+    ):
+        value = audit.get(key)
+        if not isinstance(value, (tuple, list)):
+            raise ValueError(f"RunResult coverage_audit.{key} must be an array")
+        date_sets[key] = tuple(value)
+    return {
+        "Strategy Kind": strategy.get("strategy_kind"),
+        "Producer Adapter": adapter.get("producer_adapter_id"),
+        "Observed Dates": len(date_sets["observed_dates"]),
+        "Valid Dates": len(date_sets["valid_dates"]),
+        "Missing Dates": len(date_sets["missing_dates"]),
+        "Solver-failed Dates": len(date_sets["solver_failed_dates"]),
+    }
+
+
+def _outcome_value(outcome: NpvOutcome, field: str) -> Any:
+    """Read one displayed NPV value using only the typed availability envelope."""
+    if field == "available":
+        return outcome.available
+    if field == "status":
+        return outcome.status
+    if field == "message":
+        return outcome.message
+    if not outcome.available:
+        return None
+    distribution = outcome.distribution
+    # NpvOutcome's state matrix guarantees this, but keep the presentation
+    # boundary fail-closed if a future schema version weakens that invariant.
+    if distribution is None:
+        raise ValueError("available NpvOutcome has no distribution")
+    return getattr(distribution, field)
+
+
+def _build_project_case_npv_sheet(ws, result: RunResult) -> None:
+    """Write the two explicitly labelled Project Case NPV outcomes."""
+    ws.title = _PROJECT_CASE_NPV_SHEET
+    screening = result.no_lifecycle_cost_screening_npv
+    lifecycle = result.lifecycle_cash_npv
+    headers = [
+        "Metric",
+        "No-lifecycle-cost screening NPV",
+        "Pre-tax unlevered lifecycle cash NPV",
+    ]
+    _write_header_row(ws, 1, headers)
+    rows = [
+        ("Available", _outcome_value(screening, "available"), _outcome_value(lifecycle, "available")),
+        ("Status", _outcome_value(screening, "status"), _outcome_value(lifecycle, "status")),
+        ("Message", _outcome_value(screening, "message"), _outcome_value(lifecycle, "message")),
+        (
+            "P10 (Downside, EUR)",
+            _outcome_value(screening, "p10"),
+            _outcome_value(lifecycle, "p10"),
+        ),
+        (
+            "P50 (Median, EUR)",
+            _outcome_value(screening, "p50"),
+            _outcome_value(lifecycle, "p50"),
+        ),
+        (
+            "P90 (Upside, EUR)",
+            _outcome_value(screening, "p90"),
+            _outcome_value(lifecycle, "p90"),
+        ),
+        (
+            "P(NPV > 0)",
+            _outcome_value(screening, "prob_positive"),
+            _outcome_value(lifecycle, "prob_positive"),
+        ),
+    ]
+    for row_index, values in enumerate(rows, 2):
+        for column_index, value in enumerate(values, 1):
+            cell = ws.cell(
+                row=row_index,
+                column=column_index,
+                value=_safe_cell_value(value),
+            )
+            if row_index in {5, 6, 7} and column_index > 1 and value is not None:
+                cell.number_format = "#,##0.00"
+            elif row_index == 8 and column_index > 1 and value is not None:
+                cell.number_format = _PCT_FMT
+
+    row = len(rows) + 3
+    row = _write_kv_pair(ws, row, "Schema Version", result.schema_version)
+    row = _write_kv_pair(ws, row, "Project Case Input Fingerprint", result.input_fingerprint)
+    row = _write_kv_pair(
+        ws,
+        row,
+        "Cash-flow Table Statistic",
+        result.provenance.get("cashflow_table_statistic"),
+    )
+    assertions = _project_case_red_lines(result)
+    row = _write_kv_pair(ws, row, "Floor Included in Project Case Cash NPV", assertions["floor_included"])
+    row = _write_kv_pair(ws, row, "Valuation Basis", "Pre-tax unlevered; real base-year EUR")
+    row = _write_kv_pair(
+        ws,
+        row,
+        "Representative Table Basis",
+        "Linear P50 annual bootstrap draw; not an expected-value table",
+    )
+    row = _write_kv_pair(
+        ws,
+        row,
+        "P50 Reconciliation",
+        "NPV P50 = -year-0 CapEx + sum(discounted net cash flow)",
+    )
+    row += 1
+    for label, value in _strategy_coverage_summary(result).items():
+        row = _write_kv_pair(ws, row, label, value)
+    _auto_column_width(ws)
+
+
+def _cashflow_frame(table: CashflowTable) -> pd.DataFrame:
+    """Map every typed CashflowRow field to one stable Excel column."""
+    return pd.DataFrame(
+        [
+            {
+                "Project Year": row.year,
+                "Revenue (EUR)": row.revenue_eur,
+                "Fixed O&M (EUR)": row.opex_eur,
+                "Augmentation Net Cost (EUR)": row.augmentation_eur,
+                "Terminal Cash (EUR)": row.terminal_eur,
+                "Net Cash Flow (EUR)": row.net_eur,
+                "Discount Factor": row.discount_factor,
+                "Discounted Net Cash Flow (EUR)": row.discounted_net_eur,
+            }
+            for row in table.rows
+        ]
+    )
+
+
+def _build_project_case_cashflow_sheet(
+    ws,
+    title: str,
+    table: CashflowTable,
+    *,
+    installed_capex_eur: float,
+    reported_p50_eur: float,
+) -> None:
+    """Write one representative table plus an explicit year-0 reconciliation."""
+    frame = _cashflow_frame(table)
+    ws.title = title
+    if not math.isfinite(installed_capex_eur) or installed_capex_eur < 0.0:
+        raise ValueError("Project Case installed_capex_eur must be finite and >= 0")
+    if not math.isfinite(reported_p50_eur):
+        raise ValueError("Project Case reported P50 NPV must be finite")
+    discounted_project_cash_eur = math.fsum(
+        row.discounted_net_eur for row in table.rows
+    )
+    reconciled_p50_eur = -installed_capex_eur + discounted_project_cash_eur
+    if not math.isclose(
+        reconciled_p50_eur,
+        reported_p50_eur,
+        rel_tol=1e-10,
+        abs_tol=1e-6,
+    ):
+        raise ValueError(
+            f"{title} does not reconcile: -installed CapEx + discounted "
+            "project-year cash flow differs from reported P50 NPV"
+        )
+
+    _write_header_row(ws, 1, ["Representative P50 reconciliation", "Value (EUR)"])
+    reconciliation_rows = (
+        ("Installed CapEx at year 0", installed_capex_eur),
+        ("Discounted project-year cash flow", discounted_project_cash_eur),
+        ("Reconciled P50 NPV", reconciled_p50_eur),
+        ("Reported P50 NPV", reported_p50_eur),
+        ("Reconciliation difference", reconciled_p50_eur - reported_p50_eur),
+    )
+    for row_index, (label, value) in enumerate(reconciliation_rows, start=2):
+        ws.cell(row=row_index, column=1, value=label).font = Font(bold=True)
+        cell = ws.cell(row=row_index, column=2, value=value)
+        cell.number_format = "#,##0.00"
+
+    table_header_row = len(reconciliation_rows) + 3
+    _write_header_row(ws, table_header_row, list(frame.columns))
+    discount_column = list(frame.columns).index("Discount Factor") + 1
+    for row_index, values in enumerate(
+        frame.itertuples(index=False), table_header_row + 1
+    ):
+        for column_index, value in enumerate(values, 1):
+            # Do not round the stored value: the representative rows must
+            # reconcile to the typed P50 NPV when a user sums them in Excel.
+            cell = ws.cell(row=row_index, column=column_index, value=value)
+            if column_index == discount_column:
+                cell.number_format = "0.000000"
+            elif column_index > 1:
+                cell.number_format = "#,##0.00"
+    _auto_column_width(ws)
+
+
+def _flatten_audit_tree(value: Any, path: str) -> list[tuple[str, Any, str]]:
+    """Flatten the immutable provenance tree without dropping null/empty values."""
+    if isinstance(value, Mapping):
+        if not value:
+            return [(path, "{}", "object")]
+        rows: list[tuple[str, Any, str]] = []
+        for key in sorted(value):
+            child = f"{path}.{key}" if path else str(key)
+            rows.extend(_flatten_audit_tree(value[key], child))
+        return rows
+    if isinstance(value, (tuple, list)):
+        if not value:
+            return [(path, "[]", "array")]
+        rows = []
+        for index, item in enumerate(value):
+            rows.extend(_flatten_audit_tree(item, f"{path}[{index}]"))
+        return rows
+    if value is None:
+        return [(path, None, "null")]
+    value_type = "boolean" if isinstance(value, bool) else type(value).__name__
+    return [(path, value, value_type)]
+
+
+def _audit_raw_text(value: Any) -> str:
+    """Return a lossless, type-accompanied scalar representation for Excel."""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, float):
+        return repr(value)
+    return str(value)
+
+
+def _is_xml_10_text(value: str) -> bool:
+    """Return whether every character can be represented in an XML 1.0 cell."""
+    for char in value:
+        codepoint = ord(char)
+        if not (
+            codepoint in (0x09, 0x0A, 0x0D)
+            or 0x20 <= codepoint <= 0xD7FF
+            or 0xE000 <= codepoint <= 0xFFFD
+            or 0x10000 <= codepoint <= 0x10FFFF
+        ):
+            return False
+    return True
+
+
+def _excel_audit_text(value: str) -> tuple[str, str, int, int]:
+    """Return reversible XML-safe text plus its reconstruction metadata.
+
+    Safe values remain human-readable.  A value containing any XML 1.0-illegal
+    character is encoded as base64 over UTF-8 with ``surrogatepass`` so even an
+    isolated surrogate has a deterministic reversible representation.  Encoding
+    happens before cell-limit chunking.
+    """
+    raw_bytes = value.encode("utf-8", errors="surrogatepass")
+    if _is_xml_10_text(value):
+        return value, _AUDIT_TEXT_PLAIN, len(value), len(raw_bytes)
+    encoded = base64.b64encode(raw_bytes).decode("ascii")
+    return encoded, _AUDIT_TEXT_BASE64, len(value), len(raw_bytes)
+
+
+def _ordered_text_chunks(value: str) -> tuple[str, ...]:
+    """Split text at Excel's cell limit without dropping an empty value."""
+    if not value:
+        return ("",)
+    return tuple(
+        value[start : start + _EXCEL_CELL_TEXT_LIMIT]
+        for start in range(0, len(value), _EXCEL_CELL_TEXT_LIMIT)
+    )
+
+
+def _write_explicit_text_cell(cell, value: str) -> None:
+    """Store exact raw text while preventing spreadsheet formula evaluation."""
+    cell.value = value
+    cell.data_type = "s"
+    cell.quotePrefix = True
+
+
+def _build_project_case_assumptions_sheet(ws, result: RunResult) -> None:
+    """Write the complete RunResult provenance as a path-addressable audit trail."""
+    ws.title = _PROJECT_CASE_ASSUMPTIONS_SHEET
+    audit_root = {
+        "run_result": {
+            "schema_version": result.schema_version,
+            "input_fingerprint": result.input_fingerprint,
+        },
+        "provenance": result.provenance,
+    }
+    rows = []
+    for key in sorted(audit_root):
+        rows.extend(_flatten_audit_tree(audit_root[key], key))
+    _write_header_row(
+        ws,
+        1,
+        [
+            "Path",
+            "Value (encoded text)",
+            "Value Type",
+            "Chunk Index",
+            "Chunk Count",
+            "Text Encoding",
+            "Original Character Count",
+            "Original UTF-8 Byte Count",
+        ],
+    )
+    output_row = 2
+    for path, value, value_type in rows:
+        encoded, encoding, character_count, byte_count = _excel_audit_text(
+            _audit_raw_text(value)
+        )
+        chunks = _ordered_text_chunks(encoded)
+        for chunk_index, chunk in enumerate(chunks, start=1):
+            _write_explicit_text_cell(ws.cell(row=output_row, column=1), path)
+            _write_explicit_text_cell(ws.cell(row=output_row, column=2), chunk)
+            _write_explicit_text_cell(ws.cell(row=output_row, column=3), value_type)
+            ws.cell(row=output_row, column=4, value=chunk_index)
+            ws.cell(row=output_row, column=5, value=len(chunks))
+            _write_explicit_text_cell(ws.cell(row=output_row, column=6), encoding)
+            ws.cell(row=output_row, column=7, value=character_count)
+            ws.cell(row=output_row, column=8, value=byte_count)
+            output_row += 1
+    _auto_column_width(ws)
+
+
+def _installed_capex_from_provenance(result: RunResult) -> float:
+    """Read the typed input CapEx carried inside PC-B's immutable provenance."""
+    try:
+        value = result.provenance["project_case"]["asset_case"][
+            "installed_capex_eur"
+        ]
+    except (KeyError, TypeError) as exc:
+        raise ValueError(
+            "RunResult provenance has no project_case.asset_case.installed_capex_eur"
+        ) from exc
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("RunResult installed_capex_eur provenance must be numeric")
+    capex = float(value)
+    if not math.isfinite(capex) or capex < 0.0:
+        raise ValueError("RunResult installed_capex_eur provenance must be finite and >= 0")
+    return capex
+
+
+def _write_project_case_sheets(
+    wb: Workbook,
+    result: RunResult,
+    *,
+    use_active_sheet: bool = False,
+) -> None:
+    """Append the stable PC-C worksheet set to ``wb``."""
+    _project_case_red_lines(result)
+    npv_ws = wb.active if use_active_sheet else wb.create_sheet()
+    _build_project_case_npv_sheet(npv_ws, result)
+
+    # RunResult's state matrix guarantees screening availability/table presence.
+    screening_table = result.screening_cashflow_table
+    if screening_table is None:
+        raise ValueError("RunResult has no screening_cashflow_table")
+    installed_capex_eur = _installed_capex_from_provenance(result)
+    screening_distribution = result.no_lifecycle_cost_screening_npv.distribution
+    if screening_distribution is None:
+        raise ValueError("available screening NPV has no distribution")
+    _build_project_case_cashflow_sheet(
+        wb.create_sheet(),
+        _SCREENING_CASHFLOW_SHEET,
+        screening_table,
+        installed_capex_eur=installed_capex_eur,
+        reported_p50_eur=screening_distribution.p50,
+    )
+
+    # Branch only on the typed NpvOutcome availability flag. UNKNOWN therefore
+    # gets blank lifecycle NPV numbers above and no misleading empty/zero sheet.
+    if result.lifecycle_cash_npv.available:
+        lifecycle_table = result.lifecycle_cashflow_table
+        if lifecycle_table is None:
+            raise ValueError("available lifecycle NPV has no lifecycle_cashflow_table")
+        lifecycle_distribution = result.lifecycle_cash_npv.distribution
+        if lifecycle_distribution is None:
+            raise ValueError("available lifecycle NPV has no distribution")
+        _build_project_case_cashflow_sheet(
+            wb.create_sheet(),
+            _LIFECYCLE_CASHFLOW_SHEET,
+            lifecycle_table,
+            installed_capex_eur=installed_capex_eur,
+            reported_p50_eur=lifecycle_distribution.p50,
+        )
+    _build_project_case_assumptions_sheet(wb.create_sheet(), result)
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 def _write_excel_workbook(
@@ -315,6 +870,7 @@ def _write_excel_workbook(
     revenue_estimate: dict[str, float],
     negative_stats: dict[str, float],
     tz: str | None = None,
+    project_case_result: RunResult | None = None,
 ) -> None:
     """Populate the workbook opened via pandas ExcelWriter."""
     wb = writer.book
@@ -347,6 +903,8 @@ def _write_excel_workbook(
 
     heatmap = build_price_heatmap(complete_df, tz=tz)
     _build_heatmap_sheet(wb.create_sheet(), "Price Heatmap", heatmap)
+    if project_case_result is not None:
+        _write_project_case_sheets(wb, project_case_result)
 
 def export_to_excel(
     zone: str,
@@ -358,6 +916,7 @@ def export_to_excel(
     negative_stats: dict[str, float],
     output_path: Path | None = None,
     tz: str | None = None,
+    project_case_result: RunResult | None = None,
 ) -> Path:
     """Export all analytics to a formatted Excel workbook.
 
@@ -371,6 +930,8 @@ def export_to_excel(
         negative_stats: Negative price stats dict.
         output_path: Optional output path. Auto-generated if None.
         tz: IANA timezone for local-time date display and heatmap.
+        project_case_result: Optional typed Project Case result. When provided,
+            append the PC-C NPV, cash-flow and assumptions/provenance sheets.
 
     Returns:
         Path to the created .xlsx file.
@@ -393,6 +954,7 @@ def export_to_excel(
             revenue_estimate,
             negative_stats,
             tz=tz,
+            project_case_result=project_case_result,
         )
     return output_path
 
@@ -406,6 +968,7 @@ def export_to_bytes(
     revenue_estimate: dict[str, float],
     negative_stats: dict[str, float],
     tz: str | None = None,
+    project_case_result: RunResult | None = None,
 ) -> bytes:
     """Export to in-memory bytes for Streamlit download button.
 
@@ -427,7 +990,24 @@ def export_to_bytes(
             revenue_estimate,
             negative_stats,
             tz=tz,
+            project_case_result=project_case_result,
         )
+    return buf.getvalue()
+
+
+def project_case_to_excel(result: RunResult) -> bytes:
+    """Export one typed Project Case RunResult as a standalone audit workbook.
+
+    The workbook contains only values carried by ``RunResult`` and its immutable
+    provenance. The wear-net contracted-floor comparator is intentionally absent;
+    export fails closed unless provenance explicitly asserts ``floor_included`` is
+    false. An unavailable lifecycle result keeps its numeric cells blank and omits
+    the lifecycle cash-flow sheet rather than presenting it as EUR 0.
+    """
+    wb = Workbook()
+    _write_project_case_sheets(wb, result, use_active_sheet=True)
+    buf = BytesIO()
+    wb.save(buf)
     return buf.getvalue()
 
 

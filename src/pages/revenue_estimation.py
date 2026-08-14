@@ -46,6 +46,7 @@ from src.degradation import (
     estimate_battery_lifetime,
 )
 from src.dispatch import solve_joint_capacity_batch
+from src.pages.project_case import render_project_case_panel
 from src.scenario import (
     bootstrap_annual_revenue,
     calculate_npv_distribution,
@@ -142,6 +143,9 @@ def render(
     report_figures: dict[str, object],
     export_revenue: dict,
     auto_fetch_results: dict | None = None,
+    intraday_df: pd.DataFrame | None = None,
+    capacity_df: pd.DataFrame | None = None,
+    capacity_sources: dict[tuple[str, str, str], dict] | None = None,
 ) -> dict:
     """Render the Revenue Estimation tab. Returns updated export_revenue."""
     st.subheader(f"Revenue Estimation — {primary_zone}")
@@ -742,6 +746,26 @@ def render(
         efficiency=efficiency,
         capex_eur_kwh=capex_eur_kwh,
         chart_template=chart_template,
+    )
+
+    intraday_cache_key = f"intraday_cache::{primary_zone}::{start_date}::{end_date}"
+    current_intraday_df = st.session_state.get(intraday_cache_key)
+    if current_intraday_df is None:
+        current_intraday_df = intraday_df
+    render_project_case_panel(
+        primary_zone=primary_zone,
+        primary_df=primary_df,
+        start_date=start_date,
+        end_date=end_date,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        capture_rate=capture_rate,
+        capex_eur_kwh=capex_eur_kwh,
+        intraday_df=current_intraday_df,
+        ancillary_df=anc_df,
+        capacity_df=capacity_df,
+        capacity_sources=capacity_sources,
     )
 
     return export_revenue
