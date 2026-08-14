@@ -36,6 +36,7 @@ from src.dispatch import solve_joint_capacity_batch
 from src.export import cockpit_tables_to_excel
 from src.imbalance_overlay import compute_imbalance_overlay
 from src.liquidity import compute_liquidity_cap
+from src.pages.project_case import render_project_case_cockpit_mirror
 from src.reserve_forecast import RESERVE_VALUE_COL, compute_reserve_forecast_skill
 from src.simulation import (
     DAYS_PER_YEAR,
@@ -180,6 +181,7 @@ def render(
         efficiency=efficiency,
         capture_rate=cockpit_capture_rate,
     )
+    render_project_case_cockpit_mirror()
 
     if mode == "DA + IDA1 Replay":
         if intraday_df is None or intraday_df.empty:
@@ -285,7 +287,6 @@ def render(
     _render_imbalance_overlay_section(
         primary_zone=primary_zone, dates=dates, zone_tz=zone_tz, power_mw=power_mw,
     )
-
     with st.expander("Simulation interval data", expanded=False):
         st.dataframe(ts, width="stretch", hide_index=True)
 

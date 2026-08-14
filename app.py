@@ -31,6 +31,8 @@ from src.data_ingestion import (
     DataSourceParseError,
     build_zone_query_window,
     read_activation_cache,
+    read_capacity_cache,
+    read_capacity_sources,
     read_imbalance_cache,
     read_intraday_cache,
 )
@@ -41,6 +43,7 @@ from src.pages import (
     forward_scenarios,
     heatmaps,
     market_overview,
+    project_case,
     renewable_correlation,
     revenue_estimation,
     simulation_cockpit,
@@ -184,6 +187,25 @@ if fetch_btn or "zone_data" in st.session_state:
         else {}
     )
     anc_df = build_ancillary_dataset(manual_anc_df, auto_fetch_results)
+    capacity_df = None
+    capacity_sources = {}
+    try:
+        capacity_start, capacity_end = build_zone_query_window(
+            primary_zone, start_date, end_date,
+        )
+        capacity_df = read_capacity_cache(
+            primary_zone, capacity_start, capacity_end,
+        )
+        if capacity_df is not None and not capacity_df.empty:
+            capacity_df = capacity_df.copy()
+            capacity_df["zone"] = primary_zone
+        capacity_sources = read_capacity_sources()
+    except ValueError:
+        # An unsupported/invalid zone cannot be a typed Project Case reserve
+        # input.  The Revenue panel will expose DA-only instead of falling back
+        # to an unrelated capacity stream.
+        capacity_df = None
+        capacity_sources = {}
     intraday_cache_key = f"intraday_cache::{primary_zone}::{start_date}::{end_date}"
     intraday_df = st.session_state.get(intraday_cache_key)
     if intraday_df is None:
@@ -318,6 +340,9 @@ if fetch_btn or "zone_data" in st.session_state:
             report_figures=report_figures,
             export_revenue=export_revenue,
             auto_fetch_results=auto_fetch_results,
+            intraday_df=intraday_df,
+            capacity_df=capacity_df,
+            capacity_sources=capacity_sources,
         )
 
     with tabs[3]:
@@ -398,6 +423,7 @@ if fetch_btn or "zone_data" in st.session_state:
         revenue_estimate=export_revenue,
         negative_stats=neg_stats,
         tz=zone_tz,
+        project_case_result=project_case.current_project_case_result(),
     )
     include_pdf_charts = st.checkbox(
         "Include charts in PDF",
