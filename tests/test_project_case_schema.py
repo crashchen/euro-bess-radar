@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses as dc
 import datetime as dt
+from functools import lru_cache
 
 import pytest
 
@@ -39,6 +40,8 @@ from src.project_case import (
     SampleWindow,
     SolverFailureDetail,
     ValuationCase,
+    compute_project_case,
+    fingerprint_hex,
     grid,
 )
 from src.project_case.enums import LIFECYCLE_UNKNOWN_MESSAGE, LIFECYCLE_UNKNOWN_STATUS
@@ -95,8 +98,11 @@ def test_asset_case_rejects_bad_domains(kwargs):
 
 def test_asset_case_from_capex_per_kwh_normalises():
     a = AssetCase.from_capex_per_kwh(
-        power_mw=10.0, duration_hours=2.0, round_trip_efficiency=0.9,
-        capex_eur_per_kwh=300.0, fixed_om_eur_per_mw_yr=1.0,
+        power_mw=10.0,
+        duration_hours=2.0,
+        round_trip_efficiency=0.9,
+        capex_eur_per_kwh=300.0,
+        fixed_om_eur_per_mw_yr=1.0,
     )
     assert a.installed_capex_eur == 300.0 * 20_000.0  # 20 MWh * 1000 kWh/MWh
     assert "capex_eur_per_kwh" not in a.to_payload()
@@ -131,36 +137,67 @@ def test_bootstrap_algorithm_literal_locked():
 def test_scheduled_needs_positive_restoration_event():
     with pytest.raises(ProjectCaseValidationError):
         LifecycleCase(
-            10, CapacityMaintenanceBasis.SCHEDULED_NAMEPLATE_MAINTENANCE, "src", "2026-01-01",
-            (AugmentationEvent(3, 100.0, 0.0, 0.0),), 0.0, 0.0,
+            10,
+            CapacityMaintenanceBasis.SCHEDULED_NAMEPLATE_MAINTENANCE,
+            "src",
+            "2026-01-01",
+            (AugmentationEvent(3, 100.0, 0.0, 0.0),),
+            0.0,
+            0.0,
         )
     LifecycleCase(
-        10, CapacityMaintenanceBasis.SCHEDULED_NAMEPLATE_MAINTENANCE, "src", "2026-01-01",
-        (AugmentationEvent(3, 100.0, 0.3, 0.0),), 0.0, 0.0,
+        10,
+        CapacityMaintenanceBasis.SCHEDULED_NAMEPLATE_MAINTENANCE,
+        "src",
+        "2026-01-01",
+        (AugmentationEvent(3, 100.0, 0.3, 0.0),),
+        0.0,
+        0.0,
     )
 
 
 def test_no_augmentation_requires_empty_schedule():
     with pytest.raises(ProjectCaseValidationError):
         LifecycleCase(
-            10, CapacityMaintenanceBasis.NO_AUGMENTATION_REQUIRED_ASSERTED, "src", "2026-01-01",
-            (AugmentationEvent(3, 100.0, 0.3, 0.0),), 0.0, 0.0,
+            10,
+            CapacityMaintenanceBasis.NO_AUGMENTATION_REQUIRED_ASSERTED,
+            "src",
+            "2026-01-01",
+            (AugmentationEvent(3, 100.0, 0.3, 0.0),),
+            0.0,
+            0.0,
         )
     LifecycleCase(
-        10, CapacityMaintenanceBasis.NO_AUGMENTATION_REQUIRED_ASSERTED, "src", "2026-01-01",
-        (), 0.0, 0.0,
+        10,
+        CapacityMaintenanceBasis.NO_AUGMENTATION_REQUIRED_ASSERTED,
+        "src",
+        "2026-01-01",
+        (),
+        0.0,
+        0.0,
     )
 
 
 def test_asserted_basis_requires_source_and_as_of():
     with pytest.raises(ProjectCaseValidationError):
         LifecycleCase(
-            10, CapacityMaintenanceBasis.NO_AUGMENTATION_REQUIRED_ASSERTED, None, "2026-01-01",
-            (), 0.0, 0.0,
+            10,
+            CapacityMaintenanceBasis.NO_AUGMENTATION_REQUIRED_ASSERTED,
+            None,
+            "2026-01-01",
+            (),
+            0.0,
+            0.0,
         )
     with pytest.raises(ProjectCaseValidationError):
         LifecycleCase(
-            10, CapacityMaintenanceBasis.NO_AUGMENTATION_REQUIRED_ASSERTED, "src", None, (), 0.0, 0.0,
+            10,
+            CapacityMaintenanceBasis.NO_AUGMENTATION_REQUIRED_ASSERTED,
+            "src",
+            None,
+            (),
+            0.0,
+            0.0,
         )
 
 
@@ -173,8 +210,13 @@ def test_unknown_basis_requires_null_source_and_as_of():
 def test_event_year_within_project_life():
     with pytest.raises(ProjectCaseValidationError):
         LifecycleCase(
-            5, CapacityMaintenanceBasis.SCHEDULED_NAMEPLATE_MAINTENANCE, "s", "2026-01-01",
-            (AugmentationEvent(6, 1.0, 0.3, 0.0),), 0.0, 0.0,
+            5,
+            CapacityMaintenanceBasis.SCHEDULED_NAMEPLATE_MAINTENANCE,
+            "s",
+            "2026-01-01",
+            (AugmentationEvent(6, 1.0, 0.3, 0.0),),
+            0.0,
+            0.0,
         )
 
 
@@ -194,13 +236,33 @@ def test_spread_decay_domains():
 
 
 def test_explicit_curve_year1_must_be_one_and_source_required():
-    Projection(ProjectionKind.ExplicitAnnualMultiplierCurve, multipliers=(1.0, 0.9), source="s", as_of="2026-01-01")
+    Projection(
+        ProjectionKind.ExplicitAnnualMultiplierCurve,
+        multipliers=(1.0, 0.9),
+        source="s",
+        as_of="2026-01-01",
+    )
     with pytest.raises(ProjectCaseValidationError):
-        Projection(ProjectionKind.ExplicitAnnualMultiplierCurve, multipliers=(0.9, 0.9), source="s", as_of="2026-01-01")
+        Projection(
+            ProjectionKind.ExplicitAnnualMultiplierCurve,
+            multipliers=(0.9, 0.9),
+            source="s",
+            as_of="2026-01-01",
+        )
     with pytest.raises(ProjectCaseValidationError):
-        Projection(ProjectionKind.ExplicitAnnualMultiplierCurve, multipliers=(1.0, -0.1), source="s", as_of="2026-01-01")
+        Projection(
+            ProjectionKind.ExplicitAnnualMultiplierCurve,
+            multipliers=(1.0, -0.1),
+            source="s",
+            as_of="2026-01-01",
+        )
     with pytest.raises(ProjectCaseValidationError):
-        Projection(ProjectionKind.ExplicitAnnualMultiplierCurve, multipliers=(1.0, 0.9), source=None, as_of="2026-01-01")
+        Projection(
+            ProjectionKind.ExplicitAnnualMultiplierCurve,
+            multipliers=(1.0, 0.9),
+            source=None,
+            as_of="2026-01-01",
+        )
 
 
 # --- CurrencyBasis (§4.3/§4.4, red-line #19) ---------------------------------
@@ -214,7 +276,9 @@ def test_currency_deflator_needs_members():
 def test_currency_source_mode_members_must_be_null():
     CurrencyBasis(CurrencyBasisMode.SOURCE_EUR_TREATED_AS_BASE_YEAR_REAL, 2026)
     with pytest.raises(ProjectCaseValidationError):
-        CurrencyBasis(CurrencyBasisMode.SOURCE_EUR_TREATED_AS_BASE_YEAR_REAL, 2026, deflator_method="cpi")
+        CurrencyBasis(
+            CurrencyBasisMode.SOURCE_EUR_TREATED_AS_BASE_YEAR_REAL, 2026, deflator_method="cpi"
+        )
 
 
 # --- CoverageAudit partition (§4.3/§4.6, red-line #17) -----------------------
@@ -276,17 +340,23 @@ def test_unsupported_zone_rejected():
 def test_da_only_forecast_audits_must_be_null():
     srr = fx.da_only_srr()
     with pytest.raises(ProjectCaseValidationError):
-        _reissue(srr, forecast_audits=ForecastAudits(ida=ForecastAudit("walk_forward", "hour_of_day", 0.0)))
+        _reissue(
+            srr,
+            forecast_audits=ForecastAudits(ida=ForecastAudit("walk_forward", "hour_of_day", 0.0)),
+        )
 
 
 def test_da_id_reserve_requires_three_legs_with_reserve_block_bucket():
     srr = fx.da_id_reserve_srr()
     with pytest.raises(ProjectCaseValidationError):
-        _reissue(srr, forecast_audits=ForecastAudits(
-            da=ForecastAudit("walk_forward", "hour_of_day", None),
-            ida=ForecastAudit("walk_forward", "hour_of_day", None),
-            reserve=ForecastAudit("walk_forward", "hour_of_day", None),  # wrong bucket
-        ))
+        _reissue(
+            srr,
+            forecast_audits=ForecastAudits(
+                da=ForecastAudit("walk_forward", "hour_of_day", None),
+                ida=ForecastAudit("walk_forward", "hour_of_day", None),
+                reserve=ForecastAudit("walk_forward", "hour_of_day", None),  # wrong bucket
+            ),
+        )
 
 
 def test_forecast_mode_must_be_walk_forward():
@@ -360,7 +430,12 @@ def test_explicit_curve_length_must_equal_project_life():
             LifecycleCase(15, CapacityMaintenanceBasis.UNKNOWN, None, None, (), 0.0, 0.0),
             MarketCase(
                 srr,
-                Projection(ProjectionKind.ExplicitAnnualMultiplierCurve, multipliers=(1.0, 0.9), source="s", as_of="2026-01-01"),
+                Projection(
+                    ProjectionKind.ExplicitAnnualMultiplierCurve,
+                    multipliers=(1.0, 0.9),
+                    source="s",
+                    as_of="2026-01-01",
+                ),
             ),
             ValuationCase(0.08, 2026),
             BootstrapCase(0, 5000, "pc-bootstrap-pcg64-choice365-linear-v1"),
@@ -462,6 +537,7 @@ def test_issuance_permit_cannot_be_reused_by_copied_async_context():
         blocked: list[ProjectCaseValidationError] = []
 
         with _issue_strategy_run_result():
+
             async def attack() -> None:
                 await release.wait()
                 try:
@@ -473,7 +549,7 @@ def test_issuance_permit_cannot_be_reused_by_copied_async_context():
                     blocked.append(exc)
 
             task = asyncio.create_task(attack())  # copies the still-live context
-            issued = dc.replace(srr)              # atomically consumes its permit
+            issued = dc.replace(srr)  # atomically consumes its permit
             release.set()
             await task
         return issued, blocked
@@ -527,7 +603,10 @@ def test_reserve_solver_failed_date_must_be_covered():
             sample_window=SampleWindow(D1, D3, "Europe/Berlin"),
             daily_realised_cash_series=((D1, 300.0),),
             coverage_audit=CoverageAudit(
-                (D1, D2, D3), (D1,), (D3,), (D2,),
+                (D1, D2, D3),
+                (D1,),
+                (D3,),
+                (D2,),
                 (SolverFailureDetail(D2, "s", "m", "st"),),
             ),
             reserve_coverage_audit=ReserveCoverageAudit(
@@ -541,10 +620,36 @@ def _cashflow_table(basis: str) -> CashflowTable:
     return CashflowTable(
         basis,
         (
-            CashflowRow(1, 100.0, 10.0, 0.0, 0.0, 90.0, 0.9259, 83.3),
-            CashflowRow(2, 100.0, 10.0, 0.0, 0.0, 90.0, 0.8573, 77.2),
+            CashflowRow(1, 100.0, None, 0.0, 100.0, 10.0, 0.0, 0.0, 90.0, 0.9259, 83.331),
+            CashflowRow(2, 100.0, None, 0.0, 100.0, 10.0, 0.0, 0.0, 90.0, 0.8573, 77.157),
         ),
     )
+
+
+@lru_cache(maxsize=1)
+def _valid_run_result() -> RunResult:
+    return compute_project_case(fx.project_case())
+
+
+def _valid_provenance() -> dict:
+    return _valid_run_result().to_payload()["provenance"]
+
+
+def _valid_input_fingerprint() -> str:
+    return _valid_run_result().input_fingerprint
+
+
+def _project_fingerprint_for_provenance(provenance: dict) -> str:
+    digest = fingerprint_hex("ProjectCase", provenance["project_case"])
+    provenance["project_case_input_fingerprint"] = digest
+    return digest
+
+
+def _strategy_and_project_fingerprints_for_provenance(provenance: dict) -> str:
+    strategy_digest = fingerprint_hex("StrategyRunResult", provenance["strategy_run_result"])
+    provenance["strategy_run_fingerprint"] = strategy_digest
+    provenance["project_case"]["market_case"]["strategy_run_fingerprint"] = strategy_digest
+    return _project_fingerprint_for_provenance(provenance)
 
 
 def test_npv_outcome_shapes():
@@ -562,27 +667,25 @@ def test_npv_outcome_shapes():
 
 
 def test_run_result_state_matrix_and_serialisation():
-    ok = NpvOutcome.ok(NpvDistribution(1.0, 2.0, 3.0, 0.5))
-    un = _unknown_lifecycle()
-    # Valid: screening available + table present; lifecycle unavailable + null table.
-    rr = RunResult(
-        input_fingerprint="ab" * 32,
-        no_lifecycle_cost_screening_npv=ok,
-        lifecycle_cash_npv=un,
-        provenance={"note": "pc-b fills this", "nested": {"a": [1, 2]}},
-        screening_cashflow_table=_cashflow_table("screening"),
+    unknown_case = dc.replace(
+        fx.project_case(),
+        lifecycle_case=LifecycleCase(
+            15,
+            CapacityMaintenanceBasis.UNKNOWN,
+            None,
+            None,
+            (),
+            0.0,
+            0.0,
+        ),
     )
-    assert rr.schema_version == "project-case-v1"
+    rr = compute_project_case(unknown_case)
+    assert rr.schema_version == "project-case-v1.1"
     payload = rr.to_payload()
     assert payload["lifecycle_cashflow_table"] is None
     assert payload["screening_cashflow_table"]["rows"][0]["year"] == 1
-    assert payload["provenance"]["nested"]["a"] == [1, 2]  # round-trips to plain list
     # Both bases available: both tables present, each bound to its own basis.
-    both = RunResult(
-        "ab" * 32, ok, ok, provenance={},
-        screening_cashflow_table=_cashflow_table("screening"),
-        lifecycle_cashflow_table=_cashflow_table("lifecycle"),
-    )
+    both = _valid_run_result()
     assert both.to_payload()["lifecycle_cashflow_table"]["basis"] == "lifecycle"
 
 
@@ -593,12 +696,15 @@ def test_run_result_screening_must_be_available():
     un = _unknown_lifecycle()
     with pytest.raises(ProjectCaseValidationError, match="screening"):
         RunResult(
-            "ab" * 32, un, ok, provenance={},
+            _valid_input_fingerprint(),
+            un,
+            ok,
+            provenance=_valid_provenance(),
             lifecycle_cashflow_table=_cashflow_table("lifecycle"),
         )
     # Both unavailable is also rejected (screening must be available).
     with pytest.raises(ProjectCaseValidationError, match="screening"):
-        RunResult("ab" * 32, un, un, provenance={})
+        RunResult(_valid_input_fingerprint(), un, un, provenance=_valid_provenance())
 
 
 def test_run_result_lifecycle_unavailable_is_the_locked_envelope():
@@ -610,7 +716,10 @@ def test_run_result_lifecycle_unavailable_is_the_locked_envelope():
     ):
         with pytest.raises(ProjectCaseValidationError, match="unavailable lifecycle"):
             RunResult(
-                "ab" * 32, ok, NpvOutcome.unavailable(status, message), provenance={},
+                _valid_input_fingerprint(),
+                ok,
+                NpvOutcome.unavailable(status, message),
+                provenance=_valid_provenance(),
                 screening_cashflow_table=_cashflow_table("screening"),
             )
 
@@ -620,16 +729,25 @@ def test_run_result_rejects_contradictory_states():
     un = _unknown_lifecycle()
     # Available NPV (screening) but a null table is a contradiction.
     with pytest.raises(ProjectCaseValidationError):
-        RunResult("ab" * 32, ok, un, provenance={})
+        RunResult(_valid_input_fingerprint(), ok, un, provenance=_valid_provenance())
     # Unavailable NPV (lifecycle) but a present table is a contradiction.
     with pytest.raises(ProjectCaseValidationError):
         RunResult(
-            "ab" * 32, ok, un, provenance={},
+            _valid_input_fingerprint(),
+            ok,
+            un,
+            provenance=_valid_provenance(),
             screening_cashflow_table=_cashflow_table("screening"),
             lifecycle_cashflow_table=_cashflow_table("lifecycle"),
         )
     with pytest.raises(ProjectCaseValidationError):
-        RunResult("nothex", ok, un, provenance={}, screening_cashflow_table=_cashflow_table("screening"))
+        RunResult(
+            "nothex",
+            ok,
+            un,
+            provenance=_valid_provenance(),
+            screening_cashflow_table=_cashflow_table("screening"),
+        )
 
 
 def test_run_result_table_basis_must_match_slot():
@@ -638,72 +756,483 @@ def test_run_result_table_basis_must_match_slot():
     # Both NPVs available but the tables are swapped between slots.
     with pytest.raises(ProjectCaseValidationError, match="basis"):
         RunResult(
-            "ab" * 32, ok, ok, provenance={},
+            _valid_input_fingerprint(),
+            ok,
+            ok,
+            provenance=_valid_provenance(),
             screening_cashflow_table=_cashflow_table("lifecycle"),
             lifecycle_cashflow_table=_cashflow_table("screening"),
         )
 
 
 def test_run_result_provenance_is_deep_frozen():
-    ok = NpvOutcome.ok(NpvDistribution(1.0, 2.0, 3.0, 0.5))
-    un = _unknown_lifecycle()
-    src = {"solver": {"failures": [1, 2]}}
+    base = _valid_run_result()
+    src = _valid_provenance()
     rr = RunResult(
-        "ab" * 32, ok, un, provenance=src,
-        screening_cashflow_table=_cashflow_table("screening"),
+        base.input_fingerprint,
+        base.no_lifecycle_cost_screening_npv,
+        base.lifecycle_cash_npv,
+        provenance=src,
+        screening_cashflow_table=base.screening_cashflow_table,
+        lifecycle_cashflow_table=base.lifecycle_cashflow_table,
     )
-    src["solver"]["failures"].append(3)  # mutating the caller's dict must not leak in
-    assert rr.provenance["solver"]["failures"] == (1, 2)
+    src["projection"]["resolved_annual_multipliers"].append(123.0)
+    assert len(rr.provenance["projection"]["resolved_annual_multipliers"]) == 15
     with pytest.raises(TypeError):
-        rr.provenance["solver"] = None  # deep-frozen
+        rr.provenance["projection"] = None  # deep-frozen
 
 
 def test_run_result_provenance_rejects_unserialisable_domain():
     """Provenance must be a closed JSON/CBOR tree — a set / bytes / object that
     ``_deep_freeze`` used to pass through untouched is rejected (review r3 #4)."""
-    ok = NpvOutcome.ok(NpvDistribution(1.0, 2.0, 3.0, 0.5))
-    un = _unknown_lifecycle()
-    for bad in ({"k": {1, 2, 3}}, {"k": b"bytes"}, {"k": object()}, {1: "int-key"},
-                {"k": float("nan")}):
+    base = _valid_run_result()
+    for bad in ({1, 2, 3}, b"bytes", object(), float("nan")):
+        provenance = _valid_provenance()
+        provenance["projection"]["resolved_annual_multipliers"][0] = bad
         with pytest.raises(ProjectCaseValidationError):
             RunResult(
-                "ab" * 32, ok, un, provenance=bad,
-                screening_cashflow_table=_cashflow_table("screening"),
+                base.input_fingerprint,
+                base.no_lifecycle_cost_screening_npv,
+                base.lifecycle_cash_npv,
+                provenance=provenance,
+                screening_cashflow_table=base.screening_cashflow_table,
+                lifecycle_cashflow_table=base.lifecycle_cashflow_table,
             )
 
 
-def test_cashflow_table_rejects_bad_rows():
+def _replace_table_row(table: CashflowTable, index: int, row: CashflowRow) -> CashflowTable:
+    rows = list(table.rows)
+    rows[index] = row
+    return CashflowTable(table.basis, tuple(rows))
+
+
+def test_run_result_requires_exact_project_years_and_p50_reconciliation():
+    base = _valid_run_result()
+    screening = base.screening_cashflow_table
+    assert screening is not None
+
+    with pytest.raises(ProjectCaseValidationError, match="project years"):
+        dc.replace(
+            base,
+            screening_cashflow_table=CashflowTable("screening", screening.rows[:-1]),
+        )
+
+    outcome = base.no_lifecycle_cost_screening_npv
+    assert outcome.distribution is not None
+    with pytest.raises(ProjectCaseValidationError, match="NPV distribution"):
+        dc.replace(
+            base,
+            no_lifecycle_cost_screening_npv=NpvOutcome.ok(
+                dc.replace(outcome.distribution, p50=outcome.distribution.p50 + 10.0)
+            ),
+        )
+
+
+def test_run_result_screening_rows_cannot_carry_lifecycle_costs():
+    base = _valid_run_result()
+    screening = base.screening_cashflow_table
+    assert screening is not None
+    row = screening.rows[0]
+    cost = 10.0
+    mutated = dc.replace(
+        row,
+        opex_eur=cost,
+        net_eur=row.net_eur - cost,
+        discounted_net_eur=row.discounted_net_eur - cost * row.discount_factor,
+    )
+    with pytest.raises(ProjectCaseValidationError, match="opex_eur"):
+        dc.replace(
+            base,
+            screening_cashflow_table=_replace_table_row(screening, 0, mutated),
+        )
+
+
+def test_run_result_null_contract_row_matrix_is_fail_closed():
+    base = _valid_run_result()
+    screening = base.screening_cashflow_table
+    assert screening is not None
+    row = screening.rows[0]
+    # A displayed zero floor is semantically different from no contract, even
+    # though it leaves every row-local arithmetic identity unchanged.
+    mutated = dc.replace(row, effective_contract_floor_eur=0.0)
+    with pytest.raises(ProjectCaseValidationError, match="effective_contract_floor_eur"):
+        dc.replace(
+            base,
+            screening_cashflow_table=_replace_table_row(screening, 0, mutated),
+        )
+
+
+def test_run_result_contract_rows_match_term_and_resolved_floor():
+    base = compute_project_case(fx.project_case(contract=fx.contract_case()))
+    screening = base.screening_cashflow_table
+    assert screening is not None
+
+    term_row = screening.rows[1]  # fixture term begins in project year 2
+    with pytest.raises(ProjectCaseValidationError, match="effective_contract_floor_eur"):
+        dc.replace(
+            base,
+            screening_cashflow_table=_replace_table_row(
+                screening,
+                1,
+                dc.replace(
+                    term_row,
+                    effective_contract_floor_eur=term_row.effective_contract_floor_eur + 1.0,
+                ),
+            ),
+        )
+
+    outside_row = screening.rows[0]
+    with pytest.raises(ProjectCaseValidationError, match="effective_contract_floor_eur"):
+        dc.replace(
+            base,
+            screening_cashflow_table=_replace_table_row(
+                screening,
+                0,
+                dc.replace(outside_row, effective_contract_floor_eur=0.0),
+            ),
+        )
+
+
+def test_run_result_lifecycle_revenue_components_match_screening():
+    base = _valid_run_result()
+    lifecycle = base.lifecycle_cashflow_table
+    assert lifecycle is not None
+    row = lifecycle.rows[0]
+    delta = 10.0
+    mutated = dc.replace(
+        row,
+        merchant_revenue_eur=row.merchant_revenue_eur + delta,
+        revenue_eur=row.revenue_eur + delta,
+        net_eur=row.net_eur + delta,
+        discounted_net_eur=row.discounted_net_eur + delta * row.discount_factor,
+    )
+    with pytest.raises(ProjectCaseValidationError, match="merchant_revenue_eur"):
+        dc.replace(
+            base,
+            lifecycle_cashflow_table=_replace_table_row(lifecycle, 0, mutated),
+        )
+
+
+def test_run_result_rejects_merchant_topup_decomposition_swap():
+    base = compute_project_case(
+        fx.project_case(
+            contract=fx.contract_case(
+                rates=(100_000.0, 100_000.0),
+                entitlement_factors=(1.0, 1.0),
+            )
+        )
+    )
+    screening = base.screening_cashflow_table
+    assert screening is not None
+    row = screening.rows[1]
+    assert row.merchant_revenue_eur > 0.0 and row.contract_top_up_eur > 0.0
+    # The row-local settled identity survives this swap; only reconstruction
+    # from the fingerprinted bootstrap can tell the two components are forged.
+    swapped = dc.replace(
+        row,
+        merchant_revenue_eur=row.contract_top_up_eur,
+        contract_top_up_eur=row.merchant_revenue_eur,
+    )
+    with pytest.raises(ProjectCaseValidationError, match="merchant_revenue_eur"):
+        dc.replace(
+            base,
+            screening_cashflow_table=_replace_table_row(screening, 1, swapped),
+        )
+
+
+def test_run_result_maintenance_basis_and_lifecycle_availability_are_exact():
+    active = _valid_run_result()
+    with pytest.raises(ProjectCaseValidationError, match="UNKNOWN iff"):
+        dc.replace(
+            active,
+            lifecycle_cash_npv=_unknown_lifecycle(),
+            lifecycle_cashflow_table=None,
+        )
+
+    unknown_case = dc.replace(
+        fx.project_case(),
+        lifecycle_case=LifecycleCase(
+            15,
+            CapacityMaintenanceBasis.UNKNOWN,
+            None,
+            None,
+            (),
+            0.0,
+            0.0,
+        ),
+    )
+    unknown = compute_project_case(unknown_case)
+    screening = unknown.screening_cashflow_table
+    assert screening is not None
+    with pytest.raises(ProjectCaseValidationError, match="UNKNOWN iff"):
+        dc.replace(
+            unknown,
+            lifecycle_cash_npv=unknown.no_lifecycle_cost_screening_npv,
+            lifecycle_cashflow_table=CashflowTable("lifecycle", screening.rows),
+        )
+
+
+def test_run_result_rejects_noncanonical_real_wire_types_and_engineering_aliases():
+    base = _valid_run_result()
+
+    asset_provenance = _valid_provenance()
+    asset_provenance["project_case"]["asset_case"]["power_mw"] = 10
+    asset_digest = _project_fingerprint_for_provenance(asset_provenance)
+    with pytest.raises(ProjectCaseValidationError, match="canonical float"):
+        RunResult(
+            asset_digest,
+            base.no_lifecycle_cost_screening_npv,
+            base.lifecycle_cash_npv,
+            provenance=asset_provenance,
+            screening_cashflow_table=base.screening_cashflow_table,
+            lifecycle_cashflow_table=base.lifecycle_cashflow_table,
+        )
+
+    strategy_provenance = _valid_provenance()
+    strategy_provenance["strategy_run_result"]["power_mw"] = 10
+    strategy_digest = fingerprint_hex(
+        "StrategyRunResult", strategy_provenance["strategy_run_result"]
+    )
+    strategy_provenance["strategy_run_fingerprint"] = strategy_digest
+    strategy_provenance["project_case"]["market_case"]["strategy_run_fingerprint"] = strategy_digest
+    project_digest = _project_fingerprint_for_provenance(strategy_provenance)
+    with pytest.raises(ProjectCaseValidationError, match="canonical float"):
+        RunResult(
+            project_digest,
+            base.no_lifecycle_cost_screening_npv,
+            base.lifecycle_cash_npv,
+            provenance=strategy_provenance,
+            screening_cashflow_table=base.screening_cashflow_table,
+            lifecycle_cashflow_table=base.lifecycle_cashflow_table,
+        )
+
+    contracted = compute_project_case(fx.project_case(contract=fx.contract_case()))
+    contract_provenance = contracted.to_payload()["provenance"]
+    contract_provenance["project_case"]["contract_case"]["settlement_terms"][
+        "floor_rate_real_eur_per_modeled_mw_year_by_contract_year"
+    ][0] = 10
+    contract_digest = _project_fingerprint_for_provenance(contract_provenance)
+    with pytest.raises(ProjectCaseValidationError, match="canonical float"):
+        RunResult(
+            contract_digest,
+            contracted.no_lifecycle_cost_screening_npv,
+            contracted.lifecycle_cash_npv,
+            provenance=contract_provenance,
+            screening_cashflow_table=contracted.screening_cashflow_table,
+            lifecycle_cashflow_table=contracted.lifecycle_cashflow_table,
+        )
+
+
+def test_run_result_replays_full_typed_strategy_invariants_after_rehash():
+    base = _valid_run_result()
+
+    def bad_calculator(provenance):
+        provenance["strategy_run_result"]["calculator_version"] = "pc-a-forged"
+
+    def bad_timezone(provenance):
+        provenance["strategy_run_result"]["sample_window"]["timezone"] = "UTC"
+
+    def duplicate_daily_date(provenance):
+        series = provenance["strategy_run_result"]["daily_realised_cash_series"]
+        series[1][0] = series[0][0]
+
+    def bad_sample_universe(provenance):
+        provenance["strategy_run_result"]["sample_window"]["last_delivery_date"] = str(D1)
+
+    def pre_vom_cash(provenance):
+        provenance["strategy_run_result"]["cash_basis"]["post_vom"] = False
+
+    def bad_vom(provenance):
+        provenance["strategy_run_result"]["embedded_vom_cost_eur_mwh"] = 0.6
+
+    def wrong_producer_tuple(provenance):
+        provenance["strategy_run_result"]["adapter_provenance"]["source_function"] = "forged_solver"
+
+    def illegal_forecast_matrix(provenance):
+        provenance["strategy_run_result"]["forecast_audits"]["ida"] = {
+            "forecast_mode": "walk_forward",
+            "bucket": "hour_of_day",
+            "deadband": 0.0,
+        }
+
+    def illegal_reserve_matrix(provenance):
+        provenance["strategy_run_result"]["reserve_product"] = "FCR"
+
+    def wrong_zone_grid_profile(provenance):
+        provenance["strategy_run_result"]["adapter_provenance"]["expected_grid_profiles"]["da"] = (
+            "pc-da-ch-60min-v1"
+        )
+
+    for mutate in (
+        bad_calculator,
+        bad_timezone,
+        duplicate_daily_date,
+        bad_sample_universe,
+        pre_vom_cash,
+        bad_vom,
+        wrong_producer_tuple,
+        illegal_forecast_matrix,
+        illegal_reserve_matrix,
+        wrong_zone_grid_profile,
+    ):
+        provenance = _valid_provenance()
+        mutate(provenance)
+        digest = _strategy_and_project_fingerprints_for_provenance(provenance)
+        with pytest.raises(ProjectCaseValidationError):
+            RunResult(
+                digest,
+                base.no_lifecycle_cost_screening_npv,
+                base.lifecycle_cash_npv,
+                provenance=provenance,
+                screening_cashflow_table=base.screening_cashflow_table,
+                lifecycle_cashflow_table=base.lifecycle_cashflow_table,
+            )
+
+
+def test_run_result_replays_asset_and_lifecycle_typed_domains_after_rehash():
+    base = _valid_run_result()
+    bad_asset = _valid_provenance()
+    bad_asset["project_case"]["asset_case"]["installed_capex_eur"] = -1.0
+    digest = _project_fingerprint_for_provenance(bad_asset)
     with pytest.raises(ProjectCaseValidationError):
-        CashflowTable("bogus", (CashflowRow(1, 0, 0, 0, 0, 0, 1.0, 0),))  # bad basis
+        RunResult(
+            digest,
+            base.no_lifecycle_cost_screening_npv,
+            base.lifecycle_cash_npv,
+            provenance=bad_asset,
+            screening_cashflow_table=base.screening_cashflow_table,
+            lifecycle_cashflow_table=base.lifecycle_cashflow_table,
+        )
+
+    unknown_case = dc.replace(
+        fx.project_case(),
+        lifecycle_case=LifecycleCase(
+            15,
+            CapacityMaintenanceBasis.UNKNOWN,
+            None,
+            None,
+            (),
+            0.0,
+            0.0,
+        ),
+    )
+    unknown = compute_project_case(unknown_case)
+    for field, value in (
+        ("capacity_maintenance_source", "bogus-source"),
+        ("capacity_maintenance_as_of", "2026-08-16"),
+    ):
+        provenance = unknown.to_payload()["provenance"]
+        provenance["project_case"]["lifecycle_case"][field] = value
+        digest = _project_fingerprint_for_provenance(provenance)
+        with pytest.raises(ProjectCaseValidationError, match="UNKNOWN"):
+            RunResult(
+                digest,
+                unknown.no_lifecycle_cost_screening_npv,
+                unknown.lifecycle_cash_npv,
+                provenance=provenance,
+                screening_cashflow_table=unknown.screening_cashflow_table,
+                lifecycle_cashflow_table=None,
+            )
+
+
+def test_run_result_replays_bootstrap_and_projection_typed_domains_after_rehash():
+    base = _valid_run_result()
+    for mutate in (
+        lambda provenance: provenance["project_case"]["bootstrap_case"].__setitem__(
+            "bootstrap_algorithm_version", "forged-bootstrap"
+        ),
+        lambda provenance: provenance["project_case"]["market_case"]["projection"].__setitem__(
+            "source", "illegal-on-spread-decay"
+        ),
+    ):
+        provenance = _valid_provenance()
+        mutate(provenance)
+        digest = _project_fingerprint_for_provenance(provenance)
+        with pytest.raises(ProjectCaseValidationError):
+            RunResult(
+                digest,
+                base.no_lifecycle_cost_screening_npv,
+                base.lifecycle_cash_npv,
+                provenance=provenance,
+                screening_cashflow_table=base.screening_cashflow_table,
+                lifecycle_cashflow_table=base.lifecycle_cashflow_table,
+            )
+
+
+def test_run_result_rejects_unbound_projection_and_interpolation_provenance():
+    base = _valid_run_result()
+    provenance = _valid_provenance()
+    provenance["projection"]["resolved_annual_multipliers"][1] = 0.123
+    with pytest.raises(ProjectCaseValidationError, match="fingerprinted projection"):
+        RunResult(
+            base.input_fingerprint,
+            base.no_lifecycle_cost_screening_npv,
+            base.lifecycle_cash_npv,
+            provenance=provenance,
+            screening_cashflow_table=base.screening_cashflow_table,
+            lifecycle_cashflow_table=base.lifecycle_cashflow_table,
+        )
+
+    contracted = compute_project_case(fx.project_case(contract=fx.contract_case()))
+    contract_provenance = contracted.to_payload()["provenance"]
+    interpolation = contract_provenance["contract_settlement"]["representative_interpolation"]
+    interpolation["lower_original_draw_index"] = (
+        interpolation["lower_original_draw_index"] + 1
+    ) % 5000
+    with pytest.raises(ProjectCaseValidationError, match="sorted ranks"):
+        RunResult(
+            contracted.input_fingerprint,
+            contracted.no_lifecycle_cost_screening_npv,
+            contracted.lifecycle_cash_npv,
+            provenance=contract_provenance,
+            screening_cashflow_table=contracted.screening_cashflow_table,
+            lifecycle_cashflow_table=contracted.lifecycle_cashflow_table,
+        )
+
+
+def test_cashflow_table_rejects_bad_rows():
+    row = _cashflow_table("screening").rows[0]
+    with pytest.raises(ProjectCaseValidationError):
+        CashflowTable("bogus", (row,))  # bad basis
     with pytest.raises(ProjectCaseValidationError):
         CashflowTable("screening", ())  # empty
     with pytest.raises(ProjectCaseValidationError):  # duplicate/unsorted years
         CashflowTable(
             "screening",
-            (CashflowRow(2, 0, 0, 0, 0, 0, 1.0, 0), CashflowRow(2, 0, 0, 0, 0, 0, 1.0, 0)),
+            (dc.replace(row, year=2), dc.replace(row, year=2)),
         )
     with pytest.raises(ProjectCaseValidationError):
-        CashflowRow(1, float("nan"), 0, 0, 0, 0, 1.0, 0)  # non-finite cash
+        dc.replace(row, merchant_revenue_eur=float("nan"))
 
 
 # --- Capture basis coupling (review r2 #6) -----------------------------------
 def test_capture_basis_applied_flag_and_source_are_coupled():
-    CaptureBasis(True, 0.9, "da_slippage")          # ok
-    CaptureBasis(False, 1.0, "not_applied")         # ok
+    CaptureBasis(True, 0.9, "da_slippage")  # ok
+    CaptureBasis(False, 1.0, "not_applied")  # ok
     with pytest.raises(ProjectCaseValidationError):
-        CaptureBasis(True, 0.9, "not_applied")      # applied haircut needs a source
+        CaptureBasis(True, 0.9, "not_applied")  # applied haircut needs a source
     with pytest.raises(ProjectCaseValidationError):
-        CaptureBasis(True, 1.0, "da_slippage")      # applied must mean rate != 1.0
+        CaptureBasis(True, 1.0, "da_slippage")  # applied must mean rate != 1.0
     with pytest.raises(ProjectCaseValidationError):
-        CaptureBasis(False, 0.9, "da_slippage")     # rate != 1.0 must be applied
+        CaptureBasis(False, 0.9, "da_slippage")  # rate != 1.0 must be applied
 
 
 # --- AdapterProvenance immutability + profile validation (review r2 #2/#3) ----
 def _provenance(excluded, profiles) -> AdapterProvenance:
     return AdapterProvenance(
-        ProducerAdapterId.PC_ADP_DA_ONLY, "simulate_replay_batch", "total_revenue_eur",
-        excluded, "DA MILP Replay", False, 0.5, 0.9, None, None, None,
-        "pc-market-grid-v1", profiles,
+        ProducerAdapterId.PC_ADP_DA_ONLY,
+        "simulate_replay_batch",
+        "total_revenue_eur",
+        excluded,
+        "DA MILP Replay",
+        False,
+        0.5,
+        0.9,
+        None,
+        None,
+        None,
+        "pc-market-grid-v1",
+        profiles,
     )
 
 
@@ -716,4 +1245,6 @@ def test_adapter_provenance_excluded_fields_is_owned_tuple():
 
 def test_adapter_provenance_rejects_bogus_profile_id():
     with pytest.raises(ProjectCaseValidationError):
-        _provenance(("degradation_cost_eur",), {"da": "bogus-profile", "ida": None, "reserve": None})
+        _provenance(
+            ("degradation_cost_eur",), {"da": "bogus-profile", "ida": None, "reserve": None}
+        )

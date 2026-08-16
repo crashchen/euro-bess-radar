@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import math
+from functools import lru_cache
 
 import pandas as pd
 import pytest
@@ -14,11 +16,8 @@ from src.project_case import (
     AssetCase,
     BootstrapCase,
     CapacityMaintenanceBasis,
-    CashflowRow,
-    CashflowTable,
+    CoverageAudit,
     LifecycleCase,
-    NpvDistribution,
-    NpvOutcome,
     Projection,
     ProjectionKind,
     RunResult,
@@ -31,56 +30,50 @@ from src.project_case.enums import (
     LIFECYCLE_UNKNOWN_MESSAGE,
     LIFECYCLE_UNKNOWN_STATUS,
 )
+from src.project_case.schema import _issue_strategy_run_result
 from tests import pc_case_fixtures as fx
 
 
-def _table(basis: str, *, lifecycle: bool) -> CashflowTable:
-    return CashflowTable(
-        basis,
-        (
-            CashflowRow(
-                year=1,
-                revenue_eur=101.0,
-                opex_eur=11.0 if lifecycle else 0.0,
-                augmentation_eur=12.0 if lifecycle else 0.0,
-                terminal_eur=13.0 if lifecycle else 0.0,
-                net_eur=91.0 if lifecycle else 101.0,
-                discount_factor=0.9,
-                discounted_net_eur=81.9 if lifecycle else 90.9,
-            ),
-        ),
-    )
-
-
+@lru_cache(maxsize=1)
 def _available_result() -> RunResult:
-    return RunResult(
-        input_fingerprint="ab" * 32,
-        no_lifecycle_cost_screening_npv=NpvOutcome.ok(
-            NpvDistribution(-101.0, 202.0, 909.0, 0.61)
-        ),
-        lifecycle_cash_npv=NpvOutcome.ok(
-            NpvDistribution(-303.0, 44.0, 707.0, 0.37)
-        ),
-        provenance={"red_line_assertions": {"floor_included": False}},
-        screening_cashflow_table=_table("screening", lifecycle=False),
-        lifecycle_cashflow_table=_table("lifecycle", lifecycle=True),
-    )
+    """A producer-issued, fully validated v1.1 result for presentation tests."""
+    return compute_project_case(fx.project_case())
 
 
+@lru_cache(maxsize=1)
 def _unknown_result() -> RunResult:
-    return RunResult(
-        input_fingerprint="cd" * 32,
-        no_lifecycle_cost_screening_npv=NpvOutcome.ok(
-            NpvDistribution(-101.0, 202.0, 909.0, 0.61)
-        ),
-        lifecycle_cash_npv=NpvOutcome.unavailable(
-            LIFECYCLE_UNKNOWN_STATUS,
-            LIFECYCLE_UNKNOWN_MESSAGE,
-        ),
-        provenance={"red_line_assertions": {"floor_included": False}},
-        screening_cashflow_table=_table("screening", lifecycle=False),
-        lifecycle_cashflow_table=None,
+    case = fx.project_case()
+    unknown_lifecycle = LifecycleCase(
+        case.lifecycle_case.project_life_years,
+        CapacityMaintenanceBasis.UNKNOWN,
+        None,
+        None,
+        (),
+        0.0,
+        0.0,
     )
+    return compute_project_case(
+        dataclasses.replace(case, lifecycle_case=unknown_lifecycle)
+    )
+
+
+@lru_cache(maxsize=1)
+def _partial_result() -> RunResult:
+    """A valid result whose typed StrategyRunResult has one missing date."""
+    strategy = fx.da_only_srr()
+    with _issue_strategy_run_result():
+        strategy = dataclasses.replace(
+            strategy,
+            daily_realised_cash_series=((fx.D1, 123.5),),
+            coverage_audit=CoverageAudit(
+                (fx.D1, fx.D2),
+                (fx.D1,),
+                (fx.D2,),
+                (),
+                (),
+            ),
+        )
+    return compute_project_case(fx.project_case(strategy))
 
 
 def _available_result_app() -> None:
@@ -98,29 +91,10 @@ def _unknown_result_app() -> None:
 
 
 def _partial_result_app() -> None:
-    import dataclasses
-
     from src.pages.project_case import render_project_case_result
-    from tests.test_project_case_ui import _available_result
+    from tests.test_project_case_ui import _partial_result
 
-    result = _available_result()
-    partial = dataclasses.replace(
-        result,
-        provenance={
-            "red_line_assertions": {"floor_included": False},
-            "strategy_run_result": {
-                "strategy_kind": "DA_ONLY",
-                "adapter_provenance": {"producer_adapter_id": "PC_ADP_DA_ONLY"},
-                "coverage_audit": {
-                    "observed_dates": ["2026-03-10", "2026-03-11"],
-                    "valid_dates": ["2026-03-10"],
-                    "missing_dates": ["2026-03-11"],
-                    "solver_failed_dates": [],
-                },
-            },
-        },
-    )
-    render_project_case_result(partial)
+    render_project_case_result(_partial_result())
 
 
 def _panel_app() -> None:
@@ -244,20 +218,26 @@ def test_locked_project_case_labels_are_literal() -> None:
     assert project_page.PROBABILITY_LABEL == "P(NPV > 0)"
 
 
-def test_available_result_maps_distinct_sentinels_to_exact_ui_slots() -> None:
+def test_available_result_maps_typed_distributions_to_exact_ui_slots() -> None:
     app = AppTest.from_function(_available_result_app).run(timeout=30)
     assert not app.exception
     metrics = _metric_map(app)
-    screening = project_page.SCREENING_NPV_LABEL
-    lifecycle = project_page.LIFECYCLE_NPV_LABEL
-    assert metrics[f"{screening} — P10 (Downside)"] == "€-101"
-    assert metrics[f"{screening} — P50 (Median)"] == "€202"
-    assert metrics[f"{screening} — P90 (Upside)"] == "€909"
-    assert metrics[f"{screening} — P(NPV > 0)"] == "61%"
-    assert metrics[f"{lifecycle} — P10 (Downside)"] == "€-303"
-    assert metrics[f"{lifecycle} — P50 (Median)"] == "€44"
-    assert metrics[f"{lifecycle} — P90 (Upside)"] == "€707"
-    assert metrics[f"{lifecycle} — P(NPV > 0)"] == "37%"
+    result = _available_result()
+    for label, outcome in (
+        (
+            project_page.SCREENING_NPV_LABEL,
+            result.no_lifecycle_cost_screening_npv,
+        ),
+        (project_page.LIFECYCLE_NPV_LABEL, result.lifecycle_cash_npv),
+    ):
+        distribution = outcome.distribution
+        assert distribution is not None
+        assert metrics[f"{label} — P10 (Downside)"] == f"€{distribution.p10:,.0f}"
+        assert metrics[f"{label} — P50 (Median)"] == f"€{distribution.p50:,.0f}"
+        assert metrics[f"{label} — P90 (Upside)"] == f"€{distribution.p90:,.0f}"
+        assert metrics[f"{label} — P(NPV > 0)"] == (
+            f"{distribution.prob_positive:.0%}"
+        )
 
 
 def test_unknown_is_screening_only_and_never_rendered_as_zero() -> None:
@@ -290,6 +270,9 @@ def test_cashflow_tables_are_exact_runresult_rows_and_disclose_p50_basis() -> No
     assert len(app.dataframe) == 2
     expected_columns = [
         "year",
+        "merchant_revenue_eur",
+        "effective_contract_floor_eur",
+        "contract_top_up_eur",
         "revenue_eur",
         "opex_eur",
         "augmentation_eur",
@@ -304,15 +287,18 @@ def test_cashflow_tables_are_exact_runresult_rows_and_disclose_p50_basis() -> No
     lifecycle = lifecycle.data if hasattr(lifecycle, "data") else lifecycle
     assert list(screening.columns) == expected_columns
     assert list(lifecycle.columns) == expected_columns
-    assert screening.iloc[0].to_dict() == _table(
-        "screening", lifecycle=False
-    ).rows[0].to_payload()
-    assert lifecycle.iloc[0].to_dict() == _table(
-        "lifecycle", lifecycle=True
-    ).rows[0].to_payload()
+    result = _available_result()
+    assert result.screening_cashflow_table is not None
+    assert result.lifecycle_cashflow_table is not None
+    assert screening.iloc[0].to_dict() == (
+        result.screening_cashflow_table.rows[0].to_payload()
+    )
+    assert lifecycle.iloc[0].to_dict() == (
+        result.lifecycle_cashflow_table.rows[0].to_payload()
+    )
     assert any(
         "linear P50 annual bootstrap draw" in caption.value
-        and "not expected-value tables" in caption.value
+        and "neither expected-value tables" in caption.value
         for caption in app.caption
     )
 
@@ -413,8 +399,24 @@ def test_request_fingerprint_covers_source_data_lifecycle_and_versions(
     assert project_page._request_fingerprint(
         **{**kwargs, "lifecycle": changed_lifecycle}
     ) != baseline
+    current_pc_a = project_page.PC_A_CALCULATOR_VERSION
     monkeypatch.setattr(project_page, "PC_A_CALCULATOR_VERSION", "pc-a-test-next")
     assert project_page._request_fingerprint(**kwargs) != baseline
+    monkeypatch.setattr(project_page, "PC_A_CALCULATOR_VERSION", current_pc_a)
+    monkeypatch.setattr(project_page, "PC_D2_CALCULATOR_VERSION", "pc-d2-test-next")
+    assert project_page._request_fingerprint(**kwargs) != baseline
+
+
+def test_result_cache_gate_requires_project_case_v11_and_pc_d2(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _unknown_result()
+    assert result.schema_version == "project-case-v1.1"
+    assert result.provenance["calculator_version"] == "pc-d2-v1.1"
+    assert project_page._result_uses_current_versions(result)
+
+    monkeypatch.setattr(project_page, "PC_D2_CALCULATOR_VERSION", "pc-b-v1")
+    assert not project_page._result_uses_current_versions(result)
 
 
 def test_active_maintenance_basis_renders_both_npv_outcomes(

@@ -9,13 +9,27 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from src.project_case.fingerprint import PROFILE, SCHEMA_VERSION
+from src.project_case.fingerprint import (
+    PROFILE,
+    PROJECT_CASE_SCHEMA_VERSION,
+    RUN_RESULT_SCHEMA_VERSION,
+    SCHEMA_VERSION,
+    STRATEGY_RUN_RESULT_SCHEMA_VERSION,
+)
 
 __all__ = [
     "BOOTSTRAP_ALGORITHM_V1",
     "BUCKET_BLOCK_OF_DAY_4H",
     "BUCKET_HOUR_OF_DAY",
     "BUCKET_HOUR_OF_WEEK",
+    "CASHFLOW_RECONCILIATION_ABS_TOL_EUR_V1",
+    "CASHFLOW_RECONCILIATION_REL_TOL_V1",
+    "CASHFLOW_RECONCILIATION_VERSION_V1",
+    "CONTRACT_ASSET_SCOPE_V1",
+    "CONTRACT_CASHFLOW_TABLE_STATISTIC_V1",
+    "CONTRACT_QUOTE_BASIS_V1",
+    "CONTRACT_SETTLEMENT_ALGORITHM_V1",
+    "CONTRACT_SETTLEMENT_FREQUENCY_V1",
     "DA_ID_BUCKETS",
     "DEFAULT_SIMULATIONS",
     "EXPECTED_GRID_REGISTRY_VERSION",
@@ -28,16 +42,28 @@ __all__ = [
     "MAX_SIMULATIONS",
     "MIN_BASE_YEAR",
     "MIN_SIMULATIONS",
+    "NULL_CASHFLOW_TABLE_STATISTIC_V1",
+    "PC_A_CALCULATOR_VERSION",
+    "PC_D2_CALCULATOR_VERSION",
     "PROFILE",
+    "PROJECT_CASE_SCHEMA_VERSION",
     "RESERVE_PRICE_AGGREGATION_V1",
+    "RUN_RESULT_SCHEMA_VERSION",
     "SCHEMA_VERSION",
+    "STRATEGY_RUN_RESULT_SCHEMA_VERSION",
     "WALK_FORWARD",
     "CapacityMaintenanceBasis",
+    "ContractCurrencyBasisMode",
+    "ContractQuoteStatus",
+    "ContractSettlementBasis",
     "CurrencyBasisMode",
     "ProducerAdapterId",
     "ProjectionKind",
     "StrategyKind",
 ]
+
+
+PC_A_CALCULATOR_VERSION = "pc-a-v1"
 
 
 class StrategyKind(StrEnum):
@@ -81,11 +107,41 @@ class CurrencyBasisMode(StrEnum):
     SOURCE_EUR_TREATED_AS_BASE_YEAR_REAL = "SOURCE_EUR_TREATED_AS_BASE_YEAR_REAL"
 
 
+class ContractSettlementBasis(StrEnum):
+    """The sole Project Case v1.1 cash-NPV-eligible settlement union member."""
+
+    ANNUAL_PRE_LIFECYCLE_STRATEGY_CASH_FLOOR_V1 = "ANNUAL_PRE_LIFECYCLE_STRATEGY_CASH_FLOOR_V1"
+
+
+class ContractCurrencyBasisMode(StrEnum):
+    """The deliberately narrow v1.1 floor-curve currency assertion."""
+
+    USER_ASSERTED_REAL_BASE_YEAR_EUR_CURVE = "USER_ASSERTED_REAL_BASE_YEAR_EUR_CURVE"
+
+
+class ContractQuoteStatus(StrEnum):
+    """User-asserted maturity of the source supporting the floor curve."""
+
+    USER_SCENARIO = "USER_SCENARIO"
+    USER_ASSERTED_INDICATIVE_QUOTE = "USER_ASSERTED_INDICATIVE_QUOTE"
+    USER_ASSERTED_EXECUTED_SOURCE_DOCUMENT = "USER_ASSERTED_EXECUTED_SOURCE_DOCUMENT"
+
+
 # --- Locked literal constants (§4.8, red-line #15/#25) ---
 
 BOOTSTRAP_ALGORITHM_V1 = "pc-bootstrap-pcg64-choice365-linear-v1"
 EXPECTED_GRID_REGISTRY_VERSION = "pc-market-grid-v1"
 RESERVE_PRICE_AGGREGATION_V1 = "duration_weighted_mean_complete_blocks_v1"
+CONTRACT_QUOTE_BASIS_V1 = "EUR_PER_MODELED_PROJECT_MW_YEAR"
+CONTRACT_SETTLEMENT_FREQUENCY_V1 = "ANNUAL_PROJECT_YEAR_END"
+CONTRACT_ASSET_SCOPE_V1 = "WHOLE_PROJECT_MODELED_MW"
+CONTRACT_SETTLEMENT_ALGORITHM_V1 = "pc-annual-pre-lifecycle-strategy-cash-floor-v1"
+CONTRACT_CASHFLOW_TABLE_STATISTIC_V1 = "p50_npv_rank_interpolated_cashflow_linear_v1"
+CASHFLOW_RECONCILIATION_VERSION_V1 = "pc-cashflow-p50-reconciliation-v1"
+CASHFLOW_RECONCILIATION_REL_TOL_V1 = 1e-10
+CASHFLOW_RECONCILIATION_ABS_TOL_EUR_V1 = 1e-6
+NULL_CASHFLOW_TABLE_STATISTIC_V1 = "p50_annual_bootstrap_draw_linear"
+PC_D2_CALCULATOR_VERSION = "pc-d2-v1.1"
 
 # The pinned provenance ``mode`` string for the DA-only adapter (§4.8).
 MAINTENANCE_PROVENANCE_MODE = "DA MILP Replay"

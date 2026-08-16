@@ -22,11 +22,22 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+import numpy as np
+
 from src import config
 from src.dispatch import DISPATCH_VOM_COST_EUR_MWH
+from src.project_case.bootstrap import bootstrap_annual_sums
 from src.project_case.enums import (
     BOOTSTRAP_ALGORITHM_V1,
     BUCKET_BLOCK_OF_DAY_4H,
+    CASHFLOW_RECONCILIATION_ABS_TOL_EUR_V1,
+    CASHFLOW_RECONCILIATION_REL_TOL_V1,
+    CASHFLOW_RECONCILIATION_VERSION_V1,
+    CONTRACT_ASSET_SCOPE_V1,
+    CONTRACT_CASHFLOW_TABLE_STATISTIC_V1,
+    CONTRACT_QUOTE_BASIS_V1,
+    CONTRACT_SETTLEMENT_ALGORITHM_V1,
+    CONTRACT_SETTLEMENT_FREQUENCY_V1,
     DA_ID_BUCKETS,
     EXPECTED_GRID_REGISTRY_VERSION,
     LIFECYCLE_UNKNOWN_MESSAGE,
@@ -38,16 +49,22 @@ from src.project_case.enums import (
     MAX_SIMULATIONS,
     MIN_BASE_YEAR,
     MIN_SIMULATIONS,
+    NULL_CASHFLOW_TABLE_STATISTIC_V1,
+    PC_A_CALCULATOR_VERSION,
+    PC_D2_CALCULATOR_VERSION,
     RESERVE_PRICE_AGGREGATION_V1,
     WALK_FORWARD,
     CapacityMaintenanceBasis,
+    ContractCurrencyBasisMode,
+    ContractQuoteStatus,
+    ContractSettlementBasis,
     CurrencyBasisMode,
     ProducerAdapterId,
     ProjectionKind,
     StrategyKind,
 )
 from src.project_case.fingerprint import (
-    SCHEMA_VERSION,
+    RUN_RESULT_SCHEMA_VERSION,
     encode_value,
     fingerprint_hex,
     sorted_by_encoding,
@@ -59,9 +76,7 @@ _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _BLOCK_ID_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 
-_RESERVE_KINDS = frozenset(
-    {StrategyKind.DA_RESERVE_COOPT, StrategyKind.DA_ID_RESERVE_REALISED}
-)
+_RESERVE_KINDS = frozenset({StrategyKind.DA_RESERVE_COOPT, StrategyKind.DA_ID_RESERVE_REALISED})
 
 
 class ProjectCaseValidationError(ValueError):
@@ -99,8 +114,8 @@ class _StrategyIssuancePermit:
             return True
 
 
-_STRATEGY_ISSUANCE: contextvars.ContextVar[_StrategyIssuancePermit | None] = (
-    contextvars.ContextVar("_pc_strategy_issuance", default=None)
+_STRATEGY_ISSUANCE: contextvars.ContextVar[_StrategyIssuancePermit | None] = contextvars.ContextVar(
+    "_pc_strategy_issuance", default=None
 )
 
 
@@ -127,6 +142,44 @@ def _finite_float(x: Any, name: str) -> float:
     if not math.isfinite(v):
         raise ProjectCaseValidationError(f"{name} must be finite (got {x!r})")
     return v
+
+
+def _wire_float(x: Any, name: str) -> float:
+    """Validate an already-normalised fingerprint payload real.
+
+    Typed constructors intentionally accept convenient numeric inputs and emit
+    ``float`` from ``to_payload``.  A public provenance payload is already on the
+    wire boundary, however: accepting integer syntax there would create a second
+    CBOR encoding for the same semantic real.  Require the exact Python wire type.
+    """
+
+    if type(x) is not float:
+        raise ProjectCaseValidationError(
+            f"{name} must be a canonical float on the fingerprint wire (got {type(x).__name__})"
+        )
+    return _finite_float(x, name)
+
+
+def _wire_nonneg_float(x: Any, name: str) -> float:
+    value = _wire_float(x, name)
+    if value < 0.0:
+        raise ProjectCaseValidationError(f"{name} must be >= 0 (got {value})")
+    return value
+
+
+def _wire_ratio_float(x: Any, name: str) -> float:
+    value = _wire_float(x, name)
+    if not 0.0 <= value <= 1.0:
+        raise ProjectCaseValidationError(f"{name} must be in [0, 1] (got {value})")
+    return value
+
+
+def _wire_int_in(x: Any, lo: int, hi: int, name: str) -> int:
+    if type(x) is not int:
+        raise ProjectCaseValidationError(
+            f"{name} must be a canonical int on the fingerprint wire (got {type(x).__name__})"
+        )
+    return _int_in(x, lo, hi, name)
 
 
 def _nonneg_float(x: Any, name: str) -> float:
@@ -170,9 +223,7 @@ def _text(x: Any, name: str) -> str:
 
 def _hex64(x: Any, name: str) -> str:
     if not isinstance(x, str) or not _HEX64_RE.match(x):
-        raise ProjectCaseValidationError(
-            f"{name} must be a lowercase 64-character hex digest"
-        )
+        raise ProjectCaseValidationError(f"{name} must be a lowercase 64-character hex digest")
     return x
 
 
@@ -195,9 +246,7 @@ def _iso(d: _dt.date) -> str:
 
 def _block_id(x: Any, name: str) -> str:
     if not isinstance(x, str) or not _BLOCK_ID_RE.match(x):
-        raise ProjectCaseValidationError(
-            f"{name} must be a UTC block id YYYY-MM-DDTHH:MM:SSZ"
-        )
+        raise ProjectCaseValidationError(f"{name} must be a UTC block id YYYY-MM-DDTHH:MM:SSZ")
     return x
 
 
@@ -236,17 +285,13 @@ class CaptureBasis:
         # stamped-but-sourceless haircut (rate 0.9 with source "not_applied") or a
         # mislabelled ``applied`` flag is unconstructible (review r2 #6).
         if self.applied != (float(self.rate) != 1.0):
-            raise ProjectCaseValidationError(
-                "capture.applied must equal (rate != 1.0)"
-            )
+            raise ProjectCaseValidationError("capture.applied must equal (rate != 1.0)")
         if self.applied and self.source == "not_applied":
             raise ProjectCaseValidationError(
                 "an applied capture haircut requires a real source, not 'not_applied'"
             )
         if not self.applied and self.source != "not_applied":
-            raise ProjectCaseValidationError(
-                "a non-applied capture must have source 'not_applied'"
-            )
+            raise ProjectCaseValidationError("a non-applied capture must have source 'not_applied'")
 
     def to_payload(self) -> dict[str, Any]:
         return {"applied": self.applied, "rate": float(self.rate), "source": self.source}
@@ -290,9 +335,7 @@ class CashBasis:
         if not isinstance(self.capture, CaptureBasis):
             raise ProjectCaseValidationError("cash_basis.capture must be a CaptureBasis")
         if not isinstance(self.liquidity, LiquidityBasis):
-            raise ProjectCaseValidationError(
-                "cash_basis.liquidity must be a LiquidityBasis"
-            )
+            raise ProjectCaseValidationError("cash_basis.liquidity must be a LiquidityBasis")
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -458,9 +501,7 @@ class ReserveCoverageEntry:
                 "present_blocks | missing_blocks must equal required_blocks"
             )
         if pres & miss:
-            raise ProjectCaseValidationError(
-                "present_blocks and missing_blocks must be disjoint"
-            )
+            raise ProjectCaseValidationError("present_blocks and missing_blocks must be disjoint")
         durations = {
             _block_id(k, "duration key"): _pos_float(v, "settlement_duration_hours")
             for k, v in self.settlement_duration_hours_by_block.items()
@@ -473,9 +514,7 @@ class ReserveCoverageEntry:
         object.__setattr__(self, "present_blocks", tuple(sorted(pres)))
         object.__setattr__(self, "missing_blocks", tuple(sorted(miss)))
         # Read-only view so a fingerprint-bearing object stays deeply immutable.
-        object.__setattr__(
-            self, "settlement_duration_hours_by_block", MappingProxyType(durations)
-        )
+        object.__setattr__(self, "settlement_duration_hours_by_block", MappingProxyType(durations))
 
     @property
     def fully_covered(self) -> bool:
@@ -490,8 +529,7 @@ class ReserveCoverageEntry:
             "present_blocks": sorted_by_encoding(self.present_blocks),
             "missing_blocks": sorted_by_encoding(self.missing_blocks),
             "settlement_duration_hours_by_block": {
-                k: float(v)
-                for k, v in self.settlement_duration_hours_by_block.items()
+                k: float(v) for k, v in self.settlement_duration_hours_by_block.items()
             },
         }
 
@@ -641,7 +679,9 @@ class AdapterProvenance:
             raise ProjectCaseValidationError("carry_soc must be bool")
         object.__setattr__(self, "soc_init_frac", _ratio_float(self.soc_init_frac, "soc_init_frac"))
         if self.capture_rate is not None:
-            object.__setattr__(self, "capture_rate", _ratio_float(self.capture_rate, "capture_rate"))
+            object.__setattr__(
+                self, "capture_rate", _ratio_float(self.capture_rate, "capture_rate")
+            )
         if self.reserve_price_aggregation is not None:
             _text(self.reserve_price_aggregation, "reserve_price_aggregation")
         if self.reserve_pricing_dates is not None:
@@ -654,9 +694,7 @@ class AdapterProvenance:
             object.__setattr__(
                 self,
                 "reserve_scalar_price_eur_mw_h",
-                _nonneg_float(
-                    self.reserve_scalar_price_eur_mw_h, "reserve_scalar_price_eur_mw_h"
-                ),
+                _nonneg_float(self.reserve_scalar_price_eur_mw_h, "reserve_scalar_price_eur_mw_h"),
             )
         if self.expected_grid_registry_version != EXPECTED_GRID_REGISTRY_VERSION:
             raise ProjectCaseValidationError(
@@ -752,7 +790,9 @@ class StrategyRunResult:
         if not isinstance(self.strategy_kind, StrategyKind):
             raise ProjectCaseValidationError("strategy_kind invalid")
         object.__setattr__(self, "power_mw", _pos_float(self.power_mw, "power_mw"))
-        object.__setattr__(self, "duration_hours", _pos_float(self.duration_hours, "duration_hours"))
+        object.__setattr__(
+            self, "duration_hours", _pos_float(self.duration_hours, "duration_hours")
+        )
         object.__setattr__(
             self,
             "round_trip_efficiency",
@@ -768,8 +808,10 @@ class StrategyRunResult:
                 f" ({expected_tz!r}), got {self.sample_window.timezone!r}"
             )
         # Series: immutable tuple of (date, finite value), unique dates == valid_dates.
-        series = tuple((_as_date(d, "series date"), _finite_float(v, "series value"))
-                       for d, v in self.daily_realised_cash_series)
+        series = tuple(
+            (_as_date(d, "series date"), _finite_float(v, "series value"))
+            for d, v in self.daily_realised_cash_series
+        )
         series_dates = [d for d, _ in series]
         if not series:
             raise ProjectCaseValidationError("daily_realised_cash_series must be non-empty")
@@ -867,9 +909,7 @@ class StrategyRunResult:
         kind = self.strategy_kind
         if kind is StrategyKind.DA_ONLY or kind is StrategyKind.DA_RESERVE_COOPT:
             if fa.da or fa.ida or fa.reserve:
-                raise ProjectCaseValidationError(
-                    f"{kind.value} must have all forecast audits null"
-                )
+                raise ProjectCaseValidationError(f"{kind.value} must have all forecast audits null")
         elif kind is StrategyKind.DA_ID_FORECAST:
             if fa.da is not None or fa.reserve is not None or fa.ida is None:
                 raise ProjectCaseValidationError(
@@ -977,7 +1017,9 @@ class StrategyRunResult:
                     f"PC_ADP_DA_ONLY provenance mode must be {MAINTENANCE_PROVENANCE_MODE!r}"
                 )
         elif prov.mode is not None:
-            raise ProjectCaseValidationError("provenance mode must be null for non-DA-only adapters")
+            raise ProjectCaseValidationError(
+                "provenance mode must be null for non-DA-only adapters"
+            )
         # Daily bootstrap i.i.d. basis (red-line #22).
         if prov.carry_soc is not False:
             raise ProjectCaseValidationError("adapter_provenance.carry_soc must be False")
@@ -1066,13 +1108,17 @@ class AssetCase:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "power_mw", _pos_float(self.power_mw, "power_mw"))
-        object.__setattr__(self, "duration_hours", _pos_float(self.duration_hours, "duration_hours"))
+        object.__setattr__(
+            self, "duration_hours", _pos_float(self.duration_hours, "duration_hours")
+        )
         v = _finite_float(self.round_trip_efficiency, "round_trip_efficiency")
         if not 0.0 < v <= 1.0:
             raise ProjectCaseValidationError("round_trip_efficiency must be in (0, 1]")
         object.__setattr__(self, "round_trip_efficiency", v)
         object.__setattr__(
-            self, "installed_capex_eur", _nonneg_float(self.installed_capex_eur, "installed_capex_eur")
+            self,
+            "installed_capex_eur",
+            _nonneg_float(self.installed_capex_eur, "installed_capex_eur"),
         )
         object.__setattr__(
             self,
@@ -1171,9 +1217,7 @@ class LifecycleCase:
                 raise ProjectCaseValidationError(
                     "augmentation event year exceeds project_life_years"
                 )
-        events = tuple(
-            sorted(events, key=lambda e: (e.year, encode_value(e.to_payload())))
-        )
+        events = tuple(sorted(events, key=lambda e: (e.year, encode_value(e.to_payload()))))
         object.__setattr__(self, "augmentation_events", events)
         object.__setattr__(
             self,
@@ -1191,7 +1235,10 @@ class LifecycleCase:
         basis = self.capacity_maintenance_basis
         events = self.augmentation_events
         if basis is CapacityMaintenanceBasis.UNKNOWN:
-            if self.capacity_maintenance_source is not None or self.capacity_maintenance_as_of is not None:
+            if (
+                self.capacity_maintenance_source is not None
+                or self.capacity_maintenance_as_of is not None
+            ):
                 raise ProjectCaseValidationError(
                     "UNKNOWN maintenance basis must have null source and as-of"
                 )
@@ -1372,14 +1419,172 @@ class BootstrapCase:
 
 
 @dataclass(frozen=True)
+class ContractCurrencyBasis:
+    """The narrow v1.1 assertion that the stored curve is real base-year EUR."""
+
+    mode: ContractCurrencyBasisMode
+    target_base_year: int
+
+    def __post_init__(self) -> None:
+        if self.mode is not ContractCurrencyBasisMode.USER_ASSERTED_REAL_BASE_YEAR_EUR_CURVE:
+            raise ProjectCaseValidationError("contract currency_basis.mode invalid")
+        _int_in(
+            self.target_base_year,
+            MIN_BASE_YEAR,
+            MAX_BASE_YEAR,
+            "contract currency_basis.target_base_year",
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode.value,
+            "target_base_year": int(self.target_base_year),
+        }
+
+
+@dataclass(frozen=True)
+class AnnualPreLifecycleStrategyCashFloor:
+    """Exact settlement-terms payload for the sole Project Case v1.1 union member."""
+
+    contract_start_project_year: int
+    floor_rate_real_eur_per_modeled_mw_year_by_contract_year: tuple[float, ...]
+    floor_entitlement_factor_by_contract_year: tuple[float, ...]
+    quote_basis: str
+    settlement_frequency: str
+    asset_scope: str
+    currency_basis: ContractCurrencyBasis
+    quote_status: ContractQuoteStatus
+    source: str
+    source_as_of_date: str
+    source_document_sha256: str | None
+
+    def __post_init__(self) -> None:
+        _int_in(
+            self.contract_start_project_year,
+            1,
+            MAX_PROJECT_LIFE_YEARS,
+            "contract_start_project_year",
+        )
+        try:
+            rates = tuple(
+                _nonneg_float(value, "floor_rate_real_eur_per_modeled_mw_year")
+                for value in self.floor_rate_real_eur_per_modeled_mw_year_by_contract_year
+            )
+            factors = tuple(
+                _ratio_float(value, "floor_entitlement_factor")
+                for value in self.floor_entitlement_factor_by_contract_year
+            )
+        except TypeError as exc:
+            raise ProjectCaseValidationError(
+                "contract floor-rate and entitlement-factor curves must be arrays"
+            ) from exc
+        if not rates:
+            raise ProjectCaseValidationError("contract floor-rate curve must be non-empty")
+        if len(rates) != len(factors):
+            raise ProjectCaseValidationError(
+                "contract floor-rate and entitlement-factor curves must have equal length"
+            )
+        object.__setattr__(
+            self,
+            "floor_rate_real_eur_per_modeled_mw_year_by_contract_year",
+            rates,
+        )
+        object.__setattr__(
+            self,
+            "floor_entitlement_factor_by_contract_year",
+            factors,
+        )
+        for name, value, required in (
+            ("quote_basis", self.quote_basis, CONTRACT_QUOTE_BASIS_V1),
+            (
+                "settlement_frequency",
+                self.settlement_frequency,
+                CONTRACT_SETTLEMENT_FREQUENCY_V1,
+            ),
+            ("asset_scope", self.asset_scope, CONTRACT_ASSET_SCOPE_V1),
+        ):
+            if value != required:
+                raise ProjectCaseValidationError(f"{name} must be {required!r}")
+        if not isinstance(self.currency_basis, ContractCurrencyBasis):
+            raise ProjectCaseValidationError(
+                "contract currency_basis must be a ContractCurrencyBasis"
+            )
+        if not isinstance(self.quote_status, ContractQuoteStatus):
+            raise ProjectCaseValidationError("contract quote_status invalid")
+        _text(self.source, "contract source")
+        object.__setattr__(
+            self,
+            "source_as_of_date",
+            _iso(_as_date(self.source_as_of_date, "contract source_as_of_date")),
+        )
+        if self.quote_status is ContractQuoteStatus.USER_SCENARIO:
+            if self.source_document_sha256 is not None:
+                raise ProjectCaseValidationError(
+                    "USER_SCENARIO requires null source_document_sha256"
+                )
+        else:
+            _hex64(self.source_document_sha256, "contract source_document_sha256")
+
+    @property
+    def contract_tenor_years(self) -> int:
+        return len(self.floor_rate_real_eur_per_modeled_mw_year_by_contract_year)
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "contract_start_project_year": int(self.contract_start_project_year),
+            "floor_rate_real_eur_per_modeled_mw_year_by_contract_year": [
+                float(value)
+                for value in self.floor_rate_real_eur_per_modeled_mw_year_by_contract_year
+            ],
+            "floor_entitlement_factor_by_contract_year": [
+                float(value) for value in self.floor_entitlement_factor_by_contract_year
+            ],
+            "quote_basis": self.quote_basis,
+            "settlement_frequency": self.settlement_frequency,
+            "asset_scope": self.asset_scope,
+            "currency_basis": self.currency_basis.to_payload(),
+            "quote_status": self.quote_status.value,
+            "source": self.source,
+            "source_as_of_date": self.source_as_of_date,
+            "source_document_sha256": self.source_document_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class ContractCase:
+    """Optional Project Case v1.1 settlement-basis tagged union."""
+
+    settlement_basis: ContractSettlementBasis
+    settlement_terms: AnnualPreLifecycleStrategyCashFloor
+
+    def __post_init__(self) -> None:
+        if (
+            self.settlement_basis
+            is not ContractSettlementBasis.ANNUAL_PRE_LIFECYCLE_STRATEGY_CASH_FLOOR_V1
+        ):
+            raise ProjectCaseValidationError("contract settlement_basis invalid")
+        if not isinstance(self.settlement_terms, AnnualPreLifecycleStrategyCashFloor):
+            raise ProjectCaseValidationError(
+                "contract settlement_terms must be AnnualPreLifecycleStrategyCashFloor"
+            )
+
+    def to_payload(self) -> dict[str, Any]:
+        return {
+            "settlement_basis": self.settlement_basis.value,
+            "settlement_terms": self.settlement_terms.to_payload(),
+        }
+
+
+@dataclass(frozen=True)
 class ProjectCase:
-    """The v1 aggregator (§4.6). ``validate()`` enforces cross-object invariants."""
+    """The v1.1 aggregator (§4.6). ``validate()`` enforces cross-object invariants."""
 
     asset_case: AssetCase
     lifecycle_case: LifecycleCase
     market_case: MarketCase
     valuation_case: ValuationCase
     bootstrap_case: BootstrapCase
+    contract_case: ContractCase | None = None
 
     def __post_init__(self) -> None:
         for name, cls in (
@@ -1391,6 +1596,8 @@ class ProjectCase:
         ):
             if not isinstance(getattr(self, name), cls):
                 raise ProjectCaseValidationError(f"{name} must be a {cls.__name__}")
+        if self.contract_case is not None and not isinstance(self.contract_case, ContractCase):
+            raise ProjectCaseValidationError("contract_case must be a ContractCase or None")
         self.validate()
 
     def validate(self) -> None:
@@ -1422,6 +1629,17 @@ class ProjectCase:
             raise ProjectCaseValidationError(
                 "ExplicitAnnualMultiplierCurve must cover exactly project_life_years entries"
             )
+        if self.contract_case is not None:
+            terms = self.contract_case.settlement_terms
+            final_year = terms.contract_start_project_year + terms.contract_tenor_years - 1
+            if final_year > int(self.lifecycle_case.project_life_years):
+                raise ProjectCaseValidationError(
+                    "contract term must lie entirely inside project_life_years"
+                )
+            if int(terms.currency_basis.target_base_year) != int(self.valuation_case.base_year):
+                raise ProjectCaseValidationError(
+                    "contract currency_basis.target_base_year must equal ValuationCase.base_year"
+                )
 
     def to_payload(self) -> dict[str, Any]:
         return {
@@ -1430,6 +1648,9 @@ class ProjectCase:
             "market_case": self.market_case.to_payload(),
             "valuation_case": self.valuation_case.to_payload(),
             "bootstrap_case": self.bootstrap_case.to_payload(),
+            "contract_case": (
+                None if self.contract_case is None else self.contract_case.to_payload()
+            ),
         }
 
     def input_fingerprint(self) -> str:
@@ -1486,10 +1707,14 @@ class NpvOutcome:
                     "distribution:<NpvDistribution>}"
                 )
             if not isinstance(self.distribution, NpvDistribution):
-                raise ProjectCaseValidationError("NpvOutcome.distribution must be an NpvDistribution")
+                raise ProjectCaseValidationError(
+                    "NpvOutcome.distribution must be an NpvDistribution"
+                )
         else:
             if self.distribution is not None:
-                raise ProjectCaseValidationError("unavailable NpvOutcome must have null distribution")
+                raise ProjectCaseValidationError(
+                    "unavailable NpvOutcome must have null distribution"
+                )
             _text(self.message, "NpvOutcome.message")
 
     @classmethod
@@ -1554,11 +1779,13 @@ def _deep_thaw(value: Any) -> Any:
 
 
 @dataclass(frozen=True)
-class CashflowRow:
-    """One project-year cash-flow row (§6). PC-B populates the numbers; PC-A ships
-    the immutable typed shape so a RunResult can never hold an untyped table."""
+class CashflowRowV11:
+    """One Project Case v1.1 project-year cash-flow row (§6.3)."""
 
     year: int
+    merchant_revenue_eur: float
+    effective_contract_floor_eur: float | None
+    contract_top_up_eur: float
     revenue_eur: float
     opex_eur: float
     augmentation_eur: float
@@ -1575,19 +1802,64 @@ class CashflowRow:
                 f"cashflow row year must be in [1, {MAX_PROJECT_LIFE_YEARS}]"
             )
         for name in (
-            "revenue_eur", "opex_eur", "augmentation_eur", "terminal_eur",
-            "net_eur", "discounted_net_eur",
+            "merchant_revenue_eur",
+            "contract_top_up_eur",
+            "revenue_eur",
+            "opex_eur",
+            "augmentation_eur",
+            "terminal_eur",
+            "net_eur",
+            "discounted_net_eur",
         ):
             object.__setattr__(self, name, _finite_float(getattr(self, name), f"cashflow.{name}"))
+        if self.effective_contract_floor_eur is not None:
+            object.__setattr__(
+                self,
+                "effective_contract_floor_eur",
+                _nonneg_float(
+                    self.effective_contract_floor_eur,
+                    "cashflow.effective_contract_floor_eur",
+                ),
+            )
+        if self.contract_top_up_eur < 0.0:
+            raise ProjectCaseValidationError("cashflow.contract_top_up_eur must be >= 0")
+        if self.effective_contract_floor_eur is None and self.contract_top_up_eur != 0.0:
+            raise ProjectCaseValidationError(
+                "cashflow.contract_top_up_eur must be zero when the floor is absent"
+            )
         object.__setattr__(
             self, "discount_factor", _finite_float(self.discount_factor, "cashflow.discount_factor")
         )
         if self.discount_factor <= 0.0:
             raise ProjectCaseValidationError("cashflow discount_factor must be > 0")
+        expected_revenue = self.merchant_revenue_eur + self.contract_top_up_eur
+        expected_net = self.revenue_eur - self.opex_eur - self.augmentation_eur + self.terminal_eur
+        expected_discounted = self.net_eur * self.discount_factor
+        for actual, expected, name in (
+            (self.revenue_eur, expected_revenue, "revenue_eur"),
+            (self.net_eur, expected_net, "net_eur"),
+            (self.discounted_net_eur, expected_discounted, "discounted_net_eur"),
+        ):
+            if not math.isclose(
+                actual,
+                expected,
+                rel_tol=CASHFLOW_RECONCILIATION_REL_TOL_V1,
+                abs_tol=CASHFLOW_RECONCILIATION_ABS_TOL_EUR_V1,
+            ):
+                raise ProjectCaseValidationError(
+                    f"cashflow.{name} does not reconcile under {CASHFLOW_RECONCILIATION_VERSION_V1}"
+                )
 
     def to_payload(self) -> dict[str, Any]:
         return {
             "year": self.year,
+            "merchant_revenue_eur": float(self.merchant_revenue_eur),
+            "effective_contract_floor_eur": (
+                None
+                if self.effective_contract_floor_eur is None
+                else float(self.effective_contract_floor_eur)
+            ),
+            "contract_top_up_eur": float(self.contract_top_up_eur),
             "revenue_eur": float(self.revenue_eur),
             "opex_eur": float(self.opex_eur),
             "augmentation_eur": float(self.augmentation_eur),
@@ -1598,6 +1870,11 @@ class CashflowRow:
         }
 
 
+# Source-compatible import alias. The v1 row type is not accepted anywhere under
+# the v1.1 RunResult schema; this name now denotes the replacement wire shape.
+CashflowRow = CashflowRowV11
+
+
 _CASHFLOW_TABLE_BASES = frozenset({"screening", "lifecycle"})
 
 
@@ -1606,7 +1883,7 @@ class CashflowTable:
     """Immutable year-by-year cash-flow table (§6). ``basis`` ∈ {screening, lifecycle}."""
 
     basis: str
-    rows: tuple[CashflowRow, ...]
+    rows: tuple[CashflowRowV11, ...]
 
     def __post_init__(self) -> None:
         if self.basis not in _CASHFLOW_TABLE_BASES:
@@ -1617,16 +1894,1435 @@ class CashflowTable:
         if not self.rows:
             raise ProjectCaseValidationError("cashflow table must have at least one row")
         for r in self.rows:
-            if not isinstance(r, CashflowRow):
-                raise ProjectCaseValidationError("cashflow table rows must be CashflowRow")
+            if not isinstance(r, CashflowRowV11):
+                raise ProjectCaseValidationError("cashflow table rows must be CashflowRowV11")
         years = [r.year for r in self.rows]
         if years != sorted(years) or len(set(years)) != len(years):
-            raise ProjectCaseValidationError(
-                "cashflow table years must be unique and ascending"
-            )
+            raise ProjectCaseValidationError("cashflow table years must be unique and ascending")
 
     def to_payload(self) -> dict[str, Any]:
         return {"basis": self.basis, "rows": [r.to_payload() for r in self.rows]}
+
+
+_RUN_RESULT_PROVENANCE_KEYS = frozenset(
+    {
+        "calculator_version",
+        "project_case_input_fingerprint",
+        "strategy_run_fingerprint",
+        "project_case",
+        "strategy_run_result",
+        "bootstrap",
+        "projection",
+        "valuation",
+        "capacity_maintenance_basis",
+        "contract_settlement",
+        "cashflow_table_statistic",
+        "cashflow_reconciliation",
+        "red_line_assertions",
+    }
+)
+_PROJECT_CASE_V11_PAYLOAD_KEYS = frozenset(
+    {
+        "asset_case",
+        "lifecycle_case",
+        "market_case",
+        "valuation_case",
+        "bootstrap_case",
+        "contract_case",
+    }
+)
+_MARKET_CASE_PAYLOAD_KEYS = frozenset({"strategy_run_fingerprint", "projection"})
+_STRATEGY_RUN_RESULT_PAYLOAD_KEYS = frozenset(
+    {
+        "strategy_kind",
+        "daily_realised_cash_series",
+        "cash_basis",
+        "power_mw",
+        "duration_hours",
+        "round_trip_efficiency",
+        "zone",
+        "sample_window",
+        "currency_basis",
+        "forecast_audits",
+        "reserve_product",
+        "reserve_source",
+        "availability",
+        "reserve_coverage_audit",
+        "coverage_audit",
+        "adapter_provenance",
+        "embedded_vom_cost_eur_mwh",
+        "source_data_content_hash",
+        "calculator_version",
+    }
+)
+_CONTRACT_SETTLEMENT_KEYS = frozenset(
+    {
+        "basis",
+        "algorithm_version",
+        "resolved_floor_by_project_year",
+        "representative_interpolation",
+    }
+)
+_RESOLVED_FLOOR_KEYS = frozenset({"year", "effective_floor_eur"})
+_INTERPOLATION_KEYS = frozenset(
+    {
+        "lower_sorted_rank",
+        "upper_sorted_rank",
+        "lower_original_draw_index",
+        "upper_original_draw_index",
+        "interpolation_weight",
+    }
+)
+_CASHFLOW_RECONCILIATION_KEYS = frozenset(
+    {"version", "relative_tolerance", "absolute_tolerance_eur"}
+)
+_RED_LINE_ASSERTION_KEYS = frozenset(
+    {
+        "cash_npv_includes_shadow_wear",
+        "vom_rededucted",
+        "mw_rescaled",
+        "wear_net_floor_comparator_included",
+        "contract_settlement_included",
+        "contract_settlement_basis",
+        "pre_tax_unlevered",
+        "tax_included",
+        "debt_included",
+        "financing_fees_included",
+    }
+)
+
+
+def _exact_mapping(value: Any, keys: frozenset[str], name: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ProjectCaseValidationError(f"{name} must be a mapping")
+    if set(value) != set(keys):
+        missing = sorted(keys - set(value))
+        extra = sorted(set(value) - keys)
+        raise ProjectCaseValidationError(f"{name} keys invalid (missing={missing}, extra={extra})")
+    return value
+
+
+def _wire_bool(value: Any, name: str) -> bool:
+    if type(value) is not bool:
+        raise ProjectCaseValidationError(f"{name} must be a canonical bool on the fingerprint wire")
+    return value
+
+
+def _validate_strategy_wire_payload(strategy: Mapping[str, Any]) -> None:
+    """Validate canonical scalar wire types for the embedded v1 strategy payload."""
+
+    for field in ("power_mw", "duration_hours", "round_trip_efficiency"):
+        _wire_float(strategy[field], f"strategy_run_result.{field}")
+    _wire_float(
+        strategy["embedded_vom_cost_eur_mwh"],
+        "strategy_run_result.embedded_vom_cost_eur_mwh",
+    )
+    series = strategy["daily_realised_cash_series"]
+    if not isinstance(series, (list, tuple)) or not series:
+        raise ProjectCaseValidationError("strategy daily_realised_cash_series invalid")
+    for record in series:
+        if not isinstance(record, (list, tuple)) or len(record) != 2:
+            raise ProjectCaseValidationError("strategy daily cash record invalid")
+        _text(record[0], "strategy daily cash date")
+        _wire_float(record[1], "strategy daily cash value")
+
+    cash = _exact_mapping(
+        strategy["cash_basis"],
+        frozenset({"post_vom", "capture", "liquidity"}),
+        "strategy cash_basis",
+    )
+    _wire_bool(cash["post_vom"], "strategy cash_basis.post_vom")
+    capture = _exact_mapping(
+        cash["capture"], frozenset({"applied", "rate", "source"}), "strategy capture"
+    )
+    _wire_bool(capture["applied"], "strategy capture.applied")
+    _wire_ratio_float(capture["rate"], "strategy capture.rate")
+    liquidity = _exact_mapping(
+        cash["liquidity"],
+        frozenset({"applied", "assumption_fingerprint"}),
+        "strategy liquidity",
+    )
+    _wire_bool(liquidity["applied"], "strategy liquidity.applied")
+
+    _exact_mapping(
+        strategy["sample_window"],
+        frozenset({"first_delivery_date", "last_delivery_date", "timezone"}),
+        "strategy sample_window",
+    )
+    currency = _exact_mapping(
+        strategy["currency_basis"],
+        frozenset(
+            {
+                "mode",
+                "target_base_year",
+                "deflator_method",
+                "deflator_vintage",
+                "deflator_factor",
+            }
+        ),
+        "strategy currency_basis",
+    )
+    _wire_int_in(
+        currency["target_base_year"],
+        MIN_BASE_YEAR,
+        MAX_BASE_YEAR,
+        "strategy currency target_base_year",
+    )
+    if currency["deflator_factor"] is not None:
+        _wire_float(currency["deflator_factor"], "strategy currency deflator_factor")
+
+    forecasts = _exact_mapping(
+        strategy["forecast_audits"],
+        frozenset({"da", "ida", "reserve"}),
+        "strategy forecast_audits",
+    )
+    for leg, audit_value in forecasts.items():
+        if audit_value is None:
+            continue
+        audit = _exact_mapping(
+            audit_value,
+            frozenset({"forecast_mode", "bucket", "deadband"}),
+            f"strategy forecast_audits.{leg}",
+        )
+        if audit["deadband"] is not None:
+            _wire_nonneg_float(audit["deadband"], f"strategy {leg} deadband")
+    if strategy["availability"] is not None:
+        _wire_ratio_float(strategy["availability"], "strategy availability")
+
+    reserve_coverage = strategy["reserve_coverage_audit"]
+    if reserve_coverage is not None:
+        if not isinstance(reserve_coverage, (list, tuple)):
+            raise ProjectCaseValidationError("strategy reserve_coverage_audit invalid")
+        for entry_value in reserve_coverage:
+            entry = _exact_mapping(
+                entry_value,
+                frozenset(
+                    {
+                        "date",
+                        "required_blocks",
+                        "present_blocks",
+                        "missing_blocks",
+                        "settlement_duration_hours_by_block",
+                    }
+                ),
+                "strategy reserve coverage entry",
+            )
+            durations = entry["settlement_duration_hours_by_block"]
+            if not isinstance(durations, Mapping):
+                raise ProjectCaseValidationError(
+                    "strategy reserve settlement durations must be a mapping"
+                )
+            for duration in durations.values():
+                value = _wire_float(duration, "strategy reserve settlement duration")
+                if value <= 0.0:
+                    raise ProjectCaseValidationError(
+                        "strategy reserve settlement duration must be > 0"
+                    )
+
+    coverage = _exact_mapping(
+        strategy["coverage_audit"],
+        frozenset(
+            {
+                "observed_dates",
+                "valid_dates",
+                "missing_dates",
+                "solver_failed_dates",
+                "solver_failure_details",
+            }
+        ),
+        "strategy coverage_audit",
+    )
+    details = coverage["solver_failure_details"]
+    if not isinstance(details, (list, tuple)):
+        raise ProjectCaseValidationError("strategy solver_failure_details invalid")
+    for detail in details:
+        _exact_mapping(
+            detail,
+            frozenset({"date", "status", "message", "stage"}),
+            "strategy solver failure detail",
+        )
+
+    adapter = _exact_mapping(
+        strategy["adapter_provenance"],
+        frozenset(
+            {
+                "producer_adapter_id",
+                "source_function",
+                "per_day_cash_field",
+                "excluded_fields",
+                "mode",
+                "carry_soc",
+                "soc_init_frac",
+                "capture_rate",
+                "reserve_price_aggregation",
+                "reserve_pricing_dates",
+                "reserve_scalar_price_eur_mw_h",
+                "expected_grid_registry_version",
+                "expected_grid_profiles",
+            }
+        ),
+        "strategy adapter_provenance",
+    )
+    _wire_bool(adapter["carry_soc"], "strategy adapter carry_soc")
+    _wire_ratio_float(adapter["soc_init_frac"], "strategy adapter soc_init_frac")
+    if adapter["capture_rate"] is not None:
+        _wire_ratio_float(adapter["capture_rate"], "strategy adapter capture_rate")
+    if adapter["reserve_scalar_price_eur_mw_h"] is not None:
+        _wire_nonneg_float(
+            adapter["reserve_scalar_price_eur_mw_h"],
+            "strategy reserve scalar price",
+        )
+    _exact_mapping(
+        adapter["expected_grid_profiles"],
+        frozenset({"da", "ida", "reserve"}),
+        "strategy expected_grid_profiles",
+    )
+
+
+def _replay_typed_strategy_payload(strategy: Mapping[str, Any]) -> StrategyRunResult:
+    """Reconstruct the embedded v1 payload through every PC-A typed invariant.
+
+    ``RunResult.provenance`` is a public construction boundary, so recomputing a
+    self-consistent digest is not enough: the embedded payload must be one that
+    the actual v1 producer type could have emitted.  The internal issuance permit
+    here authorises exactly this validation replay; it does not expose a producer
+    seam or return the replayed object to callers.
+    """
+
+    try:
+        cash_value = strategy["cash_basis"]
+        capture_value = cash_value["capture"]
+        liquidity_value = cash_value["liquidity"]
+        cash_basis = CashBasis(
+            post_vom=cash_value["post_vom"],
+            capture=CaptureBasis(
+                applied=capture_value["applied"],
+                rate=capture_value["rate"],
+                source=capture_value["source"],
+            ),
+            liquidity=LiquidityBasis(
+                applied=liquidity_value["applied"],
+                assumption_fingerprint=liquidity_value["assumption_fingerprint"],
+            ),
+        )
+
+        window_value = strategy["sample_window"]
+        sample_window = SampleWindow(
+            first_delivery_date=window_value["first_delivery_date"],
+            last_delivery_date=window_value["last_delivery_date"],
+            timezone=window_value["timezone"],
+        )
+        currency_value = strategy["currency_basis"]
+        currency_basis = CurrencyBasis(
+            mode=CurrencyBasisMode(currency_value["mode"]),
+            target_base_year=currency_value["target_base_year"],
+            deflator_method=currency_value["deflator_method"],
+            deflator_vintage=currency_value["deflator_vintage"],
+            deflator_factor=currency_value["deflator_factor"],
+        )
+
+        def _forecast(value: Any) -> ForecastAudit | None:
+            if value is None:
+                return None
+            return ForecastAudit(
+                forecast_mode=value["forecast_mode"],
+                bucket=value["bucket"],
+                deadband=value["deadband"],
+            )
+
+        forecasts_value = strategy["forecast_audits"]
+        forecast_audits = ForecastAudits(
+            da=_forecast(forecasts_value["da"]),
+            ida=_forecast(forecasts_value["ida"]),
+            reserve=_forecast(forecasts_value["reserve"]),
+        )
+
+        reserve_value = strategy["reserve_coverage_audit"]
+        reserve_coverage = None
+        if reserve_value is not None:
+            reserve_coverage = ReserveCoverageAudit(
+                tuple(
+                    ReserveCoverageEntry(
+                        date=entry["date"],
+                        required_blocks=tuple(entry["required_blocks"]),
+                        present_blocks=tuple(entry["present_blocks"]),
+                        missing_blocks=tuple(entry["missing_blocks"]),
+                        settlement_duration_hours_by_block=dict(
+                            entry["settlement_duration_hours_by_block"]
+                        ),
+                    )
+                    for entry in reserve_value
+                )
+            )
+
+        coverage_value = strategy["coverage_audit"]
+        coverage = CoverageAudit(
+            observed_dates=tuple(coverage_value["observed_dates"]),
+            valid_dates=tuple(coverage_value["valid_dates"]),
+            missing_dates=tuple(coverage_value["missing_dates"]),
+            solver_failed_dates=tuple(coverage_value["solver_failed_dates"]),
+            solver_failure_details=tuple(
+                SolverFailureDetail(
+                    date=detail["date"],
+                    status=detail["status"],
+                    message=detail["message"],
+                    stage=detail["stage"],
+                )
+                for detail in coverage_value["solver_failure_details"]
+            ),
+        )
+
+        adapter_value = strategy["adapter_provenance"]
+        adapter = AdapterProvenance(
+            producer_adapter_id=ProducerAdapterId(adapter_value["producer_adapter_id"]),
+            source_function=adapter_value["source_function"],
+            per_day_cash_field=adapter_value["per_day_cash_field"],
+            excluded_fields=tuple(adapter_value["excluded_fields"]),
+            mode=adapter_value["mode"],
+            carry_soc=adapter_value["carry_soc"],
+            soc_init_frac=adapter_value["soc_init_frac"],
+            capture_rate=adapter_value["capture_rate"],
+            reserve_price_aggregation=adapter_value["reserve_price_aggregation"],
+            reserve_pricing_dates=(
+                None
+                if adapter_value["reserve_pricing_dates"] is None
+                else tuple(adapter_value["reserve_pricing_dates"])
+            ),
+            reserve_scalar_price_eur_mw_h=adapter_value["reserve_scalar_price_eur_mw_h"],
+            expected_grid_registry_version=adapter_value["expected_grid_registry_version"],
+            expected_grid_profiles=dict(adapter_value["expected_grid_profiles"]),
+        )
+
+        with _issue_strategy_run_result():
+            replayed = StrategyRunResult(
+                strategy_kind=StrategyKind(strategy["strategy_kind"]),
+                daily_realised_cash_series=tuple(
+                    (record[0], record[1]) for record in strategy["daily_realised_cash_series"]
+                ),
+                cash_basis=cash_basis,
+                power_mw=strategy["power_mw"],
+                duration_hours=strategy["duration_hours"],
+                round_trip_efficiency=strategy["round_trip_efficiency"],
+                zone=strategy["zone"],
+                sample_window=sample_window,
+                currency_basis=currency_basis,
+                forecast_audits=forecast_audits,
+                reserve_product=strategy["reserve_product"],
+                reserve_source=strategy["reserve_source"],
+                availability=strategy["availability"],
+                reserve_coverage_audit=reserve_coverage,
+                coverage_audit=coverage,
+                adapter_provenance=adapter,
+                embedded_vom_cost_eur_mwh=strategy["embedded_vom_cost_eur_mwh"],
+                source_data_content_hash=strategy["source_data_content_hash"],
+                calculator_version=strategy["calculator_version"],
+            )
+    except ProjectCaseValidationError:
+        raise
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ProjectCaseValidationError(
+            "embedded StrategyRunResult cannot be replayed through the typed v1 schema"
+        ) from exc
+
+    if replayed.calculator_version != PC_A_CALCULATOR_VERSION:
+        raise ProjectCaseValidationError(
+            f"StrategyRunResult.calculator_version must be {PC_A_CALCULATOR_VERSION!r}"
+        )
+    if replayed.to_payload() != _deep_thaw(strategy):
+        raise ProjectCaseValidationError(
+            "embedded StrategyRunResult payload is not the canonical typed v1 payload"
+        )
+    return replayed
+
+
+def _validate_asset_wire_payload(value: Any) -> AssetCase:
+    """Validate and replay an exact fingerprint-bearing ``AssetCase`` payload."""
+
+    payload = _exact_mapping(
+        value,
+        frozenset(
+            {
+                "power_mw",
+                "duration_hours",
+                "round_trip_efficiency",
+                "installed_capex_eur",
+                "fixed_om_eur_per_mw_yr",
+            }
+        ),
+        "asset_case",
+    )
+    for key in payload:
+        _wire_float(payload[key], f"asset_case.{key}")
+    replayed = AssetCase(
+        power_mw=payload["power_mw"],
+        duration_hours=payload["duration_hours"],
+        round_trip_efficiency=payload["round_trip_efficiency"],
+        installed_capex_eur=payload["installed_capex_eur"],
+        fixed_om_eur_per_mw_yr=payload["fixed_om_eur_per_mw_yr"],
+    )
+    if replayed.to_payload() != _deep_thaw(payload):
+        raise ProjectCaseValidationError("asset_case is not a canonical typed payload")
+    return replayed
+
+
+def _validate_lifecycle_wire_payload(value: Any) -> LifecycleCase:
+    """Validate and replay an exact fingerprint-bearing ``LifecycleCase`` payload."""
+
+    payload = _exact_mapping(
+        value,
+        frozenset(
+            {
+                "project_life_years",
+                "capacity_maintenance_basis",
+                "capacity_maintenance_source",
+                "capacity_maintenance_as_of",
+                "augmentation_events",
+                "eol_residual_value_eur",
+                "decommissioning_cost_eur",
+            }
+        ),
+        "lifecycle_case",
+    )
+    life = _wire_int_in(
+        payload["project_life_years"],
+        1,
+        MAX_PROJECT_LIFE_YEARS,
+        "project_life_years",
+    )
+    raw_events = payload["augmentation_events"]
+    if not isinstance(raw_events, (list, tuple)):
+        raise ProjectCaseValidationError("lifecycle augmentation_events must be an array")
+    events: list[AugmentationEvent] = []
+    for event_value in raw_events:
+        event = _exact_mapping(
+            event_value,
+            frozenset({"year", "cost_eur", "capacity_restored_frac", "residual_value_eur"}),
+            "lifecycle augmentation event",
+        )
+        year = _wire_int_in(event["year"], 1, life, "augmentation event year")
+        _wire_nonneg_float(event["cost_eur"], "augmentation event cost_eur")
+        _wire_ratio_float(
+            event["capacity_restored_frac"], "augmentation event capacity_restored_frac"
+        )
+        _wire_nonneg_float(event["residual_value_eur"], "augmentation event residual_value_eur")
+        events.append(
+            AugmentationEvent(
+                year=year,
+                cost_eur=event["cost_eur"],
+                capacity_restored_frac=event["capacity_restored_frac"],
+                residual_value_eur=event["residual_value_eur"],
+            )
+        )
+    _wire_nonneg_float(payload["eol_residual_value_eur"], "eol_residual_value_eur")
+    _wire_nonneg_float(payload["decommissioning_cost_eur"], "decommissioning_cost_eur")
+    try:
+        basis = CapacityMaintenanceBasis(payload["capacity_maintenance_basis"])
+    except (TypeError, ValueError) as exc:
+        raise ProjectCaseValidationError("capacity_maintenance_basis invalid") from exc
+    replayed = LifecycleCase(
+        project_life_years=life,
+        capacity_maintenance_basis=basis,
+        capacity_maintenance_source=payload["capacity_maintenance_source"],
+        capacity_maintenance_as_of=payload["capacity_maintenance_as_of"],
+        augmentation_events=tuple(events),
+        eol_residual_value_eur=payload["eol_residual_value_eur"],
+        decommissioning_cost_eur=payload["decommissioning_cost_eur"],
+    )
+    if replayed.to_payload() != _deep_thaw(payload):
+        raise ProjectCaseValidationError("lifecycle_case is not a canonical typed payload")
+    return replayed
+
+
+def _validate_contract_case_payload(value: Any, *, life: int, base_year: int) -> bool:
+    """Validate the exact embedded v1.1 contract payload; return inclusion state."""
+    if value is None:
+        return False
+    contract = _exact_mapping(
+        value, frozenset({"settlement_basis", "settlement_terms"}), "contract_case"
+    )
+    expected_basis = ContractSettlementBasis.ANNUAL_PRE_LIFECYCLE_STRATEGY_CASH_FLOOR_V1.value
+    if contract["settlement_basis"] != expected_basis:
+        raise ProjectCaseValidationError("contract_case.settlement_basis invalid")
+    terms = _exact_mapping(
+        contract["settlement_terms"],
+        frozenset(
+            {
+                "contract_start_project_year",
+                "floor_rate_real_eur_per_modeled_mw_year_by_contract_year",
+                "floor_entitlement_factor_by_contract_year",
+                "quote_basis",
+                "settlement_frequency",
+                "asset_scope",
+                "currency_basis",
+                "quote_status",
+                "source",
+                "source_as_of_date",
+                "source_document_sha256",
+            }
+        ),
+        "contract_case.settlement_terms",
+    )
+    start = _wire_int_in(
+        terms["contract_start_project_year"], 1, life, "contract_start_project_year"
+    )
+    rates_raw = terms["floor_rate_real_eur_per_modeled_mw_year_by_contract_year"]
+    factors_raw = terms["floor_entitlement_factor_by_contract_year"]
+    if not isinstance(rates_raw, (list, tuple)) or not isinstance(factors_raw, (list, tuple)):
+        raise ProjectCaseValidationError("contract rate/factor curves must be arrays")
+    rates = tuple(_wire_nonneg_float(v, "contract floor rate") for v in rates_raw)
+    factors = tuple(_wire_ratio_float(v, "contract entitlement factor") for v in factors_raw)
+    if not rates or len(rates) != len(factors) or start + len(rates) - 1 > life:
+        raise ProjectCaseValidationError("contract curves/term invalid")
+    for field, expected in (
+        ("quote_basis", CONTRACT_QUOTE_BASIS_V1),
+        ("settlement_frequency", CONTRACT_SETTLEMENT_FREQUENCY_V1),
+        ("asset_scope", CONTRACT_ASSET_SCOPE_V1),
+    ):
+        if terms[field] != expected:
+            raise ProjectCaseValidationError(f"contract {field} invalid")
+    currency = _exact_mapping(
+        terms["currency_basis"],
+        frozenset({"mode", "target_base_year"}),
+        "contract currency_basis",
+    )
+    if (
+        currency["mode"] != ContractCurrencyBasisMode.USER_ASSERTED_REAL_BASE_YEAR_EUR_CURVE.value
+        or _wire_int_in(
+            currency["target_base_year"],
+            MIN_BASE_YEAR,
+            MAX_BASE_YEAR,
+            "contract currency target_base_year",
+        )
+        != base_year
+    ):
+        raise ProjectCaseValidationError("contract currency basis invalid")
+    try:
+        status = ContractQuoteStatus(terms["quote_status"])
+    except (TypeError, ValueError) as exc:
+        raise ProjectCaseValidationError("contract quote_status invalid") from exc
+    _text(terms["source"], "contract source")
+    _as_date(terms["source_as_of_date"], "contract source_as_of_date")
+    document_hash = terms["source_document_sha256"]
+    if status is ContractQuoteStatus.USER_SCENARIO:
+        if document_hash is not None:
+            raise ProjectCaseValidationError("USER_SCENARIO requires null source_document_sha256")
+    else:
+        _hex64(document_hash, "contract source_document_sha256")
+    return True
+
+
+def _replay_typed_project_case_payload(
+    project: Mapping[str, Any],
+    replayed_strategy: StrategyRunResult,
+) -> ProjectCase:
+    """Rebuild the complete fingerprinted ProjectCase through its typed schema.
+
+    This is the shared semantic gate for RunResult and public exports.  Wire-type
+    validation remains explicit so ``1`` cannot alias the real ``1.0``; typed
+    reconstruction then owns all tagged-union, domain, cross-object, and
+    calculator-version invariants.
+    """
+
+    project_map = _exact_mapping(project, _PROJECT_CASE_V11_PAYLOAD_KEYS, "project_case")
+    asset = _validate_asset_wire_payload(project_map["asset_case"])
+    lifecycle = _validate_lifecycle_wire_payload(project_map["lifecycle_case"])
+
+    market_value = _exact_mapping(
+        project_map["market_case"], _MARKET_CASE_PAYLOAD_KEYS, "project_case.market_case"
+    )
+    projection_value = _exact_mapping(
+        market_value["projection"],
+        frozenset(
+            {
+                "projection_kind",
+                "annual_decay_rate",
+                "decay_floor_share",
+                "multipliers",
+                "source",
+                "as_of",
+            }
+        ),
+        "project_case.market_case.projection",
+    )
+    if projection_value["annual_decay_rate"] is not None:
+        _wire_float(projection_value["annual_decay_rate"], "annual_decay_rate")
+    if projection_value["decay_floor_share"] is not None:
+        _wire_float(projection_value["decay_floor_share"], "decay_floor_share")
+    raw_multipliers = projection_value["multipliers"]
+    if raw_multipliers is not None:
+        if not isinstance(raw_multipliers, (list, tuple)):
+            raise ProjectCaseValidationError("projection multipliers must be an array")
+        for value in raw_multipliers:
+            _wire_float(value, "projection multiplier")
+    try:
+        projection = Projection(
+            projection_kind=ProjectionKind(projection_value["projection_kind"]),
+            annual_decay_rate=projection_value["annual_decay_rate"],
+            decay_floor_share=projection_value["decay_floor_share"],
+            multipliers=(None if raw_multipliers is None else tuple(raw_multipliers)),
+            source=projection_value["source"],
+            as_of=projection_value["as_of"],
+        )
+    except (TypeError, ValueError) as exc:
+        if isinstance(exc, ProjectCaseValidationError):
+            raise
+        raise ProjectCaseValidationError("project projection payload invalid") from exc
+    market = MarketCase(replayed_strategy, projection)
+
+    valuation_value = _exact_mapping(
+        project_map["valuation_case"],
+        frozenset({"discount_rate", "base_year"}),
+        "project_case.valuation_case",
+    )
+    _wire_float(valuation_value["discount_rate"], "valuation discount_rate")
+    _wire_int_in(valuation_value["base_year"], MIN_BASE_YEAR, MAX_BASE_YEAR, "valuation base_year")
+    valuation = ValuationCase(
+        discount_rate=valuation_value["discount_rate"],
+        base_year=valuation_value["base_year"],
+    )
+
+    bootstrap_value = _exact_mapping(
+        project_map["bootstrap_case"],
+        frozenset({"seed", "n_simulations", "bootstrap_algorithm_version"}),
+        "project_case.bootstrap_case",
+    )
+    _wire_int_in(bootstrap_value["seed"], 0, MAX_SEED, "bootstrap seed")
+    _wire_int_in(
+        bootstrap_value["n_simulations"],
+        MIN_SIMULATIONS,
+        MAX_SIMULATIONS,
+        "bootstrap n_simulations",
+    )
+    bootstrap = BootstrapCase(
+        seed=bootstrap_value["seed"],
+        n_simulations=bootstrap_value["n_simulations"],
+        bootstrap_algorithm_version=bootstrap_value["bootstrap_algorithm_version"],
+    )
+
+    contract_value = project_map["contract_case"]
+    contract = None
+    if contract_value is not None:
+        _validate_contract_case_payload(
+            contract_value,
+            life=lifecycle.project_life_years,
+            base_year=valuation.base_year,
+        )
+        contract_map = contract_value
+        terms_value = contract_map["settlement_terms"]
+        currency_value = terms_value["currency_basis"]
+        currency = ContractCurrencyBasis(
+            mode=ContractCurrencyBasisMode(currency_value["mode"]),
+            target_base_year=currency_value["target_base_year"],
+        )
+        terms = AnnualPreLifecycleStrategyCashFloor(
+            contract_start_project_year=terms_value["contract_start_project_year"],
+            floor_rate_real_eur_per_modeled_mw_year_by_contract_year=tuple(
+                terms_value["floor_rate_real_eur_per_modeled_mw_year_by_contract_year"]
+            ),
+            floor_entitlement_factor_by_contract_year=tuple(
+                terms_value["floor_entitlement_factor_by_contract_year"]
+            ),
+            quote_basis=terms_value["quote_basis"],
+            settlement_frequency=terms_value["settlement_frequency"],
+            asset_scope=terms_value["asset_scope"],
+            currency_basis=currency,
+            quote_status=ContractQuoteStatus(terms_value["quote_status"]),
+            source=terms_value["source"],
+            source_as_of_date=terms_value["source_as_of_date"],
+            source_document_sha256=terms_value["source_document_sha256"],
+        )
+        contract = ContractCase(
+            settlement_basis=ContractSettlementBasis(contract_map["settlement_basis"]),
+            settlement_terms=terms,
+        )
+
+    replayed = ProjectCase(
+        asset_case=asset,
+        lifecycle_case=lifecycle,
+        market_case=market,
+        valuation_case=valuation,
+        bootstrap_case=bootstrap,
+        contract_case=contract,
+    )
+    if replayed.to_payload() != _deep_thaw(project_map):
+        raise ProjectCaseValidationError(
+            "ProjectCase provenance is not the canonical typed v1.1 payload"
+        )
+    return replayed
+
+
+def _validate_run_result_provenance(provenance: Mapping[str, Any], input_fingerprint: str) -> None:
+    prov = _exact_mapping(provenance, _RUN_RESULT_PROVENANCE_KEYS, "RunResult.provenance")
+    if prov["calculator_version"] != PC_D2_CALCULATOR_VERSION:
+        raise ProjectCaseValidationError(
+            f"provenance.calculator_version must be {PC_D2_CALCULATOR_VERSION!r}"
+        )
+    _hex64(prov["project_case_input_fingerprint"], "project_case_input_fingerprint")
+    _hex64(prov["strategy_run_fingerprint"], "strategy_run_fingerprint")
+    project = _exact_mapping(
+        prov["project_case"], _PROJECT_CASE_V11_PAYLOAD_KEYS, "provenance.project_case"
+    )
+    asset = _exact_mapping(
+        project["asset_case"],
+        frozenset(
+            {
+                "power_mw",
+                "duration_hours",
+                "round_trip_efficiency",
+                "installed_capex_eur",
+                "fixed_om_eur_per_mw_yr",
+            }
+        ),
+        "provenance.project_case.asset_case",
+    )
+    _validate_asset_wire_payload(asset)
+    market = _exact_mapping(
+        project["market_case"],
+        _MARKET_CASE_PAYLOAD_KEYS,
+        "provenance.project_case.market_case",
+    )
+    project_bootstrap = _exact_mapping(
+        project["bootstrap_case"],
+        frozenset({"seed", "n_simulations", "bootstrap_algorithm_version"}),
+        "provenance.project_case.bootstrap_case",
+    )
+    strategy = _exact_mapping(
+        prov["strategy_run_result"],
+        _STRATEGY_RUN_RESULT_PAYLOAD_KEYS,
+        "provenance.strategy_run_result",
+    )
+    _validate_strategy_wire_payload(strategy)
+    replayed_strategy = _replay_typed_strategy_payload(strategy)
+    _replay_typed_project_case_payload(project, replayed_strategy)
+    strategy_fp = fingerprint_hex("StrategyRunResult", strategy)
+    if (
+        prov["strategy_run_fingerprint"] != strategy_fp
+        or market["strategy_run_fingerprint"] != strategy_fp
+    ):
+        raise ProjectCaseValidationError("RunResult strategy fingerprints do not reconcile")
+    project_fp = fingerprint_hex("ProjectCase", project)
+    if prov["project_case_input_fingerprint"] != project_fp or input_fingerprint != project_fp:
+        raise ProjectCaseValidationError("RunResult ProjectCase fingerprints do not reconcile")
+    lifecycle = _exact_mapping(
+        project["lifecycle_case"],
+        frozenset(
+            {
+                "project_life_years",
+                "capacity_maintenance_basis",
+                "capacity_maintenance_source",
+                "capacity_maintenance_as_of",
+                "augmentation_events",
+                "eol_residual_value_eur",
+                "decommissioning_cost_eur",
+            }
+        ),
+        "provenance.project_case.lifecycle_case",
+    )
+    _validate_lifecycle_wire_payload(lifecycle)
+    valuation = _exact_mapping(
+        project["valuation_case"],
+        frozenset({"discount_rate", "base_year"}),
+        "provenance.project_case.valuation_case",
+    )
+    life = _wire_int_in(
+        lifecycle["project_life_years"],
+        1,
+        MAX_PROJECT_LIFE_YEARS,
+        "project_life_years",
+    )
+    base_year = _wire_int_in(valuation["base_year"], MIN_BASE_YEAR, MAX_BASE_YEAR, "base_year")
+    for key in (
+        "power_mw",
+        "duration_hours",
+        "round_trip_efficiency",
+        "installed_capex_eur",
+        "fixed_om_eur_per_mw_yr",
+    ):
+        _wire_float(asset[key], f"asset_case.{key}")
+    _wire_float(lifecycle["eol_residual_value_eur"], "lifecycle eol_residual_value_eur")
+    _wire_float(lifecycle["decommissioning_cost_eur"], "lifecycle decommissioning_cost_eur")
+    events = lifecycle["augmentation_events"]
+    if not isinstance(events, (list, tuple)):
+        raise ProjectCaseValidationError("lifecycle augmentation_events must be an array")
+    for event_value in events:
+        event = _exact_mapping(
+            event_value,
+            frozenset({"year", "cost_eur", "capacity_restored_frac", "residual_value_eur"}),
+            "lifecycle augmentation event",
+        )
+        _wire_int_in(event["year"], 1, life, "augmentation event year")
+        _wire_nonneg_float(event["cost_eur"], "augmentation event cost_eur")
+        _wire_ratio_float(
+            event["capacity_restored_frac"], "augmentation event capacity_restored_frac"
+        )
+        _wire_nonneg_float(event["residual_value_eur"], "augmentation event residual_value_eur")
+    for field in ("power_mw", "duration_hours", "round_trip_efficiency"):
+        if asset[field] != strategy[field]:
+            raise ProjectCaseValidationError(
+                f"provenance ProjectCase asset.{field} != StrategyRunResult.{field}"
+            )
+    if base_year != strategy["currency_basis"]["target_base_year"]:
+        raise ProjectCaseValidationError(
+            "provenance valuation base_year != strategy currency target_base_year"
+        )
+    _wire_int_in(project_bootstrap["seed"], 0, MAX_SEED, "bootstrap seed")
+    _wire_int_in(
+        project_bootstrap["n_simulations"],
+        MIN_SIMULATIONS,
+        MAX_SIMULATIONS,
+        "bootstrap n_simulations",
+    )
+    bootstrap_provenance = _exact_mapping(
+        prov["bootstrap"],
+        frozenset(
+            {
+                "algorithm_version",
+                "seed",
+                "n_simulations",
+                "days_per_annual_draw",
+                "percentile_method",
+                "prob_positive_rule",
+            }
+        ),
+        "provenance.bootstrap",
+    )
+    _wire_int_in(bootstrap_provenance["seed"], 0, MAX_SEED, "provenance bootstrap seed")
+    _wire_int_in(
+        bootstrap_provenance["n_simulations"],
+        MIN_SIMULATIONS,
+        MAX_SIMULATIONS,
+        "provenance bootstrap n_simulations",
+    )
+    _wire_int_in(
+        bootstrap_provenance["days_per_annual_draw"],
+        365,
+        365,
+        "provenance bootstrap days_per_annual_draw",
+    )
+    if (
+        bootstrap_provenance["algorithm_version"]
+        != project_bootstrap["bootstrap_algorithm_version"]
+        or bootstrap_provenance["seed"] != project_bootstrap["seed"]
+        or bootstrap_provenance["n_simulations"] != project_bootstrap["n_simulations"]
+        or bootstrap_provenance["days_per_annual_draw"] != 365
+        or bootstrap_provenance["percentile_method"] != "linear"
+        or bootstrap_provenance["prob_positive_rule"] != "strict_gt_zero_all_draws"
+    ):
+        raise ProjectCaseValidationError("bootstrap provenance does not reconcile")
+    projection_provenance = _exact_mapping(
+        prov["projection"],
+        frozenset({"projection_kind", "resolved_annual_multipliers"}),
+        "provenance.projection",
+    )
+    projection_payload = _exact_mapping(
+        market["projection"],
+        frozenset(
+            {
+                "projection_kind",
+                "annual_decay_rate",
+                "decay_floor_share",
+                "multipliers",
+                "source",
+                "as_of",
+            }
+        ),
+        "provenance.project_case.market_case.projection",
+    )
+    if projection_provenance["projection_kind"] != projection_payload["projection_kind"]:
+        raise ProjectCaseValidationError("projection provenance kind mismatch")
+    try:
+        projection_kind = ProjectionKind(projection_payload["projection_kind"])
+    except (TypeError, ValueError) as exc:
+        raise ProjectCaseValidationError("projection kind invalid") from exc
+    if projection_kind is ProjectionKind.FlatRealProjection:
+        if any(
+            projection_payload[field] is not None
+            for field in (
+                "annual_decay_rate",
+                "decay_floor_share",
+                "multipliers",
+                "source",
+                "as_of",
+            )
+        ):
+            raise ProjectCaseValidationError("flat projection members must be null")
+        expected_multipliers = [1.0] * life
+    elif projection_kind is ProjectionKind.DAOnlySpreadDecay:
+        decay = _wire_float(projection_payload["annual_decay_rate"], "annual_decay_rate")
+        floor = _wire_ratio_float(projection_payload["decay_floor_share"], "decay_floor_share")
+        if not 0.0 <= decay < 1.0:
+            raise ProjectCaseValidationError("annual_decay_rate must be in [0, 1)")
+        if any(
+            projection_payload[field] is not None for field in ("multipliers", "source", "as_of")
+        ):
+            raise ProjectCaseValidationError("spread-decay non-applicable members must be null")
+        expected_multipliers = [
+            max((1.0 - decay) ** (year - 1), floor) for year in range(1, life + 1)
+        ]
+    else:
+        if (
+            projection_payload["annual_decay_rate"] is not None
+            or projection_payload["decay_floor_share"] is not None
+        ):
+            raise ProjectCaseValidationError("explicit projection decay members must be null")
+        raw_curve = projection_payload["multipliers"]
+        if not isinstance(raw_curve, (list, tuple)) or len(raw_curve) != life:
+            raise ProjectCaseValidationError("explicit projection curve invalid")
+        expected_multipliers = [
+            _wire_nonneg_float(value, "explicit projection multiplier") for value in raw_curve
+        ]
+        _text(projection_payload["source"], "explicit projection source")
+        _text(projection_payload["as_of"], "explicit projection as_of")
+    multipliers = projection_provenance["resolved_annual_multipliers"]
+    if not isinstance(multipliers, (list, tuple)) or len(multipliers) != life:
+        raise ProjectCaseValidationError("resolved_annual_multipliers invalid")
+    resolved_multipliers = [
+        _wire_nonneg_float(value, "resolved projection multiplier") for value in multipliers
+    ]
+    if resolved_multipliers != expected_multipliers:
+        raise ProjectCaseValidationError(
+            "resolved_annual_multipliers do not match fingerprinted projection"
+        )
+    _wire_float(valuation["discount_rate"], "valuation discount_rate")
+    valuation_provenance = _exact_mapping(
+        prov["valuation"],
+        frozenset({"discount_rate", "base_year", "currency_convention", "cash_timing"}),
+        "provenance.valuation",
+    )
+    _wire_float(valuation_provenance["discount_rate"], "provenance valuation discount_rate")
+    _wire_int_in(
+        valuation_provenance["base_year"],
+        MIN_BASE_YEAR,
+        MAX_BASE_YEAR,
+        "provenance valuation base_year",
+    )
+    if (
+        valuation_provenance["discount_rate"] != valuation["discount_rate"]
+        or valuation_provenance["base_year"] != base_year
+        or valuation_provenance["currency_convention"] != "real_base_year_eur"
+        or valuation_provenance["cash_timing"] != "end_of_year"
+    ):
+        raise ProjectCaseValidationError("valuation provenance does not reconcile")
+    contract_included = _validate_contract_case_payload(
+        project["contract_case"], life=life, base_year=base_year
+    )
+    if prov["capacity_maintenance_basis"] != lifecycle["capacity_maintenance_basis"]:
+        raise ProjectCaseValidationError("capacity_maintenance_basis provenance mismatch")
+
+    settlement = _exact_mapping(
+        prov["contract_settlement"],
+        _CONTRACT_SETTLEMENT_KEYS,
+        "provenance.contract_settlement",
+    )
+    floors = settlement["resolved_floor_by_project_year"]
+    if not isinstance(floors, (list, tuple)):
+        raise ProjectCaseValidationError("resolved_floor_by_project_year must be an array")
+    floor_years: list[int] = []
+    for record in floors:
+        row = _exact_mapping(record, _RESOLVED_FLOOR_KEYS, "resolved floor record")
+        floor_years.append(_wire_int_in(row["year"], 1, life, "resolved floor year"))
+        _wire_nonneg_float(row["effective_floor_eur"], "resolved effective floor")
+    if floor_years != sorted(set(floor_years)):
+        raise ProjectCaseValidationError("resolved floor years must be unique and ascending")
+
+    interpolation = settlement["representative_interpolation"]
+    expected_basis = ContractSettlementBasis.ANNUAL_PRE_LIFECYCLE_STRATEGY_CASH_FLOOR_V1.value
+    if not contract_included:
+        if (
+            settlement["basis"] is not None
+            or settlement["algorithm_version"] is not None
+            or floors
+            or interpolation is not None
+        ):
+            raise ProjectCaseValidationError("null contract settlement provenance invalid")
+        expected_statistic = NULL_CASHFLOW_TABLE_STATISTIC_V1
+    else:
+        if (
+            settlement["basis"] != expected_basis
+            or settlement["algorithm_version"] != CONTRACT_SETTLEMENT_ALGORITHM_V1
+        ):
+            raise ProjectCaseValidationError("contract settlement provenance invalid")
+        terms = project["contract_case"]["settlement_terms"]
+        start = terms["contract_start_project_year"]
+        expected_years = list(
+            range(
+                start,
+                start + len(terms["floor_rate_real_eur_per_modeled_mw_year_by_contract_year"]),
+            )
+        )
+        if floor_years != expected_years:
+            raise ProjectCaseValidationError("resolved floor year set != contract term")
+        expected_floors = [
+            float(rate) * float(asset["power_mw"]) * float(factor)
+            for rate, factor in zip(
+                terms["floor_rate_real_eur_per_modeled_mw_year_by_contract_year"],
+                terms["floor_entitlement_factor_by_contract_year"],
+                strict=True,
+            )
+        ]
+        actual_floors = [float(record["effective_floor_eur"]) for record in floors]
+        if actual_floors != expected_floors:
+            raise ProjectCaseValidationError(
+                "resolved effective floors do not reconcile to rate * modelled MW * entitlement"
+            )
+        interp = _exact_mapping(interpolation, _INTERPOLATION_KEYS, "representative_interpolation")
+        n = project_bootstrap["n_simulations"]
+        n = _int_in(n, MIN_SIMULATIONS, MAX_SIMULATIONS, "n_simulations")
+        lo = _wire_int_in(interp["lower_sorted_rank"], 0, n - 1, "lower_sorted_rank")
+        hi = _wire_int_in(interp["upper_sorted_rank"], 0, n - 1, "upper_sorted_rank")
+        _wire_int_in(interp["lower_original_draw_index"], 0, n - 1, "lower draw index")
+        _wire_int_in(interp["upper_original_draw_index"], 0, n - 1, "upper draw index")
+        weight = _wire_ratio_float(interp["interpolation_weight"], "interpolation_weight")
+        h = 0.5 * (n - 1)
+        expected_lo = math.floor(h)
+        expected_hi = math.ceil(h)
+        expected_weight = h - expected_lo
+        if (
+            lo != expected_lo
+            or hi != expected_hi
+            or weight != expected_weight
+            or (
+                lo == hi
+                and interp["lower_original_draw_index"] != interp["upper_original_draw_index"]
+            )
+        ):
+            raise ProjectCaseValidationError("representative interpolation ranks invalid")
+        expected_statistic = CONTRACT_CASHFLOW_TABLE_STATISTIC_V1
+    if prov["cashflow_table_statistic"] != expected_statistic:
+        raise ProjectCaseValidationError("cashflow_table_statistic invalid")
+
+    reconciliation = _exact_mapping(
+        prov["cashflow_reconciliation"],
+        _CASHFLOW_RECONCILIATION_KEYS,
+        "cashflow_reconciliation",
+    )
+    _wire_float(reconciliation["relative_tolerance"], "cashflow relative_tolerance")
+    _wire_float(reconciliation["absolute_tolerance_eur"], "cashflow absolute_tolerance_eur")
+    if (
+        reconciliation["version"] != CASHFLOW_RECONCILIATION_VERSION_V1
+        or reconciliation["relative_tolerance"] != CASHFLOW_RECONCILIATION_REL_TOL_V1
+        or reconciliation["absolute_tolerance_eur"] != CASHFLOW_RECONCILIATION_ABS_TOL_EUR_V1
+    ):
+        raise ProjectCaseValidationError("cashflow_reconciliation invalid")
+
+    assertions = _exact_mapping(
+        prov["red_line_assertions"],
+        _RED_LINE_ASSERTION_KEYS,
+        "red_line_assertions",
+    )
+    required_static = {
+        "cash_npv_includes_shadow_wear": False,
+        "vom_rededucted": False,
+        "mw_rescaled": False,
+        "wear_net_floor_comparator_included": False,
+        "pre_tax_unlevered": True,
+        "tax_included": False,
+        "debt_included": False,
+        "financing_fees_included": False,
+    }
+    if any(assertions[key] is not expected for key, expected in required_static.items()):
+        raise ProjectCaseValidationError("RunResult red-line assertions invalid")
+    if assertions["contract_settlement_included"] is not contract_included or assertions[
+        "contract_settlement_basis"
+    ] != (expected_basis if contract_included else None):
+        raise ProjectCaseValidationError("RunResult contract red-line assertions invalid")
+
+
+def _validate_run_result_tables(result: RunResult) -> None:
+    """Bind the representative tables to their outcomes and contract payload.
+
+    Row-local arithmetic alone is insufficient for the public ``RunResult``
+    boundary: a caller could otherwise omit a project year, alter a reconciled
+    P50 row, or attach contract fields to a merchant-only result while retaining
+    individually valid rows.  Section 6.2/6.3 therefore makes these checks part
+    of construction, not merely an export concern.
+
+    The non-null representative path is rank-interpolated *after* per-draw
+    settlement.  Consequently this validator deliberately does **not** assert
+    ``revenue_eur == max(merchant_revenue_eur, floor_eur)`` for a displayed row;
+    it validates only the locked membership, arithmetic, and P50 reconciliation
+    invariants.
+    """
+
+    project = result.provenance["project_case"]
+    strategy = result.provenance["strategy_run_result"]
+    lifecycle_payload = project["lifecycle_case"]
+    asset = project["asset_case"]
+    bootstrap = project["bootstrap_case"]
+    life = int(lifecycle_payload["project_life_years"])
+    installed_capex_eur = float(asset["installed_capex_eur"])
+    expected_years = list(range(1, life + 1))
+    contract_included = project["contract_case"] is not None
+    floor_by_year = {
+        int(record["year"]): float(record["effective_floor_eur"])
+        for record in result.provenance["contract_settlement"]["resolved_floor_by_project_year"]
+    }
+
+    try:
+        maintenance_basis = CapacityMaintenanceBasis(
+            lifecycle_payload["capacity_maintenance_basis"]
+        )
+    except (TypeError, ValueError) as exc:
+        raise ProjectCaseValidationError("RunResult capacity maintenance basis invalid") from exc
+    unknown_maintenance = maintenance_basis is CapacityMaintenanceBasis.UNKNOWN
+    if unknown_maintenance != (not result.lifecycle_cash_npv.available):
+        raise ProjectCaseValidationError(
+            "capacity maintenance UNKNOWN iff lifecycle NPV/table are unavailable"
+        )
+
+    screening = result.screening_cashflow_table
+    # The state matrix has already required this table for the always-available
+    # screening outcome.
+    assert screening is not None
+    lifecycle = result.lifecycle_cashflow_table
+    tables = [screening] if lifecycle is None else [screening, lifecycle]
+    for table in tables:
+        if [row.year for row in table.rows] != expected_years:
+            raise ProjectCaseValidationError(
+                f"{table.basis} cashflow table must cover exactly project years 1..{life}"
+            )
+
+    daily_series = strategy["daily_realised_cash_series"]
+    if not isinstance(daily_series, (list, tuple)) or not daily_series:
+        raise ProjectCaseValidationError("strategy daily_realised_cash_series invalid")
+    daily_values: list[float] = []
+    for record in daily_series:
+        if not isinstance(record, (list, tuple)) or len(record) != 2:
+            raise ProjectCaseValidationError("strategy daily cash record invalid")
+        daily_values.append(_finite_float(record[1], "strategy daily cash"))
+    try:
+        annual_draws = bootstrap_annual_sums(
+            np.asarray(daily_values, dtype=np.float64),
+            seed=bootstrap["seed"],
+            n_simulations=bootstrap["n_simulations"],
+        )
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ProjectCaseValidationError("RunResult bootstrap reconstruction failed") from exc
+    if annual_draws.shape != (bootstrap["n_simulations"],) or not np.isfinite(annual_draws).all():
+        raise ProjectCaseValidationError("RunResult annual bootstrap draws invalid")
+
+    multipliers = np.asarray(
+        result.provenance["projection"]["resolved_annual_multipliers"],
+        dtype=np.float64,
+    )
+    if multipliers.shape != (life,) or not np.isfinite(multipliers).all():
+        raise ProjectCaseValidationError("RunResult resolved projection multipliers invalid")
+    discount_rate = float(project["valuation_case"]["discount_rate"])
+    with np.errstate(over="ignore", under="ignore", divide="ignore", invalid="ignore"):
+        discount_factors = np.power(
+            1.0 + discount_rate,
+            -np.arange(1, life + 1, dtype=np.float64),
+            dtype=np.float64,
+        )
+    if not np.isfinite(discount_factors).all() or np.any(discount_factors <= 0.0):
+        raise ProjectCaseValidationError("RunResult discount factors invalid")
+
+    # Reconstruct the exact representative merchant/settled/top-up path from
+    # fingerprinted inputs and the locked bootstrap.  This closes a decomposition
+    # backdoor where merchant and top-up could be swapped while settled cash and
+    # headline P50 remained unchanged.
+    with np.errstate(over="ignore", invalid="ignore"):
+        merchant_matrix = annual_draws[:, np.newaxis] * multipliers[np.newaxis, :]
+    if not np.isfinite(merchant_matrix).all():
+        raise ProjectCaseValidationError("RunResult merchant reconstruction overflowed")
+    if not contract_included:
+        annual_p50 = float(np.percentile(annual_draws, 50.0, method="linear"))
+        with np.errstate(over="ignore", invalid="ignore"):
+            merchant_star = annual_p50 * multipliers
+        settled_star = merchant_star.copy()
+        top_up_star = np.zeros(life, dtype=np.float64)
+        settled_matrix = merchant_matrix
+    else:
+        covered = np.asarray(
+            [year in floor_by_year for year in expected_years],
+            dtype=np.bool_,
+        )
+        floors = np.asarray(
+            [floor_by_year.get(year, 0.0) for year in expected_years],
+            dtype=np.float64,
+        )
+        settled_matrix = merchant_matrix.copy()
+        with np.errstate(over="ignore", invalid="ignore"):
+            settled_matrix[:, covered] = np.maximum(
+                merchant_matrix[:, covered], floors[np.newaxis, covered]
+            )
+        interpolation = result.provenance["contract_settlement"]["representative_interpolation"]
+        assert isinstance(interpolation, Mapping)
+        original_indices = np.arange(annual_draws.size, dtype=np.int64)
+        order = np.lexsort((original_indices, annual_draws))
+        lower_rank = int(interpolation["lower_sorted_rank"])
+        upper_rank = int(interpolation["upper_sorted_rank"])
+        lower_original = int(interpolation["lower_original_draw_index"])
+        upper_original = int(interpolation["upper_original_draw_index"])
+        if lower_original != int(order[lower_rank]) or upper_original != int(order[upper_rank]):
+            raise ProjectCaseValidationError(
+                "representative interpolation original draw indices do not match sorted ranks"
+            )
+        weight = float(interpolation["interpolation_weight"])
+        with np.errstate(over="ignore", invalid="ignore"):
+            merchant_star = (1.0 - weight) * merchant_matrix[
+                lower_original
+            ] + weight * merchant_matrix[upper_original]
+            settled_star = (1.0 - weight) * settled_matrix[
+                lower_original
+            ] + weight * settled_matrix[upper_original]
+            top_up_star = settled_star - merchant_star
+    for name, values in (
+        ("representative merchant cash", merchant_star),
+        ("representative settled cash", settled_star),
+        ("representative top-up", top_up_star),
+        ("settled cash matrix", settled_matrix),
+    ):
+        if not np.isfinite(values).all():
+            raise ProjectCaseValidationError(f"RunResult {name} is non-finite")
+
+    augmentation = np.zeros(life, dtype=np.float64)
+    terminal = np.zeros(life, dtype=np.float64)
+    if unknown_maintenance:
+        # UNKNOWN is screening-only. Do not even derive lifecycle combinations:
+        # doing so would silently assume an unavailable cost basis and may
+        # overflow at individually finite extreme inputs.
+        fixed_om = 0.0
+    else:
+        fixed_om = float(asset["fixed_om_eur_per_mw_yr"]) * float(asset["power_mw"])
+        events = lifecycle_payload["augmentation_events"]
+        if not isinstance(events, (list, tuple)):
+            raise ProjectCaseValidationError("lifecycle augmentation_events invalid")
+        try:
+            for year in expected_years:
+                augmentation[year - 1] = math.fsum(
+                    float(
+                        _exact_mapping(
+                            event,
+                            frozenset(
+                                {
+                                    "year",
+                                    "cost_eur",
+                                    "capacity_restored_frac",
+                                    "residual_value_eur",
+                                }
+                            ),
+                            "lifecycle augmentation event",
+                        )["cost_eur"]
+                    )
+                    - float(event["residual_value_eur"])
+                    for event in events
+                    if event["year"] == year
+                )
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ProjectCaseValidationError("RunResult lifecycle reconstruction failed") from exc
+        terminal[-1] = float(lifecycle_payload["eol_residual_value_eur"]) - float(
+            lifecycle_payload["decommissioning_cost_eur"]
+        )
+        if (
+            not math.isfinite(fixed_om)
+            or not np.isfinite(augmentation).all()
+            or not np.isfinite(terminal).all()
+        ):
+            raise ProjectCaseValidationError("RunResult lifecycle cash reconstruction overflowed")
+
+    for table in tables:
+        for index, row in enumerate(table.rows):
+            year = index + 1
+            expected_floor = floor_by_year.get(year) if contract_included else None
+            expected_opex = 0.0 if table.basis == "screening" else fixed_om
+            expected_augmentation = (
+                0.0 if table.basis == "screening" else float(augmentation[index])
+            )
+            expected_terminal = 0.0 if table.basis == "screening" else float(terminal[index])
+            expected_net = (
+                float(settled_star[index])
+                - expected_opex
+                - expected_augmentation
+                + expected_terminal
+            )
+            expected_discounted = expected_net * float(discount_factors[index])
+            exact_fields = {
+                "merchant_revenue_eur": float(merchant_star[index]),
+                "effective_contract_floor_eur": expected_floor,
+                "contract_top_up_eur": float(top_up_star[index]),
+                "revenue_eur": float(settled_star[index]),
+                "opex_eur": expected_opex,
+                "augmentation_eur": expected_augmentation,
+                "terminal_eur": expected_terminal,
+                "net_eur": expected_net,
+                "discount_factor": float(discount_factors[index]),
+                "discounted_net_eur": expected_discounted,
+            }
+            for field, expected in exact_fields.items():
+                if getattr(row, field) != expected:
+                    raise ProjectCaseValidationError(
+                        f"{table.basis} cashflow {field} does not match fingerprinted inputs"
+                    )
+
+    with np.errstate(over="ignore", invalid="ignore"):
+        screening_draws = np.full(
+            annual_draws.shape,
+            -installed_capex_eur,
+            dtype=np.float64,
+        )
+        for index, discount_factor in enumerate(discount_factors):
+            screening_draws += settled_matrix[:, index] * float(discount_factor)
+    if not np.isfinite(screening_draws).all():
+        raise ProjectCaseValidationError("RunResult screening NPV reconstruction overflowed")
+
+    def _require_distribution(draws: np.ndarray, outcome: NpvOutcome, label: str) -> None:
+        assert outcome.distribution is not None
+        expected_percentiles = np.percentile(
+            draws,
+            [10.0, 50.0, 90.0],
+            method="linear",
+        )
+        expected_values = (
+            float(expected_percentiles[0]),
+            float(expected_percentiles[1]),
+            float(expected_percentiles[2]),
+            float(np.mean(draws > 0.0)),
+        )
+        actual_values = (
+            outcome.distribution.p10,
+            outcome.distribution.p50,
+            outcome.distribution.p90,
+            outcome.distribution.prob_positive,
+        )
+        if actual_values != expected_values:
+            raise ProjectCaseValidationError(
+                f"{label} NPV distribution does not match fingerprinted inputs"
+            )
+
+    _require_distribution(
+        screening_draws,
+        result.no_lifecycle_cost_screening_npv,
+        "screening",
+    )
+    if lifecycle is not None:
+        with np.errstate(over="ignore", invalid="ignore"):
+            lifecycle_adjustment = math.fsum(
+                float((-fixed_om - augmentation[index] + terminal[index]) * discount_factors[index])
+                for index in range(life)
+            )
+            lifecycle_draws = screening_draws + lifecycle_adjustment
+        if not np.isfinite(lifecycle_draws).all():
+            raise ProjectCaseValidationError("RunResult lifecycle NPV reconstruction overflowed")
+        _require_distribution(lifecycle_draws, result.lifecycle_cash_npv, "lifecycle")
+
+    def _require_reconciled(table: CashflowTable, outcome: NpvOutcome, label: str) -> None:
+        assert outcome.distribution is not None
+        reconciled = -installed_capex_eur + math.fsum(row.discounted_net_eur for row in table.rows)
+        if not math.isclose(
+            reconciled,
+            outcome.distribution.p50,
+            rel_tol=CASHFLOW_RECONCILIATION_REL_TOL_V1,
+            abs_tol=CASHFLOW_RECONCILIATION_ABS_TOL_EUR_V1,
+        ):
+            raise ProjectCaseValidationError(
+                f"{label} cashflow table does not reconcile to the reported P50 under "
+                f"{CASHFLOW_RECONCILIATION_VERSION_V1}"
+            )
+
+    _require_reconciled(screening, result.no_lifecycle_cost_screening_npv, "screening")
+    if lifecycle is not None:
+        _require_reconciled(lifecycle, result.lifecycle_cash_npv, "lifecycle")
 
 
 @dataclass(frozen=True)
@@ -1651,14 +3347,16 @@ class RunResult:
     no_lifecycle_cost_screening_npv: NpvOutcome
     lifecycle_cash_npv: NpvOutcome
     provenance: Mapping[str, Any]
-    schema_version: str = SCHEMA_VERSION
+    schema_version: str = RUN_RESULT_SCHEMA_VERSION
     screening_cashflow_table: CashflowTable | None = None
     lifecycle_cashflow_table: CashflowTable | None = None
 
     def __post_init__(self) -> None:
         _hex64(self.input_fingerprint, "input_fingerprint")
-        if self.schema_version != SCHEMA_VERSION:
-            raise ProjectCaseValidationError(f"schema_version must be {SCHEMA_VERSION!r}")
+        if self.schema_version != RUN_RESULT_SCHEMA_VERSION:
+            raise ProjectCaseValidationError(
+                f"schema_version must be {RUN_RESULT_SCHEMA_VERSION!r}"
+            )
         for name in ("no_lifecycle_cost_screening_npv", "lifecycle_cash_npv"):
             if not isinstance(getattr(self, name), NpvOutcome):
                 raise ProjectCaseValidationError(f"{name} must be an NpvOutcome")
@@ -1674,8 +3372,7 @@ class RunResult:
         # (§3/§4.6); any other status/message is not a valid RunResult state.
         life = self.lifecycle_cash_npv
         if not life.available and (
-            life.status != LIFECYCLE_UNKNOWN_STATUS
-            or life.message != LIFECYCLE_UNKNOWN_MESSAGE
+            life.status != LIFECYCLE_UNKNOWN_STATUS or life.message != LIFECYCLE_UNKNOWN_MESSAGE
         ):
             raise ProjectCaseValidationError(
                 "an unavailable lifecycle_cash_npv must be exactly "
@@ -1685,11 +3382,11 @@ class RunResult:
         self._validate_table_state(
             "screening_cashflow_table", self.no_lifecycle_cost_screening_npv, "screening"
         )
-        self._validate_table_state(
-            "lifecycle_cashflow_table", self.lifecycle_cash_npv, "lifecycle"
-        )
+        self._validate_table_state("lifecycle_cashflow_table", self.lifecycle_cash_npv, "lifecycle")
         if not isinstance(self.provenance, Mapping):
             raise ProjectCaseValidationError("provenance must be a mapping")
+        _validate_run_result_provenance(self.provenance, self.input_fingerprint)
+        _validate_run_result_tables(self)
         object.__setattr__(self, "provenance", _freeze_provenance(dict(self.provenance)))
 
     def _validate_table_state(self, attr: str, outcome: NpvOutcome, basis: str) -> None:
@@ -1719,11 +3416,13 @@ class RunResult:
             "no_lifecycle_cost_screening_npv": self.no_lifecycle_cost_screening_npv.to_payload(),
             "lifecycle_cash_npv": self.lifecycle_cash_npv.to_payload(),
             "screening_cashflow_table": (
-                None if self.screening_cashflow_table is None
+                None
+                if self.screening_cashflow_table is None
                 else self.screening_cashflow_table.to_payload()
             ),
             "lifecycle_cashflow_table": (
-                None if self.lifecycle_cashflow_table is None
+                None
+                if self.lifecycle_cashflow_table is None
                 else self.lifecycle_cashflow_table.to_payload()
             ),
             "provenance": _deep_thaw(self.provenance),
