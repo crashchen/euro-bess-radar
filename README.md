@@ -91,7 +91,7 @@ euro-bess-radar/
 ├── scripts/                  # Maintenance/demo scripts (seed + Netztransparenz converter)
 ├── samples/                  # Generated demo CSVs from seed_demo_9_2b.py (git-ignored)
 ├── docs/runbooks/            # Operator runbooks (9.2b + imbalance validation, manual UI smoke)
-├── docs/design/              # Locked contracts, including solver failure, economic semantics, and price-resolution transitions
+├── docs/design/              # Locked contracts + candidate PC-D0 strategy-cash floor settlement contract/vectors
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads
