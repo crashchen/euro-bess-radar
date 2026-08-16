@@ -35,6 +35,7 @@ from src.project_case.audit import (
 from src.project_case.enums import (
     BUCKET_BLOCK_OF_DAY_4H,
     DA_ID_BUCKETS,
+    PC_A_CALCULATOR_VERSION,
     RESERVE_PRICE_AGGREGATION_V1,
     WALK_FORWARD,
     CurrencyBasisMode,
@@ -58,8 +59,6 @@ from src.project_case.schema import (
     StrategyRunResult,
     _issue_strategy_run_result,
 )
-
-PC_A_CALCULATOR_VERSION = "pc-a-v1"
 
 _DA_COL = "price_eur_mwh"
 _IDA_COL = "intraday_price_eur_mwh"
@@ -315,9 +314,16 @@ def _run_da_only(
     from src.simulation import simulate_replay_batch
 
     return simulate_replay_batch(
-        da_prices, mode="DA MILP Replay", tz=tz, dates=list(dates),
-        power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
-        capture_rate=capture_rate, soc_init_frac=0.5, carry_soc=False,
+        da_prices,
+        mode="DA MILP Replay",
+        tz=tz,
+        dates=list(dates),
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        capture_rate=capture_rate,
+        soc_init_frac=0.5,
+        carry_soc=False,
     )
 
 
@@ -336,9 +342,16 @@ def _run_da_id(
     from src.simulation import simulate_sequential_da_id_batch
 
     per_day, _ = simulate_sequential_da_id_batch(
-        da_prices, ida_prices, dates=list(dates), tz=tz, power_mw=power_mw,
-        duration_hours=duration_hours, efficiency=efficiency, bucket=bucket,
-        forecast_mode=WALK_FORWARD, min_rebid_uplift_eur=min_rebid_uplift_eur,
+        da_prices,
+        ida_prices,
+        dates=list(dates),
+        tz=tz,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        bucket=bucket,
+        forecast_mode=WALK_FORWARD,
+        min_rebid_uplift_eur=min_rebid_uplift_eur,
         soc_init_frac=0.5,  # bound explicitly (red-line #22), not inherited
     )
     return per_day
@@ -359,9 +372,14 @@ def _run_reserve_coopt(
 
     restricted = _restrict_frame(da_prices, tz, frozenset(dates))
     return solve_joint_capacity_batch(
-        restricted, capacity_price_eur_mw_h=reserve_scalar, power_mw=power_mw,
-        duration_hours=duration_hours, efficiency=efficiency, tz=tz,
-        soc_init_frac=0.5, availability=availability,
+        restricted,
+        capacity_price_eur_mw_h=reserve_scalar,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        tz=tz,
+        soc_init_frac=0.5,
+        availability=availability,
         capacity_nominal_block_hours=4,
     )
 
@@ -382,9 +400,17 @@ def _run_da_id_reserve(
     from src.simulation import simulate_sequential_da_id_reserve_batch
 
     per_day, _ = simulate_sequential_da_id_reserve_batch(
-        da_prices, ida_prices, _block_series(reserve_block_prices), dates=list(dates),
-        tz=tz, power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
-        availability=availability, bucket=bucket, forecast_mode=WALK_FORWARD,
+        da_prices,
+        ida_prices,
+        _block_series(reserve_block_prices),
+        dates=list(dates),
+        tz=tz,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        availability=availability,
+        bucket=bucket,
+        forecast_mode=WALK_FORWARD,
         soc_init_frac=0.5,  # bound explicitly (red-line #22), not inherited
         capacity_nominal_block_hours=4,
     )
@@ -413,29 +439,51 @@ def emit_da_only(
     sample_window = SampleWindow(first_delivery_date, last_delivery_date, tz)
     observed = sample_window.evaluation_dates()
     da_series = _column_series(da_prices, _DA_COL, "DA")
-    gate = classify_leg_complete_dates(
-        da_series, zone=zone, leg="da", evaluation_dates=observed
-    )
+    gate = classify_leg_complete_dates(da_series, zone=zone, leg="da", evaluation_dates=observed)
     per_day = _run_da_only(
-        da_prices, tz=tz, dates=sorted(gate), power_mw=power_mw,
-        duration_hours=duration_hours, efficiency=efficiency, capture_rate=capture_rate,
+        da_prices,
+        tz=tz,
+        dates=sorted(gate),
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        capture_rate=capture_rate,
     )
     series, valid, missing, solver_failed, details = _partition(
-        observed=observed, gate=gate, per_day=per_day,
-        cash_field=spec.per_day_cash_field, stage=spec.source_function,
+        observed=observed,
+        gate=gate,
+        per_day=per_day,
+        cash_field=spec.per_day_cash_field,
+        stage=spec.source_function,
     )
-    capture = CaptureBasis(applied=(float(capture_rate) != 1.0), rate=capture_rate, source=capture_source)
+    capture = CaptureBasis(
+        applied=(float(capture_rate) != 1.0), rate=capture_rate, source=capture_source
+    )
     return _build_result(
-        spec=spec, zone=zone, sample_window=sample_window, series=series,
-        observed=observed, valid=valid, missing=missing, solver_failed=solver_failed,
-        details=details, power_mw=power_mw, duration_hours=duration_hours,
+        spec=spec,
+        zone=zone,
+        sample_window=sample_window,
+        series=series,
+        observed=observed,
+        valid=valid,
+        missing=missing,
+        solver_failed=solver_failed,
+        details=details,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
         efficiency=efficiency,
         cash_basis=CashBasis(True, capture, LiquidityBasis(False)),
-        currency_basis=currency_basis, forecast_audits=ForecastAudits(),
-        reserve_product=None, reserve_source=None, availability=None,
-        reserve_coverage_audit=None, capture_rate=float(capture_rate),
-        reserve_price_aggregation=None, reserve_pricing_dates=None,
-        reserve_scalar_price_eur_mw_h=None, mode="DA MILP Replay",
+        currency_basis=currency_basis,
+        forecast_audits=ForecastAudits(),
+        reserve_product=None,
+        reserve_source=None,
+        availability=None,
+        reserve_coverage_audit=None,
+        capture_rate=float(capture_rate),
+        reserve_price_aggregation=None,
+        reserve_pricing_dates=None,
+        reserve_scalar_price_eur_mw_h=None,
+        mode="DA MILP Replay",
         source_data_content_hash=_content_hash({"da": da_series}),
     )
 
@@ -466,31 +514,54 @@ def emit_da_id(
     observed = sample_window.evaluation_dates()
     da_series = _column_series(da_prices, _DA_COL, "DA")
     ida_series = _column_series(ida_prices, _IDA_COL, "IDA")
-    gate = classify_leg_complete_dates(da_series, zone=zone, leg="da", evaluation_dates=observed) & \
-        classify_leg_complete_dates(ida_series, zone=zone, leg="ida", evaluation_dates=observed)
+    gate = classify_leg_complete_dates(
+        da_series, zone=zone, leg="da", evaluation_dates=observed
+    ) & classify_leg_complete_dates(ida_series, zone=zone, leg="ida", evaluation_dates=observed)
     per_day = _run_da_id(
-        da_prices, ida_prices, tz=tz, dates=sorted(gate), power_mw=power_mw,
-        duration_hours=duration_hours, efficiency=efficiency, bucket=bucket,
+        da_prices,
+        ida_prices,
+        tz=tz,
+        dates=sorted(gate),
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        bucket=bucket,
         min_rebid_uplift_eur=min_rebid_uplift_eur,
     )
     series, valid, missing, solver_failed, details = _partition(
-        observed=observed, gate=gate, per_day=per_day,
-        cash_field=spec.per_day_cash_field, stage=spec.source_function,
+        observed=observed,
+        gate=gate,
+        per_day=per_day,
+        cash_field=spec.per_day_cash_field,
+        stage=spec.source_function,
     )
     return _build_result(
-        spec=spec, zone=zone, sample_window=sample_window, series=series,
-        observed=observed, valid=valid, missing=missing, solver_failed=solver_failed,
-        details=details, power_mw=power_mw, duration_hours=duration_hours,
+        spec=spec,
+        zone=zone,
+        sample_window=sample_window,
+        series=series,
+        observed=observed,
+        valid=valid,
+        missing=missing,
+        solver_failed=solver_failed,
+        details=details,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
         efficiency=efficiency,
         cash_basis=CashBasis(True, CaptureBasis(False, 1.0, "not_applied"), LiquidityBasis(False)),
         currency_basis=currency_basis,
         forecast_audits=ForecastAudits(
             ida=ForecastAudit(WALK_FORWARD, bucket, float(min_rebid_uplift_eur))
         ),
-        reserve_product=None, reserve_source=None, availability=None,
-        reserve_coverage_audit=None, capture_rate=None,
-        reserve_price_aggregation=None, reserve_pricing_dates=None,
-        reserve_scalar_price_eur_mw_h=None, mode=None,
+        reserve_product=None,
+        reserve_source=None,
+        availability=None,
+        reserve_coverage_audit=None,
+        capture_rate=None,
+        reserve_price_aggregation=None,
+        reserve_pricing_dates=None,
+        reserve_scalar_price_eur_mw_h=None,
+        mode=None,
         source_data_content_hash=_content_hash({"da": da_series, "ida": ida_series}),
     )
 
@@ -519,7 +590,9 @@ def emit_reserve_coopt(
     sample_window = SampleWindow(first_delivery_date, last_delivery_date, tz)
     observed = sample_window.evaluation_dates()
     da_series = _column_series(da_prices, _DA_COL, "DA")
-    da_complete = classify_leg_complete_dates(da_series, zone=zone, leg="da", evaluation_dates=observed)
+    da_complete = classify_leg_complete_dates(
+        da_series, zone=zone, leg="da", evaluation_dates=observed
+    )
     reserve_audit = build_reserve_coverage_audit(
         reserve_block_prices, zone=zone, evaluation_dates=observed
     )
@@ -531,25 +604,46 @@ def emit_reserve_coopt(
     pricing_tuple = tuple(sorted(pricing_dates))
     scalar = reserve_scalar_price(reserve_block_prices, zone=zone, pricing_dates=pricing_tuple)
     per_day = _run_reserve_coopt(
-        da_prices, tz=tz, dates=list(pricing_tuple), reserve_scalar=scalar,
-        power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
+        da_prices,
+        tz=tz,
+        dates=list(pricing_tuple),
+        reserve_scalar=scalar,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
         availability=availability,
     )
     series, valid, missing, solver_failed, details = _partition(
-        observed=observed, gate=pricing_dates, per_day=per_day,
-        cash_field=spec.per_day_cash_field, stage=spec.source_function,
+        observed=observed,
+        gate=pricing_dates,
+        per_day=per_day,
+        cash_field=spec.per_day_cash_field,
+        stage=spec.source_function,
     )
     return _build_result(
-        spec=spec, zone=zone, sample_window=sample_window, series=series,
-        observed=observed, valid=valid, missing=missing, solver_failed=solver_failed,
-        details=details, power_mw=power_mw, duration_hours=duration_hours,
+        spec=spec,
+        zone=zone,
+        sample_window=sample_window,
+        series=series,
+        observed=observed,
+        valid=valid,
+        missing=missing,
+        solver_failed=solver_failed,
+        details=details,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
         efficiency=efficiency,
         cash_basis=CashBasis(True, CaptureBasis(False, 1.0, "not_applied"), LiquidityBasis(False)),
-        currency_basis=currency_basis, forecast_audits=ForecastAudits(),
-        reserve_product=reserve_product, reserve_source=reserve_source,
-        availability=availability, reserve_coverage_audit=reserve_audit,
-        capture_rate=None, reserve_price_aggregation=RESERVE_PRICE_AGGREGATION_V1,
-        reserve_pricing_dates=pricing_tuple, reserve_scalar_price_eur_mw_h=scalar,
+        currency_basis=currency_basis,
+        forecast_audits=ForecastAudits(),
+        reserve_product=reserve_product,
+        reserve_source=reserve_source,
+        availability=availability,
+        reserve_coverage_audit=reserve_audit,
+        capture_rate=None,
+        reserve_price_aggregation=RESERVE_PRICE_AGGREGATION_V1,
+        reserve_pricing_dates=pricing_tuple,
+        reserve_scalar_price_eur_mw_h=scalar,
         mode=None,
         source_data_content_hash=_content_hash(
             {"da": da_series, "reserve": _block_series(reserve_block_prices)}
@@ -590,22 +684,44 @@ def emit_da_id_reserve(
         reserve_block_prices, zone=zone, evaluation_dates=observed
     )
     covered = reserve_audit.covered_dates
-    da_complete = classify_leg_complete_dates(da_series, zone=zone, leg="da", evaluation_dates=observed)
-    ida_complete = classify_leg_complete_dates(ida_series, zone=zone, leg="ida", evaluation_dates=observed)
+    da_complete = classify_leg_complete_dates(
+        da_series, zone=zone, leg="da", evaluation_dates=observed
+    )
+    ida_complete = classify_leg_complete_dates(
+        ida_series, zone=zone, leg="ida", evaluation_dates=observed
+    )
     gate = frozenset(d for d in (da_complete & ida_complete) if d in covered)
     per_day = _run_da_id_reserve(
-        da_prices, ida_prices, reserve_block_prices, tz=tz, dates=sorted(gate),
-        power_mw=power_mw, duration_hours=duration_hours, efficiency=efficiency,
-        availability=availability, bucket=bucket,
+        da_prices,
+        ida_prices,
+        reserve_block_prices,
+        tz=tz,
+        dates=sorted(gate),
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        availability=availability,
+        bucket=bucket,
     )
     series, valid, missing, solver_failed, details = _partition(
-        observed=observed, gate=gate, per_day=per_day,
-        cash_field=spec.per_day_cash_field, stage=spec.source_function,
+        observed=observed,
+        gate=gate,
+        per_day=per_day,
+        cash_field=spec.per_day_cash_field,
+        stage=spec.source_function,
     )
     return _build_result(
-        spec=spec, zone=zone, sample_window=sample_window, series=series,
-        observed=observed, valid=valid, missing=missing, solver_failed=solver_failed,
-        details=details, power_mw=power_mw, duration_hours=duration_hours,
+        spec=spec,
+        zone=zone,
+        sample_window=sample_window,
+        series=series,
+        observed=observed,
+        valid=valid,
+        missing=missing,
+        solver_failed=solver_failed,
+        details=details,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
         efficiency=efficiency,
         cash_basis=CashBasis(True, CaptureBasis(False, 1.0, "not_applied"), LiquidityBasis(False)),
         currency_basis=currency_basis,
@@ -614,10 +730,15 @@ def emit_da_id_reserve(
             ida=ForecastAudit(WALK_FORWARD, bucket, None),
             reserve=ForecastAudit(WALK_FORWARD, BUCKET_BLOCK_OF_DAY_4H, None),
         ),
-        reserve_product=reserve_product, reserve_source=reserve_source,
-        availability=availability, reserve_coverage_audit=reserve_audit,
-        capture_rate=None, reserve_price_aggregation=None,
-        reserve_pricing_dates=None, reserve_scalar_price_eur_mw_h=None, mode=None,
+        reserve_product=reserve_product,
+        reserve_source=reserve_source,
+        availability=availability,
+        reserve_coverage_audit=reserve_audit,
+        capture_rate=None,
+        reserve_price_aggregation=None,
+        reserve_pricing_dates=None,
+        reserve_scalar_price_eur_mw_h=None,
+        mode=None,
         source_data_content_hash=_content_hash(
             {"da": da_series, "ida": ida_series, "reserve": _block_series(reserve_block_prices)}
         ),

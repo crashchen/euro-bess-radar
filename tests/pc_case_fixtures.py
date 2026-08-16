@@ -11,13 +11,22 @@ import datetime as dt
 import pandas as pd
 
 from src.project_case import (
+    CONTRACT_ASSET_SCOPE_V1,
+    CONTRACT_QUOTE_BASIS_V1,
+    CONTRACT_SETTLEMENT_FREQUENCY_V1,
     AdapterProvenance,
+    AnnualPreLifecycleStrategyCashFloor,
     AssetCase,
     AugmentationEvent,
     BootstrapCase,
     CapacityMaintenanceBasis,
     CaptureBasis,
     CashBasis,
+    ContractCase,
+    ContractCurrencyBasis,
+    ContractCurrencyBasisMode,
+    ContractQuoteStatus,
+    ContractSettlementBasis,
     CoverageAudit,
     CurrencyBasis,
     CurrencyBasisMode,
@@ -59,7 +68,9 @@ def da_only_srr() -> StrategyRunResult:
         return StrategyRunResult(
             strategy_kind=StrategyKind.DA_ONLY,
             daily_realised_cash_series=((D1, 123.5), (D2, -12.0)),
-            cash_basis=CashBasis(True, CaptureBasis(True, 0.9, "da_slippage"), LiquidityBasis(False)),
+            cash_basis=CashBasis(
+                True, CaptureBasis(True, 0.9, "da_slippage"), LiquidityBasis(False)
+            ),
             power_mw=10.0,
             duration_hours=2.0,
             round_trip_efficiency=0.88,
@@ -108,7 +119,9 @@ def da_id_reserve_srr() -> StrategyRunResult:
         return StrategyRunResult(
             strategy_kind=StrategyKind.DA_ID_RESERVE_REALISED,
             daily_realised_cash_series=((D1, 300.0), (D2, 250.0)),
-            cash_basis=CashBasis(True, CaptureBasis(False, 1.0, "not_applied"), LiquidityBasis(False)),
+            cash_basis=CashBasis(
+                True, CaptureBasis(False, 1.0, "not_applied"), LiquidityBasis(False)
+            ),
             power_mw=10.0,
             duration_hours=2.0,
             round_trip_efficiency=0.88,
@@ -150,7 +163,40 @@ def da_id_reserve_srr() -> StrategyRunResult:
         )
 
 
-def project_case(srr: StrategyRunResult | None = None) -> ProjectCase:
+def contract_case(
+    *,
+    base_year: int = 2026,
+    start_year: int = 2,
+    rates: tuple[float, ...] = (10.0, 20.0),
+    entitlement_factors: tuple[float, ...] = (0.5, 1.0),
+) -> ContractCase:
+    """Canonical v1.1 annual strategy-cash floor used across D1/D2/D3 tests."""
+    return ContractCase(
+        settlement_basis=(ContractSettlementBasis.ANNUAL_PRE_LIFECYCLE_STRATEGY_CASH_FLOOR_V1),
+        settlement_terms=AnnualPreLifecycleStrategyCashFloor(
+            contract_start_project_year=start_year,
+            floor_rate_real_eur_per_modeled_mw_year_by_contract_year=rates,
+            floor_entitlement_factor_by_contract_year=entitlement_factors,
+            quote_basis=CONTRACT_QUOTE_BASIS_V1,
+            settlement_frequency=CONTRACT_SETTLEMENT_FREQUENCY_V1,
+            asset_scope=CONTRACT_ASSET_SCOPE_V1,
+            currency_basis=ContractCurrencyBasis(
+                ContractCurrencyBasisMode.USER_ASSERTED_REAL_BASE_YEAR_EUR_CURVE,
+                base_year,
+            ),
+            quote_status=ContractQuoteStatus.USER_SCENARIO,
+            source="PC-D test scenario",
+            source_as_of_date="2026-08-16",
+            source_document_sha256=None,
+        ),
+    )
+
+
+def project_case(
+    srr: StrategyRunResult | None = None,
+    *,
+    contract: ContractCase | None = None,
+) -> ProjectCase:
     """Canonical ProjectCase over the DA_ONLY strategy (golden-vector fixture)."""
     srr = srr or da_only_srr()
     return ProjectCase(
@@ -167,6 +213,7 @@ def project_case(srr: StrategyRunResult | None = None) -> ProjectCase:
         MarketCase(srr, Projection(ProjectionKind.DAOnlySpreadDecay, 0.02, 0.5)),
         ValuationCase(0.08, 2026),
         BootstrapCase(20260810, 5000, "pc-bootstrap-pcg64-choice365-linear-v1"),
+        contract,
     )
 
 
@@ -234,7 +281,10 @@ def fake_coopt_runner(
 ):
     def _run(*_args, **_kwargs):
         df = pd.DataFrame(
-            {"date": [d for d, _ in dates_values], "joint_total_revenue": [v for _, v in dates_values]}
+            {
+                "date": [d for d, _ in dates_values],
+                "joint_total_revenue": [v for _, v in dates_values],
+            }
         )
         if failures is not None:
             df.attrs["solver_failure_details"] = list(failures)

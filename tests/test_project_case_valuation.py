@@ -275,6 +275,10 @@ def test_one_bootstrap_draw_is_reused_across_all_years(monkeypatch):
         "src.project_case.valuation.bootstrap_annual_sums",
         fake_bootstrap,
     )
+    monkeypatch.setattr(
+        "src.project_case.schema.bootstrap_annual_sums",
+        lambda _values, *, seed, n_simulations: annual_draws.copy(),
+    )
     result = compute_project_case(
         _case(
             life_years=2,
@@ -304,6 +308,10 @@ def test_cashflow_table_uses_p50_not_mean_for_a_skewed_bootstrap(monkeypatch):
         "src.project_case.valuation.bootstrap_annual_sums",
         fake_bootstrap,
     )
+    monkeypatch.setattr(
+        "src.project_case.schema.bootstrap_annual_sums",
+        fake_bootstrap,
+    )
     result = compute_project_case(_case(life_years=2))
     assert all(row.revenue_eur == 0.0 for row in result.screening_cashflow_table.rows)
     assert _distribution(result).p50 == 0.0
@@ -320,6 +328,10 @@ def test_lifecycle_distribution_is_the_same_per_draw_adjustment(monkeypatch):
 
     monkeypatch.setattr(
         "src.project_case.valuation.bootstrap_annual_sums",
+        fake_bootstrap,
+    )
+    monkeypatch.setattr(
+        "src.project_case.schema.bootstrap_annual_sums",
         fake_bootstrap,
     )
     result = compute_project_case(
@@ -387,8 +399,8 @@ def test_result_fingerprint_provenance_and_red_line_assertions():
     case = _case(life_years=2)
     result = compute_project_case(case)
     assert result.input_fingerprint == case.input_fingerprint()
-    assert result.schema_version == "project-case-v1"
-    assert result.provenance["calculator_version"] == "pc-b-v1"
+    assert result.schema_version == "project-case-v1.1"
+    assert result.provenance["calculator_version"] == "pc-d2-v1.1"
     assert result.provenance["project_case_input_fingerprint"] == case.input_fingerprint()
     assert result.provenance["strategy_run_fingerprint"] == (
         case.market_case.strategy_run_result.fingerprint()
@@ -399,12 +411,25 @@ def test_result_fingerprint_provenance_and_red_line_assertions():
     assert result.provenance["cashflow_table_statistic"] == (
         "p50_annual_bootstrap_draw_linear"
     )
+    assert result.provenance["contract_settlement"] == {
+        "basis": None,
+        "algorithm_version": None,
+        "resolved_floor_by_project_year": (),
+        "representative_interpolation": None,
+    }
+    assert result.provenance["cashflow_reconciliation"] == {
+        "version": "pc-cashflow-p50-reconciliation-v1",
+        "relative_tolerance": 1e-10,
+        "absolute_tolerance_eur": 1e-6,
+    }
     assertions = result.provenance["red_line_assertions"]
     assert assertions == {
         "cash_npv_includes_shadow_wear": False,
         "vom_rededucted": False,
         "mw_rescaled": False,
-        "floor_included": False,
+        "wear_net_floor_comparator_included": False,
+        "contract_settlement_included": False,
+        "contract_settlement_basis": None,
         "pre_tax_unlevered": True,
         "tax_included": False,
         "debt_included": False,

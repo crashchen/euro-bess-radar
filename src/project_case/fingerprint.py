@@ -30,13 +30,28 @@ import hashlib
 import struct
 import unicodedata
 from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 from typing import Any
 
 PROFILE = "PC-CBOR-F64-v1"
-SCHEMA_VERSION = "project-case-v1"
+STRATEGY_RUN_RESULT_SCHEMA_VERSION = "project-case-v1"
+PROJECT_CASE_SCHEMA_VERSION = "project-case-v1.1"
+RUN_RESULT_SCHEMA_VERSION = PROJECT_CASE_SCHEMA_VERSION
+
+# Deprecated compatibility alias for the pre-v1.1 single-version API.  Keep its
+# historical v1 value: globally replacing this name is precisely the migration
+# hazard the locked contract forbids.  New code must select one of the explicit
+# object-specific constants above.
+SCHEMA_VERSION = STRATEGY_RUN_RESULT_SCHEMA_VERSION
 
 # The only two object types the envelope wraps.
-_OBJECT_TYPES = frozenset({"ProjectCase", "StrategyRunResult"})
+_OBJECT_SCHEMA_VERSIONS = MappingProxyType(
+    {
+        "ProjectCase": PROJECT_CASE_SCHEMA_VERSION,
+        "StrategyRunResult": STRATEGY_RUN_RESULT_SCHEMA_VERSION,
+    }
+)
+_OBJECT_TYPES = frozenset(_OBJECT_SCHEMA_VERSIONS)
 
 
 def _head(major: int, length: int) -> bytes:
@@ -117,7 +132,7 @@ def encode_envelope(object_type: str, payload: Mapping[str, Any]) -> bytes:
         {
             "profile": PROFILE,
             "object_type": object_type,
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": _OBJECT_SCHEMA_VERSIONS[object_type],
             "payload": payload,
         }
     )

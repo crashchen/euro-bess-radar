@@ -4,14 +4,15 @@ The page is deliberately split into two layers:
 
 * :func:`render_project_case_panel` is the single input/run owner in the Revenue
   tab.  It builds one selected, data-supported producer-issued
-  ``StrategyRunResult``, then a validated ``ProjectCase`` and finally calls PC-B
+  ``StrategyRunResult``, then a validated ``ProjectCase`` and finally calls the
+  current Project Case valuation kernel
   exactly once on an explicit button click.
 * :func:`render_project_case_result` is a pure ``RunResult`` consumer.  The
   Revenue tab and Simulation Cockpit both use it, so neither reconstructs NPV
   arithmetic from ambient widgets or a strategy-comparison table.
 
-Contracted-floor outputs remain a separate cockpit comparator and never enter
-this module's inputs, result cache, or export.
+The legacy wear-net contracted-floor comparator remains separate and never
+enters this module's inputs, result cache, or export.
 """
 
 from __future__ import annotations
@@ -29,8 +30,8 @@ from src.project_case import (
     BOOTSTRAP_ALGORITHM_V1,
     EXPECTED_GRID_REGISTRY_VERSION,
     PC_A_CALCULATOR_VERSION,
-    PC_B_CALCULATOR_VERSION,
-    SCHEMA_VERSION,
+    PC_D2_CALCULATOR_VERSION,
+    PROJECT_CASE_SCHEMA_VERSION,
     AssetCase,
     BootstrapCase,
     CapacityMaintenanceBasis,
@@ -73,8 +74,10 @@ PROBABILITY_LABEL: Final = "P(NPV > 0)"
 
 _CACHE_KEY: Final = "project_case_pc_c_cache"
 _P50_TABLE_CAPTION: Final = (
-    "Representative cash-flow tables use the linear P50 annual bootstrap draw; "
-    "they are not expected-value tables. Year 0 CapEx is excluded from the rows: "
+    "Representative cash-flow tables reconcile to the linear P50 NPV. "
+    "Merchant-only cases use the linear P50 annual bootstrap draw; contracted "
+    "cases use the rank-interpolated settled path. They are neither expected-value "
+    "tables nor year-wise medians. Year 0 CapEx is excluded from the rows: "
     "NPV P50 = -CapEx + sum(discounted net cash flow)."
 )
 
@@ -433,9 +436,9 @@ def _request_fingerprint(
 
     payload = {
         "implementation_versions": {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": PROJECT_CASE_SCHEMA_VERSION,
             "pc_a_calculator_version": PC_A_CALCULATOR_VERSION,
-            "pc_b_calculator_version": PC_B_CALCULATOR_VERSION,
+            "pc_d2_calculator_version": PC_D2_CALCULATOR_VERSION,
             "expected_grid_registry_version": EXPECTED_GRID_REGISTRY_VERSION,
         },
         "zone": primary_zone,
@@ -456,10 +459,10 @@ def _request_fingerprint(
 
 
 def _result_uses_current_versions(result: RunResult) -> bool:
-    if result.schema_version != SCHEMA_VERSION:
+    if result.schema_version != PROJECT_CASE_SCHEMA_VERSION:
         return False
     provenance = result.provenance
-    if provenance.get("calculator_version") != PC_B_CALCULATOR_VERSION:
+    if provenance.get("calculator_version") != PC_D2_CALCULATOR_VERSION:
         return False
     strategy = provenance.get("strategy_run_result")
     if not isinstance(strategy, Mapping):
