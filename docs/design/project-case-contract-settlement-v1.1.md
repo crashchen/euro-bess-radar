@@ -1,8 +1,27 @@
 # Project Case v1.1 — annual pre-lifecycle strategy-cash floor settlement
 
-Status: **candidate** (PC-D0 design-contract round; not locked, not implemented)
+Status: **locked** (PC-D0 design-contract — LOCKED by a dual **APPROVE** on the
+candidate `0c282254aa1388d9df1f700cc43a0f98e8b1156b`: Codex **APPROVE** and
+Gemini **APPROVE** — same-hash, zero blocking findings under the §13 bar —
+alongside CC's independent machine-verification: both canonical ProjectCase
+fingerprint golden vectors reproduced byte-for-byte + SHA-256 exact, all §10
+arithmetic vectors A–D and their factor mutants recomputed (31/31 checks), and
+`test_project_case_fingerprint.py` green at 17/17. This lock changes only the
+status/metadata below; the contract body and the JSON golden vectors are
+unchanged. PC-D1+D2 (atomic) implementation begins once this docs-only lock PR
+merges.)
 
 Candidate date: 2026-08-16
+
+Locked on: 2026-08-16
+
+Review metadata (lock):
+
+```
+reviewed_candidate_commit: 0c282254aa1388d9df1f700cc43a0f98e8b1156b
+lock_basis: dual_approve
+locked_on: 2026-08-16
+```
 
 Extends: [`project-case-v1.md`](./project-case-v1.md), especially its §4.5
 `ContractCase.settlement_basis` v1.1 hook.
