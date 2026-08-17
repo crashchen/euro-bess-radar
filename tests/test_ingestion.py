@@ -446,6 +446,68 @@ class TestFetchPricesRouting:
         mock_read_cache.assert_not_called()
         mock_entsoe.assert_called_once()
 
+    @patch("src.data_ingestion.fetch_entsoe_prices")
+    def test_fetch_never_writes_outside_the_isolated_cache(
+        self,
+        mock_entsoe: MagicMock,
+        mock_price_df: pd.DataFrame,
+        isolate_cache_paths: Path,
+    ) -> None:
+        """A fetch path must not touch the repository's real cache.
+
+        ``use_cache=False`` suppresses the cache *read* only; ``write_cache`` runs
+        unconditionally. Without the autouse ``isolate_cache_paths`` fixture these
+        routing tests wrote fixture prices into ``data/cache`` — bounded rows in
+        SQLite, but a wholesale overwrite of the zone's CSV export.
+
+        Isolation is asserted BEFORE the fetch runs, against the directory the
+        fixture actually created. Checking only afterwards would let a broken or
+        deleted fixture overwrite the real cache first and report the damage
+        second — the exact failure this test exists to prevent.
+        """
+        from src import config as real_config
+        from src import data_ingestion as di
+        from src import export as real_export
+
+        assert isolate_cache_paths != real_config.CACHE_DIR
+        assert isolate_cache_paths == di.CACHE_DIR
+        assert isolate_cache_paths / "bess_pulse.db" == di.DB_PATH
+        assert isolate_cache_paths == real_export.CACHE_DIR
+
+        mock_entsoe.return_value = mock_price_df
+
+        fetch_prices(
+            zone="DE_LU",
+            start=pd.Timestamp("2025-01-01", tz="UTC"),
+            end=pd.Timestamp("2025-01-02", tz="UTC"),
+            use_cache=False,
+        )
+
+        assert (isolate_cache_paths / "da_prices_de_lu.csv").exists()
+        assert (isolate_cache_paths / "bess_pulse.db").exists()
+
+    def test_cache_isolation_survives_a_test_level_monkeypatch_undo(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        isolate_cache_paths: Path,
+        tmp_path: Path,
+    ) -> None:
+        """``monkeypatch.undo()`` in a test must not revoke the cache isolation.
+
+        The autouse fixture holds its patches on a private ``MonkeyPatch``. If it
+        ever reverts to the shared ``monkeypatch`` fixture, an unrelated test that
+        swaps a stub mid-body (``test_stochastic_dispatch`` does) would silently
+        restore the real cache bindings for the rest of that test.
+        """
+        from src import config as real_config
+        from src import data_ingestion as di
+
+        monkeypatch.setattr(di, "CACHE_DIR", tmp_path / "elsewhere")
+        monkeypatch.undo()
+
+        assert isolate_cache_paths == di.CACHE_DIR
+        assert di.CACHE_DIR != real_config.CACHE_DIR
+
 
 # ── Test 5: clean_prices fills gaps ──────────────────────────────────────────
 

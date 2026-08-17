@@ -2,8 +2,45 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from pathlib import Path
+
 import pandas as pd
 import pytest
+
+from src import data_ingestion, export
+
+
+@pytest.fixture(autouse=True)
+def isolate_cache_paths(tmp_path_factory) -> Iterator[Path]:
+    """Point every cache write at a throwaway directory.
+
+    ``write_cache`` persists unconditionally — ``use_cache=False`` skips only the
+    cache *read* — so any test that exercises a fetch path without patching these
+    module bindings writes fixture prices into the developer's real cache. The
+    SQLite damage is bounded (``INSERT OR REPLACE`` on 24 rows), but the CSV
+    export is rewritten wholesale, which silently replaces a zone's entire CSV
+    with test data. Isolate globally rather than per test, so a future fetch-path
+    test cannot reintroduce the leak by forgetting to patch.
+
+    The patches are held by a fixture-private ``MonkeyPatch``, deliberately NOT
+    the shared ``monkeypatch`` fixture: that instance belongs to the test too, so
+    a test calling ``monkeypatch.undo()`` mid-body (``test_stochastic_dispatch``
+    does, to swap one solver stub for another) would revoke this isolation for
+    the rest of that test. A private instance can only be torn down here.
+
+    Tests that patch these bindings themselves still win: ``unittest.mock.patch``
+    and later ``monkeypatch`` calls both apply on top of this fixture.
+
+    Yields:
+        The temporary cache directory both modules are bound to.
+    """
+    cache_dir = tmp_path_factory.mktemp("cache")
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr(data_ingestion, "CACHE_DIR", cache_dir)
+        patcher.setattr(data_ingestion, "DB_PATH", cache_dir / "bess_pulse.db")
+        patcher.setattr(export, "CACHE_DIR", cache_dir)
+        yield cache_dir
 
 
 @pytest.fixture
