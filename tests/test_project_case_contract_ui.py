@@ -259,6 +259,54 @@ def test_curve_parser_rejects_non_numeric_instead_of_dropping_it() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("kwargs", "match"),
+    [
+        ({"power_mw": -5.0, "project_life_years": 15}, "power_mw must be > 0"),
+        ({"power_mw": 0.0, "project_life_years": 15}, "power_mw must be > 0"),
+        ({"power_mw": float("nan"), "project_life_years": 15}, "power_mw must be finite"),
+        ({"power_mw": True, "project_life_years": 15}, "not bool"),
+        ({"power_mw": 10.0, "project_life_years": 15.9}, "must be an int"),
+        ({"power_mw": 10.0, "project_life_years": True}, "not bool"),
+        ({"power_mw": 10.0, "project_life_years": 0}, r"must be in \[1, 100\]"),
+        ({"power_mw": 10.0, "project_life_years": 5_000_000}, r"must be in \[1, 100\]"),
+        ({"power_mw": 10.0, "project_life_years": 2}, "must lie entirely inside"),
+    ],
+)
+def test_public_floor_resolver_owns_its_domains(
+    kwargs: dict[str, object],
+    match: str,
+) -> None:
+    """The exported resolver takes raw scalars, so it must own AssetCase and
+    LifecycleCase domains itself: no negative floor, no silently truncated life,
+    no bare IndexError, and no unbounded allocation before validation."""
+    terms = fx.contract_case(
+        start_year=2, rates=(10.0, 20.0), entitlement_factors=(1.0, 1.0)
+    ).settlement_terms
+    with pytest.raises(ProjectCaseValidationError, match=match):
+        resolve_effective_contract_floor(terms, **kwargs)
+
+
+def test_resolver_domain_checks_are_inert_on_a_valid_project_case() -> None:
+    # Every new guard duplicates an invariant AssetCase/LifecycleCase/ProjectCase
+    # already enforce, so the merged D2 path must be untouched.
+    case = fx.project_case(contract=fx.contract_case())
+    covered, floors = _resolved_contract_floor(case)
+    assert int(covered.sum()) == 2
+    assert floors[1] == pytest.approx(10.0 * 10.0 * 0.5)
+    assert floors[2] == pytest.approx(20.0 * 10.0 * 1.0)
+
+
+def test_source_document_handling_disclosure_is_truthful() -> None:
+    """Streamlit uploads reach the server, so the panel must not claim otherwise."""
+    disclosure = project_page._CONTRACT_DOCUMENT_HANDLING_DISCLOSURE
+    assert "sends it to the server running this app" in disclosure
+    assert "records the digest" in disclosure
+    assert "shasum -a 256" in disclosure
+    for false_claim in ("hashed locally", "never uploaded", "never stored or uploaded"):
+        assert false_claim not in disclosure
+
+
 def test_uploaded_source_document_outranks_a_typed_digest() -> None:
     payload = b"executed term sheet"
     assert project_page._resolve_source_document_sha256(payload, "ab" * 32) == (
@@ -607,6 +655,9 @@ def test_asserted_quote_status_requires_a_source_document_digest(
         "source_document_sha256" in error.value for error in app.error
     )
     assert len(app.metric) == 0
+    # The uploader only appears for an asserted status, and it must carry the
+    # truthful handling statement rather than a local-only promise.
+    assert project_page._CONTRACT_DOCUMENT_HANDLING_DISCLOSURE in _captions(app)
 
     app.text_input(key="pc_contract_source_sha256").set_value("ab" * 32).run(timeout=30)
     assert not app.exception

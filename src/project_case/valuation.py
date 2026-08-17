@@ -25,6 +25,7 @@ from src.project_case.enums import (
     CONTRACT_SETTLEMENT_ALGORITHM_V1,
     LIFECYCLE_UNKNOWN_MESSAGE,
     LIFECYCLE_UNKNOWN_STATUS,
+    MAX_PROJECT_LIFE_YEARS,
     NULL_CASHFLOW_TABLE_STATISTIC_V1,
     PC_D2_CALCULATOR_VERSION,
     CapacityMaintenanceBasis,
@@ -39,6 +40,8 @@ from src.project_case.schema import (
     ProjectCase,
     ProjectCaseValidationError,
     RunResult,
+    _int_in,
+    _pos_float,
 )
 
 PC_B_CALCULATOR_VERSION: Final = "pc-b-v1"
@@ -174,6 +177,13 @@ def resolve_effective_contract_floor(
     both call it, so a previewed floor curve cannot drift from the floor the
     calculator settles against.
 
+    Because this entry point takes raw scalars instead of a validated
+    ``ProjectCase``, it owns the same domains ``AssetCase.power_mw`` and
+    ``LifecycleCase.project_life_years`` enforce, and it checks them BEFORE
+    allocating: a caller must not be able to reach a negative floor, a silently
+    truncated project life, a bare ``IndexError`` from an out-of-life term, or an
+    unbounded allocation.  Every failure is a ``ProjectCaseValidationError``.
+
     Coverage is carried independently from the numeric vector: a zero inside the
     contract term is an active floor, whereas zero in the unused array slots is
     ignored.  This prevents an absent post-term floor from protecting a negative
@@ -185,13 +195,21 @@ def resolve_effective_contract_floor(
         raise ProjectCaseValidationError(
             "unsupported ContractCase settlement terms for PC-D2"
         )
-    life = int(project_life_years)
+    life = _int_in(
+        project_life_years, 1, MAX_PROJECT_LIFE_YEARS, "project_life_years"
+    )
     start = int(terms.contract_start_project_year)
+    final_year = start + terms.contract_tenor_years - 1
+    if final_year > life:
+        raise ProjectCaseValidationError(
+            "contract term must lie entirely inside project_life_years "
+            f"(ends in year {final_year}, life {life})"
+        )
     rates = terms.floor_rate_real_eur_per_modeled_mw_year_by_contract_year
     factors = terms.floor_entitlement_factor_by_contract_year
+    modeled_mw = _pos_float(power_mw, "power_mw")
     covered = np.zeros(life, dtype=np.bool_)
     floors = np.zeros(life, dtype=np.float64)
-    modeled_mw = float(power_mw)
     with np.errstate(over="ignore", invalid="ignore"):
         for offset, (rate, factor) in enumerate(zip(rates, factors, strict=True)):
             project_index = start - 1 + offset

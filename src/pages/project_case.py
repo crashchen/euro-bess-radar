@@ -141,6 +141,18 @@ _CONTRACT_ENTITLEMENT_DISCLOSURE: Final = (
     "top-up, and it must not repeat the reserve-capacity availability already "
     "embedded in producer cash."
 )
+# Honest handling statement for the source-document uploader. Streamlit's
+# file_uploader necessarily sends the selected file to the server running the
+# app, so this must never promise local-only hashing; what the panel can truly
+# promise is that only the digest flows onward into the case.
+_CONTRACT_DOCUMENT_HANDLING_DISCLOSURE: Final = (
+    "Uploading a source document sends it to the server running this app, which "
+    "reads it only to compute the SHA-256. Project Case then records the digest "
+    "alone — the document itself never enters the case, the result cache, the "
+    "fingerprint, or the export. On a deployment you do not control, hash the "
+    "file yourself (for example `shasum -a 256 <file>`) and type the digest "
+    "instead of uploading a confidential contract."
+)
 _CONTRACT_CURRENCY_DISCLOSURE: Final = (
     "Quoted rates are a user assertion that the EUR values are already real in the "
     "valuation base year. No inflation, deflation, FX, or indexation conversion is "
@@ -758,8 +770,9 @@ def _contract_source_document_sha256(status: ContractQuoteStatus) -> str | None:
             "requires it to be absent."
         )
         return None
+    st.caption(_CONTRACT_DOCUMENT_HANDLING_DISCLOSURE)
     upload = st.file_uploader(
-        "Source document (hashed locally, never stored or uploaded)",
+        "Source document — sent to this deployment to compute its SHA-256",
         key="pc_contract_source_document",
     )
     typed = st.text_input(
