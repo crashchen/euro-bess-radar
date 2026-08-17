@@ -209,6 +209,23 @@ def inject_global_cockpit_theme() -> None:
             padding: 0.75rem 0.9rem;
         }
 
+        /* Inline code spans keep Streamlit's LIGHT default background while the
+           app paints text near-white, so `like this` renders at ~1.05:1 contrast
+           — invisible. Same failure shape as the Plotly legend fix: we set the
+           foreground and let an unstyled default supply the background. Product
+           labels merely look broken, but the PC-D3 uploader caption carries the
+           `shasum -a 256 <file>` fallback a user needs when they must NOT upload
+           a confidential contract, so this is load-bearing text. Excludes block
+           code (`pre code`), which already ships its own readable theme. */
+        .stApp :not(pre) > code {
+            background: rgba(0,163,255,0.14) !important;
+            color: var(--bp-text) !important;
+            -webkit-text-fill-color: var(--bp-text) !important;
+            border: 1px solid rgba(0,163,255,0.28);
+            border-radius: 5px;
+            padding: 0.05em 0.34em;
+        }
+
         [data-testid="stMetricLabel"] p {
             color: var(--bp-muted) !important;
             text-transform: uppercase;

@@ -146,3 +146,19 @@ def test_global_theme_styles_base_button_primary_as_brand_gradient(monkeypatch) 
     assert '[data-testid="stBaseButton-primary"]' in css
     assert '[data-testid="stSidebar"] [data-testid="stBaseButton-primary"]' in css
     assert "linear-gradient(135deg, rgba(255,45,149,0.96)" in css
+
+
+def test_global_theme_guards_inline_code_contrast(monkeypatch) -> None:
+    """Inline code must not inherit Streamlit's light default background.
+
+    Browser-verified before the fix: computed style was color rgb(234,243,255)
+    on background rgb(248,249,251) — roughly 1.05:1, i.e. invisible. The rule
+    must own BOTH the background and the foreground; setting only one leaves the
+    other free to come from whichever default wins.
+    """
+    css = _injected_theme_css(monkeypatch)
+
+    assert ".stApp :not(pre) > code" in css
+    assert "background: rgba(0,163,255,0.14) !important" in css
+    assert "color: var(--bp-text) !important" in css
+    assert "-webkit-text-fill-color: var(--bp-text) !important" in css
