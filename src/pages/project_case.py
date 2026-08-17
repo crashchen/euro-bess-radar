@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime as dt
 import hashlib
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Final
@@ -32,9 +33,15 @@ from src.project_case import (
     PC_A_CALCULATOR_VERSION,
     PC_D2_CALCULATOR_VERSION,
     PROJECT_CASE_SCHEMA_VERSION,
+    AnnualPreLifecycleStrategyCashFloor,
     AssetCase,
     BootstrapCase,
     CapacityMaintenanceBasis,
+    ContractCase,
+    ContractCurrencyBasis,
+    ContractCurrencyBasisMode,
+    ContractQuoteStatus,
+    ContractSettlementBasis,
     CurrencyBasis,
     CurrencyBasisMode,
     LifecycleCase,
@@ -55,9 +62,21 @@ from src.project_case import (
     emit_reserve_coopt,
     encode_value,
     grid,
+    resolve_effective_contract_floor,
 )
 from src.project_case.audit import AdapterUnavailableError
-from src.project_case.enums import BUCKET_HOUR_OF_DAY, BUCKET_HOUR_OF_WEEK
+from src.project_case.enums import (
+    BUCKET_HOUR_OF_DAY,
+    BUCKET_HOUR_OF_WEEK,
+    CONTRACT_ASSET_SCOPE_V1,
+    CONTRACT_PRODUCT_DISCLOSURE_V1,
+    CONTRACT_QUOTE_BASIS_V1,
+    CONTRACT_SETTLEMENT_FREQUENCY_V1,
+    DEFAULT_SIMULATIONS,
+    MAX_PROJECT_LIFE_YEARS,
+    MAX_SIMULATIONS,
+    MIN_SIMULATIONS,
+)
 from src.project_case.imports import (
     AUGMENTATION_TEMPLATE_CSV,
     explicit_multiplier_template_csv,
@@ -85,6 +104,59 @@ _DA_ONLY_LABEL: Final = "DA-only realised"
 _DA_ID_LABEL: Final = "DA + IDA1 forecast-driven"
 _DA_RESERVE_LABEL: Final = "DA + reserve co-optimised"
 _DA_ID_RESERVE_LABEL: Final = "DA + IDA1 + reserve realistic"
+
+# --- PC-D3 contract-entry vocabulary ---------------------------------------- #
+_CONTRACT_NONE_LABEL: Final = "No contract — merchant-only settlement"
+_CONTRACT_FLOOR_LABEL: Final = "Annual whole-project strategy-cash floor"
+_CONTRACT_CURVE_FLAT: Final = "Flat real quote"
+_CONTRACT_CURVE_ESCALATING: Final = "Escalating real quote"
+_CONTRACT_CURVE_EXPLICIT: Final = "Explicit per-contract-year values"
+_CONTRACT_FACTOR_FULL: Final = "100% — quoted rates already net of availability"
+_CONTRACT_FACTOR_FLAT: Final = "Flat entitlement factor"
+_CONTRACT_FACTOR_EXPLICIT: Final = "Explicit per-contract-year factors"
+
+# The exporter renders the same locked literal; both import it from the schema
+# package so a wording drift is impossible (locked contract section 8).
+_CONTRACT_PRODUCT_DISCLOSURE: Final = CONTRACT_PRODUCT_DISCLOSURE_V1
+
+# Coexistence disclosure required by PC-D3: the cockpit ships a DIFFERENT,
+# wear-net screening comparator under a similar name.
+_CONTRACT_SIBLING_DISCLOSURE: Final = (
+    "Different product from the cockpit's 'Contracted floor versus merchant cash "
+    "flow' panel. That comparator floors a wear-net DA-only EUR/MW/yr screening "
+    "baseline and never enters Project Case cash. This settlement floors the "
+    "selected producer's gross pre-lifecycle strategy cash for every bootstrap "
+    "draw and project year, and it does change the NPVs reported above."
+)
+_CONTRACT_TOP_UP_DISCLOSURE: Final = (
+    "Settled cash is max(merchant, effective floor) per draw and project year — "
+    "never merchant plus floor. Merchant cash is not clamped at zero first, so a "
+    "loss-making year inside the term can require a top-up larger than the quoted "
+    "floor. Capped top-up, partial contracted MW, fees, sharing, penalties, tax, "
+    "and debt are separate products that this basis does not model."
+)
+_CONTRACT_ENTITLEMENT_DISCLOSURE: Final = (
+    "The entitlement factor is a deterministic contractual scenario applied only "
+    "to the floor, before the max. It is never applied to merchant cash or to the "
+    "top-up, and it must not repeat the reserve-capacity availability already "
+    "embedded in producer cash."
+)
+_CONTRACT_CURRENCY_DISCLOSURE: Final = (
+    "Quoted rates are a user assertion that the EUR values are already real in the "
+    "valuation base year. No inflation, deflation, FX, or indexation conversion is "
+    "applied here; convert a nominal or indexed quote outside the calculator and "
+    "record how in the source field."
+)
+
+_QUOTE_STATUS_CHOICES: Final = {
+    "User scenario — no source document": ContractQuoteStatus.USER_SCENARIO,
+    "User-asserted indicative quote": (
+        ContractQuoteStatus.USER_ASSERTED_INDICATIVE_QUOTE
+    ),
+    "User-asserted executed source document": (
+        ContractQuoteStatus.USER_ASSERTED_EXECUTED_SOURCE_DOCUMENT
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -182,6 +254,171 @@ def _render_outcome(label: str, outcome: NpvOutcome) -> None:
     )
 
 
+def _contract_case_payload(result: RunResult) -> Mapping[str, object] | None:
+    """Return the settled ContractCase payload, or ``None`` for merchant-only."""
+    project_case = result.provenance.get("project_case")
+    if not isinstance(project_case, Mapping):
+        return None
+    contract_case = project_case.get("contract_case")
+    return contract_case if isinstance(contract_case, Mapping) else None
+
+
+def _disclosure_text(value: object) -> str:
+    """Render a provenance scalar without turning an absent value into a blank."""
+    return "null" if value is None else str(value)
+
+
+def _contract_floor_disclosure_frame(
+    terms: Mapping[str, object],
+    settlement: Mapping[str, object],
+) -> pd.DataFrame:
+    """Rebuild the disclosed floor table from calculator output, not from inputs."""
+    rates = terms["floor_rate_real_eur_per_modeled_mw_year_by_contract_year"]
+    factors = terms["floor_entitlement_factor_by_contract_year"]
+    floor_by_year = {
+        int(item["year"]): float(item["effective_floor_eur"])
+        for item in settlement["resolved_floor_by_project_year"]
+    }
+    start = int(terms["contract_start_project_year"])
+    return pd.DataFrame(
+        [
+            {
+                "contract_year": offset + 1,
+                "project_year": start + offset,
+                "floor_rate_real_eur_per_modeled_mw_year": float(rate),
+                "floor_entitlement_factor": float(factor),
+                "effective_whole_project_floor_eur": floor_by_year[start + offset],
+            }
+            for offset, (rate, factor) in enumerate(zip(rates, factors, strict=True))
+        ]
+    )
+
+
+def _render_contract_settlement_disclosure(
+    result: RunResult,
+    *,
+    compact: bool,
+) -> None:
+    """Disclose the settled contract from the RunResult alone, never from widgets."""
+    contract_case = _contract_case_payload(result)
+    assertions = result.provenance.get("red_line_assertions")
+    asserted = (
+        assertions.get("contract_settlement_included")
+        if isinstance(assertions, Mapping)
+        else None
+    )
+    if asserted is not (contract_case is not None):
+        st.error(
+            "Project Case provenance disagrees about whether a contract was "
+            "settled. The settlement disclosure is withheld rather than guessed."
+        )
+        return
+    if contract_case is None:
+        return
+    if compact:
+        st.caption(
+            "Contract settlement applied: "
+            f"{contract_case['settlement_basis']}. {_CONTRACT_PRODUCT_DISCLOSURE}"
+        )
+        return
+
+    with st.expander("Contract settlement disclosure", expanded=False):
+        st.caption(_CONTRACT_PRODUCT_DISCLOSURE)
+        st.caption(_CONTRACT_SIBLING_DISCLOSURE)
+        st.caption(_CONTRACT_TOP_UP_DISCLOSURE)
+        try:
+            terms = contract_case["settlement_terms"]
+            settlement = result.provenance["contract_settlement"]
+            reconciliation = result.provenance["cashflow_reconciliation"]
+            asset_case = result.provenance["project_case"]["asset_case"]
+            currency = terms["currency_basis"]
+            interpolation = settlement["representative_interpolation"]
+            summary = pd.DataFrame(
+                [
+                    (field, _disclosure_text(value))
+                    for field, value in (
+                        ("Settlement basis", contract_case["settlement_basis"]),
+                        ("Settlement algorithm", settlement["algorithm_version"]),
+                        ("Quote status (user assertion)", terms["quote_status"]),
+                        ("Source", terms["source"]),
+                        ("Source as-of date", terms["source_as_of_date"]),
+                        ("Source document SHA-256", terms["source_document_sha256"]),
+                        ("Modelled whole-project power (MW)", asset_case["power_mw"]),
+                        ("Quote basis", terms["quote_basis"]),
+                        ("Asset scope", terms["asset_scope"]),
+                        ("Settlement frequency", terms["settlement_frequency"]),
+                        (
+                            "Contract start project year",
+                            terms["contract_start_project_year"],
+                        ),
+                        (
+                            "Contract tenor (years)",
+                            len(
+                                terms[
+                                    "floor_rate_real_eur_per_modeled_mw_year"
+                                    "_by_contract_year"
+                                ]
+                            ),
+                        ),
+                        ("Currency basis", currency["mode"]),
+                        ("Real-EUR base year", currency["target_base_year"]),
+                        ("Reconciliation version", reconciliation["version"]),
+                    )
+                ],
+                columns=["field", "value"],
+            )
+            floors = _contract_floor_disclosure_frame(terms, settlement)
+            interpolation_frame = pd.DataFrame(
+                [
+                    (field, _disclosure_text(value))
+                    for field, value in (
+                        (
+                            "Lower sorted rank (zero-based)",
+                            interpolation["lower_sorted_rank"],
+                        ),
+                        (
+                            "Upper sorted rank (zero-based)",
+                            interpolation["upper_sorted_rank"],
+                        ),
+                        (
+                            "Lower original draw index (zero-based)",
+                            interpolation["lower_original_draw_index"],
+                        ),
+                        (
+                            "Upper original draw index (zero-based)",
+                            interpolation["upper_original_draw_index"],
+                        ),
+                        (
+                            "Interpolation weight",
+                            interpolation["interpolation_weight"],
+                        ),
+                    )
+                ],
+                columns=["field", "value"],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            st.error(
+                "Project Case contract provenance is incomplete "
+                f"({exc}); the settlement disclosure is withheld."
+            )
+            return
+        st.dataframe(summary, width="stretch", hide_index=True)
+        st.caption(_CONTRACT_CURRENCY_DISCLOSURE)
+        st.caption(
+            "Effective whole-project floor per covered project year. Project "
+            "years outside the term carry no floor at all, which is not a zero "
+            "floor."
+        )
+        st.dataframe(floors, width="stretch", hide_index=True)
+        st.caption(
+            "Representative cash-flow basis: the P50 path is rank-interpolated "
+            "between two settled draws. It is neither an actual scenario nor a "
+            "per-year median, so its settled year cash need not equal "
+            "max(median merchant, floor)."
+        )
+        st.dataframe(interpolation_frame, width="stretch", hide_index=True)
+
+
 def render_project_case_result(
     result: RunResult,
     *,
@@ -193,10 +430,19 @@ def render_project_case_result(
         return
     _render_outcome(SCREENING_NPV_LABEL, result.no_lifecycle_cost_screening_npv)
     _render_outcome(LIFECYCLE_NPV_LABEL, result.lifecycle_cash_npv)
-    st.caption(
-        "Lifecycle output is pre-tax unlevered, not bankable: tax, debt, DSCR, "
-        "financing fees, shadow wear, and contracted-floor settlement are excluded."
-    )
+    if _contract_case_payload(result) is None:
+        st.caption(
+            "Lifecycle output is pre-tax unlevered, not bankable: tax, debt, DSCR, "
+            "financing fees, shadow wear, and contracted-floor settlement are excluded."
+        )
+    else:
+        st.caption(
+            "Lifecycle output is pre-tax unlevered, not bankable: tax, debt, DSCR, "
+            "financing fees, and shadow wear are excluded. Contract settlement IS "
+            "included: cash is max(merchant, effective floor) per draw and project "
+            "year, applied before lifecycle costs."
+        )
+    _render_contract_settlement_disclosure(result, compact=compact)
     strategy = result.provenance.get("strategy_run_result")
     if isinstance(strategy, Mapping):
         audit = strategy.get("coverage_audit")
@@ -394,6 +640,287 @@ def _lifecycle_inputs(project_life_years: int) -> LifecycleCase:
     )
 
 
+def _parse_contract_curve(text: str, *, expected: int, label: str) -> tuple[float, ...]:
+    """Parse a user-typed per-contract-year curve; fail closed on any surprise."""
+    tokens = [token for token in re.split(r"[,;\s]+", str(text).strip()) if token]
+    values: list[float] = []
+    for token in tokens:
+        try:
+            values.append(float(token))
+        except ValueError as exc:
+            raise ProjectCaseValidationError(
+                f"{label} contains a non-numeric entry {token!r}"
+            ) from exc
+    if len(values) != expected:
+        raise ProjectCaseValidationError(
+            f"{label} must supply exactly {expected} value(s) for the selected "
+            f"tenor; got {len(values)}"
+        )
+    return tuple(values)
+
+
+def _contract_rate_curve(tenor: int) -> tuple[float, ...]:
+    """Resolve the explicit real floor-rate curve that is fingerprinted."""
+    mode = st.selectbox(
+        "Floor quote entry",
+        [_CONTRACT_CURVE_FLAT, _CONTRACT_CURVE_ESCALATING, _CONTRACT_CURVE_EXPLICIT],
+        key="pc_contract_rate_mode",
+        help=(
+            "Flat and escalating entry are conveniences. The resolved explicit "
+            "curve below is what is validated, fingerprinted and settled."
+        ),
+    )
+    if mode == _CONTRACT_CURVE_FLAT:
+        rate = st.number_input(
+            "Real floor rate (EUR/modelled MW-year)",
+            min_value=0.0,
+            value=0.0,
+            step=1000.0,
+            key="pc_contract_flat_rate",
+        )
+        return (float(rate),) * tenor
+    if mode == _CONTRACT_CURVE_ESCALATING:
+        c1, c2 = st.columns(2)
+        base = c1.number_input(
+            "Contract-year 1 real floor rate (EUR/modelled MW-year)",
+            min_value=0.0,
+            value=0.0,
+            step=1000.0,
+            key="pc_contract_escalating_base",
+        )
+        escalation_pct = c2.number_input(
+            "Real escalation (%/contract year)",
+            min_value=-99.0,
+            max_value=100.0,
+            value=0.0,
+            step=0.5,
+            key="pc_contract_escalation_pct",
+        )
+        growth = 1.0 + float(escalation_pct) / 100.0
+        return tuple(float(base) * growth**offset for offset in range(tenor))
+    text = st.text_area(
+        "Real floor rates by contract year (EUR/modelled MW-year)",
+        key="pc_contract_rate_curve",
+        help="Comma-, space- or newline-separated, one value per contract year.",
+    )
+    return _parse_contract_curve(text, expected=tenor, label="floor-rate curve")
+
+
+def _contract_entitlement_factors(tenor: int) -> tuple[float, ...]:
+    """Resolve the explicit entitlement-factor curve that is fingerprinted."""
+    mode = st.selectbox(
+        "Floor entitlement factors",
+        [_CONTRACT_FACTOR_FULL, _CONTRACT_FACTOR_FLAT, _CONTRACT_FACTOR_EXPLICIT],
+        key="pc_contract_factor_mode",
+    )
+    st.caption(_CONTRACT_ENTITLEMENT_DISCLOSURE)
+    if mode == _CONTRACT_FACTOR_FULL:
+        return (1.0,) * tenor
+    if mode == _CONTRACT_FACTOR_FLAT:
+        factor_pct = st.number_input(
+            "Entitlement factor (% of quoted floor)",
+            min_value=0.0,
+            max_value=100.0,
+            value=100.0,
+            step=1.0,
+            key="pc_contract_flat_factor_pct",
+        )
+        return (float(factor_pct) / 100.0,) * tenor
+    text = st.text_area(
+        "Entitlement factors by contract year (0-1)",
+        key="pc_contract_factor_curve",
+        help="Comma-, space- or newline-separated, one factor per contract year.",
+    )
+    return _parse_contract_curve(text, expected=tenor, label="entitlement-factor curve")
+
+
+def _resolve_source_document_sha256(
+    uploaded: bytes | None,
+    typed: str,
+) -> str | None:
+    """Digest an uploaded source document, else use the typed digest verbatim.
+
+    An uploaded document wins so a stale typed digest cannot outrank the document
+    actually in hand.  Only surrounding whitespace is stripped from typed input:
+    case is left alone so a non-lowercase digest fails the schema check loudly
+    instead of being silently rewritten.
+    """
+    if uploaded is not None:
+        return hashlib.sha256(uploaded).hexdigest()
+    return str(typed).strip() or None
+
+
+def _contract_source_document_sha256(status: ContractQuoteStatus) -> str | None:
+    """Resolve the source-document digest under the locked null matrix."""
+    if status is ContractQuoteStatus.USER_SCENARIO:
+        st.caption(
+            "A user scenario carries no source-document digest; the locked schema "
+            "requires it to be absent."
+        )
+        return None
+    upload = st.file_uploader(
+        "Source document (hashed locally, never stored or uploaded)",
+        key="pc_contract_source_document",
+    )
+    typed = st.text_input(
+        "Source document SHA-256 (lowercase 64-hex)",
+        key="pc_contract_source_sha256",
+    )
+    digest = _resolve_source_document_sha256(
+        None if upload is None else upload.getvalue(),
+        typed,
+    )
+    if upload is not None:
+        st.caption(
+            f"Digest computed from the uploaded document: {digest}. An uploaded "
+            "document takes precedence over the typed digest."
+        )
+    return digest
+
+
+def _contract_floor_preview(
+    terms: AnnualPreLifecycleStrategyCashFloor,
+    *,
+    power_mw: float,
+    project_life_years: int,
+) -> tuple[pd.DataFrame, int]:
+    """Preview the resolved floor using the calculator's own resolution."""
+    covered, floors = resolve_effective_contract_floor(
+        terms,
+        power_mw=power_mw,
+        project_life_years=project_life_years,
+    )
+    start = int(terms.contract_start_project_year)
+    rates = terms.floor_rate_real_eur_per_modeled_mw_year_by_contract_year
+    factors = terms.floor_entitlement_factor_by_contract_year
+    rows = [
+        {
+            "contract_year": offset + 1,
+            "project_year": start + offset,
+            "floor_rate_real_eur_per_modeled_mw_year": float(rate),
+            "floor_entitlement_factor": float(factor),
+            "effective_whole_project_floor_eur": float(floors[start - 1 + offset]),
+        }
+        for offset, (rate, factor) in enumerate(zip(rates, factors, strict=True))
+    ]
+    return pd.DataFrame(rows), int(covered.sum())
+
+
+def _contract_inputs(
+    *,
+    project_life_years: int,
+    base_year: int,
+    power_mw: float,
+) -> ContractCase | None:
+    """Build the optional v1.1 ContractCase, or ``None`` for merchant-only cash."""
+    with st.expander("Contracted floor settlement (optional)", expanded=False):
+        st.caption(_CONTRACT_PRODUCT_DISCLOSURE)
+        st.caption(_CONTRACT_SIBLING_DISCLOSURE)
+        mode = st.selectbox(
+            "Settlement basis",
+            [_CONTRACT_NONE_LABEL, _CONTRACT_FLOOR_LABEL],
+            key="pc_contract_mode",
+        )
+        if mode == _CONTRACT_NONE_LABEL:
+            st.caption(
+                "Merchant-only settlement: the NPVs above are unprotected "
+                "strategy cash and no floor is applied."
+            )
+            return None
+
+        st.caption(_CONTRACT_TOP_UP_DISCLOSURE)
+        c1, c2 = st.columns(2)
+        # Both bounds are the schema's own domain, never a derived bound: a
+        # dynamic max would silently re-clamp a stored widget value when project
+        # life changes. An out-of-life term fails closed below instead.
+        start_year = int(c1.number_input(
+            "Contract start project year",
+            min_value=1,
+            max_value=MAX_PROJECT_LIFE_YEARS,
+            value=1,
+            step=1,
+            key="pc_contract_start_year",
+        ))
+        tenor = int(c2.number_input(
+            "Contract tenor (years)",
+            min_value=1,
+            max_value=MAX_PROJECT_LIFE_YEARS,
+            value=1,
+            step=1,
+            key="pc_contract_tenor",
+        ))
+        final_year = start_year + tenor - 1
+        if final_year > project_life_years:
+            raise ProjectCaseValidationError(
+                f"contract term ends in project year {final_year}, beyond the "
+                f"{project_life_years}-year project life"
+            )
+        rates = _contract_rate_curve(tenor)
+        factors = _contract_entitlement_factors(tenor)
+
+        status_label = st.selectbox(
+            "Quote status (user assertion)",
+            list(_QUOTE_STATUS_CHOICES),
+            key="pc_contract_quote_status",
+            help=(
+                "Records only the asserted maturity of the source. Even an "
+                "executed source document does not claim that the platform has "
+                "reproduced the complete legal contract."
+            ),
+        )
+        status = _QUOTE_STATUS_CHOICES[status_label]
+        c3, c4 = st.columns(2)
+        source = c3.text_input("Contract source", key="pc_contract_source")
+        as_of = c4.date_input(
+            "Source as-of",
+            value=dt.date.today(),
+            key="pc_contract_as_of",
+        )
+        source_sha256 = _contract_source_document_sha256(status)
+        st.caption(_CONTRACT_CURRENCY_DISCLOSURE)
+        st.caption(
+            f"Fixed v1.1 basis: quote {CONTRACT_QUOTE_BASIS_V1}; scope "
+            f"{CONTRACT_ASSET_SCOPE_V1}; settlement "
+            f"{CONTRACT_SETTLEMENT_FREQUENCY_V1}; real-EUR base year {base_year} "
+            f"(bound to the valuation base year); modelled whole-project power "
+            f"{power_mw:g} MW (inherited from the asset case, never re-entered here)."
+        )
+
+        terms = AnnualPreLifecycleStrategyCashFloor(
+            contract_start_project_year=start_year,
+            floor_rate_real_eur_per_modeled_mw_year_by_contract_year=rates,
+            floor_entitlement_factor_by_contract_year=factors,
+            quote_basis=CONTRACT_QUOTE_BASIS_V1,
+            settlement_frequency=CONTRACT_SETTLEMENT_FREQUENCY_V1,
+            asset_scope=CONTRACT_ASSET_SCOPE_V1,
+            currency_basis=ContractCurrencyBasis(
+                ContractCurrencyBasisMode.USER_ASSERTED_REAL_BASE_YEAR_EUR_CURVE,
+                base_year,
+            ),
+            quote_status=status,
+            source=source,
+            source_as_of_date=as_of.isoformat(),
+            source_document_sha256=source_sha256,
+        )
+        preview, covered_years = _contract_floor_preview(
+            terms,
+            power_mw=power_mw,
+            project_life_years=project_life_years,
+        )
+        st.caption(
+            f"Validated floor preview — {covered_years} covered project year(s), "
+            f"{start_year} to {final_year}. Years outside the term have no floor "
+            "at all; that is not a zero floor."
+        )
+        st.dataframe(preview, width="stretch", hide_index=True)
+        return ContractCase(
+            settlement_basis=(
+                ContractSettlementBasis.ANNUAL_PRE_LIFECYCLE_STRATEGY_CASH_FLOOR_V1
+            ),
+            settlement_terms=terms,
+        )
+
+
 def _request_fingerprint(
     *,
     primary_df: pd.DataFrame,
@@ -407,6 +934,7 @@ def _request_fingerprint(
     bootstrap: BootstrapCase,
     capture_rate: float,
     strategy: _StrategySelection,
+    contract: ContractCase | None,
 ) -> str:
     """Hash every pre-adapter input so ordinary reruns never re-run the MILP.
 
@@ -453,6 +981,9 @@ def _request_fingerprint(
         "projection": projection.to_payload(),
         "valuation_case": valuation.to_payload(),
         "bootstrap_case": bootstrap.to_payload(),
+        # A contract edit must invalidate the cache before anything renders or
+        # downloads, so no floor-protected NPV can survive its own terms.
+        "contract_case": None if contract is None else contract.to_payload(),
         "capture_rate": float(capture_rate),
     }
     return hashlib.sha256(encode_value(payload)).hexdigest()
@@ -577,10 +1108,20 @@ def render_project_case_panel(
             ),
         )
 
+        contract = _contract_inputs(
+            project_life_years=project_life,
+            base_year=base_year,
+            power_mw=power_mw,
+        )
+
         c4, c5 = st.columns(2)
         seed = int(c4.text_input("Bootstrap seed", "0", key="pc_bootstrap_seed"))
         simulations = int(c5.number_input(
-            "Bootstrap simulations", 1000, 50000, 5000, 1000,
+            "Bootstrap simulations",
+            MIN_SIMULATIONS,
+            MAX_SIMULATIONS,
+            DEFAULT_SIMULATIONS,
+            1000,
             key="pc_bootstrap_simulations",
         ))
         start = pd.Timestamp(start_date).date()
@@ -606,6 +1147,7 @@ def render_project_case_panel(
             bootstrap=bootstrap,
             capture_rate=capture_rate,
             strategy=strategy_selection,
+            contract=contract,
         )
         currency_basis = CurrencyBasis(
             CurrencyBasisMode.SOURCE_EUR_TREATED_AS_BASE_YEAR_REAL,
@@ -647,6 +1189,7 @@ def render_project_case_panel(
                     market_case=MarketCase(strategy, projection),
                     valuation_case=valuation,
                     bootstrap_case=bootstrap,
+                    contract_case=contract,
                 )
                 result = compute_project_case(case)
             st.session_state[_CACHE_KEY] = ProjectCaseRunCache(
