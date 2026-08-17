@@ -27,6 +27,7 @@ __all__ = [
     "CASHFLOW_RECONCILIATION_VERSION_V1",
     "CONTRACT_ASSET_SCOPE_V1",
     "CONTRACT_CASHFLOW_TABLE_STATISTIC_V1",
+    "CONTRACT_PRODUCT_DISCLOSURE_V1",
     "CONTRACT_QUOTE_BASIS_V1",
     "CONTRACT_SETTLEMENT_ALGORITHM_V1",
     "CONTRACT_SETTLEMENT_FREQUENCY_V1",
@@ -142,6 +143,14 @@ CASHFLOW_RECONCILIATION_REL_TOL_V1 = 1e-10
 CASHFLOW_RECONCILIATION_ABS_TOL_EUR_V1 = 1e-6
 NULL_CASHFLOW_TABLE_STATISTIC_V1 = "p50_annual_bootstrap_draw_linear"
 PC_D2_CALCULATOR_VERSION = "pc-d2-v1.1"
+
+# The exact settlement product boundary the locked contract (§8) requires on
+# every human-readable surface.  Excel and the Streamlit panel both render this
+# one constant so the two disclosures can never drift apart.
+CONTRACT_PRODUCT_DISCLOSURE_V1 = (
+    "Annual whole-project strategy-cash floor before lifecycle costs; not MACSE, "
+    "not a complete legal-contract model, and not a bankable valuation."
+)
 
 # The pinned provenance ``mode`` string for the DA-only adapter (§4.8).
 MAINTENANCE_PROVENANCE_MODE = "DA MILP Replay"

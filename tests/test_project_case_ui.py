@@ -380,6 +380,7 @@ def test_request_fingerprint_covers_source_data_lifecycle_and_versions(
             project_page._DA_ONLY_LABEL,
             project_page.ProducerAdapterId.PC_ADP_DA_ONLY,
         ),
+        contract=None,
     )
     baseline = project_page._request_fingerprint(**kwargs)
     changed_frame = frame.copy()

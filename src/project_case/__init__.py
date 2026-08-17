@@ -93,7 +93,11 @@ from src.project_case.schema import (
     StrategyRunResult,
     ValuationCase,
 )
-from src.project_case.valuation import PC_B_CALCULATOR_VERSION, compute_project_case
+from src.project_case.valuation import (
+    PC_B_CALCULATOR_VERSION,
+    compute_project_case,
+    resolve_effective_contract_floor,
+)
 
 __all__ = [
     "BOOTSTRAP_ALGORITHM_V1",
@@ -171,5 +175,6 @@ __all__ = [
     "encode_value",
     "fingerprint_hex",
     "grid",
+    "resolve_effective_contract_floor",
     "sorted_by_encoding",
 ]

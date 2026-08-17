@@ -54,6 +54,7 @@ from src.project_case import (
     fingerprint_hex,
 )
 from src.project_case.enums import (
+    CONTRACT_PRODUCT_DISCLOSURE_V1,
     LIFECYCLE_UNKNOWN_MESSAGE,
     LIFECYCLE_UNKNOWN_STATUS,
     MAX_PROJECT_LIFE_YEARS,
@@ -87,10 +88,8 @@ _CONTRACT_CURRENCY_BASIS = (
     ContractCurrencyBasisMode.USER_ASSERTED_REAL_BASE_YEAR_EUR_CURVE.value
 )
 _CONTRACT_QUOTE_STATUSES = frozenset(status.value for status in ContractQuoteStatus)
-_CONTRACT_DISCLOSURE = (
-    "Annual whole-project strategy-cash floor before lifecycle costs; not MACSE, "
-    "not a complete legal-contract model, and not a bankable valuation."
-)
+# One locked literal shared with the Streamlit disclosure surface (§8).
+_CONTRACT_DISCLOSURE = CONTRACT_PRODUCT_DISCLOSURE_V1
 _PROJECT_CASE_STATIC_RED_LINES = {
     "cash_npv_includes_shadow_wear": False,
     "vom_rededucted": False,
@@ -523,7 +522,7 @@ def _build_heatmap_sheet(ws, title: str, heatmap: pd.DataFrame) -> None:
     _auto_column_width(ws)
 
 
-# ── Project Case (PC-C) sheet builders ─────────────────────────────────────
+# ── Project Case (PC-C/PC-D) sheet builders ──────────────────────────────────
 
 def _require_exact_mapping(
     value: Any,
@@ -2273,7 +2272,7 @@ def project_case_to_excel(result: RunResult) -> bytes:
     return buf.getvalue()
 
 
-# ── PDF export ──────────────────────────────────────────────────────────────
+# ── PDF export ───────────────────────────────────────────────────────────────
 
 
 def _render_figure_to_image(
@@ -2508,7 +2507,7 @@ def export_to_pdf_bytes(
     )
 
 
-# ── Comparison export ─────────────────────────────────────────────────────────
+# ── Comparison export ────────────────────────────────────────────────────────
 
 _COMPARISON_COLUMNS = {
     "zone": ("Zone", None),

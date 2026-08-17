@@ -1606,6 +1606,14 @@ _CONTRACTED_FLOOR_TRAJECTORY_CAPTION = (
     "floor-escalation inputs (flat when both are inactive); the Risk Analysis "
     "revenue-decay assumption is never used in this calculation."
 )
+# PC-D3 coexistence: Project Case ships a different, cash-NPV-eligible floor
+# settlement. Name the difference here so neither panel is read as the other.
+_CONTRACTED_FLOOR_SIBLING_CAPTION = (
+    "Different product from Project Case 'Contracted floor settlement' in the "
+    "Revenue tab. This comparator floors a wear-net DA-only EUR/MW/yr screening "
+    "baseline and never enters Project Case cash or its NPVs; that settlement "
+    "floors gross pre-lifecycle strategy cash per bootstrap draw and project year."
+)
 _CONTRACTED_FLOOR_NEGATIVE_YEAR_CAPTION = (
     "Negative merchant years: under the wear-net settlement basis the annual "
     "top-up exceeds the floor itself in those years; a revenue-settled contract "
@@ -2052,6 +2060,7 @@ def _render_contracted_floor_section(
             "an additive revenue stream, and it does not change dispatch."
         )
         st.caption(_CONTRACTED_FLOOR_TRAJECTORY_CAPTION)
+        st.caption(_CONTRACTED_FLOOR_SIBLING_CAPTION)
         if frontier_context is None:
             st.session_state.pop(_CONTRACTED_FLOOR_STATE_KEY, None)
             st.info(

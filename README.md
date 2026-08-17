@@ -13,6 +13,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 - **Joint MILP co-optimization estimate** for DA arbitrage vs reserve-capacity power headroom
 - **Auditable dispatch failures end-to-end** — ordinary/joint, composite DA+ID/reserve, replay, sequential, and stochastic paths propagate typed stage diagnostics; failed days are excluded from revenue, annualisation, risk pools, and common-policy windows instead of becoming zero revenue
 - **Separated economic semantics** — gross revenue, non-cash shadow-wear-adjusted economic margin, and cash NPV are reported as distinct layers; cash NPV does not double-count the installed CapEx as linear wear
+- **Project Case lifecycle valuation** — compose one producer-issued realised strategy into a no-lifecycle-cost screening NPV and a pre-tax unlevered lifecycle cash NPV, with typed/fingerprinted inputs, an explicit run/cache boundary, a read-only Cockpit mirror, and a self-validating Excel workbook. An optional annual whole-project strategy-cash floor can be entered interactively: the quote resolves to an explicit real rate curve, is previewed against the calculator's own floor resolution before the run, settles as `max(merchant, floor)` per bootstrap draw and project year, and is disclosed from the result itself. It is not MACSE, not a complete legal-contract model, and not a bankable valuation, and it stays a different product from the cockpit's wear-net floor comparator
 - **Bounded data freshness and network behavior** — Streamlit market-data caches share the persistent 24-hour TTL, and ENTSO-E calls use an explicit 30-second timeout with repository-level retry as the single retry owner
 - **Market-calendar mixed-resolution handling** — SDAC Day-Ahead windows crossing delivery day 2025-10-01 preserve the 60-minute pre-cutover and 15-minute post-cutover grids at the shared CET/CEST market boundary; cache checks and gap metrics use the same segmented physical-time basis
 - **Simulation Cockpit** for interval-level BESS dispatch replay, event tables, multi-day summaries with continuous-horizon SoC carry-over, a forecast-driven sequential DA+ID policy (vs perfect-foresight ceiling) with rebid deadband + forecast-skill report, an annualised strategy comparison (with optional DA + reserve-capacity co-optimisation, a cumulative DA + IDA1 + reserve perfect-foresight ceiling, and a Phase 9.2b forecast-driven realistic reserve-first row with a forecast-effect gap panel when ancillary capacity prices are loaded), a DA-only cycle-cap/degradation frontier with an optional user-asserted DA liquidity participation cap followed by a contracted-floor overlay that can project decaying merchant revenue against an escalating floor year by year, activation-energy and reBAP/imbalance historical replay overlays (separate, non-additive screening estimates when those streams are imported), and Excel export — plus SoC, revenue, throughput, and battery-health diagnostics
@@ -77,8 +78,8 @@ euro-bess-radar/
 │   ├── degradation.py        # Throughput-based degradation and lifetime metrics
 │   ├── scenario.py           # Bootstrap NPV, sensitivity, and merchant-revenue decay factors
 │   ├── project_case/         # Typed case/adapters, lifecycle valuation, v1.1 contract settlement + CSV imports
-│   ├── pages/project_case.py # PC-C RunResult-driven UI, strategy gate and cache
-│   ├── contracted_floor.py   # Floor-protected merchant cash-flow comparison
+│   ├── pages/project_case.py # RunResult-driven UI, strategy gate, cache and contract entry (PC-C/PC-D3)
+│   ├── contracted_floor.py   # Wear-net screening floor comparator (separate product from Project Case settlement)
 │   ├── liquidity.py          # DA executable-power participation-cap calculation
 │   ├── forward_curve.py      # Forward-price parsing and historical-shape synthesis
 │   ├── trader_benchmark.py   # External annual revenue-curve reconciliation
@@ -87,7 +88,7 @@ euro-bess-radar/
 │   ├── activation_overlay.py # Activation-energy replay overlay (screening, non-additive)
 │   ├── imbalance_overlay.py  # reBAP/imbalance replay overlay primitive
 │   └── export.py             # Excel/PDF reports + audited Project Case v1.1 workbook sheets
-├── tests/                    # 1533 passing tests (21 solver-heavy); 2 PDF tests may skip
+├── tests/                    # 1578 passing tests (21 solver-heavy); 2 PDF tests may skip
 ├── scripts/                  # Maintenance/demo scripts (seed + Netztransparenz converter)
 ├── samples/                  # Generated demo CSVs from seed_demo_9_2b.py (git-ignored)
 ├── docs/runbooks/            # Operator runbooks (9.2b + imbalance validation, manual UI smoke)

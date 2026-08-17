@@ -25,6 +25,7 @@ from src.project_case.enums import (
     CONTRACT_SETTLEMENT_ALGORITHM_V1,
     LIFECYCLE_UNKNOWN_MESSAGE,
     LIFECYCLE_UNKNOWN_STATUS,
+    MAX_PROJECT_LIFE_YEARS,
     NULL_CASHFLOW_TABLE_STATISTIC_V1,
     PC_D2_CALCULATOR_VERSION,
     CapacityMaintenanceBasis,
@@ -39,6 +40,8 @@ from src.project_case.schema import (
     ProjectCase,
     ProjectCaseValidationError,
     RunResult,
+    _int_in,
+    _pos_float,
 )
 
 PC_B_CALCULATOR_VERSION: Final = "pc-b-v1"
@@ -48,6 +51,7 @@ __all__ = [
     "PC_B_CALCULATOR_VERSION",
     "PC_D2_CALCULATOR_VERSION",
     "compute_project_case",
+    "resolve_effective_contract_floor",
 ]
 
 
@@ -160,45 +164,77 @@ def _screening_npv_draws(
     return draws
 
 
-def _resolved_contract_floor(
-    case: ProjectCase,
-) -> tuple[np.ndarray, np.ndarray] | None:
-    """Return ``(covered_mask, effective_floor)`` for the typed annual floor.
+def resolve_effective_contract_floor(
+    terms: AnnualPreLifecycleStrategyCashFloor,
+    *,
+    power_mw: float,
+    project_life_years: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return ``(covered_mask, effective_floor)`` for the typed annual floor (§4).
+
+    This is the single implementation of the locked ``F[t] = q_k * MW * a_k``
+    mapping.  ``compute_project_case`` and the PC-D3 pre-run validation preview
+    both call it, so a previewed floor curve cannot drift from the floor the
+    calculator settles against.
+
+    Because this entry point takes raw scalars instead of a validated
+    ``ProjectCase``, it owns the same domains ``AssetCase.power_mw`` and
+    ``LifecycleCase.project_life_years`` enforce, and it checks them BEFORE
+    allocating: a caller must not be able to reach a negative floor, a silently
+    truncated project life, a bare ``IndexError`` from an out-of-life term, or an
+    unbounded allocation.  Every failure is a ``ProjectCaseValidationError``.
 
     Coverage is carried independently from the numeric vector: a zero inside the
     contract term is an active floor, whereas zero in the unused array slots is
     ignored.  This prevents an absent post-term floor from protecting a negative
     merchant year to zero (PC-D red-line #9).
     """
-    contract = case.contract_case
-    if contract is None:
-        return None
-    terms = contract.settlement_terms
     if not isinstance(terms, AnnualPreLifecycleStrategyCashFloor):
         # The schema owns the closed tagged union.  Keep the calculator defensive
         # so a future union member cannot silently inherit these cash semantics.
         raise ProjectCaseValidationError(
             "unsupported ContractCase settlement terms for PC-D2"
         )
-
-    life = int(case.lifecycle_case.project_life_years)
+    life = _int_in(
+        project_life_years, 1, MAX_PROJECT_LIFE_YEARS, "project_life_years"
+    )
     start = int(terms.contract_start_project_year)
+    final_year = start + terms.contract_tenor_years - 1
+    if final_year > life:
+        raise ProjectCaseValidationError(
+            "contract term must lie entirely inside project_life_years "
+            f"(ends in year {final_year}, life {life})"
+        )
     rates = terms.floor_rate_real_eur_per_modeled_mw_year_by_contract_year
     factors = terms.floor_entitlement_factor_by_contract_year
+    modeled_mw = _pos_float(power_mw, "power_mw")
     covered = np.zeros(life, dtype=np.bool_)
     floors = np.zeros(life, dtype=np.float64)
-    power_mw = float(case.asset_case.power_mw)
     with np.errstate(over="ignore", invalid="ignore"):
         for offset, (rate, factor) in enumerate(zip(rates, factors, strict=True)):
             project_index = start - 1 + offset
             # Operation order follows the locked formula q * MW * a.  The
             # entitlement factor is part of F before max, never a top-up haircut.
-            value = float(rate) * power_mw
+            value = float(rate) * modeled_mw
             value *= float(factor)
             floors[project_index] = value
             covered[project_index] = True
     _require_finite_array(floors[covered], "effective contract floors")
     return covered, floors
+
+
+def _resolved_contract_floor(
+    case: ProjectCase,
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """Bind :func:`resolve_effective_contract_floor` to a validated ProjectCase."""
+    contract = case.contract_case
+    if contract is None:
+        return None
+    return resolve_effective_contract_floor(
+        contract.settlement_terms,
+        power_mw=case.asset_case.power_mw,
+        project_life_years=case.lifecycle_case.project_life_years,
+    )
 
 
 def _settled_revenue_matrix(
