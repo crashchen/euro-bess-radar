@@ -60,6 +60,12 @@ from src.project_case.fingerprint import (
     fingerprint_hex,
     sorted_by_encoding,
 )
+from src.project_case.revenue_handoff import (
+    PROJECT_REVENUE_HANDOFF_SCHEMA,
+    PROJECT_REVENUE_HANDOFF_VERSION,
+    project_revenue_handoff_payload,
+    project_revenue_handoff_to_json,
+)
 from src.project_case.schema import (
     AdapterProvenance,
     AnnualPreLifecycleStrategyCashFloor,
@@ -116,6 +122,8 @@ __all__ = [
     "PC_D2_CALCULATOR_VERSION",
     "PROFILE",
     "PROJECT_CASE_SCHEMA_VERSION",
+    "PROJECT_REVENUE_HANDOFF_SCHEMA",
+    "PROJECT_REVENUE_HANDOFF_VERSION",
     "RUN_RESULT_SCHEMA_VERSION",
     "SCHEMA_VERSION",
     "SPECS",
@@ -175,6 +183,8 @@ __all__ = [
     "encode_value",
     "fingerprint_hex",
     "grid",
+    "project_revenue_handoff_payload",
+    "project_revenue_handoff_to_json",
     "resolve_effective_contract_floor",
     "sorted_by_encoding",
 ]

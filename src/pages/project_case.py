@@ -62,6 +62,7 @@ from src.project_case import (
     emit_reserve_coopt,
     encode_value,
     grid,
+    project_revenue_handoff_to_json,
     resolve_effective_contract_floor,
 )
 from src.project_case.audit import AdapterUnavailableError
@@ -493,6 +494,16 @@ def render_project_case_result(
     if lifecycle is not None:
         with st.expander("Lifecycle representative cash flow", expanded=False):
             st.dataframe(lifecycle, width="stretch", hide_index=True)
+    st.download_button(
+        "Export Project Revenue Handoff JSON",
+        data=project_revenue_handoff_to_json(result),
+        file_name="radar_project_revenue_handoff.json",
+        mime="application/json",
+        help=(
+            "Fingerprint-preserving annual settled revenue for ESS. Excludes lifecycle costs, "
+            "tax, debt, and financing fees."
+        ),
+    )
 
 
 def _select_maintenance_basis() -> CapacityMaintenanceBasis:
