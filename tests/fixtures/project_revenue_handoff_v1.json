@@ -1,0 +1,59 @@
+{
+  "annual_rows": [
+    {
+      "contract_top_up_eur": 0.0,
+      "effective_contract_floor_eur": null,
+      "merchant_revenue_eur": -27350.0,
+      "project_year": 1,
+      "settled_revenue_eur": -27350.0,
+      "settlement_adjustment_eur": 0.0
+    },
+    {
+      "contract_top_up_eur": 0.0,
+      "effective_contract_floor_eur": null,
+      "merchant_revenue_eur": -26803.0,
+      "project_year": 2,
+      "settled_revenue_eur": -26803.0,
+      "settlement_adjustment_eur": 0.0
+    }
+  ],
+  "basis": {
+    "availability_embedded": false,
+    "capture_embedded": true,
+    "cash_timing": "end_of_year",
+    "contract_settlement_basis": null,
+    "contract_settlement_included": false,
+    "currency": "EUR",
+    "currency_mode": "real_base_year_eur",
+    "debt_included": false,
+    "financing_fees_included": false,
+    "lifecycle_costs_included": false,
+    "liquidity_embedded": false,
+    "modeled_duration_hours": 2.0,
+    "modeled_energy_mwh": 20.0,
+    "modeled_power_mw": 10.0,
+    "mw_rescaled": false,
+    "post_vom": true,
+    "project_year_origin": "relative",
+    "real_base_year": 2026,
+    "round_trip_efficiency": 0.88,
+    "rte_embedded": true,
+    "tax_included": false
+  },
+  "handoff_digest_sha256": "40a290cfbea64687701ad36a2c171d61597a2f9e15faf97c91ca35bd812d0247",
+  "schema": "euro_bess_radar.project_revenue_handoff",
+  "source": {
+    "calculator_version": "pc-d2-v1.1",
+    "cashflow_table_statistic": "p50_annual_bootstrap_draw_linear",
+    "project_case_input_fingerprint": "ee25863cb2c94817d6db9f930b27ba782d118949ff7fd73752fd0325cf2fc9e1",
+    "run_result_schema_version": "project-case-v1.1",
+    "sample_end_date": "2026-03-11",
+    "sample_start_date": "2026-03-10",
+    "source_data_content_hash": "abababababababababababababababababababababababababababababababab",
+    "strategy_calculator_version": "pc-a-v1",
+    "strategy_kind": "DA_ONLY",
+    "strategy_run_fingerprint": "820b514e66364f22b840df8f674c28829c80501815f94dd6bbabf829f5271e73",
+    "zone": "DE_LU"
+  },
+  "version": 1
+}
