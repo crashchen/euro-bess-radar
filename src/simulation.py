@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable
 from datetime import date
+from itertools import pairwise
 from typing import Any
 
 import numpy as np
@@ -280,7 +281,16 @@ def simulate_da_id_replay(
     merged = da_day[["price_eur_mwh"]].join(
         ida_day[["intraday_price_eur_mwh"]],
         how="inner",
-    ).dropna()
+    )
+    if merged.empty:
+        return empty_simulation_result("DA and IDA1 data have no overlapping intervals.")
+    if len(merged) != len(da_day) or len(merged) != len(ida_day):
+        return empty_simulation_result(
+            "DA and IDA1 delivery interval resolution mismatch or incomplete coverage; "
+            "joining discards or duplicates intervals "
+            f"(DA={len(da_day)}, IDA1={len(ida_day)}, merged={len(merged)})."
+        )
+    merged = merged.dropna()
     if merged.empty:
         return empty_simulation_result("DA and IDA1 data have no overlapping intervals.")
     if not _is_regular_utc_day(merged, local_date=simulation_date):
@@ -409,7 +419,10 @@ def simulate_replay_batch(
     solver is itself horizon-agnostic, so terminal-neutral applies only
     at the run end for both the DA and the IDA stage).
     `batch.attrs["da_id_carry_soc_supported"]` stays `True` for parity
-    with the DA-only path.
+    with the DA-only path. A cadence change or the interval cap also
+    ends a run: SoC carries into the next run, with terminal-neutral
+    equality re-applied at the boundary. `n_cadence_splits` records only
+    cadence boundaries in the continuous solve (zero in per-day mode).
     """
     selected_dates = (
         available_local_dates(price_df, tz=tz) if dates is None else dates
@@ -417,9 +430,10 @@ def simulate_replay_batch(
     has_intraday = intraday_df is not None and not intraday_df.empty
     is_da_id = mode == "DA + IDA1 Replay"
     can_continue = carry_soc and len(selected_dates) >= 2
+    n_cadence_splits = 0
 
     if can_continue and not is_da_id:
-        rows, missing_days, solver_failures = _simulate_continuous_da_replay(
+        rows, missing_days, solver_failures, n_cadence_splits = _simulate_continuous_da_replay(
             price_df,
             dates=selected_dates,
             tz=tz,
@@ -432,7 +446,7 @@ def simulate_replay_batch(
         )
         use_continuous = True
     elif can_continue and is_da_id and has_intraday:
-        rows, missing_days, solver_failures = _simulate_continuous_da_id_replay(
+        rows, missing_days, solver_failures, n_cadence_splits = _simulate_continuous_da_id_replay(
             price_df,
             intraday_df,  # type: ignore[arg-type]
             dates=selected_dates,
@@ -479,6 +493,7 @@ def simulate_replay_batch(
     out.attrs["carry_mode"] = (
         "continuous_horizon" if use_continuous else "per_day_reset"
     )
+    out.attrs["n_cadence_splits"] = n_cadence_splits
     # Continuous DA+ID carry-over is now implemented; kept for UI parity.
     out.attrs["da_id_carry_soc_supported"] = True
     return out
@@ -550,7 +565,7 @@ def _simulate_continuous_da_replay(
     capture_rate: float,
     capex_eur_kwh: float,
     soc_init_frac: float,
-) -> tuple[list[dict[str, Any]], int, list[dict[str, str]]]:
+) -> tuple[list[dict[str, Any]], int, list[dict[str, str]], int]:
     """Solve the requested window as one MILP per contiguous clean run.
 
     Splits `dates` into maximal contiguous sequences that yield a complete
@@ -627,7 +642,7 @@ def _simulate_continuous_da_replay(
 
     clean_dates = {d for run_dates, _, _ in runs for d in run_dates}
     missing_days = sum(1 for d in dates if d not in clean_dates)
-    return rows, missing_days, solver_failures
+    return rows, missing_days, solver_failures, _count_cadence_splits(runs)
 
 
 def _da_id_traded_volume(
@@ -658,7 +673,7 @@ def _simulate_continuous_da_id_replay(
     capture_rate: float,
     capex_eur_kwh: float,
     soc_init_frac: float,
-) -> tuple[list[dict[str, Any]], int, list[dict[str, str]]]:
+) -> tuple[list[dict[str, Any]], int, list[dict[str, str]], int]:
     """Continuous-horizon DA + IDA1 replay.
 
     Mirrors `_simulate_continuous_da_replay` but feeds each contiguous
@@ -681,7 +696,10 @@ def _simulate_continuous_da_id_replay(
             return pd.DataFrame()
         merged = da_day[["price_eur_mwh"]].join(
             ida_day[["intraday_price_eur_mwh"]], how="inner",
-        ).dropna()
+        )
+        if len(merged) != len(da_day) or len(merged) != len(ida_day):
+            return pd.DataFrame()
+        merged = merged.dropna()
         return merged if not merged.empty else pd.DataFrame()
 
     runs = _group_clean_runs(dates=dates, build_day=build_da_id_day)
@@ -764,7 +782,19 @@ def _simulate_continuous_da_id_replay(
 
     clean_dates = {d for run_dates, _, _ in runs for d in run_dates}
     missing_days = sum(1 for d in dates if d not in clean_dates)
-    return rows, missing_days, solver_failures
+    return rows, missing_days, solver_failures, _count_cadence_splits(runs)
+
+
+def _count_cadence_splits(
+    runs: list[tuple[list[date], pd.DataFrame, list[tuple[int, int]]]],
+) -> int:
+    """Count adjacent clean runs split by cadence, excluding gaps and size-only splits."""
+    return sum(
+        (next_dates[0] - previous_dates[-1]).days == 1
+        and _infer_interval_hours(previous_frame.index) != _infer_interval_hours(next_frame.index)
+        for (previous_dates, previous_frame, _), (next_dates, next_frame, _)
+        in pairwise(runs)
+    )
 
 
 def _group_clean_runs(
@@ -783,11 +813,12 @@ def _group_clean_runs(
       - the day's frame is empty,
       - the day's frame has any NaN value,
       - the day's frame is sparse (non-uniform UTC index),
+      - the day's cadence differs from the current run's cadence,
       - adding the day would push the run past
         `MAX_CONTINUOUS_REPLAY_INTERVALS` (a performance cap — a single
         large MILP for 90 days of 15-min data otherwise hangs the
-        dashboard). This split is a *soft* reset: the caller seeds the
-        next run with the end-of-previous-run SoC, so SoC still carries
+        dashboard). Cadence and size-cap splits are *soft* resets: the
+        caller seeds the next run with the end-of-previous-run SoC, so SoC still carries
         across the boundary, but terminal-neutral equality is re-applied
         at each chunk edge. The split is contiguous (no day is dropped).
     """
@@ -800,9 +831,10 @@ def _group_clean_runs(
     current_breaks: list[tuple[int, int]] = []
     cursor = 0
     previous_date: date | None = None
+    current_cadence: float | None = None
 
     def flush() -> None:
-        nonlocal cursor, current_dates, current_frames, current_breaks
+        nonlocal cursor, current_dates, current_frames, current_breaks, current_cadence
         if current_dates:
             slice_df = pd.concat(current_frames)
             runs.append((current_dates, slice_df, current_breaks))
@@ -810,6 +842,7 @@ def _group_clean_runs(
         current_frames = []
         current_breaks = []
         cursor = 0
+        current_cadence = None
 
     for local_date in sorted_dates:
         if previous_date is not None and (local_date - previous_date).days != 1:
@@ -829,9 +862,12 @@ def _group_clean_runs(
             flush()
             previous_date = None
             continue
+        cadence = _infer_interval_hours(pd.DatetimeIndex(day_df.index))
         n = len(day_df)
-        if current_dates and cursor + n > MAX_CONTINUOUS_REPLAY_INTERVALS:
-            # Soft size-cap reset: flush the accumulated chunk but keep
+        if current_dates and (
+            cadence != current_cadence or cursor + n > MAX_CONTINUOUS_REPLAY_INTERVALS
+        ):
+            # Soft cadence/size-cap reset: flush the accumulated chunk but keep
             # `previous_date` so the next chunk stays contiguous. The
             # continuous solvers seed it with the prior chunk's end SoC.
             flush()
@@ -840,6 +876,7 @@ def _group_clean_runs(
         current_breaks.append((cursor, cursor + n))
         cursor += n
         previous_date = local_date
+        current_cadence = cadence
 
     flush()
     return runs

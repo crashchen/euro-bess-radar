@@ -56,6 +56,14 @@ def _forced_joint_failure(n: int, message: str = "forced joint failure") -> dict
 
 
 class TestSolveDailyLp:
+    @pytest.mark.parametrize("bad_price", [np.inf, -np.inf], ids=["posinf", "neginf"])
+    def test_infinite_prices_have_typed_failure_status(self, bad_price: float) -> None:
+        result = solve_daily_lp(np.array([20.0, bad_price, 80.0]), dt=1.0)
+
+        assert result["success"] is False
+        assert result["status"] == "invalid_input"
+        assert "non-finite" in result["message"]
+
     def test_flat_prices_yield_zero_revenue(self) -> None:
         """Flat prices offer no arbitrage; revenue should be ~0."""
         prices = np.array([50.0] * 24)
@@ -379,6 +387,17 @@ class TestSolveDispatchBatch:
 
 
 class TestSolveDailyJointCapacityLp:
+    @pytest.mark.parametrize("bad_price", [np.inf, -np.inf], ids=["posinf", "neginf"])
+    def test_infinite_prices_have_typed_failure_status(self, bad_price: float) -> None:
+        result = solve_daily_joint_capacity_lp(
+            np.array([20.0, bad_price, 80.0]), dt=1.0,
+            capacity_price_eur_mw_h=5.0,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "invalid_input"
+        assert "non-finite" in result["message"]
+
     def test_flat_prices_commit_capacity_when_capacity_price_positive(self) -> None:
         prices = np.array([50.0] * 24)
         result = solve_daily_joint_capacity_lp(
@@ -580,6 +599,21 @@ class TestSolveJointCapacityBatch:
 
 
 class TestSolveDailyDaIdDispatch:
+    @pytest.mark.parametrize("bad_price", [np.inf, -np.inf], ids=["posinf", "neginf"])
+    @pytest.mark.parametrize("bad_field", ["da_prices", "ida_prices"])
+    def test_infinite_prices_have_typed_failure_status(
+        self, bad_price: float, bad_field: str,
+    ) -> None:
+        prices = {field: np.array([20.0, 50.0, 80.0]) for field in ("da_prices", "ida_prices")}
+        prices[bad_field][1] = bad_price
+
+        result = solve_daily_da_id_dispatch(**prices, dt=1.0)
+
+        assert result["success"] is False
+        assert result["status"] == "invalid_input"
+        assert result["failure_stage"] == "input"
+        assert "non-finite" in result["message"]
+
     def test_ida_equal_to_da_yields_zero_uplift(self) -> None:
         """When IDA prints the same as DA, the optimal Stage-2 solution is
         the Stage-1 schedule itself, so rebid uplift = 0.
@@ -724,6 +758,23 @@ def _da_id_reserve_prices() -> tuple[np.ndarray, np.ndarray]:
 class TestSolveDailyDaIdReserveDispatch:
     """Perfect-foresight DA + IDA + reserve co-optimisation ceiling."""
 
+    @pytest.mark.parametrize("bad_price", [np.inf, -np.inf], ids=["posinf", "neginf"])
+    @pytest.mark.parametrize("bad_field", ["da_prices", "ida_prices"])
+    def test_infinite_prices_have_typed_failure_status(
+        self, bad_price: float, bad_field: str,
+    ) -> None:
+        prices = {field: np.array([20.0, 50.0, 80.0]) for field in ("da_prices", "ida_prices")}
+        prices[bad_field][1] = bad_price
+
+        result = solve_daily_da_id_reserve_dispatch(
+            **prices, dt=1.0, capacity_price_eur_mw_h=5.0,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "invalid_input"
+        assert result["failure_stage"] == "input"
+        assert "non-finite" in result["message"]
+
     def test_collapses_to_da_id_ceiling_at_zero_capacity(self) -> None:
         # cap_price=0 removes the reserve incentive -> exactly the DA+ID ceiling.
         da, ida = _da_id_reserve_prices()
@@ -833,6 +884,26 @@ class TestSolveDailyDaIdReserveDispatch:
 
 class TestSolveSequentialDaIdReserveDispatch:
     """Forecast-driven reserve-first DA + IDA + reserve policy."""
+
+    @pytest.mark.parametrize("bad_price", [np.inf, -np.inf], ids=["posinf", "neginf"])
+    @pytest.mark.parametrize("bad_field", ["da_forecast", "da_realised", "ida_forecast", "ida_realised"])
+    def test_infinite_prices_have_typed_failure_status(
+        self, bad_price: float, bad_field: str,
+    ) -> None:
+        prices = {
+            field: np.array([20.0, 50.0, 80.0])
+            for field in ("da_forecast", "da_realised", "ida_forecast", "ida_realised")
+        }
+        prices[bad_field][1] = bad_price
+
+        result = solve_sequential_da_id_reserve_dispatch(
+            **prices, dt=1.0, reserve_forecast=5.0, reserve_realised=5.0,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "invalid_input"
+        assert result["failure_stage"] == "input"
+        assert "non-finite" in result["message"]
 
     _DA = np.array([20.0] * 8 + [90.0] * 8 + [25.0] * 8)
     _IDA = np.array([95.0] * 8 + [20.0] * 8 + [88.0] * 8)
@@ -1060,6 +1131,24 @@ class TestSolveSequentialDaIdReserveDispatch:
 
 class TestSolveSequentialDaIdDispatch:
     """Sequential DA + IDA1 policy under an imperfect IDA forecast."""
+
+    @pytest.mark.parametrize("bad_price", [np.inf, -np.inf], ids=["posinf", "neginf"])
+    @pytest.mark.parametrize("bad_field", ["da_prices", "ida_forecast", "ida_realised"])
+    def test_infinite_prices_have_typed_failure_status(
+        self, bad_price: float, bad_field: str,
+    ) -> None:
+        prices = {
+            field: np.array([20.0, 50.0, 80.0])
+            for field in ("da_prices", "ida_forecast", "ida_realised")
+        }
+        prices[bad_field][1] = bad_price
+
+        result = solve_sequential_da_id_dispatch(**prices, dt=1.0)
+
+        assert result["success"] is False
+        assert result["status"] == "invalid_input"
+        assert result["failure_stage"] == "input"
+        assert "non-finite" in result["message"]
 
     # DA cheap AM / expensive PM; realised IDA is SHAPE-INVERTED so the
     # DA-only schedule is wrong for IDA and a rebid genuinely matters.

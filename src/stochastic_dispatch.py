@@ -90,7 +90,7 @@ def _empty_commitment_result(
     s: int,
     *,
     status: str = "invalid_input",
-    message: str = "stochastic commitment inputs are empty or invalid",
+    message: str = "stochastic commitment inputs are empty or invalid (including non-finite prices)",
     failure_stage: str = "stochastic_commitment",
 ) -> dict:
     """Safe-shape failed commitment result with auditable solve state."""
@@ -223,7 +223,7 @@ def solve_stochastic_da_commitment(
     s = scenarios.shape[0]
     if (
         n == 0 or scenarios.shape[1] != n or weights.size != s
-        or np.isnan(da_prices).any() or np.isnan(scenarios).any()
+        or not np.isfinite(da_prices).all() or not np.isfinite(scenarios).all()
         or (weights < 0).any()  # negative weights break the expected-value sum
         or not math.isclose(float(weights.sum()), 1.0, abs_tol=1e-9)
     ):
@@ -687,7 +687,7 @@ def _empty_dispatch_result(
     n: int,
     *,
     status: str = "invalid_input",
-    message: str = "stochastic dispatch inputs are empty or invalid",
+    message: str = "stochastic dispatch inputs are empty or invalid (including non-finite prices)",
     failure_stage: str = "input",
 ) -> dict:
     """Safe-shape failed execution result with stage-qualified diagnostics."""
@@ -781,7 +781,7 @@ def solve_stochastic_da_id_dispatch(
     n = da_prices.size
     if (
         n == 0 or base_forecast.size != n or ida_realised.size != n
-        or np.isnan(base_forecast).any() or np.isnan(ida_realised).any()
+        or not np.isfinite(base_forecast).all() or not np.isfinite(ida_realised).all()
     ):
         return _empty_dispatch_result(n)
 
@@ -988,8 +988,8 @@ def solve_myopic_capped_da_id_dispatch(
     n = da_prices.size
     if (
         n == 0 or base_forecast.size != n or ida_realised.size != n
-        or np.isnan(da_prices).any() or np.isnan(base_forecast).any()
-        or np.isnan(ida_realised).any()
+        or not np.isfinite(da_prices).all() or not np.isfinite(base_forecast).all()
+        or not np.isfinite(ida_realised).all()
     ):
         return _empty_dispatch_result(n)
 
@@ -1055,7 +1055,7 @@ def _empty_reserve_commitment_result(
     n: int,
     *,
     status: str = "invalid_input",
-    message: str = "Stage-0 reserve inputs are empty or invalid",
+    message: str = "Stage-0 reserve inputs are empty or invalid (including non-finite prices)",
     failure_stage: str = "stage0_reserve_commitment",
 ) -> dict:
     """Safe-shape failed Stage-0 result with auditable solve state."""
@@ -1175,7 +1175,7 @@ def solve_stochastic_reserve_commitment(
     s = scenarios.shape[0]
     if (
         scenarios.shape[1] != n or weights.size != s
-        or np.isnan(da_forecast).any() or np.isnan(scenarios).any()
+        or not np.isfinite(da_forecast).all() or not np.isfinite(scenarios).all()
         or (weights < 0).any()
         or not math.isclose(float(weights.sum()), 1.0, abs_tol=1e-9)
     ):
@@ -1516,11 +1516,11 @@ def _stochastic_coopt_ceiling_v2_result(
     da = np.asarray(da_prices, dtype=float).ravel()
     realised = np.asarray(realised_ida, dtype=float).ravel()
     n = da.size
-    if n == 0 or realised.size != n or np.isnan(da).any() or np.isnan(realised).any():
+    if n == 0 or realised.size != n or not np.isfinite(da).all() or not np.isfinite(realised).all():
         return {
             "success": False,
             "status": "invalid_input",
-            "message": "v2 ceiling prices are empty, misaligned, or contain NaN",
+            "message": "v2 ceiling prices are empty, misaligned, or contain non-finite values (NaN or infinity)",
             "failure_stage": "coopt_ceiling_v2",
             "value_eur": float("nan"),
         }

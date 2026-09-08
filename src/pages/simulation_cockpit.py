@@ -59,6 +59,12 @@ from src.strategy_compare import (
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
+_CADENCE_SPLIT_CAPTION = (
+    "This window crosses a market resolution change. The continuous horizon "
+    "is split at each cadence change: SoC carries between segments, but "
+    "terminal-neutral equality is reapplied at each segment end."
+)
+
 # Stochastic policy panel (Increment D): fixed scenario count + seed so the
 # opt-in run is reproducible; the load-bearing rebid cap is the one exposed knob.
 _STOCHASTIC_N_SCENARIOS = 10
@@ -900,6 +906,8 @@ def _render_multi_day_summary(
             batch, requested_days=len(batch_dates),
             excluded_days=excluded, carry_mode=carry_mode,
         )
+        if batch.attrs.get("n_cadence_splits", 0) > 0:
+            st.caption(_CADENCE_SPLIT_CAPTION)
         _plot_batch_summary(batch, chart_template)
         if len(batch) >= 3:
             _plot_rolling_summary(batch, chart_template)

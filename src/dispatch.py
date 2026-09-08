@@ -70,7 +70,7 @@ def solve_daily_lp(
     if max_efc_per_day is not None and max_efc_per_day < 0:
         raise ValueError(f"max_efc_per_day must be >= 0, got {max_efc_per_day}")
     n = len(prices)
-    if n == 0 or np.isnan(prices).any():
+    if n == 0 or not np.isfinite(prices).all():
         return {
             "revenue_eur": 0.0,
             "p_charge": np.zeros(max(n, 0)),
@@ -79,7 +79,7 @@ def solve_daily_lp(
             "n_cycles": 0.0,
             "success": False,
             "status": "invalid_input",
-            "message": "price vector is empty or contains NaN",
+            "message": "price vector is empty or contains non-finite values (NaN or infinity)",
             "tiebreak_applied": None,
         }
 
@@ -305,7 +305,7 @@ def solve_daily_joint_capacity_lp(
     solver failure cannot be confused with a genuine zero-revenue optimum.
     """
     n = len(prices)
-    if n == 0 or np.isnan(prices).any():
+    if n == 0 or not np.isfinite(prices).all():
         zeros = np.zeros(max(n, 0))
         return {
             "total_revenue_eur": 0.0,
@@ -319,7 +319,7 @@ def solve_daily_joint_capacity_lp(
             "avg_reserve_mw": 0.0,
             "success": False,
             "status": "invalid_input",
-            "message": "price vector is empty or contains NaN",
+            "message": "price vector is empty or contains non-finite values (NaN or infinity)",
         }
 
     capacity_mwh = power_mw * duration_hours
@@ -650,10 +650,10 @@ def solve_daily_da_id_dispatch(
         its safe-shape zero values are never used as partial economics.
     """
     n = len(da_prices)
-    if n == 0 or n != len(ida_prices) or np.isnan(da_prices).any() or np.isnan(ida_prices).any():
+    if n == 0 or n != len(ida_prices) or not np.isfinite(da_prices).all() or not np.isfinite(ida_prices).all():
         return _zero_da_id_result(
             n, status="invalid_input",
-            message="input: price vectors are empty, misaligned, or contain NaN",
+            message="input: price vectors are empty, misaligned, or contain non-finite values (NaN or infinity)",
             failure_stage="input",
         )
 
@@ -804,14 +804,14 @@ def solve_daily_da_id_reserve_dispatch(
             capacity_price = None
     if (
         n == 0 or n != len(ida_prices)
-        or np.isnan(da_prices).any() or np.isnan(ida_prices).any()
+        or not np.isfinite(da_prices).all() or not np.isfinite(ida_prices).all()
         or capacity_price is None
     ):
         return _zero_da_id_reserve_result(
             n, status="invalid_input",
             message=(
                 "input: price vectors or capacity price are empty, misaligned, "
-                "or invalid"
+                "or invalid (including non-finite prices)"
             ),
             failure_stage="input",
         )
@@ -940,11 +940,11 @@ def solve_sequential_da_id_reserve_dispatch(
         )
 
     lengths_ok = n > 0 and all(len(arr) == n for arr in (da_fc, da, ida_fc, ida))
-    has_nan = any(np.isnan(arr).any() for arr in (da_fc, da, ida_fc, ida))
-    if not lengths_ok or has_nan:
+    has_nonfinite = any(not np.isfinite(arr).all() for arr in (da_fc, da, ida_fc, ida))
+    if not lengths_ok or has_nonfinite:
         return _zero_sequential_reserve_result(
             max(n, 0), status="invalid_input",
-            message="input: price vectors are empty, misaligned, or contain NaN",
+            message="input: price vectors are empty, misaligned, or contain non-finite values (NaN or infinity)",
             failure_stage="input",
         )
 
@@ -1294,15 +1294,15 @@ def solve_sequential_da_id_dispatch(
     """
     n = len(da_prices)
     lengths_ok = n > 0 and len(ida_forecast) == n and len(ida_realised) == n
-    has_nan = (
-        np.isnan(da_prices).any()
-        or np.isnan(ida_forecast).any()
-        or np.isnan(ida_realised).any()
+    has_nonfinite = (
+        not np.isfinite(da_prices).all()
+        or not np.isfinite(ida_forecast).all()
+        or not np.isfinite(ida_realised).all()
     )
-    if not lengths_ok or has_nan:
+    if not lengths_ok or has_nonfinite:
         return _zero_sequential_da_id_result(
             n, status="invalid_input",
-            message="input: price vectors are empty, misaligned, or contain NaN",
+            message="input: price vectors are empty, misaligned, or contain non-finite values (NaN or infinity)",
             failure_stage="input",
         )
 

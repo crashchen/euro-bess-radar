@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -502,6 +504,79 @@ class TestImbalanceImportParsing:
         csv_str = self._HDR + "2026-05-01T00:00:00Z,DE_LU;DROP TABLE x,42.5,850\n"
         with pytest.raises(DataSourceParseError, match="unsafe import zone"):
             parse_imbalance_import_csv(csv_str)
+
+
+@pytest.mark.parametrize("bad_number", ["inf", "-inf"])
+@pytest.mark.parametrize(
+    "parser,fields,invalid_column",
+    [
+        pytest.param(
+            parse_capacity_import_csv,
+            {"zone": "DE_LU", "product": "FCR", "direction": "symmetric",
+             "capacity_price_eur_mw_h": -5.0},
+            "capacity_price_eur_mw_h", id="capacity-price",
+        ),
+        pytest.param(
+            parse_activation_import_csv,
+            {"zone": "DE_LU", "product": "aFRR", "direction": "up",
+             "activation_price_eur_mwh": -5.0, "system_activated_volume_mw": 0.0},
+            "activation_price_eur_mwh", id="activation-price",
+        ),
+        pytest.param(
+            parse_activation_import_csv,
+            {"zone": "DE_LU", "product": "aFRR", "direction": "up",
+             "activation_price_eur_mwh": -5.0, "system_activated_volume_mw": 0.0},
+            "system_activated_volume_mw", id="activation-volume",
+        ),
+        pytest.param(
+            parse_imbalance_import_csv,
+            {"zone": "DE_LU", "imbalance_price_eur_mwh": -5.0,
+             "system_imbalance_volume_mw": -333.5},
+            "imbalance_price_eur_mwh", id="imbalance-price",
+        ),
+        pytest.param(
+            parse_imbalance_import_csv,
+            {"zone": "DE_LU", "imbalance_price_eur_mwh": -5.0,
+             "system_imbalance_volume_mw": -333.5},
+            "system_imbalance_volume_mw", id="imbalance-volume",
+        ),
+    ],
+)
+def test_nonfinite_required_import_numbers_drop_rows_with_accounting(
+    parser, fields, invalid_column, bad_number, caplog,
+) -> None:
+    """F3: prices and required volumes share the finite-row import boundary."""
+    header = "timestamp," + ",".join(fields) + "\n"
+    good = "2026-05-01T00:00:00Z," + ",".join(map(str, fields.values())) + "\n"
+    bad_fields = {**fields, invalid_column: bad_number}
+    bad = "2026-05-01T00:15:00Z," + ",".join(map(str, bad_fields.values())) + "\n"
+    # Two invalid fields in one row still count as ONE discarded row.
+    both_bad_fields = {
+        key: bad_number if isinstance(value, float) else value
+        for key, value in fields.items()
+    }
+    both_bad = "2026-05-01T00:30:00Z," + ",".join(map(str, both_bad_fields.values())) + "\n"
+    with caplog.at_level(logging.WARNING):
+        parsed = parser(header + good + bad + both_bad)
+    assert len(parsed) == 1
+    numeric = parsed.select_dtypes(include="number")
+    # Capacity's standard frame also has deliberately empty optional columns.
+    present_numeric = numeric.dropna(axis=1, how="all")
+    assert np.isfinite(present_numeric.to_numpy()).all()
+    price_column = next(column for column in present_numeric if "price" in column)
+    assert parsed[price_column].iloc[0] == -5.0
+    assert parsed["zone"].iloc[0] == "DE_LU"
+    warnings = [record.message for record in caplog.records if record.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "Dropped 2" in warnings[0] and "non-finite" in warnings[0]
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        # Metadata in already-discarded numeric rows must remain unvalidated.
+        empty = parser(header + (bad + both_bad).replace("DE_LU", "DE_LU;DROP TABLE x"))
+    assert empty.empty
+    assert empty.index.name == "timestamp"
+    assert "Dropped 2" in caplog.text
 
 
 # ── Parsing ──────────────────────────────────────────────────────────────────

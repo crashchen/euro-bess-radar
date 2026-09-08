@@ -850,6 +850,214 @@ def test_chunked_continuous_run_keeps_within_chunk_carry(monkeypatch) -> None:
     ) + 50.0
 
 
+def _make_cadence_day(
+    local_date: str, *, freq: str, values: float | list[float] | np.ndarray,
+) -> pd.DataFrame:
+    """A complete Berlin market day, stored on the usual UTC axis."""
+    start = pd.Timestamp(local_date, tz="Europe/Berlin")
+    index = pd.date_range(
+        start, start + pd.DateOffset(days=1), freq=freq, inclusive="left",
+    ).tz_convert("UTC")
+    return pd.DataFrame({"price_eur_mwh": values}, index=index)
+
+
+@pytest.mark.parametrize("mode", ["DA MILP Replay", "DA + IDA1 Replay"])
+def test_continuous_mixed_cadence_does_not_inflate_quarter_hour_day(mode: str) -> None:
+    """T1: an hourly-majority run must not stretch 96 quarters into 96 hours."""
+    prices = pd.concat([
+        *[
+            _make_cadence_day(f"2025-09-{day}", freq="h", values=50.0)
+            for day in range(26, 31)
+        ],
+        _make_cadence_day("2025-10-01", freq="15min", values=np.tile([10.0, 90.0], 48)),
+    ])
+    batch = simulate_replay_batch(
+        prices, mode=mode,
+        intraday_df=prices.rename(columns={"price_eur_mwh": "intraday_price_eur_mwh"}),
+        tz="Europe/Berlin", power_mw=1.0, duration_hours=1.0,
+        efficiency=1.0, capture_rate=1.0, soc_init_frac=0.0,
+    )
+
+    quarter_day = batch.set_index("date").loc[date(2025, 10, 1)]
+    assert quarter_day[[
+        "total_revenue_eur", "physical_throughput_mwh", "daily_fce",
+    ]].to_numpy(dtype=float) == pytest.approx([948.0, 24.0, 12.0])
+    # Physical guard independent of the chosen prices and expected revenue.
+    assert (batch["physical_throughput_mwh"] <= 2 * 1.0 * 24 + 1e-8).all()
+    assert batch.attrs["valid_days"] == 6
+    assert batch.attrs["excluded_days"] == 0
+    assert batch.attrs["n_cadence_splits"] == 1
+    assert batch["n_intervals"].tolist() == [24] * 5 + [96]
+
+
+def test_continuous_mixed_cadence_preserves_hourly_day_revenue() -> None:
+    """T2: a quarter-hour-majority run must not compress an hourly day to 6h."""
+    prices = pd.concat([
+        _make_cadence_day("2025-09-30", freq="h", values=[20.0] * 12 + [100.0] * 12),
+        _make_cadence_day("2025-10-01", freq="15min", values=60.0),
+    ])
+    params = {
+        "tz": "Europe/Berlin", "power_mw": 1.0, "duration_hours": 4.0,
+        "efficiency": 1.0, "capture_rate": 1.0, "soc_init_frac": 0.0,
+    }
+    batch = simulate_replay_batch(prices, **params)
+    standalone = simulate_da_milp_replay(
+        prices, simulation_date=date(2025, 9, 30), **params,
+    )
+
+    hourly_day = batch.set_index("date").loc[date(2025, 9, 30)]
+    assert hourly_day["total_revenue_eur"] == pytest.approx(
+        standalone["summary"]["total_revenue_eur"], abs=0.01,
+    )
+    assert hourly_day["total_revenue_eur"] == pytest.approx(316.0, abs=0.01)
+    assert hourly_day["physical_throughput_mwh"] == pytest.approx(8.0)
+    assert batch.attrs["valid_days"] == 2
+    assert batch.attrs["excluded_days"] == 0
+    assert batch.attrs["n_cadence_splits"] == 1
+
+
+def test_group_clean_runs_splits_cadence_without_losing_days() -> None:
+    """T3: both cadence directions split exactly at the boundary and keep every day."""
+    days = [date(2025, 9, day) for day in range(25, 30)]
+    frames = {
+        day: _make_cadence_day(str(day), freq=freq, values=50.0).tz_convert("Europe/Berlin")
+        for day, freq in zip(days, ["h", "h", "15min", "15min", "h"], strict=True)
+    }
+
+    runs = _group_clean_runs(dates=days, build_day=frames.__getitem__)
+
+    assert [run_dates for run_dates, _, _ in runs] == [days[:2], days[2:4], days[4:]]
+    assert [day for run_dates, _, _ in runs for day in run_dates] == days
+    for run_dates, frame, breaks in runs:
+        assert len({sim._infer_interval_hours(frames[day].index) for day in run_dates}) == 1
+        assert len(np.unique(np.diff(frame.index.asi8))) == 1
+        assert breaks[0][0] == 0
+        assert breaks[-1][1] == len(frame)
+
+
+@pytest.mark.parametrize("dates_count,carry_soc", [(0, True), (1, True), (2, True), (2, False)])
+def test_replay_batch_no_cadence_split_reports_zero(dates_count: int, carry_soc: bool) -> None:
+    """The disclosure count is stable even for empty and per-day batches."""
+    prices = pd.concat([_make_prices(), _make_prices().shift(freq="1D")])
+    days = available_local_dates(prices, tz="UTC")[:dates_count]
+    batch = simulate_replay_batch(prices, dates=days, tz="UTC", carry_soc=carry_soc)
+    assert batch.attrs["n_cadence_splits"] == 0
+    assert type(batch.attrs["n_cadence_splits"]) is int
+
+
+@pytest.mark.parametrize("gap_kind", ["omitted", "empty", "nan", "sparse"])
+def test_replay_batch_cadence_split_count_ignores_gap_boundaries(gap_kind: str) -> None:
+    """Missing data already splits a horizon and must not masquerade as a cadence split."""
+    days = [date(2025, 9, day) for day in [28, 29, 30]]
+    frames = [
+        _make_cadence_day("2025-09-28", freq="h", values=50.0),
+        _make_cadence_day("2025-09-30", freq="15min", values=50.0),
+    ]
+    if gap_kind in {"nan", "sparse"}:
+        middle = _make_cadence_day("2025-09-29", freq="h", values=50.0)
+        if gap_kind == "nan":
+            middle.iloc[4, 0] = np.nan
+        else:
+            middle = middle.drop(index=middle.index[4])
+        frames.append(middle)
+    if gap_kind == "omitted":
+        days.remove(date(2025, 9, 29))
+    batch = simulate_replay_batch(pd.concat(frames), dates=days, tz="Europe/Berlin")
+
+    assert batch["date"].tolist() == [date(2025, 9, 28), date(2025, 9, 30)]
+    assert batch.attrs["excluded_days_due_to_missing"] == int(gap_kind != "omitted")
+    assert batch.attrs["n_cadence_splits"] == 0
+
+
+def test_replay_batch_cadence_split_count_excludes_size_cap(monkeypatch) -> None:
+    """A cap split and a cadence split at the next edge must count only the latter."""
+    monkeypatch.setattr(sim, "MAX_CONTINUOUS_REPLAY_INTERVALS", 24)
+    prices = pd.concat([
+        _make_cadence_day("2025-09-29", freq="h", values=50.0),
+        _make_cadence_day("2025-09-30", freq="h", values=50.0),
+        _make_cadence_day("2025-10-01", freq="15min", values=50.0),
+    ])
+    batch = simulate_replay_batch(prices, tz="Europe/Berlin", soc_init_frac=0.3)
+
+    assert batch.attrs["valid_days"] == 3
+    assert batch.attrs["excluded_days"] == 0
+    assert batch.attrs["n_cadence_splits"] == 1
+    assert batch["soc_start_pct"].tolist() == pytest.approx([30.0] * 3)
+    assert batch["soc_end_pct"].tolist() == pytest.approx([30.0] * 3)
+
+
+@pytest.mark.parametrize("all_missing", [False, True])
+def test_da_id_replay_matching_grid_nan_keeps_missing_coverage_reason(all_missing: bool) -> None:
+    """Compatibility control: dropna does not turn an existing missing-data case into mismatch."""
+    da, ida = _make_da_id_pair()
+    if all_missing:
+        ida["intraday_price_eur_mwh"] = np.nan
+    else:
+        ida.iloc[4, 0] = np.nan
+    result = simulate_da_id_replay(da, ida, simulation_date=da.index[0].date(), tz="UTC")
+
+    assert result["summary"]["success"] is False
+    assert result["summary"]["status"] == "invalid_input"
+    assert result["timeseries"].empty
+    expected = (
+        "DA and IDA1 data have no overlapping intervals."
+        if all_missing else
+        "DA and IDA1 coverage is incomplete or has an irregular interval grid."
+    )
+    assert result["summary"]["message"] == expected
+
+
+@pytest.mark.parametrize("da_freq,ida_freq", [("h", "15min"), ("15min", "h")])
+@pytest.mark.parametrize("continuous", [False, True])
+def test_da_id_replay_rejects_mismatched_delivery_intervals(
+    da_freq: str, ida_freq: str, continuous: bool,
+) -> None:
+    """T4: neither single-day nor default continuous replay may lose a market's rows."""
+    days = ["2025-09-01", "2025-09-02"] if continuous else ["2025-09-01"]
+    da = pd.concat([_make_cadence_day(day, freq=da_freq, values=50.0) for day in days])
+    ida_values = np.tile([20.0, 100.0, 20.0, 20.0], 24) if ida_freq == "15min" else 50.0
+    ida = pd.concat([
+        _make_cadence_day(day, freq=ida_freq, values=ida_values) for day in days
+    ]).rename(columns={"price_eur_mwh": "intraday_price_eur_mwh"})
+
+    if continuous:
+        batch = simulate_replay_batch(
+            da, mode="DA + IDA1 Replay", intraday_df=ida, tz="Europe/Berlin",
+            efficiency=1.0, soc_init_frac=0.0, carry_soc=True,
+        )
+        assert batch.empty
+        assert batch.attrs["valid_days"] == 0
+        assert batch.attrs["excluded_days_due_to_missing"] == len(days)
+        assert batch.attrs["excluded_days_due_to_solver_failure"] == 0
+        assert batch.attrs["model_available"] is False
+    else:
+        result = simulate_da_id_replay(
+            da, ida, simulation_date=date(2025, 9, 1), tz="Europe/Berlin",
+            efficiency=1.0, soc_init_frac=0.0,
+        )
+        assert result["summary"]["success"] is False
+        assert result["summary"]["status"] == "invalid_input"
+        assert result["timeseries"].empty
+        message = result["summary"]["message"].lower()
+        assert "resolution" in message and "mismatch" in message
+        assert f"da={len(da)}" in message
+        assert f"ida1={len(ida)}" in message
+        assert "merged=24" in message
+
+
+@pytest.mark.parametrize("column", ["price_eur_mwh", "intraday_price_eur_mwh"])
+@pytest.mark.parametrize("value", [np.inf, -np.inf])
+def test_da_id_replay_nonfinite_price_returns_typed_failure(column: str, value: float) -> None:
+    """T7 end-to-end: a polluted cache must produce a typed failure, never SciPy's ValueError."""
+    da, ida = _make_da_id_pair()
+    target = da if column == "price_eur_mwh" else ida
+    target.loc[target.index[12], column] = value
+    result = simulate_da_id_replay(da, ida, simulation_date=da.index[0].date(), tz="UTC")
+    assert result["summary"]["success"] is False
+    assert result["summary"]["status"] == "invalid_input"
+    assert result["timeseries"].empty
+
+
 def _make_seq_history(days: int = 5, *, anomaly_day: int | None = None):
     """DA + IDA over `days` with a fixed daily shape; one IDA day optionally
     inverted to act as an out-of-climatology anomaly the forecast misses."""
