@@ -1,0 +1,29 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: /private<baseline-checkout>
+configfile: pyproject.toml
+collected 71 items / 68 deselected / 3 selected
+
+tests/test_market_grid_guards.py FFF                                     [100%]
+
+=================================== FAILURES ===================================
+_______ test_project_case_rejects_native_pre_cutover_grids[da_id-DE_LU] ________
+tests/test_market_grid_guards.py:208: in test_project_case_rejects_native_pre_cutover_grids
+    with pytest.raises(AdapterUnavailableError, match="no valid dates"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE <class 'src.project_case.audit.AdapterUnavailableError'>
+_________ test_project_case_rejects_native_pre_cutover_grids[da_id-FR] _________
+tests/test_market_grid_guards.py:208: in test_project_case_rejects_native_pre_cutover_grids
+    with pytest.raises(AdapterUnavailableError, match="no valid dates"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE <class 'src.project_case.audit.AdapterUnavailableError'>
+______ test_project_case_rejects_native_pre_cutover_grids[reserve-DE_LU] _______
+tests/test_market_grid_guards.py:208: in test_project_case_rejects_native_pre_cutover_grids
+    with pytest.raises(AdapterUnavailableError, match="no valid dates"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE <class 'src.project_case.audit.AdapterUnavailableError'>
+=========================== short test summary info ============================
+FAILED tests/test_market_grid_guards.py::test_project_case_rejects_native_pre_cutover_grids[da_id-DE_LU]
+FAILED tests/test_market_grid_guards.py::test_project_case_rejects_native_pre_cutover_grids[da_id-FR]
+FAILED tests/test_market_grid_guards.py::test_project_case_rejects_native_pre_cutover_grids[reserve-DE_LU]
+======================= 3 failed, 68 deselected in 0.20s =======================

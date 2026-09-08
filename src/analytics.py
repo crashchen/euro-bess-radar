@@ -1233,6 +1233,60 @@ def calculate_two_stage_da_id_dispatch(
     )
 
 
+def _intraday_grids_compatible(da: pd.DataFrame, ida: pd.DataFrame) -> bool:
+    """Verify cadence and phase per overlapping local day, allowing sparse rows.
+
+    Days with fewer than two observations in either source cannot establish
+    cadence and are excluded from the comparison. Unequal inferred cadence or
+    off-grid timestamps still reject the window. Require at least one verified
+    day; all original source rows remain in the two coverage denominators.
+    """
+    if da.index.has_duplicates or ida.index.has_duplicates:
+        return False
+    ida_days = {day: group.index.sort_values() for day, group in ida.groupby(ida.index.date)}
+    verified_day = False
+    for day, group in da.groupby(da.index.date):
+        if day not in ida_days:
+            continue
+        da_index = group.index.sort_values()
+        ida_index = ida_days[day]
+        if min(len(da_index), len(ida_index)) < 2:
+            continue
+        dt = _infer_interval_hours(da_index)
+        if dt != _infer_interval_hours(ida_index):
+            return False
+        step_ns = pd.Timedelta(hours=dt).value
+        # Checking every point also catches phase shifts and occasional finer
+        # intervals that a cadence mode alone could conceal.
+        points = np.concatenate([da_index.asi8, ida_index.asi8])
+        if np.any((points - da_index.asi8[0]) % step_ns != 0):
+            return False
+        verified_day = True
+    return verified_day
+
+
+def _intraday_uplift_price_pairs(
+    da: pd.DataFrame, ida: pd.DataFrame, *, tz: str | None = None,
+) -> pd.DataFrame:
+    """Select the estimate/plot sample after the window's grid check passes.
+
+    Count original timestamps before filtering prices, so a NaN does not change
+    the observed delivery cadence. A singleton day is excluded from both the
+    statistics and histogram, even if its lone timestamp overlaps exactly.
+    """
+    da = _to_local(da, tz)
+    ida = _to_local(ida, tz)
+    da_counts = da.groupby(da.index.date).size()
+    ida_counts = ida.groupby(ida.index.date).size()
+    verified_dates = da_counts[da_counts >= 2].index.intersection(
+        ida_counts[ida_counts >= 2].index,
+    )
+    merged = da.loc[np.isin(da.index.date, verified_dates), ["price_eur_mwh"]].join(
+        ida[["intraday_price_eur_mwh"]], how="inner",
+    )
+    return merged.loc[np.isfinite(merged.to_numpy(dtype=float)).all(axis=1)]
+
+
 def calculate_intraday_uplift(
     da_prices: pd.DataFrame,
     intraday_prices: pd.DataFrame,
@@ -1242,7 +1296,7 @@ def calculate_intraday_uplift(
     cycles_per_day: float = 1.0,
     capture_rate: float = 0.70,
     duration_hours: float = 1.0,
-) -> dict[str, float]:
+) -> dict[str, float | int | bool | str]:
     """Estimate additional BESS revenue from re-bidding into the intraday
     auction after a DA position.
 
@@ -1266,7 +1320,7 @@ def calculate_intraday_uplift(
         da_prices: DataFrame with 'price_eur_mwh' column, DatetimeIndex (UTC).
         intraday_prices: DataFrame with 'intraday_price_eur_mwh' column,
             DatetimeIndex (UTC).
-        tz: IANA timezone for local-time grouping (only affects coverage stats).
+        tz: IANA timezone for daily delivery-grid checks and coverage stats.
         rebid_share: Fraction of BESS energy assumed free for ID after DA.
         cycles_per_day: Average DA cycles already counted; ID uplift assumes a
             similar throughput is available for rebid.
@@ -1276,7 +1330,12 @@ def calculate_intraday_uplift(
     Returns:
         Dict with avg_abs_spread, p50, p90, mean_signed, coverage_pct,
         annual_uplift_per_mw, annual_uplift_unadjusted_per_mw,
-        coverage_adjustment_factor, assumptions_used.
+        coverage_adjustment_factor, rebid_share, n_periods, model_available,
+        reason, da_coverage_pct and ida_coverage_pct. The latter two describe
+        usable finite pairs against each original source. A usable sample uses
+        the lower ratio, excluding days with fewer than two source observations
+        from the numerator only. Conflicting delivery grids still make the
+        whole estimate unavailable; their coverages describe raw finite overlap.
     """
     empty = {
         "avg_abs_spread": 0.0, "p50_abs": 0.0, "p90_abs": 0.0,
@@ -1286,6 +1345,10 @@ def calculate_intraday_uplift(
         "coverage_adjustment_factor": 0.0,
         "rebid_share": rebid_share,
         "n_periods": 0,
+        "model_available": False,
+        "reason": "DA and IDA1 series have no finite overlapping price pairs in this window.",
+        "da_coverage_pct": 0.0,
+        "ida_coverage_pct": 0.0,
     }
     if da_prices is None or da_prices.empty:
         return empty
@@ -1297,18 +1360,42 @@ def calculate_intraday_uplift(
     da = _to_local(da_prices, tz)
     ida = _to_local(intraday_prices, tz)
 
+    grid_reason = (
+        "Uplift unavailable: DA and IDA1 delivery grids are incompatible or cannot "
+        "be verified. Use matching delivery intervals with enough observations "
+        "to establish each day's cadence."
+    )
+    # Prevent duplicate timestamps from multiplying overlap counts in the join.
+    if da.index.has_duplicates or ida.index.has_duplicates:
+        return {**empty, "reason": grid_reason}
     merged = da[["price_eur_mwh"]].join(
         ida[["intraday_price_eur_mwh"]], how="inner",
-    ).dropna()
+    )
+    merged = merged.loc[np.isfinite(merged.to_numpy(dtype=float)).all(axis=1)]
+    da_ratio = len(merged) / len(da)
+    ida_ratio = len(merged) / len(ida)
+    source_coverage = {
+        "da_coverage_pct": round(100.0 * da_ratio, 1),
+        "ida_coverage_pct": round(100.0 * ida_ratio, 1),
+    }
+    if not _intraday_grids_compatible(da, ida):
+        return {**empty, **source_coverage, "reason": grid_reason}
+    merged = _intraday_uplift_price_pairs(da, ida)
     if merged.empty:
         return empty
+    da_ratio = len(merged) / len(da)
+    ida_ratio = len(merged) / len(ida)
+    source_coverage = {
+        "da_coverage_pct": round(100.0 * da_ratio, 1),
+        "ida_coverage_pct": round(100.0 * ida_ratio, 1),
+    }
 
     signed = merged["intraday_price_eur_mwh"] - merged["price_eur_mwh"]
     abs_spread = signed.abs()
     avg_abs = float(abs_spread.mean())
 
-    # Coverage: share of DA periods that also have an IDA price.
-    coverage_ratio = len(merged) / max(len(da), 1)
+    # A complete DA intersection alone must not conceal unused IDA periods.
+    coverage_ratio = min(da_ratio, ida_ratio)
     coverage_pct = round(100.0 * coverage_ratio, 1)
 
     annual_uplift_unadjusted = (
@@ -1329,6 +1416,9 @@ def calculate_intraday_uplift(
         "coverage_adjustment_factor": round(float(coverage_ratio), 4),
         "rebid_share": rebid_share,
         "n_periods": len(merged),
+        "model_available": True,
+        "reason": "",
+        **source_coverage,
     }
 
 

@@ -38,16 +38,78 @@ tests were not removed or rewritten. Validation: 1675 passed / 2 existing
 opt-in rendering skips; the separate slow suite passed 21/21. Independent
 review reproduced the baseline failures and the full-suite result.
 
-## Remaining scope after Step 1
+## Step 1b: remaining DA/IDA consumers
 
-Step 1b must extend the grid guard to reserve ceiling, sequential, sequential
-reserve, stochastic and stochastic triple batch paths, and correct the
-simplified Revenue uplift diagnostic's DA-only coverage denominator. These
-consumers can still accept hourly DA with quarter-hour IDA after a lossy join.
+Reserve ceiling, sequential, sequential reserve, stochastic and stochastic
+triple batch paths now share the ordinary continuous replay's two-sided day
+join guard. The joined day must retain both original source row counts before
+NaN removal. Existing local-time regular-day checks, forecast/scenario
+alignment, reserve skip ordering and solver failure accounting remain intact.
+A rejected market grid counts as missing data and does not reach the solvers.
+The ordinary single-day error now leads with incomplete coverage and retains
+the DA, IDA and joined row counts.
+
+The simplified Revenue uplift estimate checks inferred cadence and timestamp
+phase on every overlapping local day. It accepts verifiable sparse samples
+and matching grids that change cadence between days, including DST days.
+Different cadences, duplicate timestamps or off-grid observations make the
+entire window unavailable. Days with fewer than two observations in either
+source cannot establish cadence and are excluded from both statistics and the
+histogram; their original rows remain in the coverage denominators. If no day
+can be verified, the estimate is unavailable. No source is resampled.
+
+Only finite price pairs contribute to the estimate and histogram. The result
+exposes `model_available` and `reason`, plus `da_coverage_pct` and
+`ida_coverage_pct`: usable finite pairs divided by each original input's row
+count. On usable grids, the lower ratio is the annual uplift adjustment.
+On incompatible grids the estimate has zero usable periods and is unavailable;
+raw overlap ratios may still be nonzero, so they are not proof of model
+availability. The Revenue panel displays the reason instead of an uplift
+headline, and shows both source coverages and the exclusion rule for usable
+samples. Statistics and histogram use the same sample-selection helper.
+
+The second review found an availability reversal: four matching days plus a
+missing IDA day produced an estimate, but adding one quote on the missing day
+vetoed the whole window. Both cases now retain 96 comparable periods, 80%
+coverage and EUR 511.35 annual uplift in the five-hourly-day synthetic fixture.
+The singleton source's denominator remains 97 rows, not 96. Seven additional
+regressions cover DA/IDA symmetry, three local-day positions (including UTC
+date boundaries), and the real panel's headline, coverage and histogram.
+
+Coverage remains an interval-count screening measure, not elapsed-time or
+delivered-energy coverage. The 24 DA / 96 IDA fixture now reports raw DA/IDA
+overlap of 100%/25% with an unavailable estimate, rather than a 100%-covered
+annual uplift. Existing same-grid sparse IDA behavior is retained.
+
+Step 1b adds 72 cases: 37 fail on the Step 1 baseline and 35 are compatibility
+controls. They exercise all five public batch paths, both mismatch directions,
+positive/zero reserve, two generated scenarios, complete hourly/quarter-hour
+grids, missing/NaN rows, DST, both uplift denominators, non-finite pairs and
+the real Revenue panel. Three new public-adapter rejection cases guard against
+turning native pre-cutover mismatched grids into fingerprinted Project Case
+results. An additional post-cutover spring DST case preserves the EUR 480
+DA/IDA/reserve settlement assertion on compatible native grids.
+
+Three existing integration cases previously expected successful dispatch on
+hourly DA and quarter-hour IDA. Their assumptions are updated explicitly:
+the two non-UTC success cases use post-cutover native quarter-hour data while
+retaining walk-forward coverage and fingerprint assertions; the pre-cutover
+spring DA/IDA/reserve case now expects `AdapterUnavailableError`. The existing
+DA-only reserve EUR 480 checks on 23/24/25-hour days and the compatible autumn
+DA/IDA/reserve EUR 480 check remain. Solver-heavy integration tests remain
+part of the full-suite validation.
+
+Frozen patches, baseline failures, full-suite logs and portable reproduction
+commands are indexed in the [review evidence](../audits/README.md). The first
+Step 1b snapshot and its review remain distinguishable from the singleton fix.
+
+## Remaining scope after Step 1b
 
 Step 2 covers interval-duration vectors for local-day-internal resolution
 changes in BG, EE, FI, GR, LT, LV, PT and RO. The FI joint-capacity fixture still
 reports EUR 110.4375 instead of EUR 114. The current regular-day guard remains
-unchanged; Step 1 does not resolve that case. Moving-window calculations,
+unchanged; neither step resolves that case. Forecast skill's DA-baseline
+coverage disclosure remains a separate item: preserving the forecast's own
+timestamps does not imply complete coverage of its DA comparator. Moving-window calculations,
 dependency bounds, other interaction/visual changes and project-note
 housekeeping retain their separate planned scope.

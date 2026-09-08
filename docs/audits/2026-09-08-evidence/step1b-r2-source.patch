@@ -1,0 +1,231 @@
+diff --git a/src/analytics.py b/src/analytics.py
+index a612c423e29b6624710bc5713d7a52b297582c96..3ee985e2f98e4ec43e22569bf26b8809ea044d60 100644
+--- a/src/analytics.py
++++ b/src/analytics.py
+@@ -1236,20 +1236,22 @@ def calculate_two_stage_da_id_dispatch(
+ def _intraday_grids_compatible(da: pd.DataFrame, ida: pd.DataFrame) -> bool:
+     """Verify cadence and phase per overlapping local day, allowing sparse rows.
+ 
+-    A lone print, unequal inferred cadence or off-grid timestamps cannot prove
+-    equal delivery products. Reject ambiguous samples instead of resampling.
+-    Missing whole days are handled separately by the two coverage denominators.
++    Days with fewer than two observations in either source cannot establish
++    cadence and are excluded from the comparison. Unequal inferred cadence or
++    off-grid timestamps still reject the window. Require at least one verified
++    day; all original source rows remain in the two coverage denominators.
+     """
+     if da.index.has_duplicates or ida.index.has_duplicates:
+         return False
+     ida_days = {day: group.index.sort_values() for day, group in ida.groupby(ida.index.date)}
++    verified_day = False
+     for day, group in da.groupby(da.index.date):
+         if day not in ida_days:
+             continue
+         da_index = group.index.sort_values()
+         ida_index = ida_days[day]
+         if min(len(da_index), len(ida_index)) < 2:
+-            return False
++            continue
+         dt = _infer_interval_hours(da_index)
+         if dt != _infer_interval_hours(ida_index):
+             return False
+@@ -1259,7 +1261,30 @@ def _intraday_grids_compatible(da: pd.DataFrame, ida: pd.DataFrame) -> bool:
+         points = np.concatenate([da_index.asi8, ida_index.asi8])
+         if np.any((points - da_index.asi8[0]) % step_ns != 0):
+             return False
+-    return True
++        verified_day = True
++    return verified_day
++
++
++def _intraday_uplift_price_pairs(
++    da: pd.DataFrame, ida: pd.DataFrame, *, tz: str | None = None,
++) -> pd.DataFrame:
++    """Select the estimate/plot sample after the window's grid check passes.
++
++    Count original timestamps before filtering prices, so a NaN does not change
++    the observed delivery cadence. A singleton day is excluded from both the
++    statistics and histogram, even if its lone timestamp overlaps exactly.
++    """
++    da = _to_local(da, tz)
++    ida = _to_local(ida, tz)
++    da_counts = da.groupby(da.index.date).size()
++    ida_counts = ida.groupby(ida.index.date).size()
++    verified_dates = da_counts[da_counts >= 2].index.intersection(
++        ida_counts[ida_counts >= 2].index,
++    )
++    merged = da.loc[np.isin(da.index.date, verified_dates), ["price_eur_mwh"]].join(
++        ida[["intraday_price_eur_mwh"]], how="inner",
++    )
++    return merged.loc[np.isfinite(merged.to_numpy(dtype=float)).all(axis=1)]
+ 
+ 
+ def calculate_intraday_uplift(
+@@ -1307,9 +1332,10 @@ def calculate_intraday_uplift(
+         annual_uplift_per_mw, annual_uplift_unadjusted_per_mw,
+         coverage_adjustment_factor, rebid_share, n_periods, model_available,
+         reason, da_coverage_pct and ida_coverage_pct. The latter two describe
+-        finite timestamp overlap against each original source. A usable sample
+-        uses the lower ratio; an incompatible or unverifiable delivery grid
+-        makes the whole estimate unavailable, even when timestamps overlap.
++        usable finite pairs against each original source. A usable sample uses
++        the lower ratio, excluding days with fewer than two source observations
++        from the numerator only. Conflicting delivery grids still make the
++        whole estimate unavailable; their coverages describe raw finite overlap.
+     """
+     empty = {
+         "avg_abs_spread": 0.0, "p50_abs": 0.0, "p90_abs": 0.0,
+@@ -1354,8 +1380,15 @@ def calculate_intraday_uplift(
+     }
+     if not _intraday_grids_compatible(da, ida):
+         return {**empty, **source_coverage, "reason": grid_reason}
++    merged = _intraday_uplift_price_pairs(da, ida)
+     if merged.empty:
+         return empty
++    da_ratio = len(merged) / len(da)
++    ida_ratio = len(merged) / len(ida)
++    source_coverage = {
++        "da_coverage_pct": round(100.0 * da_ratio, 1),
++        "ida_coverage_pct": round(100.0 * ida_ratio, 1),
++    }
+ 
+     signed = merged["intraday_price_eur_mwh"] - merged["price_eur_mwh"]
+     abs_spread = signed.abs()
+diff --git a/src/pages/revenue_estimation.py b/src/pages/revenue_estimation.py
+index 79d4c088aaa8d86ee445d8157e77dcb1d3b2f286..446990a3d660fa822994aeae95f3d22e762efdd0 100644
+--- a/src/pages/revenue_estimation.py
++++ b/src/pages/revenue_estimation.py
+@@ -4,13 +4,13 @@ from __future__ import annotations
+ 
+ import math
+ 
+-import numpy as np
+ import pandas as pd
+ import plotly.express as px
+ import plotly.graph_objects as go
+ import streamlit as st
+ 
+ from src.analytics import (
++    _intraday_uplift_price_pairs,
+     calculate_daily_dispatch,
+     calculate_daily_spreads,
+     calculate_imbalance_spread,
+@@ -1206,10 +1206,7 @@ def _render_intraday_uplift_section(
+                 f"equivalent would be €{unadjusted * power_mw:,.0f}/yr."
+             )
+ 
+-        merged = primary_df[["price_eur_mwh"]].join(
+-            id_df[["intraday_price_eur_mwh"]], how="inner",
+-        )
+-        merged = merged.loc[np.isfinite(merged.to_numpy(dtype=float)).all(axis=1)]
++        merged = _intraday_uplift_price_pairs(primary_df, id_df, tz=zone_tz)
+         if not merged.empty:
+             signed = (
+                 merged["intraday_price_eur_mwh"] - merged["price_eur_mwh"]
+@@ -1228,7 +1225,9 @@ def _render_intraday_uplift_section(
+         st.caption(
+             f"Sample: {uplift['n_periods']} periods "
+             f"(DA coverage: {uplift['da_coverage_pct']:.1f}%; "
+-            f"IDA coverage: {uplift['ida_coverage_pct']:.1f}%, based on finite price pairs). "
++            f"IDA coverage: {uplift['ida_coverage_pct']:.1f}%, based on usable finite price pairs). "
++            "Days with unconfirmed delivery intervals are excluded from the sample; "
++            "coverage still uses all original source periods. "
+             "The Phase-1 headline scales the annual estimate by the lower coverage "
+             "instead of assuming sparse IDA prints represent a full year. This "
+             "is a screening estimate at a fixed rebid share; the two-stage "
+diff --git a/tests/test_market_grid_guards.py b/tests/test_market_grid_guards.py
+index e5e087a47038bff1c57f8013e4d3f8e188046b04..56aca42160c6b3c9c11bd18973a0dc4b9ff81657 100644
+--- a/tests/test_market_grid_guards.py
++++ b/tests/test_market_grid_guards.py
+@@ -164,6 +164,43 @@ def test_uplift_reports_both_source_coverage_denominators(sample):
+     assert result["annual_uplift_per_mw"] == pytest.approx(639.1875 * ratio, abs=0.01)
+ 
+ 
++@pytest.mark.parametrize("source", ["da", "ida"])
++@pytest.mark.parametrize("position", [0, 12, 23])
++def test_uplift_singleton_day_matches_absent_day(source, position):
++    """An extra unverified quote must neither veto nor inflate valid days."""
++    days = pd.date_range("2025-09-01", periods=5).strftime("%Y-%m-%d")
++    da = pd.concat([_market_day(day, "h") for day in days])
++    ida = pd.concat([_market_day(day, "h", ida=True) for day in days])
++    target = da if source == "da" else ida
++    missing_day = target.iloc[48:72]
++    sparse = target.drop(missing_day.index)
++    lone_quote = missing_day.iloc[[position]].copy()
++    lone_quote.iloc[0, 0] = 1_000_000.0
++    singleton = pd.concat([sparse, lone_quote]).sort_index()
++
++    def estimate(frame):
++        return calculate_intraday_uplift(
++            frame if source == "da" else da,
++            frame if source == "ida" else ida, tz="Europe/Berlin",
++        )
++
++    absent_result = estimate(sparse)
++    singleton_result = estimate(singleton)
++    for result in [absent_result, singleton_result]:
++        assert result["model_available"] is True
++        assert result["n_periods"] == 96
++        assert result["avg_abs_spread"] == 10.0
++        assert result["p90_abs"] == 10.0
++        assert result["mean_signed"] == 10.0
++        assert result["coverage_adjustment_factor"] == 0.8
++        assert result["annual_uplift_per_mw"] == 511.35
++    # Do not silently shrink the sparse source's denominator from 97 to 96.
++    assert absent_result[f"{source}_coverage_pct"] == 100.0
++    assert singleton_result[f"{source}_coverage_pct"] == 99.0
++    other = "ida" if source == "da" else "da"
++    assert singleton_result[f"{other}_coverage_pct"] == 80.0
++
++
+ @pytest.mark.parametrize("column", ["price_eur_mwh", "intraday_price_eur_mwh"])
+ @pytest.mark.parametrize("value", [np.inf, -np.inf])
+ def test_uplift_counts_only_finite_price_pairs(column, value):
+@@ -228,12 +265,18 @@ def _uplift_app(sample):
+     ida_index = pd.date_range(start, periods=96, freq="15min").tz_convert("UTC")
+     if sample == "sparse":
+         ida_index = da_index[:-1]
++    elif sample == "singleton":
++        da_index = pd.date_range(start, periods=48, freq="h").tz_convert("UTC")
++        ida_index = da_index[:25]
+     da = pd.DataFrame({"price_eur_mwh": 50.0}, index=da_index)
+     ida = pd.DataFrame({"intraday_price_eur_mwh": 60.0}, index=ida_index)
+-    st.session_state["intraday_cache::DE_LU::2025-09-01::2025-09-01"] = ida
++    if sample == "singleton":
++        ida.iloc[-1, 0] = 1_000_000.0
++    end = date(2025, 9, 2 if sample == "singleton" else 1)
++    st.session_state[f"intraday_cache::DE_LU::2025-09-01::{end}"] = ida
+     _render_intraday_uplift_section(
+         primary_zone="DE_LU", primary_df=da, zone_tz="Europe/Berlin",
+-        start_date=date(2025, 9, 1), end_date=date(2025, 9, 1),
++        start_date=date(2025, 9, 1), end_date=end,
+         power_mw=1.0, duration_hours=1.0, efficiency=1.0,
+         capture_rate=0.70, chart_template="plotly_dark",
+     )
+@@ -256,3 +299,26 @@ def test_revenue_panel_discloses_da_and_ida_coverage_for_sparse_sample():
+     assert "Coverage-adjusted uplift" in [metric.label for metric in app.metric]
+     assert any("DA coverage: 95.8%" in caption.value and "IDA coverage: 100.0%" in caption.value
+                for caption in app.caption)
++
++
++def test_revenue_panel_excludes_singleton_from_headline_and_histogram(monkeypatch):
++    import plotly.express as px
++    from streamlit.testing.v1 import AppTest
++
++    histogram = px.histogram
++    plotted = []
++
++    def capture_sample(data_frame, *args, **kwargs):
++        plotted.append(data_frame[kwargs["x"]].copy())
++        return histogram(data_frame, *args, **kwargs)
++
++    monkeypatch.setattr(px, "histogram", capture_sample)
++    app = AppTest.from_function(_uplift_app, args=("singleton",)).run(timeout=30)
++    assert not app.exception
++    headlines = [metric.value for metric in app.metric if metric.label == "Coverage-adjusted uplift"]
++    assert headlines == ["€320"]
++    assert len(plotted) == 1
++    assert len(plotted[0]) == 24
++    assert plotted[0].eq(10.0).all()
++    assert any("Sample: 24 periods" in caption.value and "DA coverage: 50.0%" in caption.value
++               and "IDA coverage: 96.0%" in caption.value for caption in app.caption)

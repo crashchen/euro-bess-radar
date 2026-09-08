@@ -1,0 +1,195 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 68 items
+
+tests/test_market_grid_guards.py FFFFFFFFFFFFFFFF....................... [ 57%]
+.........FFFFFFF..FFFFFFFFFFF                                            [100%]
+
+=================================== FAILURES ===================================
+___ test_policy_batches_reject_market_grid_loss[h-15min-reserve_ceiling-0.0] ___
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+___ test_policy_batches_reject_market_grid_loss[h-15min-reserve_ceiling-5.0] ___
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+_____ test_policy_batches_reject_market_grid_loss[h-15min-sequential-0.0] ______
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+_ test_policy_batches_reject_market_grid_loss[h-15min-sequential_reserve-0.0] __
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+_ test_policy_batches_reject_market_grid_loss[h-15min-sequential_reserve-5.0] __
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+_____ test_policy_batches_reject_market_grid_loss[h-15min-stochastic-0.0] ______
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+_______ test_policy_batches_reject_market_grid_loss[h-15min-triple-0.0] ________
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+_______ test_policy_batches_reject_market_grid_loss[h-15min-triple-5.0] ________
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+___ test_policy_batches_reject_market_grid_loss[15min-h-reserve_ceiling-0.0] ___
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+___ test_policy_batches_reject_market_grid_loss[15min-h-reserve_ceiling-5.0] ___
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+_____ test_policy_batches_reject_market_grid_loss[15min-h-sequential-0.0] ______
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+_ test_policy_batches_reject_market_grid_loss[15min-h-sequential_reserve-0.0] __
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+_ test_policy_batches_reject_market_grid_loss[15min-h-sequential_reserve-5.0] __
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+_____ test_policy_batches_reject_market_grid_loss[15min-h-stochastic-0.0] ______
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+_______ test_policy_batches_reject_market_grid_loss[15min-h-triple-0.0] ________
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+_______ test_policy_batches_reject_market_grid_loss[15min-h-triple-5.0] ________
+tests/test_market_grid_guards.py:69: in test_policy_batches_reject_market_grid_loss
+    assert summary["valid_days"] == 0
+E   assert 1 == 0
+__________ test_uplift_rejects_incompatible_delivery_cadence[h-15min] __________
+tests/test_market_grid_guards.py:97: in test_uplift_rejects_incompatible_delivery_cadence
+    assert result["n_periods"] == 0
+E   assert 48 == 0
+__________ test_uplift_rejects_incompatible_delivery_cadence[15min-h] __________
+tests/test_market_grid_guards.py:97: in test_uplift_rejects_incompatible_delivery_cadence
+    assert result["n_periods"] == 0
+E   assert 48 == 0
+__________ test_uplift_cannot_hide_one_mismatched_day_inside_a_window __________
+tests/test_market_grid_guards.py:108: in test_uplift_cannot_hide_one_mismatched_day_inside_a_window
+    assert result["n_periods"] == 0
+E   assert 48 == 0
+__________ test_uplift_rejects_unverifiable_source_grid[duplicate_da] __________
+tests/test_market_grid_guards.py:125: in test_uplift_rejects_unverifiable_source_grid
+    assert result["n_periods"] == 0
+E   assert 49 == 0
+_________ test_uplift_rejects_unverifiable_source_grid[duplicate_ida] __________
+tests/test_market_grid_guards.py:125: in test_uplift_rejects_unverifiable_source_grid
+    assert result["n_periods"] == 0
+E   assert 49 == 0
+_____________ test_uplift_rejects_unverifiable_source_grid[offset] _____________
+tests/test_market_grid_guards.py:126: in test_uplift_rejects_unverifiable_source_grid
+    assert result["model_available"] is False
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'model_available'
+___________ test_uplift_rejects_unverifiable_source_grid[singleton] ____________
+tests/test_market_grid_guards.py:125: in test_uplift_rejects_unverifiable_source_grid
+    assert result["n_periods"] == 0
+E   assert 1 == 0
+______ test_uplift_reports_both_source_coverage_denominators[one_missing] ______
+tests/test_market_grid_guards.py:159: in test_uplift_reports_both_source_coverage_denominators
+    assert result["model_available"] is True
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'model_available'
+______ test_uplift_reports_both_source_coverage_denominators[half_window] ______
+tests/test_market_grid_guards.py:159: in test_uplift_reports_both_source_coverage_denominators
+    assert result["model_available"] is True
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'model_available'
+_______ test_uplift_reports_both_source_coverage_denominators[sparse_da] _______
+tests/test_market_grid_guards.py:159: in test_uplift_reports_both_source_coverage_denominators
+    assert result["model_available"] is True
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'model_available'
+________ test_uplift_reports_both_source_coverage_denominators[cutover] ________
+tests/test_market_grid_guards.py:159: in test_uplift_reports_both_source_coverage_denominators
+    assert result["model_available"] is True
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'model_available'
+________ test_uplift_counts_only_finite_price_pairs[inf-price_eur_mwh] _________
+tests/test_market_grid_guards.py:174: in test_uplift_counts_only_finite_price_pairs
+    assert result["n_periods"] == 47
+E   assert 48 == 47
+____ test_uplift_counts_only_finite_price_pairs[inf-intraday_price_eur_mwh] ____
+tests/test_market_grid_guards.py:174: in test_uplift_counts_only_finite_price_pairs
+    assert result["n_periods"] == 47
+E   assert 48 == 47
+________ test_uplift_counts_only_finite_price_pairs[-inf-price_eur_mwh] ________
+tests/test_market_grid_guards.py:174: in test_uplift_counts_only_finite_price_pairs
+    assert result["n_periods"] == 47
+E   assert 48 == 47
+___ test_uplift_counts_only_finite_price_pairs[-inf-intraday_price_eur_mwh] ____
+tests/test_market_grid_guards.py:174: in test_uplift_counts_only_finite_price_pairs
+    assert result["n_periods"] == 47
+E   assert 48 == 47
+__________ test_single_replay_missing_row_message_leads_with_coverage __________
+tests/test_market_grid_guards.py:186: in test_single_replay_missing_row_message_leads_with_coverage
+    assert result["summary"]["message"].startswith("DA and IDA1 coverage is incomplete")
+E   AssertionError: assert False
+E    +  where False = <built-in method startswith of str object at 0x123e5c330>('DA and IDA1 coverage is incomplete')
+E    +    where <built-in method startswith of str object at 0x123e5c330> = 'DA and IDA1 delivery interval resolution mismatch or incomplete coverage; joining discards or duplicates intervals (DA=24, IDA1=23, merged=23).'.startswith
+____ test_revenue_panel_discloses_incompatible_grid_without_uplift_headline ____
+tests/test_market_grid_guards.py:219: in test_revenue_panel_discloses_incompatible_grid_without_uplift_headline
+    assert any("delivery grid" in warning.value.lower() for warning in app.warning)
+E   assert False
+E    +  where False = any(<generator object test_revenue_panel_discloses_incompatible_grid_without_uplift_headline.<locals>.<genexpr> at 0x125142740>)
+----------------------------- Captured stderr call -----------------------------
+2026-09-08 12:29:55.370 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+______ test_revenue_panel_discloses_da_and_ida_coverage_for_sparse_sample ______
+tests/test_market_grid_guards.py:229: in test_revenue_panel_discloses_da_and_ida_coverage_for_sparse_sample
+    assert any("DA coverage: 95.8%" in caption.value and "IDA coverage: 100.0%" in caption.value
+E   assert False
+E    +  where False = any(<generator object test_revenue_panel_discloses_da_and_ida_coverage_for_sparse_sample.<locals>.<genexpr> at 0x126d252f0>)
+----------------------------- Captured stderr call -----------------------------
+2026-09-08 12:29:55.535 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+=========================== short test summary info ============================
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[h-15min-reserve_ceiling-0.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[h-15min-reserve_ceiling-5.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[h-15min-sequential-0.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[h-15min-sequential_reserve-0.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[h-15min-sequential_reserve-5.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[h-15min-stochastic-0.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[h-15min-triple-0.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[h-15min-triple-5.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[15min-h-reserve_ceiling-0.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[15min-h-reserve_ceiling-5.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[15min-h-sequential-0.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[15min-h-sequential_reserve-0.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[15min-h-sequential_reserve-5.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[15min-h-stochastic-0.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[15min-h-triple-0.0]
+FAILED tests/test_market_grid_guards.py::test_policy_batches_reject_market_grid_loss[15min-h-triple-5.0]
+FAILED tests/test_market_grid_guards.py::test_uplift_rejects_incompatible_delivery_cadence[h-15min]
+FAILED tests/test_market_grid_guards.py::test_uplift_rejects_incompatible_delivery_cadence[15min-h]
+FAILED tests/test_market_grid_guards.py::test_uplift_cannot_hide_one_mismatched_day_inside_a_window
+FAILED tests/test_market_grid_guards.py::test_uplift_rejects_unverifiable_source_grid[duplicate_da]
+FAILED tests/test_market_grid_guards.py::test_uplift_rejects_unverifiable_source_grid[duplicate_ida]
+FAILED tests/test_market_grid_guards.py::test_uplift_rejects_unverifiable_source_grid[offset]
+FAILED tests/test_market_grid_guards.py::test_uplift_rejects_unverifiable_source_grid[singleton]
+FAILED tests/test_market_grid_guards.py::test_uplift_reports_both_source_coverage_denominators[one_missing]
+FAILED tests/test_market_grid_guards.py::test_uplift_reports_both_source_coverage_denominators[half_window]
+FAILED tests/test_market_grid_guards.py::test_uplift_reports_both_source_coverage_denominators[sparse_da]
+FAILED tests/test_market_grid_guards.py::test_uplift_reports_both_source_coverage_denominators[cutover]
+FAILED tests/test_market_grid_guards.py::test_uplift_counts_only_finite_price_pairs[inf-price_eur_mwh]
+FAILED tests/test_market_grid_guards.py::test_uplift_counts_only_finite_price_pairs[inf-intraday_price_eur_mwh]
+FAILED tests/test_market_grid_guards.py::test_uplift_counts_only_finite_price_pairs[-inf-price_eur_mwh]
+FAILED tests/test_market_grid_guards.py::test_uplift_counts_only_finite_price_pairs[-inf-intraday_price_eur_mwh]
+FAILED tests/test_market_grid_guards.py::test_single_replay_missing_row_message_leads_with_coverage
+FAILED tests/test_market_grid_guards.py::test_revenue_panel_discloses_incompatible_grid_without_uplift_headline
+FAILED tests/test_market_grid_guards.py::test_revenue_panel_discloses_da_and_ida_coverage_for_sparse_sample
+======================== 34 failed, 34 passed in 3.71s =========================

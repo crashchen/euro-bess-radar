@@ -1,0 +1,10 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 68 items
+
+tests/test_market_grid_guards.py ....................................... [ 57%]
+.............................                                            [100%]
+
+============================== 68 passed in 3.04s ==============================

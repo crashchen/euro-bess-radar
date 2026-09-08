@@ -286,7 +286,7 @@ def simulate_da_id_replay(
         return empty_simulation_result("DA and IDA1 data have no overlapping intervals.")
     if len(merged) != len(da_day) or len(merged) != len(ida_day):
         return empty_simulation_result(
-            "DA and IDA1 delivery interval resolution mismatch or incomplete coverage; "
+            "DA and IDA1 coverage is incomplete or their delivery intervals have a resolution mismatch; "
             "joining discards or duplicates intervals "
             f"(DA={len(da_day)}, IDA1={len(ida_day)}, merged={len(merged)})."
         )
@@ -694,13 +694,7 @@ def _simulate_continuous_da_id_replay(
         ida_day = _select_local_day(ida_prices, local_date, tz)
         if da_day.empty or ida_day.empty or "intraday_price_eur_mwh" not in ida_day.columns:
             return pd.DataFrame()
-        merged = da_day[["price_eur_mwh"]].join(
-            ida_day[["intraday_price_eur_mwh"]], how="inner",
-        )
-        if len(merged) != len(da_day) or len(merged) != len(ida_day):
-            return pd.DataFrame()
-        merged = merged.dropna()
-        return merged if not merged.empty else pd.DataFrame()
+        return _merge_matching_da_id_day(da_day, ida_day)
 
     runs = _group_clean_runs(dates=dates, build_day=build_da_id_day)
     for run_dates, slice_df, day_breaks in runs:
@@ -880,6 +874,21 @@ def _group_clean_runs(
 
     flush()
     return runs
+
+
+def _merge_matching_da_id_day(da_day: pd.DataFrame, ida_day: pd.DataFrame) -> pd.DataFrame:
+    """Keep both market grids intact before applying the existing NaN/day guards.
+
+    Inputs already use the same local timezone. Forecasts/scenarios are aligned
+    later, so this join must not reduce either source's delivery timestamps.
+    Returning an empty day preserves each caller's missing-data accounting.
+    """
+    merged = da_day[["price_eur_mwh"]].join(
+        ida_day[["intraday_price_eur_mwh"]], how="inner",
+    )
+    if len(merged) != len(da_day) or len(merged) != len(ida_day):
+        return pd.DataFrame()
+    return merged.dropna()
 
 
 def _is_regular_utc_day(
@@ -1182,9 +1191,7 @@ def simulate_da_id_reserve_ceiling_batch(
         if da_day.empty or ida_day.empty or "intraday_price_eur_mwh" not in ida_day.columns:
             missing_days += 1
             continue
-        merged = da_day[["price_eur_mwh"]].join(
-            ida_day[["intraday_price_eur_mwh"]], how="inner",
-        ).dropna()
+        merged = _merge_matching_da_id_day(da_day, ida_day)
         if merged.empty or not _is_regular_utc_day(merged):
             missing_days += 1
             continue
@@ -1312,9 +1319,7 @@ def simulate_sequential_da_id_reserve_batch(
         if da_day.empty or ida_day.empty or "intraday_price_eur_mwh" not in ida_day.columns:
             missing_days += 1
             continue
-        merged = da_day[["price_eur_mwh"]].join(
-            ida_day[["intraday_price_eur_mwh"]], how="inner",
-        ).dropna()
+        merged = _merge_matching_da_id_day(da_day, ida_day)
         if merged.empty or not _is_regular_utc_day(merged):
             missing_days += 1
             continue
@@ -1424,11 +1429,7 @@ def _sequential_day_row(
     # non-UTC zone (DE_LU, FR, …), so a fully-complete input returns no valid dates.
     # The forecast is aligned by ``reindex`` instead (matches on the absolute
     # instant across tz), exactly as the DA+ID+reserve batch and ``_stochastic_day``.
-    merged = (
-        da_day[["price_eur_mwh"]]
-        .join(ida_day[["intraday_price_eur_mwh"]], how="inner")
-        .dropna()
-    )
+    merged = _merge_matching_da_id_day(da_day, ida_day)
     if merged.empty or not _is_regular_utc_day(merged):
         return None, None
     idx = pd.DatetimeIndex(merged.index)
@@ -1863,11 +1864,7 @@ def _stochastic_day(
     ida_day = _select_local_day(ida_prices, local_date, tz)
     if da_day.empty or ida_day.empty or IDA_VALUE_COL not in ida_day.columns:
         return None, None
-    merged = (
-        da_day[["price_eur_mwh"]]
-        .join(ida_day[[IDA_VALUE_COL]], how="inner")
-        .dropna()
-    )
+    merged = _merge_matching_da_id_day(da_day, ida_day)
     if merged.empty or not _is_regular_utc_day(merged):
         return None, None
     aligned = _align_day_scenarios(bundle, pd.DatetimeIndex(merged.index))
@@ -2105,11 +2102,7 @@ def _triple_stochastic_day(
     ida_day = _select_local_day(ida_prices, local_date, tz)
     if da_day.empty or ida_day.empty or IDA_VALUE_COL not in ida_day.columns:
         return None, None
-    merged = (
-        da_day[["price_eur_mwh"]]
-        .join(ida_day[[IDA_VALUE_COL]], how="inner")
-        .dropna()
-    )
+    merged = _merge_matching_da_id_day(da_day, ida_day)
     if merged.empty or not _is_regular_utc_day(merged):
         return None, None
     aligned = _align_day_scenarios(bundle, pd.DatetimeIndex(merged.index))

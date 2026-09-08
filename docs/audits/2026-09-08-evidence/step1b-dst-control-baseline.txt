@@ -1,0 +1,9 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: /private<baseline-checkout>
+configfile: pyproject.toml
+collected 1 item
+
+tests/test_project_case_adapters.py .                                    [100%]
+
+============================== 1 passed in 0.30s ===============================
