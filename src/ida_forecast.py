@@ -233,11 +233,19 @@ def compute_forecast_skill(
         ``realised_std`` (context for the MAE), ``naive_da_mae`` /
         ``skill_vs_da`` (None without DA or when the naive MAE is ~0), and a
         ``by_hour`` DataFrame (local hour-of-day MAE + sample count).
+        ``da_baseline_n_points`` / ``da_baseline_coverage_pct`` expose the finite
+        DA comparator subset relative to the forecast's own scored population;
+        ``forecast_mae_on_da_overlap`` is the MAE used in that comparison.
+        An unusable DA comparator has a ``da_baseline_reason`` and does not
+        change the forecast's primary metrics.
     """
     empty = {
         "n_points": 0, "mae": float("nan"), "bias": float("nan"),
         "rmse": float("nan"), "realised_std": float("nan"),
         "naive_da_mae": None, "skill_vs_da": None,
+        "da_baseline_n_points": 0, "da_baseline_coverage_pct": 0.0,
+        "forecast_mae_on_da_overlap": None,
+        "da_baseline_reason": "No finite DA baseline overlap.",
         "by_hour": pd.DataFrame(columns=SKILL_BY_HOUR_COLUMNS),
     }
     if (
@@ -249,12 +257,7 @@ def compute_forecast_skill(
         return empty
 
     aligned = forecast_df[[FORECAST_COL]].join(realised[[value_col]], how="inner")
-    if da_prices is not None and "price_eur_mwh" in getattr(da_prices, "columns", []):
-        aligned = aligned.join(
-            da_prices[["price_eur_mwh"]].rename(columns={"price_eur_mwh": "_da"}),
-            how="left",
-        )
-    aligned = aligned.dropna(subset=[FORECAST_COL, value_col])
+    aligned = aligned.loc[np.isfinite(aligned.to_numpy(dtype=float)).all(axis=1)]
     if aligned.empty:
         return empty
 
@@ -262,9 +265,23 @@ def compute_forecast_skill(
     abs_err = err.abs()
     naive_da_mae = None
     skill_vs_da = None
-    if "_da" in aligned.columns:
-        da_rows = aligned.dropna(subset=["_da"])
+    fc_mae_sub = None
+    da_count = 0
+    da_reason = "No finite DA baseline overlap."
+    if da_prices is not None and "price_eur_mwh" in getattr(da_prices, "columns", []):
+        # A baseline join must not multiply the forecast's own population.
+        if da_prices.index.has_duplicates:
+            da_rows = aligned.iloc[:0]
+            da_reason = "DA baseline has duplicate delivery timestamps."
+        else:
+            da_rows = aligned.join(
+                da_prices[["price_eur_mwh"]].rename(columns={"price_eur_mwh": "_da"}),
+                how="inner",
+            )
+            da_rows = da_rows.loc[np.isfinite(da_rows["_da"].to_numpy(dtype=float))]
         if not da_rows.empty:
+            da_count = len(da_rows)
+            da_reason = ""
             naive_da_mae = float((da_rows["_da"] - da_rows[value_col]).abs().mean())
             fc_mae_sub = float(
                 (da_rows[FORECAST_COL] - da_rows[value_col]).abs().mean()
@@ -289,5 +306,9 @@ def compute_forecast_skill(
         "realised_std": float(aligned[value_col].std(ddof=0)),
         "naive_da_mae": naive_da_mae,
         "skill_vs_da": skill_vs_da,
+        "da_baseline_n_points": da_count,
+        "da_baseline_coverage_pct": 100.0 * da_count / len(aligned),
+        "forecast_mae_on_da_overlap": fc_mae_sub,
+        "da_baseline_reason": da_reason,
         "by_hour": by_hour[SKILL_BY_HOUR_COLUMNS],
     }

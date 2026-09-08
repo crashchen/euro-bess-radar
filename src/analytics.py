@@ -5,13 +5,15 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from src.time_utils import infer_delivery_interval_hours, interval_hours_vector
+
 
 def calculate_dispatch_price_vwaps(
     prices_eur_mwh: np.ndarray | pd.Series,
     p_charge_mw: np.ndarray | pd.Series,
     p_discharge_mw: np.ndarray | pd.Series,
     *,
-    dt_hours: float,
+    dt_hours: float | np.ndarray,
 ) -> dict[str, float]:
     """Return energy-weighted physical charge and discharge market prices.
 
@@ -26,8 +28,7 @@ def calculate_dispatch_price_vwaps(
     discharge = np.asarray(p_discharge_mw, dtype=float)
     if not (len(prices) == len(charge) == len(discharge)):
         raise ValueError("prices, p_charge_mw, and p_discharge_mw must align.")
-    if dt_hours <= 0 or not np.isfinite(dt_hours):
-        raise ValueError("dt_hours must be a positive finite number.")
+    dt_hours = interval_hours_vector(dt_hours, len(prices))
     if not (
         np.isfinite(prices).all()
         and np.isfinite(charge).all()
@@ -86,6 +87,55 @@ def _window_length(index: pd.DatetimeIndex, duration_hours: float) -> int:
     return max(round(duration_hours / interval_hours), 1)
 
 
+def time_weighted_rolling_price_mean(
+    prices: pd.Series, *, window: str = "30D", min_hours: float = 24.0,
+) -> pd.Series:
+    """Trailing physical-time price mean, through each delivery interval's end.
+
+    Weight native prices by the covered portion of each interval. NaN prices
+    and days with unverified cadence contribute no covered time. The warm-up
+    requires ``min_hours`` of finite price coverage, not that many rows.
+    """
+    if prices.empty:
+        return pd.Series(index=prices.index, dtype=float)
+    index = pd.DatetimeIndex(prices.index).as_unit("ns")
+    if index.has_duplicates or index.hasnans or not index.is_monotonic_increasing:
+        raise ValueError("Rolling prices require unique increasing finite timestamps")
+    window_hours = pd.Timedelta(window).total_seconds() / 3600
+    if not np.isfinite([window_hours, min_hours]).all() or min(window_hours, min_hours) <= 0:
+        raise ValueError("Rolling window and minimum coverage hours must be positive and finite")
+    durations = np.zeros(len(prices))
+    positions = pd.Series(np.arange(len(prices)), index=index)
+    for _, group in positions.groupby(index.date):
+        if len(group) < 2:
+            continue
+        try:
+            durations[group.to_numpy()] = interval_hours_vector(
+                infer_delivery_interval_hours(group.index), len(group),
+            )
+        except ValueError:
+            continue
+    starts = (index.asi8 - index.asi8[0]) / pd.Timedelta(hours=1).value
+    ends = starts + durations
+    # A partial day's inferred last product must not overlap the next quote.
+    durations[np.r_[ends[:-1] > starts[1:] + 1e-9, False]] = 0.0
+    ends = starts + durations
+    finite = np.isfinite(prices.to_numpy(dtype=float))
+    values = np.where(finite, prices.to_numpy(dtype=float), 0.0)
+    covered = durations * finite
+    cash = np.r_[0.0, np.cumsum(values * covered)]
+    hours = np.r_[0.0, np.cumsum(covered)]
+    left = ends - window_hours
+    old = np.minimum(np.searchsorted(ends, left, side="right"), len(prices) - 1)
+    partial = np.clip(left - starts[old], 0.0, durations[old])
+    rolling_cash = cash[1:] - cash[old] - partial * values[old] * finite[old]
+    rolling_hours = hours[1:] - hours[old] - partial * finite[old]
+    result = np.full(len(prices), np.nan)
+    usable = (rolling_hours > 0) & (rolling_hours >= min_hours - 1e-9)
+    np.divide(rolling_cash, rolling_hours, out=result, where=usable)
+    return pd.Series(result, index=prices.index, name=prices.name)
+
+
 def _find_daily_ordered_trade(
     prices: pd.Series,
     duration_hours: float,
@@ -100,6 +150,10 @@ def _find_daily_ordered_trade(
             "sell_start_idx": 0,
             "window": 1,
         }
+
+    dt = infer_delivery_interval_hours(prices.index)
+    if isinstance(dt, np.ndarray):
+        return _find_mixed_day_ordered_trade(prices, duration_hours, dt)
 
     window = _window_length(prices.index, duration_hours)
     if len(prices) < window * 2:
@@ -184,6 +238,40 @@ def _calculate_daily_ordered_spread(
     }
 
 
+def _find_mixed_day_ordered_trade(
+    prices: pd.Series, duration_hours: float, dt: np.ndarray,
+) -> dict[str, float | int]:
+    """Time-weighted full-product windows on a registered mixed DA day.
+
+    Candidate trades retain whole native delivery intervals. No hourly price
+    is copied into quarter-hours and no partial hourly order is invented.
+    """
+    edges = np.r_[0.0, np.cumsum(dt)]
+    value = np.r_[0.0, np.cumsum(prices.to_numpy(dtype=float) * dt)]
+    ends = np.searchsorted(edges, edges[:-1] + duration_hours)
+    candidates = [
+        (start, int(end), float((value[end] - value[start]) / duration_hours))
+        for start, end in enumerate(ends)
+        if end <= len(prices) and end > start
+        and np.isclose(edges[end] - edges[start], duration_hours)
+    ]
+    if not candidates:
+        raise ValueError("No complete native-product window matches the requested duration")
+    buy = min(candidates, key=lambda item: item[2])
+    sell = buy
+    best_spread = 0.0
+    for candidate in candidates:
+        for later in candidates:
+            if later[0] >= candidate[1] and later[2] - candidate[2] > best_spread:
+                buy, sell = candidate, later
+                best_spread = sell[2] - buy[2]
+    return {
+        "buy_value": buy[2], "sell_value": sell[2], "spread": round(best_spread, 10),
+        "buy_start_idx": buy[0], "sell_start_idx": sell[0], "window": buy[1] - buy[0],
+        "buy_end_idx": buy[1], "sell_end_idx": sell[1],
+    }
+
+
 def filter_to_complete_local_days(
     df: pd.DataFrame,
     tz: str | None = None,
@@ -253,7 +341,11 @@ def calculate_daily_spreads(
         if group.isna().any():
             excluded_days += 1
             continue
-        metrics = _calculate_daily_ordered_spread(group, duration_hours)
+        try:
+            metrics = _calculate_daily_ordered_spread(group, duration_hours)
+        except ValueError:
+            excluded_days += 1
+            continue
         metrics["date"] = date
         records.append(metrics)
 
@@ -470,14 +562,17 @@ def build_spread_heatmap(
         if group.isna().any():
             continue
         signal = pd.Series(0.0, index=group.index, name="signal")
-        trade = _find_daily_ordered_trade(group, duration_hours)
+        try:
+            trade = _find_daily_ordered_trade(group, duration_hours)
+        except ValueError:
+            continue
         spread = float(trade["spread"])
         if spread > 0:
             window = int(trade["window"])
             buy_start = int(trade["buy_start_idx"])
             sell_start = int(trade["sell_start_idx"])
-            signal.iloc[buy_start:buy_start + window] = -spread
-            signal.iloc[sell_start:sell_start + window] = spread
+            signal.iloc[buy_start:int(trade.get("buy_end_idx", buy_start + window))] = -spread
+            signal.iloc[sell_start:int(trade.get("sell_end_idx", sell_start + window))] = spread
         signals.append(signal)
 
     if not signals:
@@ -725,8 +820,14 @@ def calculate_negative_price_hours(df: pd.DataFrame) -> dict[str, float]:
         for _, day_group in prices.groupby(prices.index.date):
             if day_group.empty:
                 continue
-            day_dt = _infer_interval_hours(day_group.index)
-            total_hours += int((day_group < 0).sum()) * day_dt
+            try:
+                day_dt = interval_hours_vector(infer_delivery_interval_hours(day_group.index), len(day_group))
+            except ValueError:
+                # Preserve the observed interval count, but do not turn an
+                # unknown duration into a fabricated number of physical hours.
+                total_hours = float("nan")
+                break
+            total_hours += float(day_dt[(day_group < 0).to_numpy()].sum())
         negative_hours = round(total_hours, 2)
 
     return {

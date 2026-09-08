@@ -1,0 +1,1345 @@
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index cd94808035a43cdcc1ec6281e3b5705ea18d546d..2b85f6c93b1ab5c2c97bb09c1eacf661cc8279e7 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -5,8 +5,6 @@ on:
+     branches:
+       - main
+   pull_request:
+-    branches:
+-      - main
+ 
+ jobs:
+   test:
+@@ -38,3 +36,24 @@ jobs:
+ 
+       - name: Run test suite with coverage
+         run: pytest --cov=src --cov-report=term-missing -q
++
++  minimum-ui:
++    runs-on: ubuntu-latest
++    steps:
++      - name: Check out repository
++        uses: actions/checkout@v5
++
++      - name: Set up minimum supported Python
++        uses: actions/setup-python@v6
++        with:
++          python-version: "3.11"
++          cache: "pip"
++
++      - name: Install minimum supported Streamlit
++        run: |
++          python -m pip install --upgrade pip
++          pip install -r requirements.txt streamlit==1.55.0
++
++      - name: Exercise real panels on the minimum UI runtime
++        run: |
++          python -m pytest tests/test_step2_views.py tests/test_ui_theme.py tests/test_market_grid_guards.py -k "panel or chart or caption or cockpit" -q
+diff --git a/pyproject.toml b/pyproject.toml
+index 9ad80b0418c20e6902e10662226e457d6d223d6e..aa0abb435897ceb45f9ad481908a3f534acc483b 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -11,7 +11,7 @@ dependencies = [
+     "numpy>=1.26,<3.0",
+     "python-dotenv>=1.0,<2.0",
+     "requests>=2.31,<3.0",
+-    "streamlit>=1.43,<2.0",
++    "streamlit>=1.55,<2.0",
+     "plotly>=6.0,<7.0",
+     "openpyxl>=3.1,<4.0",
+     "kaleido>=1.0,<2.0",
+diff --git a/requirements.txt b/requirements.txt
+index 57a9c135544a5064538eeeb05adde7c9d03e56b8..3927f8f4d74ede3bdfd62ac73d8988304c8ca19c 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -3,7 +3,7 @@ pandas>=2.2,<3.0
+ numpy>=1.26,<3.0
+ python-dotenv>=1.0,<2.0
+ requests>=2.31,<3.0
+-streamlit>=1.43,<2.0
++streamlit>=1.55,<2.0
+ plotly>=6.0,<7.0
+ openpyxl>=3.1,<4.0
+ kaleido>=1.0,<2.0
+diff --git a/src/analytics.py b/src/analytics.py
+index 3ee985e2f98e4ec43e22569bf26b8809ea044d60..f2decaef169bb7f453f1f8be38666b9dbb205635 100644
+--- a/src/analytics.py
++++ b/src/analytics.py
+@@ -5,13 +5,15 @@ from __future__ import annotations
+ import numpy as np
+ import pandas as pd
+ 
++from src.time_utils import infer_delivery_interval_hours, interval_hours_vector
++
+ 
+ def calculate_dispatch_price_vwaps(
+     prices_eur_mwh: np.ndarray | pd.Series,
+     p_charge_mw: np.ndarray | pd.Series,
+     p_discharge_mw: np.ndarray | pd.Series,
+     *,
+-    dt_hours: float,
++    dt_hours: float | np.ndarray,
+ ) -> dict[str, float]:
+     """Return energy-weighted physical charge and discharge market prices.
+ 
+@@ -26,8 +28,7 @@ def calculate_dispatch_price_vwaps(
+     discharge = np.asarray(p_discharge_mw, dtype=float)
+     if not (len(prices) == len(charge) == len(discharge)):
+         raise ValueError("prices, p_charge_mw, and p_discharge_mw must align.")
+-    if dt_hours <= 0 or not np.isfinite(dt_hours):
+-        raise ValueError("dt_hours must be a positive finite number.")
++    dt_hours = interval_hours_vector(dt_hours, len(prices))
+     if not (
+         np.isfinite(prices).all()
+         and np.isfinite(charge).all()
+@@ -86,6 +87,55 @@ def _window_length(index: pd.DatetimeIndex, duration_hours: float) -> int:
+     return max(round(duration_hours / interval_hours), 1)
+ 
+ 
++def time_weighted_rolling_price_mean(
++    prices: pd.Series, *, window: str = "30D", min_hours: float = 24.0,
++) -> pd.Series:
++    """Trailing physical-time price mean, through each delivery interval's end.
++
++    Weight native prices by the covered portion of each interval. NaN prices
++    and days with unverified cadence contribute no covered time. The warm-up
++    requires ``min_hours`` of finite price coverage, not that many rows.
++    """
++    if prices.empty:
++        return pd.Series(index=prices.index, dtype=float)
++    index = pd.DatetimeIndex(prices.index).as_unit("ns")
++    if index.has_duplicates or index.hasnans or not index.is_monotonic_increasing:
++        raise ValueError("Rolling prices require unique increasing finite timestamps")
++    window_hours = pd.Timedelta(window).total_seconds() / 3600
++    if not np.isfinite([window_hours, min_hours]).all() or min(window_hours, min_hours) <= 0:
++        raise ValueError("Rolling window and minimum coverage hours must be positive and finite")
++    durations = np.zeros(len(prices))
++    positions = pd.Series(np.arange(len(prices)), index=index)
++    for _, group in positions.groupby(index.date):
++        if len(group) < 2:
++            continue
++        try:
++            durations[group.to_numpy()] = interval_hours_vector(
++                infer_delivery_interval_hours(group.index), len(group),
++            )
++        except ValueError:
++            continue
++    starts = (index.asi8 - index.asi8[0]) / pd.Timedelta(hours=1).value
++    ends = starts + durations
++    # A partial day's inferred last product must not overlap the next quote.
++    durations[np.r_[ends[:-1] > starts[1:] + 1e-9, False]] = 0.0
++    ends = starts + durations
++    finite = np.isfinite(prices.to_numpy(dtype=float))
++    values = np.where(finite, prices.to_numpy(dtype=float), 0.0)
++    covered = durations * finite
++    cash = np.r_[0.0, np.cumsum(values * covered)]
++    hours = np.r_[0.0, np.cumsum(covered)]
++    left = ends - window_hours
++    old = np.minimum(np.searchsorted(ends, left, side="right"), len(prices) - 1)
++    partial = np.clip(left - starts[old], 0.0, durations[old])
++    rolling_cash = cash[1:] - cash[old] - partial * values[old] * finite[old]
++    rolling_hours = hours[1:] - hours[old] - partial * finite[old]
++    result = np.full(len(prices), np.nan)
++    usable = (rolling_hours > 0) & (rolling_hours >= min_hours - 1e-9)
++    np.divide(rolling_cash, rolling_hours, out=result, where=usable)
++    return pd.Series(result, index=prices.index, name=prices.name)
++
++
+ def _find_daily_ordered_trade(
+     prices: pd.Series,
+     duration_hours: float,
+@@ -101,6 +151,10 @@ def _find_daily_ordered_trade(
+             "window": 1,
+         }
+ 
++    dt = infer_delivery_interval_hours(prices.index)
++    if isinstance(dt, np.ndarray):
++        return _find_mixed_day_ordered_trade(prices, duration_hours, dt)
++
+     window = _window_length(prices.index, duration_hours)
+     if len(prices) < window * 2:
+         baseline = float(prices.iloc[:window].mean())
+@@ -184,6 +238,40 @@ def _calculate_daily_ordered_spread(
+     }
+ 
+ 
++def _find_mixed_day_ordered_trade(
++    prices: pd.Series, duration_hours: float, dt: np.ndarray,
++) -> dict[str, float | int]:
++    """Time-weighted full-product windows on a registered mixed DA day.
++
++    Candidate trades retain whole native delivery intervals. No hourly price
++    is copied into quarter-hours and no partial hourly order is invented.
++    """
++    edges = np.r_[0.0, np.cumsum(dt)]
++    value = np.r_[0.0, np.cumsum(prices.to_numpy(dtype=float) * dt)]
++    ends = np.searchsorted(edges, edges[:-1] + duration_hours)
++    candidates = [
++        (start, int(end), float((value[end] - value[start]) / duration_hours))
++        for start, end in enumerate(ends)
++        if end <= len(prices) and end > start
++        and np.isclose(edges[end] - edges[start], duration_hours)
++    ]
++    if not candidates:
++        raise ValueError("No complete native-product window matches the requested duration")
++    buy = min(candidates, key=lambda item: item[2])
++    sell = buy
++    best_spread = 0.0
++    for candidate in candidates:
++        for later in candidates:
++            if later[0] >= candidate[1] and later[2] - candidate[2] > best_spread:
++                buy, sell = candidate, later
++                best_spread = sell[2] - buy[2]
++    return {
++        "buy_value": buy[2], "sell_value": sell[2], "spread": round(best_spread, 10),
++        "buy_start_idx": buy[0], "sell_start_idx": sell[0], "window": buy[1] - buy[0],
++        "buy_end_idx": buy[1], "sell_end_idx": sell[1],
++    }
++
++
+ def filter_to_complete_local_days(
+     df: pd.DataFrame,
+     tz: str | None = None,
+@@ -253,7 +341,11 @@ def calculate_daily_spreads(
+         if group.isna().any():
+             excluded_days += 1
+             continue
+-        metrics = _calculate_daily_ordered_spread(group, duration_hours)
++        try:
++            metrics = _calculate_daily_ordered_spread(group, duration_hours)
++        except ValueError:
++            excluded_days += 1
++            continue
+         metrics["date"] = date
+         records.append(metrics)
+ 
+@@ -470,14 +562,17 @@ def build_spread_heatmap(
+         if group.isna().any():
+             continue
+         signal = pd.Series(0.0, index=group.index, name="signal")
+-        trade = _find_daily_ordered_trade(group, duration_hours)
++        try:
++            trade = _find_daily_ordered_trade(group, duration_hours)
++        except ValueError:
++            continue
+         spread = float(trade["spread"])
+         if spread > 0:
+             window = int(trade["window"])
+             buy_start = int(trade["buy_start_idx"])
+             sell_start = int(trade["sell_start_idx"])
+-            signal.iloc[buy_start:buy_start + window] = -spread
+-            signal.iloc[sell_start:sell_start + window] = spread
++            signal.iloc[buy_start:int(trade.get("buy_end_idx", buy_start + window))] = -spread
++            signal.iloc[sell_start:int(trade.get("sell_end_idx", sell_start + window))] = spread
+         signals.append(signal)
+ 
+     if not signals:
+@@ -725,8 +820,14 @@ def calculate_negative_price_hours(df: pd.DataFrame) -> dict[str, float]:
+         for _, day_group in prices.groupby(prices.index.date):
+             if day_group.empty:
+                 continue
+-            day_dt = _infer_interval_hours(day_group.index)
+-            total_hours += int((day_group < 0).sum()) * day_dt
++            try:
++                day_dt = interval_hours_vector(infer_delivery_interval_hours(day_group.index), len(day_group))
++            except ValueError:
++                # Preserve the observed interval count, but do not turn an
++                # unknown duration into a fabricated number of physical hours.
++                total_hours = float("nan")
++                break
++            total_hours += float(day_dt[(day_group < 0).to_numpy()].sum())
+         negative_hours = round(total_hours, 2)
+ 
+     return {
+diff --git a/src/cycle_frontier.py b/src/cycle_frontier.py
+index af1cd1bbff065fb06aa244ed7565eb32d3534b7e..1d88dd9d6b4a6b95b833c9f69ad8d8d557a472e9 100644
+--- a/src/cycle_frontier.py
++++ b/src/cycle_frontier.py
+@@ -25,7 +25,6 @@ from typing import Any
+ import numpy as np
+ import pandas as pd
+ 
+-from src.analytics import _infer_interval_hours
+ from src.degradation import (
+     DAYS_PER_YEAR,
+     DEFAULT_CYCLE_LIFE,
+@@ -33,7 +32,8 @@ from src.degradation import (
+     estimate_battery_lifetime,
+ )
+ from src.dispatch import solve_daily_lp
+-from src.simulation import _is_regular_utc_day, _select_local_day, available_local_dates
++from src.simulation import _is_complete_da_day, _select_local_day, available_local_dates
++from src.time_utils import infer_delivery_interval_hours
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -124,12 +124,12 @@ def _sweep_window(
+         if (
+             day.empty
+             or bool(day["price_eur_mwh"].isna().any())
+-            or not _is_regular_utc_day(day)
++            or not _is_complete_da_day(day)
+         ):
+             excluded_days += 1
+             continue
+         prices = day["price_eur_mwh"].to_numpy(dtype=float)
+-        dt = _infer_interval_hours(pd.DatetimeIndex(day.index))
++        dt = infer_delivery_interval_hours(day.index)
+ 
+         day_results: dict[float | None, dict[str, Any]] = {}
+         for cap in caps:
+@@ -176,7 +176,7 @@ def _sweep_window(
+             # `n_cycles` convenience field (4-decimal rounding would leak
+             # into money).
+             discharged_mwh = float(
+-                np.asarray(result["p_discharge"], dtype=float).sum() * dt
++                (np.asarray(result["p_discharge"], dtype=float) * dt).sum()
+             )
+             fec[cap] += discharged_mwh / capacity_mwh
+ 
+diff --git a/src/dispatch.py b/src/dispatch.py
+index 68ba6ba4f60a0df526958c5a8fb1dcad418de999..4fe8ec4af719f4459fa42a2e867f7fee7c16d3ce 100644
+--- a/src/dispatch.py
++++ b/src/dispatch.py
+@@ -9,7 +9,8 @@ import numpy as np
+ import pandas as pd
+ from scipy.optimize import linprog
+ 
+-from src.analytics import _infer_interval_hours, _to_local
++from src.analytics import _to_local
++from src.time_utils import infer_delivery_interval_hours, interval_hours_vector
+ 
+ logger = logging.getLogger(__name__)
+ DISPATCH_VOM_COST_EUR_MWH = 0.5
+@@ -20,7 +21,7 @@ _REBID_UPLIFT_EPS_EUR = 1e-9
+ 
+ def solve_daily_lp(
+     prices: np.ndarray,
+-    dt: float,
++    dt: float | np.ndarray,
+     power_mw: float = 1.0,
+     duration_hours: float = 1.0,
+     efficiency: float = 0.88,
+@@ -33,7 +34,7 @@ def solve_daily_lp(
+ 
+     Args:
+         prices: 1-D array of prices (EUR/MWh) for each interval.
+-        dt: Interval duration in hours (e.g. 1.0, 0.5, 0.25).
++        dt: Positive finite interval hours: scalar or one value per price.
+         power_mw: BESS power rating in MW.
+         duration_hours: BESS energy duration in hours.
+         efficiency: Round-trip efficiency (0-1).
+@@ -70,7 +71,15 @@ def solve_daily_lp(
+     if max_efc_per_day is not None and max_efc_per_day < 0:
+         raise ValueError(f"max_efc_per_day must be >= 0, got {max_efc_per_day}")
+     n = len(prices)
+-    if n == 0 or not np.isfinite(prices).all():
++    input_error = (
++        "price vector is empty or contains non-finite values (NaN or infinity)"
++        if n == 0 or not np.isfinite(prices).all() else ""
++    )
++    try:
++        dt = interval_hours_vector(dt, n)
++    except ValueError as exc:
++        input_error = str(exc)
++    if input_error:
+         return {
+             "revenue_eur": 0.0,
+             "p_charge": np.zeros(max(n, 0)),
+@@ -79,7 +88,7 @@ def solve_daily_lp(
+             "n_cycles": 0.0,
+             "success": False,
+             "status": "invalid_input",
+-            "message": "price vector is empty or contains non-finite values (NaN or infinity)",
++            "message": input_error,
+             "tiebreak_applied": None,
+         }
+ 
+@@ -132,14 +141,14 @@ def solve_daily_lp(
+ 
+     for t in range(1, n + 1):
+         row_upper = np.zeros(3 * n)
+-        row_upper[:t] = sqrt_eff * dt
+-        row_upper[n:n + t] = -dt / sqrt_eff
++        row_upper[:t] = sqrt_eff * dt[:t]
++        row_upper[n:n + t] = -dt[:t] / sqrt_eff
+         a_ub_rows.append(row_upper)
+         b_ub_rows.append(capacity_mwh - soc_init)
+ 
+         row_lower = np.zeros(3 * n)
+-        row_lower[:t] = -sqrt_eff * dt
+-        row_lower[n:n + t] = dt / sqrt_eff
++        row_lower[:t] = -sqrt_eff * dt[:t]
++        row_lower[n:n + t] = dt[:t] / sqrt_eff
+         a_ub_rows.append(row_lower)
+         b_ub_rows.append(soc_init)
+ 
+@@ -180,7 +189,7 @@ def solve_daily_lp(
+     if min_throughput_tiebreak:
+         canonical_x = _min_throughput_pass(
+             c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n,
+-            float(result.fun),
++            float(result.fun), dt,
+         )
+         tiebreak_applied = canonical_x is not None
+         if canonical_x is not None:
+@@ -195,10 +204,10 @@ def solve_daily_lp(
+     soc = np.zeros(n + 1)
+     soc[0] = soc_init
+     for t in range(n):
+-        soc[t + 1] = soc[t] + (p_charge[t] * sqrt_eff - p_discharge[t] / sqrt_eff) * dt
++        soc[t + 1] = soc[t] + (p_charge[t] * sqrt_eff - p_discharge[t] / sqrt_eff) * dt[t]
+ 
+     # Cycle count: total energy discharged / capacity
+-    total_discharged = np.sum(p_discharge) * dt
++    total_discharged = np.dot(p_discharge, dt)
+     n_cycles = total_discharged / capacity_mwh if capacity_mwh > 0 else 0.0
+ 
+     return {
+@@ -215,7 +224,7 @@ def solve_daily_lp(
+ 
+ 
+ def _min_throughput_pass(
+-    c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, z_star,
++    c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, z_star, dt,
+ ):
+     """Canonical min-FEC second pass (cycle-cap frontier contract §2).
+ 
+@@ -233,7 +242,7 @@ def _min_throughput_pass(
+     a_ub2 = np.vstack([a_ub, c.reshape(1, -1)])
+     b_ub2 = np.append(b_ub, z_star + tol_z)
+     c2 = np.zeros(3 * n)
+-    c2[n:2 * n] = 1.0  # minimise discharged power (FEC, discharge leg)
++    c2[n:2 * n] = dt / dt.max()  # minimise physical discharged energy; uniform-grid coefficients stay 1
+     result = linprog(c2, A_ub=a_ub2, b_ub=b_ub2, A_eq=a_eq, b_eq=b_eq,
+                      bounds=bounds, integrality=integrality, method="highs")
+     if not result.success:
+@@ -285,7 +294,7 @@ def _coerce_nonnegative_interval_vector(
+ 
+ def solve_daily_joint_capacity_lp(
+     prices: np.ndarray,
+-    dt: float,
++    dt: float | np.ndarray,
+     capacity_price_eur_mw_h: float | np.ndarray,
+     power_mw: float = 1.0,
+     duration_hours: float = 1.0,
+@@ -295,6 +304,7 @@ def solve_daily_joint_capacity_lp(
+ ) -> dict:
+     """Jointly optimize DA dispatch and reserve capacity headroom via MILP.
+ 
++    ``dt`` accepts a positive finite scalar or one duration per price.
+     The reserve variable consumes power headroom in each interval but does not
+     model activation energy, bid acceptance, or product-specific SoC duration.
+     This keeps the estimate screening-grade while improving on a pure time-split
+@@ -305,7 +315,15 @@ def solve_daily_joint_capacity_lp(
+     solver failure cannot be confused with a genuine zero-revenue optimum.
+     """
+     n = len(prices)
+-    if n == 0 or not np.isfinite(prices).all():
++    input_error = (
++        "price vector is empty or contains non-finite values (NaN or infinity)"
++        if n == 0 or not np.isfinite(prices).all() else ""
++    )
++    try:
++        dt = interval_hours_vector(dt, n)
++    except ValueError as exc:
++        input_error = str(exc)
++    if input_error:
+         zeros = np.zeros(max(n, 0))
+         return {
+             "total_revenue_eur": 0.0,
+@@ -319,7 +337,7 @@ def solve_daily_joint_capacity_lp(
+             "avg_reserve_mw": 0.0,
+             "success": False,
+             "status": "invalid_input",
+-            "message": "price vector is empty or contains non-finite values (NaN or infinity)",
++            "message": input_error,
+         }
+ 
+     capacity_mwh = power_mw * duration_hours
+@@ -375,14 +393,14 @@ def solve_daily_joint_capacity_lp(
+ 
+     for t in range(1, n + 1):
+         row_upper = np.zeros(nv)
+-        row_upper[:t] = sqrt_eff * dt
+-        row_upper[n:n + t] = -dt / sqrt_eff
++        row_upper[:t] = sqrt_eff * dt[:t]
++        row_upper[n:n + t] = -dt[:t] / sqrt_eff
+         a_ub_rows.append(row_upper)
+         b_ub_rows.append(capacity_mwh - soc_init)
+ 
+         row_lower = np.zeros(nv)
+-        row_lower[:t] = -sqrt_eff * dt
+-        row_lower[n:n + t] = dt / sqrt_eff
++        row_lower[:t] = -sqrt_eff * dt[:t]
++        row_lower[n:n + t] = dt[:t] / sqrt_eff
+         a_ub_rows.append(row_lower)
+         b_ub_rows.append(soc_init)
+ 
+@@ -431,9 +449,9 @@ def solve_daily_joint_capacity_lp(
+     soc = np.zeros(n + 1)
+     soc[0] = soc_init
+     for t in range(n):
+-        soc[t + 1] = soc[t] + (p_charge[t] * sqrt_eff - p_discharge[t] / sqrt_eff) * dt
++        soc[t + 1] = soc[t] + (p_charge[t] * sqrt_eff - p_discharge[t] / sqrt_eff) * dt[t]
+ 
+-    total_discharged = np.sum(p_discharge) * dt
++    total_discharged = np.dot(p_discharge, dt)
+     n_cycles = total_discharged / capacity_mwh if capacity_mwh > 0 else 0.0
+ 
+     return {
+@@ -445,7 +463,7 @@ def solve_daily_joint_capacity_lp(
+         "reserve_mw": reserve_mw,
+         "soc": soc,
+         "n_cycles": round(float(n_cycles), 4),
+-        "avg_reserve_mw": round(float(reserve_mw.mean()), 6),
++        "avg_reserve_mw": round(float(np.average(reserve_mw, weights=dt)), 6),
+         "success": True,
+         "status": "optimal",
+         "message": "",
+@@ -500,10 +518,12 @@ def solve_joint_capacity_batch(
+         if sorted_group.isna().any():
+             excluded_days += 1
+             continue
+-        # Infer dt from this day's own index so mixed-resolution windows
+-        # (e.g. DE_LU crossing the 2025-10 60min→15min boundary) solve
+-        # each side at its native cadence instead of the frame mode.
+-        dt = _infer_interval_hours(sorted_group.index)
++        # Preserve each native DA duration, including a cutover within the day.
++        try:
++            dt = infer_delivery_interval_hours(sorted_group.index)
++        except ValueError:
++            excluded_days += 1
++            continue
+         capacity_price: float | np.ndarray = capacity_price_eur_mw_h
+         if capacity_nominal_block_hours is not None:
+             from src.time_utils import nominal_block_settlement_factors
+@@ -1439,9 +1459,12 @@ def solve_dispatch_batch(
+         if sorted_group.isna().any():
+             excluded_days += 1
+             continue
+-        # Per-day dt — see solve_joint_capacity_batch for the mixed-
+-        # resolution rationale.
+-        dt = _infer_interval_hours(sorted_group.index)
++        # Per-interval durations for verified mixed days; scalar on uniform days.
++        try:
++            dt = infer_delivery_interval_hours(sorted_group.index)
++        except ValueError:
++            excluded_days += 1
++            continue
+         result = solve_daily_lp(
+             sorted_group.values,
+             dt=dt,
+diff --git a/src/ida_forecast.py b/src/ida_forecast.py
+index d6aea7e9b37f958b76a19408beaf2e2900557bf1..f148dbf0b2040c332316d4342aa76ffeec1ef4f5 100644
+--- a/src/ida_forecast.py
++++ b/src/ida_forecast.py
+@@ -233,11 +233,19 @@ def compute_forecast_skill(
+         ``realised_std`` (context for the MAE), ``naive_da_mae`` /
+         ``skill_vs_da`` (None without DA or when the naive MAE is ~0), and a
+         ``by_hour`` DataFrame (local hour-of-day MAE + sample count).
++        ``da_baseline_n_points`` / ``da_baseline_coverage_pct`` expose the finite
++        DA comparator subset relative to the forecast's own scored population;
++        ``forecast_mae_on_da_overlap`` is the MAE used in that comparison.
++        An unusable DA comparator has a ``da_baseline_reason`` and does not
++        change the forecast's primary metrics.
+     """
+     empty = {
+         "n_points": 0, "mae": float("nan"), "bias": float("nan"),
+         "rmse": float("nan"), "realised_std": float("nan"),
+         "naive_da_mae": None, "skill_vs_da": None,
++        "da_baseline_n_points": 0, "da_baseline_coverage_pct": 0.0,
++        "forecast_mae_on_da_overlap": None,
++        "da_baseline_reason": "No finite DA baseline overlap.",
+         "by_hour": pd.DataFrame(columns=SKILL_BY_HOUR_COLUMNS),
+     }
+     if (
+@@ -249,12 +257,7 @@ def compute_forecast_skill(
+         return empty
+ 
+     aligned = forecast_df[[FORECAST_COL]].join(realised[[value_col]], how="inner")
+-    if da_prices is not None and "price_eur_mwh" in getattr(da_prices, "columns", []):
+-        aligned = aligned.join(
+-            da_prices[["price_eur_mwh"]].rename(columns={"price_eur_mwh": "_da"}),
+-            how="left",
+-        )
+-    aligned = aligned.dropna(subset=[FORECAST_COL, value_col])
++    aligned = aligned.loc[np.isfinite(aligned.to_numpy(dtype=float)).all(axis=1)]
+     if aligned.empty:
+         return empty
+ 
+@@ -262,9 +265,23 @@ def compute_forecast_skill(
+     abs_err = err.abs()
+     naive_da_mae = None
+     skill_vs_da = None
+-    if "_da" in aligned.columns:
+-        da_rows = aligned.dropna(subset=["_da"])
++    fc_mae_sub = None
++    da_count = 0
++    da_reason = "No finite DA baseline overlap."
++    if da_prices is not None and "price_eur_mwh" in getattr(da_prices, "columns", []):
++        # A baseline join must not multiply the forecast's own population.
++        if da_prices.index.has_duplicates:
++            da_rows = aligned.iloc[:0]
++            da_reason = "DA baseline has duplicate delivery timestamps."
++        else:
++            da_rows = aligned.join(
++                da_prices[["price_eur_mwh"]].rename(columns={"price_eur_mwh": "_da"}),
++                how="inner",
++            )
++            da_rows = da_rows.loc[np.isfinite(da_rows["_da"].to_numpy(dtype=float))]
+         if not da_rows.empty:
++            da_count = len(da_rows)
++            da_reason = ""
+             naive_da_mae = float((da_rows["_da"] - da_rows[value_col]).abs().mean())
+             fc_mae_sub = float(
+                 (da_rows[FORECAST_COL] - da_rows[value_col]).abs().mean()
+@@ -289,5 +306,9 @@ def compute_forecast_skill(
+         "realised_std": float(aligned[value_col].std(ddof=0)),
+         "naive_da_mae": naive_da_mae,
+         "skill_vs_da": skill_vs_da,
++        "da_baseline_n_points": da_count,
++        "da_baseline_coverage_pct": 100.0 * da_count / len(aligned),
++        "forecast_mae_on_da_overlap": fc_mae_sub,
++        "da_baseline_reason": da_reason,
+         "by_hour": by_hour[SKILL_BY_HOUR_COLUMNS],
+     }
+diff --git a/src/pages/market_overview.py b/src/pages/market_overview.py
+index a42cc53df63cc5cbb91fa3390abe498c86665e3a..b9a11e444253e46d0269832a27a9e3d286d331c9 100644
+--- a/src/pages/market_overview.py
++++ b/src/pages/market_overview.py
+@@ -6,6 +6,7 @@ import pandas as pd
+ import plotly.express as px
+ import streamlit as st
+ 
++from src.analytics import time_weighted_rolling_price_mean
+ from src.config import is_elexon_zone
+ from src.data_ingestion import summarize_price_data_quality
+ from src.ui_theme import apply_cockpit_plot_theme
+@@ -33,13 +34,15 @@ def render(
+     k3.metric("90th-pct Ordered Spread", f"\u20ac{percentiles['p90']:.2f}/MWh")
+     k4.metric(
+         "Neg Price Hours",
+-        f"{neg_stats['negative_hours']:.1f}h",
++        f"{neg_stats['negative_hours']:.1f}h" if pd.notna(neg_stats["negative_hours"]) else "n/a",
+         delta=f"{neg_stats['pct_negative']:.1f}% of intervals",
+     )
+     st.caption(
+         f"Spreads use chronology-aware {duration_hours}h charge/discharge windows "
+         f"in {zone_tz}."
+     )
++    if pd.isna(neg_stats["negative_hours"]):
++        st.caption("Negative-price hours are unavailable because the delivery interval grid cannot be verified.")
+     quality = summarize_price_data_quality(primary_df)
+     excluded_days = int(daily_spreads.attrs.get("excluded_days_due_to_missing", 0))
+     solver_failed_days = int(
+@@ -80,13 +83,11 @@ def render(
+     )
+     fig_price.update_traces(
+         opacity=0.72,
+-        name="Hourly",
++        name="Day-Ahead",
+         showlegend=True,
+         line=dict(color="#ff2d95", width=1.7),
+     )
+-    ma_series = primary_df["price_eur_mwh"].rolling(
+-        window=24 * 30, min_periods=24,
+-    ).mean()
++    ma_series = time_weighted_rolling_price_mean(primary_df["price_eur_mwh"])
+     fig_price.add_scatter(
+         x=primary_df.index, y=ma_series,
+         mode="lines", name="30-Day MA",
+@@ -96,6 +97,11 @@ def render(
+     apply_cockpit_plot_theme(fig_price)
+     report_figures["price_ts"] = fig_price
+     st.plotly_chart(fig_price, width="stretch")
++    st.caption(
++        "30-Day MA uses the trailing 720 physical hours, weighted by delivery "
++        "duration through each interval's end. It appears after 24 hours of finite "
++        "price coverage; missing prices and unverified intervals are excluded."
++    )
+ 
+     spread_plot_df = daily_spreads.copy()
+     spread_plot_df["date"] = pd.to_datetime(spread_plot_df["date"])
+diff --git a/src/pages/simulation_cockpit.py b/src/pages/simulation_cockpit.py
+index 1bdb34251a4d199439185b75f940b2401a9c064b..f21689b5118d10f05316447e16809fe214e62463 100644
+--- a/src/pages/simulation_cockpit.py
++++ b/src/pages/simulation_cockpit.py
+@@ -3384,6 +3384,19 @@ def _render_forecast_skill(skill: dict, chart_template: str) -> None:
+         "forecast-driven rebid rests on thin ice — widen the deadband."
+     )
+     by_hour = skill.get("by_hour")
++    baseline_count = int(skill.get("da_baseline_n_points", 0))
++    baseline_coverage = float(skill.get("da_baseline_coverage_pct", 0.0))
++    if baseline_count:
++        st.caption(
++            f"DA baseline comparison: {baseline_count:,}/{skill['n_points']:,} "
++            f"forecast intervals ({baseline_coverage:.1f}%). Skill vs DA uses only "
++            "this common subset: forecast MAE "
++            f"EUR {skill['forecast_mae_on_da_overlap']:.1f}/MWh versus DA MAE "
++            f"EUR {skill['naive_da_mae']:.1f}/MWh. "
++            "Timestamp overlap is a price-space diagnostic, not proof of matching delivery products."
++        )
++    else:
++        st.caption(f"DA baseline coverage unavailable: {skill.get('da_baseline_reason', 'Coverage was not recorded for this result.')}")
+     if by_hour is not None and not by_hour.empty:
+         fig = go.Figure(
+             go.Bar(x=by_hour["hour"], y=by_hour["mae"], marker_color=_C_PRICE_IDA),
+diff --git a/src/simulation.py b/src/simulation.py
+index 0f0106853af69fcd72ee57c1becbd7e453d899c3..ba5f944f401206fea4cbf627a3b585dfb4d3f53c 100644
+--- a/src/simulation.py
++++ b/src/simulation.py
+@@ -49,12 +49,14 @@ from src.stochastic_dispatch import (
+     solve_stochastic_reserve_commitment,
+     solve_stochastic_triple_dispatch,
+ )
++from src.time_utils import infer_delivery_interval_hours, interval_hours_vector
+ 
+ DAYS_PER_YEAR = 365.25
+ _SIM_COLUMNS = [
+     "timestamp",
+     "local_time",
+     "price_eur_mwh",
++    "interval_hours",
+     "p_charge_mw",
+     "p_discharge_mw",
+     "net_dispatch_mw",
+@@ -201,12 +203,12 @@ def simulate_da_milp_replay(
+         return empty_simulation_result("No price data for the selected local day.")
+     if day["price_eur_mwh"].isna().any():
+         return empty_simulation_result("Selected day contains missing prices.")
+-    if not _is_regular_utc_day(day, local_date=simulation_date):
++    if not _is_complete_da_day(day, local_date=simulation_date):
+         return empty_simulation_result(
+             "Selected day is incomplete or has an irregular interval grid."
+         )
+ 
+-    dt = _infer_interval_hours(pd.DatetimeIndex(day.index))
++    dt = infer_delivery_interval_hours(day.index)
+     result = solve_daily_lp(
+         day["price_eur_mwh"].to_numpy(dtype=float),
+         dt=dt,
+@@ -584,10 +586,14 @@ def _simulate_continuous_da_replay(
+         day = _select_local_day(price_df, local_date, tz)
+         return day[["price_eur_mwh"]] if not day.empty else pd.DataFrame()
+ 
+-    runs = _group_clean_runs(dates=dates, build_day=build_da_day)
++    runs = _group_clean_runs(dates=dates, build_day=build_da_day, allow_mixed_da=True)
+     for run_dates, slice_df, day_breaks in runs:
+         prices = slice_df["price_eur_mwh"].to_numpy(dtype=float)
+-        dt = _infer_interval_hours(pd.DatetimeIndex(slice_df.index))
++        durations = np.concatenate([
++            interval_hours_vector(infer_delivery_interval_hours(slice_df.iloc[start:end].index), end - start)
++            for start, end in day_breaks
++        ])
++        dt = float(durations[0]) if np.all(durations == durations[0]) else durations
+         run_result = solve_daily_lp(
+             prices,
+             dt=dt,
+@@ -613,12 +619,13 @@ def _simulate_continuous_da_replay(
+         soc_start_frac = current_soc_frac
+         for local_date, (start, end) in zip(run_dates, day_breaks, strict=True):
+             day_df = slice_df.iloc[start:end]
++            day_dt = dt if np.ndim(dt) == 0 else dt[start:end]
+             day_soc_slice = run_result["soc"][start:end + 1]
+             day_p_charge = run_result["p_charge"][start:end]
+             day_p_discharge = run_result["p_discharge"][start:end]
+             day_interval_rev = full_revenue[start:end]
+             daily_fce = _full_equivalent_cycles(
+-                day_p_discharge, dt=dt, capacity_mwh=capacity_mwh,
++                day_p_discharge, dt=day_dt, capacity_mwh=capacity_mwh,
+             )
+             day_result = _build_result(
+                 day_df,
+@@ -626,7 +633,7 @@ def _simulate_continuous_da_replay(
+                 p_discharge=day_p_discharge,
+                 soc=day_soc_slice,
+                 interval_revenue=day_interval_rev,
+-                dt=dt,
++                dt=day_dt,
+                 power_mw=power_mw,
+                 duration_hours=duration_hours,
+                 efficiency=efficiency,
+@@ -795,6 +802,7 @@ def _group_clean_runs(
+     *,
+     dates: list[date],
+     build_day: Callable[[date], pd.DataFrame],
++    allow_mixed_da: bool = False,
+ ) -> list[tuple[list[date], pd.DataFrame, list[tuple[int, int]]]]:
+     """Group `dates` into contiguous segments with clean per-day frames.
+ 
+@@ -806,7 +814,7 @@ def _group_clean_runs(
+       - the next requested date is more than one calendar day later,
+       - the day's frame is empty,
+       - the day's frame has any NaN value,
+-      - the day's frame is sparse (non-uniform UTC index),
++      - the day's frame is sparse or unsupported (DA-only may use the registered SDAC mixed grid),
+       - the day's cadence differs from the current run's cadence,
+       - adding the day would push the run past
+         `MAX_CONTINUOUS_REPLAY_INTERVALS` (a performance cap — a single
+@@ -845,7 +853,7 @@ def _group_clean_runs(
+         if (
+             day_df.empty
+             or bool(day_df.isna().to_numpy().any())
+-            or not _is_regular_utc_day(day_df, local_date=local_date)
++            or not (_is_complete_da_day if allow_mixed_da else _is_regular_utc_day)(day_df, local_date=local_date)
+         ):
+             # Empty / NaN / sparse days break the continuous horizon. A
+             # sparse day (e.g. a missing 02:00 interval that upstream
+@@ -891,6 +899,26 @@ def _merge_matching_da_id_day(da_day: pd.DataFrame, ida_day: pd.DataFrame) -> pd
+     return merged.dropna()
+ 
+ 
++def _is_complete_da_day(day_df: pd.DataFrame, *, local_date: date | None = None) -> bool:
++    """Complete DA day, including the registered SDAC transition within a day."""
++    if day_df is None or len(day_df) < 2:
++        return False
++    index = pd.DatetimeIndex(day_df.index)
++    try:
++        dt = interval_hours_vector(infer_delivery_interval_hours(index), len(index))
++    except ValueError:
++        return False
++    expected_date = local_date or index[0].date()
++    start = pd.Timestamp(expected_date)
++    if index.tz is not None:
++        start = start.tz_localize(index.tz)
++    return bool(
++        all(ts.date() == expected_date for ts in index)
++        and index[0] == start
++        and index[-1] + pd.Timedelta(hours=float(dt[-1])) == start + pd.DateOffset(days=1)
++    )
++
++
+ def _is_regular_utc_day(
+     day_df: pd.DataFrame,
+     *,
+@@ -1540,7 +1568,11 @@ def _event_row(
+     """Summarise one contiguous non-zero physical dispatch event."""
+     window = timeseries.iloc[start:end]
+     index = pd.DatetimeIndex(timeseries["local_time"])
+-    dt = _infer_interval_hours(index)
++    durations = (
++        timeseries["interval_hours"].to_numpy(dtype=float)
++        if "interval_hours" in timeseries else interval_hours_vector(infer_delivery_interval_hours(index), len(index))
++    )
++    dt = durations[start:end]
+     event_type = "Discharge" if sign > 0 else "Charge"
+     power_col = "p_discharge_mw" if sign > 0 else "p_charge_mw"
+     power = window[power_col].abs()
+@@ -1557,15 +1589,15 @@ def _event_row(
+         "event_id": event_id,
+         "event_type": event_type,
+         "start_time": window["local_time"].iloc[0],
+-        "end_time": window["local_time"].iloc[-1] + pd.Timedelta(hours=dt),
+-        "duration_h": float(len(window) * dt),
+-        "avg_power_mw": float(power.mean()) if not power.empty else 0.0,
+-        "energy_mwh": float(power.sum() * dt),
+-        "avg_price_eur_mwh": float(window["price_eur_mwh"].mean()),
++        "end_time": window["local_time"].iloc[-1] + pd.Timedelta(hours=float(dt[-1])),
++        "duration_h": float(dt.sum()),
++        "avg_power_mw": float(np.average(power, weights=dt)) if not power.empty else 0.0,
++        "energy_mwh": float(np.dot(power, dt)),
++        "avg_price_eur_mwh": float(np.average(window["price_eur_mwh"], weights=dt)),
+         "revenue_eur": float(window["interval_revenue_eur"].sum()),
+         "soc_start_pct": soc_start,
+         "soc_end_pct": float(window["soc_pct"].iloc[-1]),
+-        "avg_rebid_delta_mw": float(rebid.mean()) if not rebid.empty else 0.0,
++        "avg_rebid_delta_mw": float(np.average(rebid, weights=dt)) if not rebid.empty else 0.0,
+         "max_abs_rebid_delta_mw": float(rebid.abs().max()) if not rebid.empty else 0.0,
+     }
+ 
+@@ -1589,7 +1621,7 @@ def _da_interval_revenue(
+     p_charge: np.ndarray,
+     p_discharge: np.ndarray,
+     *,
+-    dt: float,
++    dt: float | np.ndarray,
+     capture_rate: float,
+ ) -> np.ndarray:
+     """Post-VOM DA interval revenue, haircut by capture rate."""
+@@ -1625,7 +1657,7 @@ def _build_result(
+     p_discharge: np.ndarray,
+     soc: np.ndarray,
+     interval_revenue: np.ndarray,
+-    dt: float,
++    dt: float | np.ndarray,
+     power_mw: float,
+     duration_hours: float,
+     efficiency: float,
+@@ -1664,7 +1696,7 @@ def _build_result(
+     active_power = np.abs(net_dispatch)
+     active = active_power > 1e-6
+     avg_c_rate = (
+-        float(active_power[active].mean()) / capacity_mwh
++        float(np.average(active_power[active], weights=interval_hours_vector(dt, len(day))[active])) / capacity_mwh
+         if active.any() and capacity_mwh > 0 else 0.0
+     )
+     deg = calculate_degradation_cost(
+@@ -1683,6 +1715,7 @@ def _build_result(
+         "timestamp": pd.DatetimeIndex(day.index).tz_convert("UTC"),
+         "local_time": pd.DatetimeIndex(day.index),
+         "price_eur_mwh": day["price_eur_mwh"].to_numpy(dtype=float),
++        "interval_hours": interval_hours_vector(dt, len(day)),
+         "p_charge_mw": p_charge,
+         "p_discharge_mw": p_discharge,
+         "net_dispatch_mw": net_dispatch,
+@@ -1736,22 +1769,22 @@ def _build_result(
+ def _full_equivalent_cycles(
+     p_discharge: np.ndarray,
+     *,
+-    dt: float,
++    dt: float | np.ndarray,
+     capacity_mwh: float,
+ ) -> float:
+     if capacity_mwh <= 0:
+         return 0.0
+-    return float(np.asarray(p_discharge).sum() * dt / capacity_mwh)
++    return float((np.asarray(p_discharge) * dt).sum() / capacity_mwh)
+ 
+ 
+ def _available_charge_power(
+     soc_start: np.ndarray,
+     capacity_mwh: float,
+     power_mw: float,
+-    dt: float,
++    dt: float | np.ndarray,
+     efficiency: float,
+ ) -> np.ndarray:
+-    if capacity_mwh <= 0 or dt <= 0:
++    if capacity_mwh <= 0 or np.any(np.asarray(dt) <= 0):
+         return np.zeros_like(soc_start)
+     sqrt_eff = math.sqrt(max(efficiency, 1e-12))
+     return np.minimum(
+@@ -1763,10 +1796,10 @@ def _available_charge_power(
+ def _available_discharge_power(
+     soc_start: np.ndarray,
+     power_mw: float,
+-    dt: float,
++    dt: float | np.ndarray,
+     efficiency: float,
+ ) -> np.ndarray:
+-    if dt <= 0:
++    if np.any(np.asarray(dt) <= 0):
+         return np.zeros_like(soc_start)
+     sqrt_eff = math.sqrt(max(efficiency, 1e-12))
+     return np.minimum(power_mw, np.maximum(soc_start * sqrt_eff / dt, 0.0))
+diff --git a/src/time_utils.py b/src/time_utils.py
+index 0dd366e134e37d076f033b7c8f099c5525b4b474..6d4655bbcb64c425624c2be0fc99bccdb70b6837 100644
+--- a/src/time_utils.py
++++ b/src/time_utils.py
+@@ -11,6 +11,55 @@ from datetime import time as time_type
+ import numpy as np
+ import pandas as pd
+ 
++from src.config import SDAC_15MIN_DELIVERY_DATE, SDAC_MARKET_TIMEZONE
++
++
++def interval_hours_vector(dt: float | np.ndarray, n: int) -> np.ndarray:
++    """Validate physical durations: a positive finite scalar or aligned 1-D vector.
++
++    A one-element vector is not a scalar broadcast. Missing, non-finite or
++    non-positive durations cannot be repaired by a solver or treated as zero.
++    """
++    try:
++        values = np.asarray(dt, dtype=float)
++    except (TypeError, ValueError) as exc:
++        raise ValueError("Interval duration must be a positive finite scalar or aligned vector") from exc
++    if isinstance(dt, (bool, np.bool_)) or values.ndim > 1:
++        raise ValueError("Interval duration must be a scalar or one-dimensional vector")
++    if values.ndim == 0:
++        values = np.full(n, float(values))
++    elif len(values) != n:
++        raise ValueError(f"Interval duration vector must have length {n}")
++    if not np.isfinite(values).all() or np.any(values <= 0):
++        raise ValueError("Interval duration must be positive and finite")
++    return values
++
++
++def infer_delivery_interval_hours(index: pd.DatetimeIndex) -> float | np.ndarray:
++    """Infer a uniform cadence or validate the registered SDAC mixed DA grid.
++
++    Mixed durations are accepted only for consecutive native hourly/quarter-hour
++    starts on the known market cutover. In particular, a missing observation is
++    never stretched into a longer delivery product. Uniform partial samples keep
++    their historical inference behavior; full-day callers must check day bounds.
++    This is a DA helper, not permission to align different market products.
++    """
++    idx = pd.DatetimeIndex(index).as_unit("ns")
++    if idx.hasnans or idx.has_duplicates or not idx.is_monotonic_increasing:
++        raise ValueError("DA delivery grid must have unique increasing finite timestamps")
++    if len(idx) < 2:
++        return 1.0
++    hour_ns = pd.Timedelta(hours=1).value
++    deltas = np.diff(idx.asi8)
++    if np.all(deltas == deltas[0]):
++        return float(deltas[0] / hour_ns)
++    cutover = pd.Timestamp(SDAC_15MIN_DELIVERY_DATE).tz_localize(SDAC_MARKET_TIMEZONE).tz_convert("UTC")
++    if idx.tz is not None and idx[0] < cutover <= idx[-1]:
++        step_ns = np.where(idx.asi8 < cutover.value, hour_ns, hour_ns // 4)
++        if np.all(deltas == step_ns[:-1]) and np.all(idx.asi8 % step_ns == 0):
++            return step_ns.astype(float) / hour_ns
++    raise ValueError("DA delivery grid is incomplete or has an unsupported cadence change")
++
+ 
+ def _local_midnight(value, timezone: str) -> pd.Timestamp:
+     """Interpret a date-like value as local midnight in the requested timezone."""
+diff --git a/tests/test_delivery_durations.py b/tests/test_delivery_durations.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..c9deee4fcac47dc95ec9c657a94bdbee5db30724
+--- /dev/null
++++ b/tests/test_delivery_durations.py
+@@ -0,0 +1,236 @@
++"""Physical-duration known answers for the local-day-internal SDAC cutover."""
++
++from datetime import date
++
++import numpy as np
++import pandas as pd
++import pytest
++
++from src.analytics import (
++    calculate_daily_dispatch,
++    calculate_dispatch_price_vwaps,
++    calculate_negative_price_hours,
++)
++from src.config import ZONE_TIMEZONES
++from src.dispatch import solve_daily_joint_capacity_lp, solve_daily_lp, solve_joint_capacity_batch
++from src.project_case.grid import expected_da_timestamps
++from src.simulation import (
++    build_dispatch_event_table,
++    simulate_da_milp_replay,
++    simulate_replay_batch,
++)
++
++ZONES = ["BG", "EE", "FI", "GR", "LT", "LV", "PT", "RO"]
++
++
++def market_day(zone, *, flat=False):
++    day = date(2025, 9, 30) if zone == "PT" else date(2025, 10, 1)
++    index = pd.DatetimeIndex(expected_da_timestamps(zone, day))
++    cutover = pd.Timestamp("2025-09-30T22:00Z")
++    values = np.full(len(index), 50.0) if flat else np.where(index < cutover, 0.0, 100.0)
++    return day, pd.DataFrame({"price_eur_mwh": values}, index=index)
++
++
++@pytest.mark.parametrize("zone", ZONES)
++def test_joint_capacity_preserves_24_physical_hours(zone):
++    _, prices = market_day(zone, flat=True)
++    result = solve_joint_capacity_batch(prices, 5.0, tz=ZONE_TIMEZONES[zone], efficiency=1.0)
++    assert result.attrs["model_available"] is True
++    assert len(result) == 1
++    assert result.iloc[0]["joint_capacity_revenue"] == pytest.approx(114.0)
++    assert result.iloc[0]["joint_da_revenue"] == 0.0
++
++
++@pytest.mark.parametrize("zone", ZONES)
++def test_daily_greedy_and_milp_use_native_delivery_duration(zone):
++    _, prices = market_day(zone)
++    result = calculate_daily_dispatch(prices, tz=ZONE_TIMEZONES[zone], efficiency=1.0)
++    assert len(result) == 1
++    assert result.iloc[0]["spread"] == pytest.approx(100.0)
++    assert result.iloc[0]["lp_revenue"] == pytest.approx(99.0)
++    assert result.iloc[0]["n_cycles"] == pytest.approx(1.0)
++
++
++@pytest.mark.parametrize("zone", ZONES)
++def test_single_replay_retains_mixed_day_energy_vwap_and_event_hours(zone):
++    day, prices = market_day(zone)
++    result = simulate_da_milp_replay(
++        prices, simulation_date=day, tz=ZONE_TIMEZONES[zone],
++        efficiency=1.0, soc_init_frac=0.0,
++    )
++    summary, ts = result["summary"], result["timeseries"]
++    assert summary["success"] is True
++    assert len(ts) == len(prices)
++    assert summary["total_revenue_eur"] == pytest.approx(99.0)
++    assert summary["physical_throughput_mwh"] == pytest.approx(2.0)
++    assert summary["daily_fce"] == pytest.approx(1.0)
++    assert summary["charge_vwap_eur_mwh"] == pytest.approx(0.0)
++    assert summary["discharge_vwap_eur_mwh"] == pytest.approx(100.0)
++    assert ts["interval_hours"].sum() == pytest.approx(24.0)
++    assert ts["soc_mwh"].between(-1e-7, 1.0 + 1e-7).all()
++    events = build_dispatch_event_table(ts)
++    assert events["energy_mwh"].sum() == pytest.approx(2.0)
++    assert events["duration_h"].sum() == pytest.approx(2.0)
++    for row in events.itertuples():
++        assert (row.end_time - row.start_time).total_seconds() / 3600 == pytest.approx(row.duration_h)
++
++
++@pytest.mark.parametrize("zone", ZONES)
++@pytest.mark.parametrize("carry", [False, True])
++def test_batch_replay_retains_mixed_day(zone, carry):
++    day, prices = market_day(zone)
++    result = simulate_replay_batch(
++        prices, tz=ZONE_TIMEZONES[zone], dates=[day], carry_soc=carry,
++        efficiency=1.0, soc_init_frac=0.0,
++    )
++    assert result.attrs["model_available"] is True
++    assert result.attrs["valid_days"] == 1
++    assert result.attrs["excluded_days_due_to_missing"] == 0
++    assert result.iloc[0]["total_revenue_eur"] == pytest.approx(99.0)
++    assert result.iloc[0]["physical_throughput_mwh"] == pytest.approx(2.0)
++
++
++@pytest.mark.parametrize("zone", ZONES)
++def test_negative_hours_are_physical_even_on_utc_index(zone):
++    _, prices = market_day(zone, flat=True)
++    prices["price_eur_mwh"] = -50.0
++    assert calculate_negative_price_hours(prices)["negative_hours"] == 24.0
++
++
++@pytest.mark.parametrize("solver", [solve_daily_lp, solve_daily_joint_capacity_lp])
++def test_duration_vector_known_answer_and_soc_balance(solver):
++    prices = np.array([0.0, 100.0, 100.0, 100.0, 100.0])
++    dt = np.array([1.0, 0.25, 0.25, 0.25, 0.25])
++    kwargs = {"capacity_price_eur_mw_h": 0.0} if solver is solve_daily_joint_capacity_lp else {}
++    result = solver(prices, dt, efficiency=1.0, soc_init_frac=0.0, **kwargs)
++    assert result["success"] is True
++    revenue = result["total_revenue_eur"] if kwargs else result["revenue_eur"]
++    assert revenue == pytest.approx(99.0)
++    assert np.dot(result["p_discharge"], dt) == pytest.approx(1.0)
++    assert result["n_cycles"] == pytest.approx(1.0)
++    np.testing.assert_allclose(np.diff(result["soc"]), (result["p_charge"] - result["p_discharge"]) * dt)
++
++
++@pytest.mark.parametrize("solver", [solve_daily_lp, solve_daily_joint_capacity_lp])
++@pytest.mark.parametrize("dt", [0.0, -0.25, np.inf, np.nan, [1.0], [[1.0, 1.0]], [1.0, 0.0]])
++def test_bad_duration_returns_typed_failure_before_optimisation(solver, dt, monkeypatch):
++    import src.dispatch as dispatch
++
++    def unexpected(*args, **kwargs):
++        pytest.fail("Invalid duration reached linprog")
++
++    monkeypatch.setattr(dispatch, "linprog", unexpected)
++    kwargs = {"capacity_price_eur_mw_h": 5.0} if solver is solve_daily_joint_capacity_lp else {}
++    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
++    assert result["success"] is False
++    assert result["status"] == "invalid_input"
++    assert "duration" in result["message"].lower()
++
++
++def test_duration_vector_cycle_cap_and_canonical_energy():
++    dt = np.array([1.0, 0.25, 0.25, 0.25, 0.25])
++    result = solve_daily_lp(
++        np.array([0.0, 100.0, 100.0, 100.0, 100.0]), dt,
++        efficiency=1.0, soc_init_frac=0.0, max_efc_per_day=0.5,
++        min_throughput_tiebreak=True,
++    )
++    assert result["success"] is True
++    assert result["tiebreak_applied"] is True
++    assert result["revenue_eur"] == pytest.approx(49.5, abs=1e-6)
++    assert np.dot(result["p_discharge"], dt) == pytest.approx(0.5)
++
++
++def test_vwap_weights_each_interval_energy():
++    result = calculate_dispatch_price_vwaps(
++        np.array([0.0, 100.0]), np.array([1.0, 1.0]), np.array([0.0, 0.0]),
++        dt_hours=np.array([1.0, 0.25]),
++    )
++    assert result["charge_energy_mwh"] == 1.25
++    assert result["charge_vwap_eur_mwh"] == 20.0
++
++
++@pytest.mark.parametrize("mutation", ["first", "last", "cutover", "hole", "duplicate", "offset"])
++def test_mixed_day_gaps_are_not_stretched_into_delivery_intervals(mutation):
++    day, prices = market_day("FI")
++    if mutation == "duplicate":
++        prices = pd.concat([prices, prices.iloc[[1]]]).sort_index()
++    elif mutation == "offset":
++        prices = prices.shift(freq="5min")
++    else:
++        pos = {"first": 0, "last": -1, "cutover": 1, "hole": 20}[mutation]
++        prices = prices.drop(prices.index[pos])
++    result = simulate_da_milp_replay(prices, simulation_date=day, tz="Europe/Helsinki")
++    assert result["summary"]["success"] is False
++    assert result["summary"]["status"] == "invalid_input"
++
++
++@pytest.mark.parametrize("zone", ["FI", "PT"])
++def test_cycle_frontier_keeps_common_mixed_day_and_physical_fec(zone):
++    from src.cycle_frontier import compute_cycle_cap_frontier
++
++    day, prices = market_day(zone)
++    frame, summary = compute_cycle_cap_frontier(
++        prices, dates=[day], tz=ZONE_TIMEZONES[zone], power_mw=1.0,
++        duration_hours=4.0, efficiency=1.0, capex_eur_kwh=0.0,
++        cycle_caps=[0.125, None],
++    )
++    assert summary["valid_days"] == 1
++    np.testing.assert_allclose(frame["gross_eur"], [49.5, 99.0], atol=1e-6)
++    np.testing.assert_allclose(frame["avg_efc_per_day"], [0.125, 0.25], atol=1e-8)
++    np.testing.assert_allclose(frame["discharge_vwap_eur_mwh"], [100.0, 100.0])
++
++
++@pytest.mark.parametrize("zone", ["FI", "PT"])
++def test_continuous_replay_slices_duration_vectors_back_to_each_day(zone):
++    middle, prices = market_day(zone)
++    dates = [(pd.Timestamp(middle) + pd.Timedelta(days=offset)).date() for offset in [-1, 0, 1]]
++    frames = [
++        prices if day == middle else pd.DataFrame(
++            {"price_eur_mwh": 0.0}, index=pd.DatetimeIndex(expected_da_timestamps(zone, day)),
++        )
++        for day in dates
++    ]
++    result = simulate_replay_batch(
++        pd.concat(frames), dates=dates, tz=ZONE_TIMEZONES[zone],
++        efficiency=1.0, soc_init_frac=0.0,
++    )
++    assert result.attrs["valid_days"] == 3
++    assert result["n_intervals"].tolist() == [len(frame) for frame in frames]
++    assert result["total_revenue_eur"].sum() == pytest.approx(99.0)
++    assert result["physical_throughput_mwh"].sum() == pytest.approx(2.0)
++
++
++@pytest.mark.parametrize("zone", ["FI", "PT"])
++def test_project_case_da_accepts_existing_registered_mixed_day(zone):
++    from src.project_case import CurrencyBasis, CurrencyBasisMode, emit_da_only
++
++    day, prices = market_day(zone)
++    result = emit_da_only(
++        prices, zone=zone, first_delivery_date=day, last_delivery_date=day,
++        power_mw=1.0, duration_hours=4.0, efficiency=1.0,
++        currency_basis=CurrencyBasis(CurrencyBasisMode.SOURCE_EUR_TREATED_AS_BASE_YEAR_REAL, 2025),
++    )
++    assert result.coverage_audit.valid_dates == (day,)
++    assert dict(result.daily_realised_cash_series)[day] == pytest.approx(99.0)
++    assert len(result.fingerprint()) == 64
++
++
++def test_joint_vector_reserve_average_and_cash_are_duration_weighted():
++    result = solve_daily_joint_capacity_lp(
++        np.array([0.0, 100.0]), np.array([1.0, 0.25]), 10.0,
++        efficiency=1.0, soc_init_frac=0.0,
++    )
++    assert result["success"] is True
++    assert result["da_revenue_eur"] == pytest.approx(24.75)
++    assert result["capacity_revenue_eur"] == pytest.approx(7.125)
++    assert result["avg_reserve_mw"] == pytest.approx(0.6)
++
++
++def test_unknown_grid_does_not_fabricate_negative_price_hours():
++    prices = pd.DataFrame(
++        {"price_eur_mwh": -50.0},
++        index=pd.to_datetime(["2026-01-01T00:00Z", "2026-01-01T01:00Z", "2026-01-01T03:00Z"]),
++    )
++    result = calculate_negative_price_hours(prices)
++    assert result["negative_intervals"] == 3
++    assert np.isnan(result["negative_hours"])
+diff --git a/tests/test_step2_views.py b/tests/test_step2_views.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..aca181f0c2240d4cc12cc06eaa355a0f0f0c8584
+--- /dev/null
++++ b/tests/test_step2_views.py
+@@ -0,0 +1,111 @@
++"""Regression checks for physical rolling windows and forecast baseline disclosure."""
++
++import numpy as np
++import pandas as pd
++import pytest
++
++from src.ida_forecast import FORECAST_COL, compute_forecast_skill
++
++
++@pytest.mark.parametrize("sample", ["quarter_da", "missing", "infinite", "duplicate", "none"])
++def test_forecast_baseline_reports_its_own_finite_comparison_population(sample):
++    index = pd.date_range("2025-09-01", periods=96, freq="15min", tz="UTC")
++    forecast = pd.DataFrame({FORECAST_COL: 55.0}, index=index)
++    realised = pd.DataFrame({"intraday_price_eur_mwh": 60.0}, index=index)
++    da = pd.DataFrame({"price_eur_mwh": 50.0}, index=index[::4])
++    count = 24
++    if sample == "missing":
++        da.iloc[0, 0] = np.nan
++        count = 23
++    elif sample == "infinite":
++        da.iloc[0, 0] = np.inf
++        count = 23
++    elif sample == "duplicate":
++        da = pd.concat([da, da.iloc[[0]]])
++        count = 0
++    elif sample == "none":
++        da = None
++        count = 0
++    result = compute_forecast_skill(forecast, realised, da_prices=da, tz="Europe/Berlin")
++    assert result["n_points"] == 96
++    assert result["mae"] == 5.0
++    assert result["da_baseline_n_points"] == count
++    assert result["da_baseline_coverage_pct"] == pytest.approx(count / 96 * 100)
++    assert result["forecast_mae_on_da_overlap"] == (5.0 if count else None)
++    assert result["skill_vs_da"] == (0.5 if count else None)
++
++
++def _skill_app():
++    import pandas as pd
++
++    from src.ida_forecast import FORECAST_COL, compute_forecast_skill
++    from src.pages.simulation_cockpit import _render_forecast_skill
++
++    index = pd.date_range("2025-09-01", periods=96, freq="15min", tz="UTC")
++    forecast = pd.DataFrame({FORECAST_COL: 55.0}, index=index)
++    realised = pd.DataFrame({"intraday_price_eur_mwh": 60.0}, index=index)
++    da = pd.DataFrame({"price_eur_mwh": 50.0}, index=index[::4])
++    _render_forecast_skill(compute_forecast_skill(forecast, realised, da_prices=da), "plotly_dark")
++
++
++def test_forecast_panel_discloses_da_subset_separately():
++    from streamlit.testing.v1 import AppTest
++
++    app = AppTest.from_function(_skill_app).run(timeout=30)
++    assert not app.exception
++    assert any("24/96" in caption.value and "25.0%" in caption.value for caption in app.caption)
++
++
++def _market_app(sample):
++    import numpy as np
++    import pandas as pd
++    import streamlit as st
++
++    from src.analytics import (
++        calculate_daily_spreads,
++        calculate_negative_price_hours,
++        calculate_spread_percentiles,
++    )
++    from src.pages.market_overview import render
++
++    if sample == "mixed":
++        before = pd.date_range("2025-09-01", "2025-10-01", inclusive="left", freq="h", tz="Europe/Berlin")
++        after = pd.date_range("2025-10-01", "2025-10-11", inclusive="left", freq="15min", tz="Europe/Berlin")
++        index = before.append(after).tz_convert("UTC")
++        values = np.r_[np.full(len(before), 10.0), np.full(len(after), 100.0)]
++    else:
++        count = 40 * 96 if sample == "quarter" else 40 * 24
++        index = pd.date_range("2026-01-01", periods=count, freq="15min" if sample == "quarter" else "h", tz="UTC")
++        values = np.r_[np.full(count * 3 // 4, 10.0), np.full(count // 4, 100.0)]
++    frame = pd.DataFrame({"price_eur_mwh": values}, index=index.rename("timestamp"))
++    daily = calculate_daily_spreads(frame)
++    figures = {}
++    render("DE_LU", frame, daily, calculate_spread_percentiles(daily),
++           calculate_negative_price_hours(frame), 1, "UTC", "plotly_dark", figures)
++    st.session_state["ma_values"] = np.asarray(figures["price_ts"].data[1].y, dtype=float)
++
++
++@pytest.mark.parametrize("sample,warmup", [("hour", 24), ("quarter", 96), ("mixed", 24)])
++def test_real_market_chart_uses_30_physical_days_and_24_hours_warmup(sample, warmup):
++    from streamlit.testing.v1 import AppTest
++
++    app = AppTest.from_function(_market_app, args=(sample,)).run(timeout=30)
++    assert not app.exception
++    values = app.session_state["ma_values"]
++    assert np.isnan(values[:warmup - 1]).all()
++    assert values[warmup - 1] == 10.0
++    assert values[-1] == pytest.approx(40.0)
++
++
++def test_rolling_window_clips_a_partial_old_interval_and_ignores_nan():
++    from src.analytics import time_weighted_rolling_price_mean
++
++    before = pd.date_range("2025-09-30", periods=24, freq="h", tz="Europe/Berlin")
++    after = pd.date_range("2025-10-01", periods=4, freq="15min", tz="Europe/Berlin")
++    prices = pd.Series(np.r_[np.full(24, 10.0), np.full(4, 100.0)], index=before.append(after))
++    result = time_weighted_rolling_price_mean(prices, window="1D")
++    assert result.iloc[24] == pytest.approx((23.75 * 10 + 0.25 * 100) / 24)
++    prices.iloc[0] = np.nan
++    result = time_weighted_rolling_price_mean(prices, window="1D")
++    assert result.iloc[:27].isna().all()  # fewer than 24 finite covered hours
++    assert result.iloc[-1] == pytest.approx((23 * 10 + 100) / 24)

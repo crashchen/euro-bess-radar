@@ -1,0 +1,58 @@
+Dropped 1 IDA CSV rows with non-finite price/volume values.
+2026-09-08 14:25:38.015
+  Warning: to view this Streamlit app on a browser, run it with the following
+  command:
+
+    streamlit run docs/audits/2026-09-08-evidence/reproduce.py [ARGUMENTS]
+2026-09-08 14:25:38.015 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.015 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.015 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.015 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.016 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.016 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.016 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.016 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.016 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.016 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.016 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.016 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.016 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.017 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.017 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.017 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.017 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.017 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.017 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.017 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.017 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.017 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.017 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.018 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.018 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.065 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.065 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.065 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.066 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.066 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.066 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.066 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.066 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.078 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.078 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.078 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.078 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-08 14:25:38.079 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+mixed_continuous native [{"date": "2025-09-30", "total_revenue_eur": 316.0, "physical_throughput_mwh": 8.0, "n_intervals": 24}, {"date": "2025-10-01", "total_revenue_eur": 0.0, "physical_throughput_mwh": 0.0, "n_intervals": 96}] {'observed_days': 2, 'valid_days': 2, 'excluded_days': 0, 'excluded_days_due_to_missing': 0, 'excluded_days_due_to_solver_failure': 0, 'solver_failure_details': [], 'model_available': True, 'carry_soc': True, 'carry_mode': 'continuous_horizon', 'n_cadence_splits': 1, 'da_id_carry_soc_supported': True}
+mixed_continuous physical_15m_equivalent [{"date": "2025-09-30", "total_revenue_eur": 316.0, "physical_throughput_mwh": 8.0, "n_intervals": 96}, {"date": "2025-10-01", "total_revenue_eur": 0.0, "physical_throughput_mwh": 0.0, "n_intervals": 96}] {'observed_days': 2, 'valid_days': 2, 'excluded_days': 0, 'excluded_days_due_to_missing': 0, 'excluded_days_due_to_solver_failure': 0, 'solver_failure_details': [], 'model_available': True, 'carry_soc': True, 'carry_mode': 'continuous_horizon', 'n_cadence_splits': 0, 'da_id_carry_soc_supported': True}
+fi_clean 93 filled 0 actual_hours 24.0
+fi_replay {'total_revenue_eur': 0.0, 'annualized_eur_per_mw': 0.0, 'number_of_trades': 0, 'physical_throughput_mwh': 0.0, 'traded_volume_mwh': 0.0, 'rebalancing_factor': 1.0, 'daily_fce': 0.0, 'avg_c_rate': 0.0, 'max_depth_of_discharge_pct': 0.0, 'degradation_cost_eur': 0.0, 'soh_delta_pct': -0.0, 'charge_vwap_eur_mwh': nan, 'discharge_vwap_eur_mwh': nan, 'market_vwap_available': True, 'reason': '', 'success': True, 'status': 'optimal', 'message': '', 'failure_stage': None}
+fi_reserve [{'joint_capacity_revenue': 114.0}] expected 114.0
+sparse_ida_analytics [{'date': datetime.date(2026, 1, 1), 'da_revenue': 79.0, 'ida_lp_value': 79.0, 'implicit_mtm': 80.0, 'rebid_uplift': 0.0, 'total_cash': 79.0, 'da_n_cycles': 1.0, 'ida_n_cycles': 1.0}] {'observed_days': 1, 'valid_days': 1, 'excluded_days_due_to_missing': 0, 'excluded_days_due_to_solver_failure': 0, 'solver_failure_details': [], 'model_available': True}
+sparse_ida_replay {'total_revenue_eur': 0.0, 'annualized_eur_per_mw': 0.0, 'number_of_trades': 0, 'physical_throughput_mwh': 0.0, 'traded_volume_mwh': 0.0, 'rebalancing_factor': 0.0, 'daily_fce': 0.0, 'avg_c_rate': 0.0, 'max_depth_of_discharge_pct': 0.0, 'degradation_cost_eur': 0.0, 'soh_delta_pct': 0.0, 'charge_vwap_eur_mwh': nan, 'discharge_vwap_eur_mwh': nan, 'market_vwap_available': False, 'success': False, 'status': 'invalid_input', 'message': 'DA and IDA1 coverage is incomplete or their delivery intervals have a resolution mismatch; joining discards or duplicates intervals (DA=24, IDA1=23, merged=23).', 'failure_stage': None, 'reason': 'DA and IDA1 coverage is incomplete or their delivery intervals have a resolution mismatch; joining discards or duplicates intervals (DA=24, IDA1=23, merged=23).'}
+mixed_markets native_hourly_DA n 0 rev 0.0 success False
+mixed_markets explicit_15m_DA n 96 rev 474.0 success True
+inf_import persisted [{'zone': 'DE_LU', 'sequence': 1, 'rows': 23, 'first': Timestamp('2026-01-01 00:00:00+0000', tz='UTC'), 'last': Timestamp('2026-01-01 23:00:00+0000', tz='UTC')}] infinity_in_cache 0
+inf_replay {'total_revenue_eur': 0.0, 'annualized_eur_per_mw': 0.0, 'number_of_trades': 0, 'physical_throughput_mwh': 0.0, 'traded_volume_mwh': 0.0, 'rebalancing_factor': 0.0, 'daily_fce': 0.0, 'avg_c_rate': 0.0, 'max_depth_of_discharge_pct': 0.0, 'degradation_cost_eur': 0.0, 'soh_delta_pct': 0.0, 'charge_vwap_eur_mwh': nan, 'discharge_vwap_eur_mwh': nan, 'market_vwap_available': False, 'success': False, 'status': 'invalid_input', 'message': 'DA and IDA1 coverage is incomplete or their delivery intervals have a resolution mismatch; joining discards or duplicates intervals (DA=24, IDA1=23, merged=23).', 'failure_stage': None, 'reason': 'DA and IDA1 coverage is incomplete or their delivery intervals have a resolution mismatch; joining discards or duplicates intervals (DA=24, IDA1=23, merged=23).'}
+plotted_ma 30-Day MA 40.0 true_30d 40.0
+dst_reserve 2025-03-30 project_case 456.0 cockpit 437.0
+dst_reserve 2025-10-26 project_case 456.0 cockpit 475.0

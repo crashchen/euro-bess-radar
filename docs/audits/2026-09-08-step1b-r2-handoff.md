@@ -33,7 +33,7 @@
 在本轮源码版本检出中核对（文档不计入源码 hash）：
 
 ```sh
-git diff --binary --full-index 0b5d7181c4d2ec7a6e8e85f7fdd36f8cedf2cd97 HEAD -- src/ tests/ | shasum -a 256
+git diff --binary --full-index 0b5d7181c4d2ec7a6e8e85f7fdd36f8cedf2cd97 c46aaf9054cc00723d4314d462b46d293da7f375 -- src/ tests/ | shasum -a 256
 shasum -a 256 docs/audits/2026-09-08-evidence/step1b-r2-source.patch
 PYTHONPATH=. .venv/bin/python docs/audits/2026-09-08-evidence/step1b-r2-probe.py
 ```

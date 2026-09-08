@@ -49,12 +49,14 @@ from src.stochastic_dispatch import (
     solve_stochastic_reserve_commitment,
     solve_stochastic_triple_dispatch,
 )
+from src.time_utils import infer_delivery_interval_hours, interval_hours_vector
 
 DAYS_PER_YEAR = 365.25
 _SIM_COLUMNS = [
     "timestamp",
     "local_time",
     "price_eur_mwh",
+    "interval_hours",
     "p_charge_mw",
     "p_discharge_mw",
     "net_dispatch_mw",
@@ -201,12 +203,12 @@ def simulate_da_milp_replay(
         return empty_simulation_result("No price data for the selected local day.")
     if day["price_eur_mwh"].isna().any():
         return empty_simulation_result("Selected day contains missing prices.")
-    if not _is_regular_utc_day(day, local_date=simulation_date):
+    if not _is_complete_da_day(day, local_date=simulation_date):
         return empty_simulation_result(
             "Selected day is incomplete or has an irregular interval grid."
         )
 
-    dt = _infer_interval_hours(pd.DatetimeIndex(day.index))
+    dt = infer_delivery_interval_hours(day.index)
     result = solve_daily_lp(
         day["price_eur_mwh"].to_numpy(dtype=float),
         dt=dt,
@@ -584,10 +586,14 @@ def _simulate_continuous_da_replay(
         day = _select_local_day(price_df, local_date, tz)
         return day[["price_eur_mwh"]] if not day.empty else pd.DataFrame()
 
-    runs = _group_clean_runs(dates=dates, build_day=build_da_day)
+    runs = _group_clean_runs(dates=dates, build_day=build_da_day, allow_mixed_da=True)
     for run_dates, slice_df, day_breaks in runs:
         prices = slice_df["price_eur_mwh"].to_numpy(dtype=float)
-        dt = _infer_interval_hours(pd.DatetimeIndex(slice_df.index))
+        durations = np.concatenate([
+            interval_hours_vector(infer_delivery_interval_hours(slice_df.iloc[start:end].index), end - start)
+            for start, end in day_breaks
+        ])
+        dt = float(durations[0]) if np.all(durations == durations[0]) else durations
         run_result = solve_daily_lp(
             prices,
             dt=dt,
@@ -613,12 +619,13 @@ def _simulate_continuous_da_replay(
         soc_start_frac = current_soc_frac
         for local_date, (start, end) in zip(run_dates, day_breaks, strict=True):
             day_df = slice_df.iloc[start:end]
+            day_dt = dt if np.ndim(dt) == 0 else dt[start:end]
             day_soc_slice = run_result["soc"][start:end + 1]
             day_p_charge = run_result["p_charge"][start:end]
             day_p_discharge = run_result["p_discharge"][start:end]
             day_interval_rev = full_revenue[start:end]
             daily_fce = _full_equivalent_cycles(
-                day_p_discharge, dt=dt, capacity_mwh=capacity_mwh,
+                day_p_discharge, dt=day_dt, capacity_mwh=capacity_mwh,
             )
             day_result = _build_result(
                 day_df,
@@ -626,7 +633,7 @@ def _simulate_continuous_da_replay(
                 p_discharge=day_p_discharge,
                 soc=day_soc_slice,
                 interval_revenue=day_interval_rev,
-                dt=dt,
+                dt=day_dt,
                 power_mw=power_mw,
                 duration_hours=duration_hours,
                 efficiency=efficiency,
@@ -795,6 +802,7 @@ def _group_clean_runs(
     *,
     dates: list[date],
     build_day: Callable[[date], pd.DataFrame],
+    allow_mixed_da: bool = False,
 ) -> list[tuple[list[date], pd.DataFrame, list[tuple[int, int]]]]:
     """Group `dates` into contiguous segments with clean per-day frames.
 
@@ -806,7 +814,7 @@ def _group_clean_runs(
       - the next requested date is more than one calendar day later,
       - the day's frame is empty,
       - the day's frame has any NaN value,
-      - the day's frame is sparse (non-uniform UTC index),
+      - the day's frame is sparse or unsupported (DA-only may use the registered SDAC mixed grid),
       - the day's cadence differs from the current run's cadence,
       - adding the day would push the run past
         `MAX_CONTINUOUS_REPLAY_INTERVALS` (a performance cap — a single
@@ -845,7 +853,7 @@ def _group_clean_runs(
         if (
             day_df.empty
             or bool(day_df.isna().to_numpy().any())
-            or not _is_regular_utc_day(day_df, local_date=local_date)
+            or not (_is_complete_da_day if allow_mixed_da else _is_regular_utc_day)(day_df, local_date=local_date)
         ):
             # Empty / NaN / sparse days break the continuous horizon. A
             # sparse day (e.g. a missing 02:00 interval that upstream
@@ -889,6 +897,26 @@ def _merge_matching_da_id_day(da_day: pd.DataFrame, ida_day: pd.DataFrame) -> pd
     if len(merged) != len(da_day) or len(merged) != len(ida_day):
         return pd.DataFrame()
     return merged.dropna()
+
+
+def _is_complete_da_day(day_df: pd.DataFrame, *, local_date: date | None = None) -> bool:
+    """Complete DA day, including the registered SDAC transition within a day."""
+    if day_df is None or len(day_df) < 2:
+        return False
+    index = pd.DatetimeIndex(day_df.index)
+    try:
+        dt = interval_hours_vector(infer_delivery_interval_hours(index), len(index))
+    except ValueError:
+        return False
+    expected_date = local_date or index[0].date()
+    start = pd.Timestamp(expected_date)
+    if index.tz is not None:
+        start = start.tz_localize(index.tz)
+    return bool(
+        all(ts.date() == expected_date for ts in index)
+        and index[0] == start
+        and index[-1] + pd.Timedelta(hours=float(dt[-1])) == start + pd.DateOffset(days=1)
+    )
 
 
 def _is_regular_utc_day(
@@ -1540,7 +1568,11 @@ def _event_row(
     """Summarise one contiguous non-zero physical dispatch event."""
     window = timeseries.iloc[start:end]
     index = pd.DatetimeIndex(timeseries["local_time"])
-    dt = _infer_interval_hours(index)
+    durations = (
+        timeseries["interval_hours"].to_numpy(dtype=float)
+        if "interval_hours" in timeseries else interval_hours_vector(infer_delivery_interval_hours(index), len(index))
+    )
+    dt = durations[start:end]
     event_type = "Discharge" if sign > 0 else "Charge"
     power_col = "p_discharge_mw" if sign > 0 else "p_charge_mw"
     power = window[power_col].abs()
@@ -1557,15 +1589,15 @@ def _event_row(
         "event_id": event_id,
         "event_type": event_type,
         "start_time": window["local_time"].iloc[0],
-        "end_time": window["local_time"].iloc[-1] + pd.Timedelta(hours=dt),
-        "duration_h": float(len(window) * dt),
-        "avg_power_mw": float(power.mean()) if not power.empty else 0.0,
-        "energy_mwh": float(power.sum() * dt),
-        "avg_price_eur_mwh": float(window["price_eur_mwh"].mean()),
+        "end_time": window["local_time"].iloc[-1] + pd.Timedelta(hours=float(dt[-1])),
+        "duration_h": float(dt.sum()),
+        "avg_power_mw": float(np.average(power, weights=dt)) if not power.empty else 0.0,
+        "energy_mwh": float(np.dot(power, dt)),
+        "avg_price_eur_mwh": float(np.average(window["price_eur_mwh"], weights=dt)),
         "revenue_eur": float(window["interval_revenue_eur"].sum()),
         "soc_start_pct": soc_start,
         "soc_end_pct": float(window["soc_pct"].iloc[-1]),
-        "avg_rebid_delta_mw": float(rebid.mean()) if not rebid.empty else 0.0,
+        "avg_rebid_delta_mw": float(np.average(rebid, weights=dt)) if not rebid.empty else 0.0,
         "max_abs_rebid_delta_mw": float(rebid.abs().max()) if not rebid.empty else 0.0,
     }
 
@@ -1589,7 +1621,7 @@ def _da_interval_revenue(
     p_charge: np.ndarray,
     p_discharge: np.ndarray,
     *,
-    dt: float,
+    dt: float | np.ndarray,
     capture_rate: float,
 ) -> np.ndarray:
     """Post-VOM DA interval revenue, haircut by capture rate."""
@@ -1625,7 +1657,7 @@ def _build_result(
     p_discharge: np.ndarray,
     soc: np.ndarray,
     interval_revenue: np.ndarray,
-    dt: float,
+    dt: float | np.ndarray,
     power_mw: float,
     duration_hours: float,
     efficiency: float,
@@ -1664,7 +1696,7 @@ def _build_result(
     active_power = np.abs(net_dispatch)
     active = active_power > 1e-6
     avg_c_rate = (
-        float(active_power[active].mean()) / capacity_mwh
+        float(np.average(active_power[active], weights=interval_hours_vector(dt, len(day))[active])) / capacity_mwh
         if active.any() and capacity_mwh > 0 else 0.0
     )
     deg = calculate_degradation_cost(
@@ -1683,6 +1715,7 @@ def _build_result(
         "timestamp": pd.DatetimeIndex(day.index).tz_convert("UTC"),
         "local_time": pd.DatetimeIndex(day.index),
         "price_eur_mwh": day["price_eur_mwh"].to_numpy(dtype=float),
+        "interval_hours": interval_hours_vector(dt, len(day)),
         "p_charge_mw": p_charge,
         "p_discharge_mw": p_discharge,
         "net_dispatch_mw": net_dispatch,
@@ -1736,22 +1769,22 @@ def _build_result(
 def _full_equivalent_cycles(
     p_discharge: np.ndarray,
     *,
-    dt: float,
+    dt: float | np.ndarray,
     capacity_mwh: float,
 ) -> float:
     if capacity_mwh <= 0:
         return 0.0
-    return float(np.asarray(p_discharge).sum() * dt / capacity_mwh)
+    return float((np.asarray(p_discharge) * dt).sum() / capacity_mwh)
 
 
 def _available_charge_power(
     soc_start: np.ndarray,
     capacity_mwh: float,
     power_mw: float,
-    dt: float,
+    dt: float | np.ndarray,
     efficiency: float,
 ) -> np.ndarray:
-    if capacity_mwh <= 0 or dt <= 0:
+    if capacity_mwh <= 0 or np.any(np.asarray(dt) <= 0):
         return np.zeros_like(soc_start)
     sqrt_eff = math.sqrt(max(efficiency, 1e-12))
     return np.minimum(
@@ -1763,10 +1796,10 @@ def _available_charge_power(
 def _available_discharge_power(
     soc_start: np.ndarray,
     power_mw: float,
-    dt: float,
+    dt: float | np.ndarray,
     efficiency: float,
 ) -> np.ndarray:
-    if dt <= 0:
+    if np.any(np.asarray(dt) <= 0):
         return np.zeros_like(soc_start)
     sqrt_eff = math.sqrt(max(efficiency, 1e-12))
     return np.minimum(power_mw, np.maximum(soc_start * sqrt_eff / dt, 0.0))

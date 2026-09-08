@@ -25,7 +25,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from src.analytics import _infer_interval_hours
 from src.degradation import (
     DAYS_PER_YEAR,
     DEFAULT_CYCLE_LIFE,
@@ -33,7 +32,8 @@ from src.degradation import (
     estimate_battery_lifetime,
 )
 from src.dispatch import solve_daily_lp
-from src.simulation import _is_regular_utc_day, _select_local_day, available_local_dates
+from src.simulation import _is_complete_da_day, _select_local_day, available_local_dates
+from src.time_utils import infer_delivery_interval_hours
 
 logger = logging.getLogger(__name__)
 
@@ -124,12 +124,12 @@ def _sweep_window(
         if (
             day.empty
             or bool(day["price_eur_mwh"].isna().any())
-            or not _is_regular_utc_day(day)
+            or not _is_complete_da_day(day)
         ):
             excluded_days += 1
             continue
         prices = day["price_eur_mwh"].to_numpy(dtype=float)
-        dt = _infer_interval_hours(pd.DatetimeIndex(day.index))
+        dt = infer_delivery_interval_hours(day.index)
 
         day_results: dict[float | None, dict[str, Any]] = {}
         for cap in caps:
@@ -176,7 +176,7 @@ def _sweep_window(
             # `n_cycles` convenience field (4-decimal rounding would leak
             # into money).
             discharged_mwh = float(
-                np.asarray(result["p_discharge"], dtype=float).sum() * dt
+                (np.asarray(result["p_discharge"], dtype=float) * dt).sum()
             )
             fec[cap] += discharged_mwh / capacity_mwh
 

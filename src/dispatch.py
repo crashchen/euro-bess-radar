@@ -9,7 +9,8 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import linprog
 
-from src.analytics import _infer_interval_hours, _to_local
+from src.analytics import _to_local
+from src.time_utils import infer_delivery_interval_hours, interval_hours_vector
 
 logger = logging.getLogger(__name__)
 DISPATCH_VOM_COST_EUR_MWH = 0.5
@@ -20,7 +21,7 @@ _REBID_UPLIFT_EPS_EUR = 1e-9
 
 def solve_daily_lp(
     prices: np.ndarray,
-    dt: float,
+    dt: float | np.ndarray,
     power_mw: float = 1.0,
     duration_hours: float = 1.0,
     efficiency: float = 0.88,
@@ -33,7 +34,7 @@ def solve_daily_lp(
 
     Args:
         prices: 1-D array of prices (EUR/MWh) for each interval.
-        dt: Interval duration in hours (e.g. 1.0, 0.5, 0.25).
+        dt: Positive finite interval hours: scalar or one value per price.
         power_mw: BESS power rating in MW.
         duration_hours: BESS energy duration in hours.
         efficiency: Round-trip efficiency (0-1).
@@ -70,7 +71,15 @@ def solve_daily_lp(
     if max_efc_per_day is not None and max_efc_per_day < 0:
         raise ValueError(f"max_efc_per_day must be >= 0, got {max_efc_per_day}")
     n = len(prices)
-    if n == 0 or not np.isfinite(prices).all():
+    input_error = (
+        "price vector is empty or contains non-finite values (NaN or infinity)"
+        if n == 0 or not np.isfinite(prices).all() else ""
+    )
+    try:
+        dt = interval_hours_vector(dt, n)
+    except ValueError as exc:
+        input_error = str(exc)
+    if input_error:
         return {
             "revenue_eur": 0.0,
             "p_charge": np.zeros(max(n, 0)),
@@ -79,7 +88,7 @@ def solve_daily_lp(
             "n_cycles": 0.0,
             "success": False,
             "status": "invalid_input",
-            "message": "price vector is empty or contains non-finite values (NaN or infinity)",
+            "message": input_error,
             "tiebreak_applied": None,
         }
 
@@ -132,14 +141,14 @@ def solve_daily_lp(
 
     for t in range(1, n + 1):
         row_upper = np.zeros(3 * n)
-        row_upper[:t] = sqrt_eff * dt
-        row_upper[n:n + t] = -dt / sqrt_eff
+        row_upper[:t] = sqrt_eff * dt[:t]
+        row_upper[n:n + t] = -dt[:t] / sqrt_eff
         a_ub_rows.append(row_upper)
         b_ub_rows.append(capacity_mwh - soc_init)
 
         row_lower = np.zeros(3 * n)
-        row_lower[:t] = -sqrt_eff * dt
-        row_lower[n:n + t] = dt / sqrt_eff
+        row_lower[:t] = -sqrt_eff * dt[:t]
+        row_lower[n:n + t] = dt[:t] / sqrt_eff
         a_ub_rows.append(row_lower)
         b_ub_rows.append(soc_init)
 
@@ -180,7 +189,7 @@ def solve_daily_lp(
     if min_throughput_tiebreak:
         canonical_x = _min_throughput_pass(
             c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n,
-            float(result.fun),
+            float(result.fun), dt,
         )
         tiebreak_applied = canonical_x is not None
         if canonical_x is not None:
@@ -195,10 +204,10 @@ def solve_daily_lp(
     soc = np.zeros(n + 1)
     soc[0] = soc_init
     for t in range(n):
-        soc[t + 1] = soc[t] + (p_charge[t] * sqrt_eff - p_discharge[t] / sqrt_eff) * dt
+        soc[t + 1] = soc[t] + (p_charge[t] * sqrt_eff - p_discharge[t] / sqrt_eff) * dt[t]
 
     # Cycle count: total energy discharged / capacity
-    total_discharged = np.sum(p_discharge) * dt
+    total_discharged = np.dot(p_discharge, dt)
     n_cycles = total_discharged / capacity_mwh if capacity_mwh > 0 else 0.0
 
     return {
@@ -215,7 +224,7 @@ def solve_daily_lp(
 
 
 def _min_throughput_pass(
-    c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, z_star,
+    c, a_ub, b_ub, a_eq, b_eq, bounds, integrality, n, z_star, dt,
 ):
     """Canonical min-FEC second pass (cycle-cap frontier contract §2).
 
@@ -233,7 +242,7 @@ def _min_throughput_pass(
     a_ub2 = np.vstack([a_ub, c.reshape(1, -1)])
     b_ub2 = np.append(b_ub, z_star + tol_z)
     c2 = np.zeros(3 * n)
-    c2[n:2 * n] = 1.0  # minimise discharged power (FEC, discharge leg)
+    c2[n:2 * n] = dt / dt.max()  # minimise physical discharged energy; uniform-grid coefficients stay 1
     result = linprog(c2, A_ub=a_ub2, b_ub=b_ub2, A_eq=a_eq, b_eq=b_eq,
                      bounds=bounds, integrality=integrality, method="highs")
     if not result.success:
@@ -285,7 +294,7 @@ def _coerce_nonnegative_interval_vector(
 
 def solve_daily_joint_capacity_lp(
     prices: np.ndarray,
-    dt: float,
+    dt: float | np.ndarray,
     capacity_price_eur_mw_h: float | np.ndarray,
     power_mw: float = 1.0,
     duration_hours: float = 1.0,
@@ -295,6 +304,7 @@ def solve_daily_joint_capacity_lp(
 ) -> dict:
     """Jointly optimize DA dispatch and reserve capacity headroom via MILP.
 
+    ``dt`` accepts a positive finite scalar or one duration per price.
     The reserve variable consumes power headroom in each interval but does not
     model activation energy, bid acceptance, or product-specific SoC duration.
     This keeps the estimate screening-grade while improving on a pure time-split
@@ -305,7 +315,15 @@ def solve_daily_joint_capacity_lp(
     solver failure cannot be confused with a genuine zero-revenue optimum.
     """
     n = len(prices)
-    if n == 0 or not np.isfinite(prices).all():
+    input_error = (
+        "price vector is empty or contains non-finite values (NaN or infinity)"
+        if n == 0 or not np.isfinite(prices).all() else ""
+    )
+    try:
+        dt = interval_hours_vector(dt, n)
+    except ValueError as exc:
+        input_error = str(exc)
+    if input_error:
         zeros = np.zeros(max(n, 0))
         return {
             "total_revenue_eur": 0.0,
@@ -319,7 +337,7 @@ def solve_daily_joint_capacity_lp(
             "avg_reserve_mw": 0.0,
             "success": False,
             "status": "invalid_input",
-            "message": "price vector is empty or contains non-finite values (NaN or infinity)",
+            "message": input_error,
         }
 
     capacity_mwh = power_mw * duration_hours
@@ -375,14 +393,14 @@ def solve_daily_joint_capacity_lp(
 
     for t in range(1, n + 1):
         row_upper = np.zeros(nv)
-        row_upper[:t] = sqrt_eff * dt
-        row_upper[n:n + t] = -dt / sqrt_eff
+        row_upper[:t] = sqrt_eff * dt[:t]
+        row_upper[n:n + t] = -dt[:t] / sqrt_eff
         a_ub_rows.append(row_upper)
         b_ub_rows.append(capacity_mwh - soc_init)
 
         row_lower = np.zeros(nv)
-        row_lower[:t] = -sqrt_eff * dt
-        row_lower[n:n + t] = dt / sqrt_eff
+        row_lower[:t] = -sqrt_eff * dt[:t]
+        row_lower[n:n + t] = dt[:t] / sqrt_eff
         a_ub_rows.append(row_lower)
         b_ub_rows.append(soc_init)
 
@@ -431,9 +449,9 @@ def solve_daily_joint_capacity_lp(
     soc = np.zeros(n + 1)
     soc[0] = soc_init
     for t in range(n):
-        soc[t + 1] = soc[t] + (p_charge[t] * sqrt_eff - p_discharge[t] / sqrt_eff) * dt
+        soc[t + 1] = soc[t] + (p_charge[t] * sqrt_eff - p_discharge[t] / sqrt_eff) * dt[t]
 
-    total_discharged = np.sum(p_discharge) * dt
+    total_discharged = np.dot(p_discharge, dt)
     n_cycles = total_discharged / capacity_mwh if capacity_mwh > 0 else 0.0
 
     return {
@@ -445,7 +463,7 @@ def solve_daily_joint_capacity_lp(
         "reserve_mw": reserve_mw,
         "soc": soc,
         "n_cycles": round(float(n_cycles), 4),
-        "avg_reserve_mw": round(float(reserve_mw.mean()), 6),
+        "avg_reserve_mw": round(float(np.average(reserve_mw, weights=dt)), 6),
         "success": True,
         "status": "optimal",
         "message": "",
@@ -500,10 +518,12 @@ def solve_joint_capacity_batch(
         if sorted_group.isna().any():
             excluded_days += 1
             continue
-        # Infer dt from this day's own index so mixed-resolution windows
-        # (e.g. DE_LU crossing the 2025-10 60min→15min boundary) solve
-        # each side at its native cadence instead of the frame mode.
-        dt = _infer_interval_hours(sorted_group.index)
+        # Preserve each native DA duration, including a cutover within the day.
+        try:
+            dt = infer_delivery_interval_hours(sorted_group.index)
+        except ValueError:
+            excluded_days += 1
+            continue
         capacity_price: float | np.ndarray = capacity_price_eur_mw_h
         if capacity_nominal_block_hours is not None:
             from src.time_utils import nominal_block_settlement_factors
@@ -1439,9 +1459,12 @@ def solve_dispatch_batch(
         if sorted_group.isna().any():
             excluded_days += 1
             continue
-        # Per-day dt — see solve_joint_capacity_batch for the mixed-
-        # resolution rationale.
-        dt = _infer_interval_hours(sorted_group.index)
+        # Per-interval durations for verified mixed days; scalar on uniform days.
+        try:
+            dt = infer_delivery_interval_hours(sorted_group.index)
+        except ValueError:
+            excluded_days += 1
+            continue
         result = solve_daily_lp(
             sorted_group.values,
             dt=dt,

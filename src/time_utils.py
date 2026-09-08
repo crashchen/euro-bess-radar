@@ -11,6 +11,55 @@ from datetime import time as time_type
 import numpy as np
 import pandas as pd
 
+from src.config import SDAC_15MIN_DELIVERY_DATE, SDAC_MARKET_TIMEZONE
+
+
+def interval_hours_vector(dt: float | np.ndarray, n: int) -> np.ndarray:
+    """Validate physical durations: a positive finite scalar or aligned 1-D vector.
+
+    A one-element vector is not a scalar broadcast. Missing, non-finite or
+    non-positive durations cannot be repaired by a solver or treated as zero.
+    """
+    try:
+        values = np.asarray(dt, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Interval duration must be a positive finite scalar or aligned vector") from exc
+    if isinstance(dt, (bool, np.bool_)) or values.ndim > 1:
+        raise ValueError("Interval duration must be a scalar or one-dimensional vector")
+    if values.ndim == 0:
+        values = np.full(n, float(values))
+    elif len(values) != n:
+        raise ValueError(f"Interval duration vector must have length {n}")
+    if not np.isfinite(values).all() or np.any(values <= 0):
+        raise ValueError("Interval duration must be positive and finite")
+    return values
+
+
+def infer_delivery_interval_hours(index: pd.DatetimeIndex) -> float | np.ndarray:
+    """Infer a uniform cadence or validate the registered SDAC mixed DA grid.
+
+    Mixed durations are accepted only for consecutive native hourly/quarter-hour
+    starts on the known market cutover. In particular, a missing observation is
+    never stretched into a longer delivery product. Uniform partial samples keep
+    their historical inference behavior; full-day callers must check day bounds.
+    This is a DA helper, not permission to align different market products.
+    """
+    idx = pd.DatetimeIndex(index).as_unit("ns")
+    if idx.hasnans or idx.has_duplicates or not idx.is_monotonic_increasing:
+        raise ValueError("DA delivery grid must have unique increasing finite timestamps")
+    if len(idx) < 2:
+        return 1.0
+    hour_ns = pd.Timedelta(hours=1).value
+    deltas = np.diff(idx.asi8)
+    if np.all(deltas == deltas[0]):
+        return float(deltas[0] / hour_ns)
+    cutover = pd.Timestamp(SDAC_15MIN_DELIVERY_DATE).tz_localize(SDAC_MARKET_TIMEZONE).tz_convert("UTC")
+    if idx.tz is not None and idx[0] < cutover <= idx[-1]:
+        step_ns = np.where(idx.asi8 < cutover.value, hour_ns, hour_ns // 4)
+        if np.all(deltas == step_ns[:-1]) and np.all(idx.asi8 % step_ns == 0):
+            return step_ns.astype(float) / hour_ns
+    raise ValueError("DA delivery grid is incomplete or has an unsupported cadence change")
+
 
 def _local_midnight(value, timezone: str) -> pd.Timestamp:
     """Interpret a date-like value as local midnight in the requested timezone."""

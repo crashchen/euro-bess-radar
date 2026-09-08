@@ -6,6 +6,7 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from src.analytics import time_weighted_rolling_price_mean
 from src.config import is_elexon_zone
 from src.data_ingestion import summarize_price_data_quality
 from src.ui_theme import apply_cockpit_plot_theme
@@ -33,13 +34,15 @@ def render(
     k3.metric("90th-pct Ordered Spread", f"\u20ac{percentiles['p90']:.2f}/MWh")
     k4.metric(
         "Neg Price Hours",
-        f"{neg_stats['negative_hours']:.1f}h",
+        f"{neg_stats['negative_hours']:.1f}h" if pd.notna(neg_stats["negative_hours"]) else "n/a",
         delta=f"{neg_stats['pct_negative']:.1f}% of intervals",
     )
     st.caption(
         f"Spreads use chronology-aware {duration_hours}h charge/discharge windows "
         f"in {zone_tz}."
     )
+    if pd.isna(neg_stats["negative_hours"]):
+        st.caption("Negative-price hours are unavailable because the delivery interval grid cannot be verified.")
     quality = summarize_price_data_quality(primary_df)
     excluded_days = int(daily_spreads.attrs.get("excluded_days_due_to_missing", 0))
     solver_failed_days = int(
@@ -80,13 +83,11 @@ def render(
     )
     fig_price.update_traces(
         opacity=0.72,
-        name="Hourly",
+        name="Day-Ahead",
         showlegend=True,
         line=dict(color="#ff2d95", width=1.7),
     )
-    ma_series = primary_df["price_eur_mwh"].rolling(
-        window=24 * 30, min_periods=24,
-    ).mean()
+    ma_series = time_weighted_rolling_price_mean(primary_df["price_eur_mwh"])
     fig_price.add_scatter(
         x=primary_df.index, y=ma_series,
         mode="lines", name="30-Day MA",
@@ -96,6 +97,11 @@ def render(
     apply_cockpit_plot_theme(fig_price)
     report_figures["price_ts"] = fig_price
     st.plotly_chart(fig_price, width="stretch")
+    st.caption(
+        "30-Day MA uses the trailing 720 physical hours, weighted by delivery "
+        "duration through each interval's end. It appears after 24 hours of finite "
+        "price coverage; missing prices and unverified intervals are excluded."
+    )
 
     spread_plot_df = daily_spreads.copy()
     spread_plot_df["date"] = pd.to_datetime(spread_plot_df["date"])
