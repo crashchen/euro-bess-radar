@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -1170,11 +1171,8 @@ def _render_intraday_uplift_section(
             duration_hours=duration_hours,
         )
 
-        if uplift["n_periods"] == 0:
-            st.warning(
-                "DA and IDA1 series have no overlapping periods in this "
-                "window — nothing to compute."
-            )
+        if not uplift["model_available"]:
+            st.warning(uplift["reason"])
             return
 
         m1, m2, m3, m4 = st.columns(4)
@@ -1202,14 +1200,16 @@ def _render_intraday_uplift_section(
                 uplift["annual_uplift_per_mw"],
             )
             st.warning(
-                f"IDA1 coverage is only {uplift['coverage_pct']:.0f}% of DA periods. "
+                f"Matched-price coverage is only {uplift['coverage_pct']:.1f}% "
+                f"(DA: {uplift['da_coverage_pct']:.1f}%; IDA: {uplift['ida_coverage_pct']:.1f}%). "
                 "The headline uplift is coverage-adjusted; the full-coverage "
                 f"equivalent would be €{unadjusted * power_mw:,.0f}/yr."
             )
 
         merged = primary_df[["price_eur_mwh"]].join(
             id_df[["intraday_price_eur_mwh"]], how="inner",
-        ).dropna()
+        )
+        merged = merged.loc[np.isfinite(merged.to_numpy(dtype=float)).all(axis=1)]
         if not merged.empty:
             signed = (
                 merged["intraday_price_eur_mwh"] - merged["price_eur_mwh"]
@@ -1227,8 +1227,9 @@ def _render_intraday_uplift_section(
 
         st.caption(
             f"Sample: {uplift['n_periods']} periods "
-            f"({uplift['coverage_pct']:.0f}% of DA periods have an IDA1 print). "
-            "The Phase-1 headline scales the annual estimate by this coverage "
+            f"(DA coverage: {uplift['da_coverage_pct']:.1f}%; "
+            f"IDA coverage: {uplift['ida_coverage_pct']:.1f}%, based on finite price pairs). "
+            "The Phase-1 headline scales the annual estimate by the lower coverage "
             "instead of assuming sparse IDA prints represent a full year. This "
             "is a screening estimate at a fixed rebid share; the two-stage "
             "MILP below produces an ex-post upper bound."

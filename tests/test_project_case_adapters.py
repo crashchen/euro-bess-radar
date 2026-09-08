@@ -443,7 +443,7 @@ def test_reserve_coopt_real_solver_integration():
 @pytest.mark.slow
 @pytest.mark.parametrize(
     "target",
-    [dt.date(2025, 3, 30), dt.date(2025, 6, 5), dt.date(2025, 10, 26)],
+    [dt.date(2025, 3, 30), dt.date(2025, 6, 5), dt.date(2025, 10, 26), dt.date(2026, 3, 29)],
 )
 def test_regelleistung_xlsx_to_public_adapter_conserves_nominal_block_cash(target):
     """Six published €80/MW blocks settle to €480/MW on 23/24/25h days.
@@ -451,6 +451,8 @@ def test_regelleistung_xlsx_to_public_adapter_conserves_nominal_block_cash(targe
     This is the load-bearing end-to-end regression: current XLSX parser -> raw
     reserve coverage -> public adapter -> real MILP. The energy/SoC clock remains
     physical; only the German nominal capacity settlement is DST-normalised.
+    Pre-cutover DA/IDA have different delivery grids, so the DA+IDA+reserve
+    adapter must reject that input; DA-only reserve settlement remains valid.
     """
     da_idx = grid.expected_da_timestamps(ZONE, target)
     da = pd.DataFrame({"price_eur_mwh": 0.0}, index=pd.DatetimeIndex(da_idx))
@@ -474,6 +476,16 @@ def test_regelleistung_xlsx_to_public_adapter_conserves_nominal_block_cash(targe
             {"intraday_price_eur_mwh": 0.0}, index=pd.DatetimeIndex(ida_idx),
         )
         reserve = pd.concat([_regelleistung_block_series(day) for day in days])
+        if target == dt.date(2025, 3, 30):
+            assert len(ida_idx) == 4 * len(da_idx)
+            with pytest.raises(AdapterUnavailableError, match="no valid dates"):
+                emit_da_id_reserve(
+                    da, ida, reserve, zone=ZONE, first_delivery_date=days[0],
+                    last_delivery_date=days[-1], power_mw=1.0, duration_hours=1.0,
+                    efficiency=0.88, currency_basis=CB, reserve_product="FCR",
+                    reserve_source="regelleistung", availability=1.0, bucket="hour_of_day",
+                )
+            return
         triple = emit_da_id_reserve(
             da, ida, reserve, zone=ZONE, first_delivery_date=days[0],
             last_delivery_date=days[-1], power_mw=1.0, duration_hours=1.0,
@@ -511,14 +523,18 @@ def test_da_id_real_solver_integration_non_utc_zone(zone, tz):
     # ``_is_regular_utc_day`` (which pins first/last interval to LOCAL midnight)
     # rejected EVERY day on a non-UTC zone — fully-complete DE_LU/FR input returned
     # "no valid dates". This drives the REAL solver end-to-end on both zones.
+    # Use post-cutover native grids: earlier hourly DA / quarter-hour IDA is
+    # deliberately unavailable after the Step 1b anti-loss guard. The separate
+    # pre-cutover adapter regression pins that rejection rather than resampling.
+    integration_days = [dt.date(2025, 11, day) for day in [1, 2, 3]]
     srr = emit_da_id(
-        _zone_da_frame(zone, tz, DAYS), _zone_ida_frame(zone, tz, DAYS), zone=zone,
-        first_delivery_date=DAYS[0], last_delivery_date=DAYS[-1], power_mw=10.0,
+        _zone_da_frame(zone, tz, integration_days), _zone_ida_frame(zone, tz, integration_days), zone=zone,
+        first_delivery_date=integration_days[0], last_delivery_date=integration_days[-1], power_mw=10.0,
         duration_hours=2.0, efficiency=0.88, currency_basis=CB,
         bucket="hour_of_day", min_rebid_uplift_eur=0.0,
     )
     # Walk-forward: the first day has no prior history (missing), the rest are valid.
-    assert srr.coverage_audit.valid_dates == (DAYS[1], DAYS[2])
-    assert srr.coverage_audit.missing_dates == (DAYS[0],)
+    assert srr.coverage_audit.valid_dates == (integration_days[1], integration_days[2])
+    assert srr.coverage_audit.missing_dates == (integration_days[0],)
     assert all(np.isfinite(v) for _, v in srr.daily_realised_cash_series)
     assert srr.fingerprint()  # fingerprints without error
