@@ -1,0 +1,2 @@
+# Frozen git patches require space-prefixed blank context lines and exact bytes.
+*.patch -text whitespace=-blank-at-eol

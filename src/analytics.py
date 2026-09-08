@@ -1236,20 +1236,22 @@ def calculate_two_stage_da_id_dispatch(
 def _intraday_grids_compatible(da: pd.DataFrame, ida: pd.DataFrame) -> bool:
     """Verify cadence and phase per overlapping local day, allowing sparse rows.
 
-    A lone print, unequal inferred cadence or off-grid timestamps cannot prove
-    equal delivery products. Reject ambiguous samples instead of resampling.
-    Missing whole days are handled separately by the two coverage denominators.
+    Days with fewer than two observations in either source cannot establish
+    cadence and are excluded from the comparison. Unequal inferred cadence or
+    off-grid timestamps still reject the window. Require at least one verified
+    day; all original source rows remain in the two coverage denominators.
     """
     if da.index.has_duplicates or ida.index.has_duplicates:
         return False
     ida_days = {day: group.index.sort_values() for day, group in ida.groupby(ida.index.date)}
+    verified_day = False
     for day, group in da.groupby(da.index.date):
         if day not in ida_days:
             continue
         da_index = group.index.sort_values()
         ida_index = ida_days[day]
         if min(len(da_index), len(ida_index)) < 2:
-            return False
+            continue
         dt = _infer_interval_hours(da_index)
         if dt != _infer_interval_hours(ida_index):
             return False
@@ -1259,7 +1261,30 @@ def _intraday_grids_compatible(da: pd.DataFrame, ida: pd.DataFrame) -> bool:
         points = np.concatenate([da_index.asi8, ida_index.asi8])
         if np.any((points - da_index.asi8[0]) % step_ns != 0):
             return False
-    return True
+        verified_day = True
+    return verified_day
+
+
+def _intraday_uplift_price_pairs(
+    da: pd.DataFrame, ida: pd.DataFrame, *, tz: str | None = None,
+) -> pd.DataFrame:
+    """Select the estimate/plot sample after the window's grid check passes.
+
+    Count original timestamps before filtering prices, so a NaN does not change
+    the observed delivery cadence. A singleton day is excluded from both the
+    statistics and histogram, even if its lone timestamp overlaps exactly.
+    """
+    da = _to_local(da, tz)
+    ida = _to_local(ida, tz)
+    da_counts = da.groupby(da.index.date).size()
+    ida_counts = ida.groupby(ida.index.date).size()
+    verified_dates = da_counts[da_counts >= 2].index.intersection(
+        ida_counts[ida_counts >= 2].index,
+    )
+    merged = da.loc[np.isin(da.index.date, verified_dates), ["price_eur_mwh"]].join(
+        ida[["intraday_price_eur_mwh"]], how="inner",
+    )
+    return merged.loc[np.isfinite(merged.to_numpy(dtype=float)).all(axis=1)]
 
 
 def calculate_intraday_uplift(
@@ -1307,9 +1332,10 @@ def calculate_intraday_uplift(
         annual_uplift_per_mw, annual_uplift_unadjusted_per_mw,
         coverage_adjustment_factor, rebid_share, n_periods, model_available,
         reason, da_coverage_pct and ida_coverage_pct. The latter two describe
-        finite timestamp overlap against each original source. A usable sample
-        uses the lower ratio; an incompatible or unverifiable delivery grid
-        makes the whole estimate unavailable, even when timestamps overlap.
+        usable finite pairs against each original source. A usable sample uses
+        the lower ratio, excluding days with fewer than two source observations
+        from the numerator only. Conflicting delivery grids still make the
+        whole estimate unavailable; their coverages describe raw finite overlap.
     """
     empty = {
         "avg_abs_spread": 0.0, "p50_abs": 0.0, "p90_abs": 0.0,
@@ -1354,8 +1380,15 @@ def calculate_intraday_uplift(
     }
     if not _intraday_grids_compatible(da, ida):
         return {**empty, **source_coverage, "reason": grid_reason}
+    merged = _intraday_uplift_price_pairs(da, ida)
     if merged.empty:
         return empty
+    da_ratio = len(merged) / len(da)
+    ida_ratio = len(merged) / len(ida)
+    source_coverage = {
+        "da_coverage_pct": round(100.0 * da_ratio, 1),
+        "ida_coverage_pct": round(100.0 * ida_ratio, 1),
+    }
 
     signed = merged["intraday_price_eur_mwh"] - merged["price_eur_mwh"]
     abs_spread = signed.abs()

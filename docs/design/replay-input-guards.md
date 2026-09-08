@@ -52,20 +52,29 @@ the DA, IDA and joined row counts.
 The simplified Revenue uplift estimate checks inferred cadence and timestamp
 phase on every overlapping local day. It accepts verifiable sparse samples
 and matching grids that change cadence between days, including DST days.
-Different cadences, duplicate timestamps, off-grid observations or fewer than
-two source observations on a compared day make the entire window unavailable.
-No partial-window uplift is silently substituted and no source is resampled.
-Without delivery-duration metadata, very sparse samples whose cadence cannot
-be established are conservatively unavailable.
+Different cadences, duplicate timestamps or off-grid observations make the
+entire window unavailable. Days with fewer than two observations in either
+source cannot establish cadence and are excluded from both statistics and the
+histogram; their original rows remain in the coverage denominators. If no day
+can be verified, the estimate is unavailable. No source is resampled.
 
 Only finite price pairs contribute to the estimate and histogram. The result
 exposes `model_available` and `reason`, plus `da_coverage_pct` and
-`ida_coverage_pct`: finite timestamp overlap divided by each original input's
-row count. On usable grids, the lower ratio is the annual uplift adjustment.
+`ida_coverage_pct`: usable finite pairs divided by each original input's row
+count. On usable grids, the lower ratio is the annual uplift adjustment.
 On incompatible grids the estimate has zero usable periods and is unavailable;
 raw overlap ratios may still be nonzero, so they are not proof of model
 availability. The Revenue panel displays the reason instead of an uplift
-headline, and shows both source coverages for usable samples.
+headline, and shows both source coverages and the exclusion rule for usable
+samples. Statistics and histogram use the same sample-selection helper.
+
+The second review found an availability reversal: four matching days plus a
+missing IDA day produced an estimate, but adding one quote on the missing day
+vetoed the whole window. Both cases now retain 96 comparable periods, 80%
+coverage and EUR 511.35 annual uplift in the five-hourly-day synthetic fixture.
+The singleton source's denominator remains 97 rows, not 96. Seven additional
+regressions cover DA/IDA symmetry, three local-day positions (including UTC
+date boundaries), and the real panel's headline, coverage and histogram.
 
 Coverage remains an interval-count screening measure, not elapsed-time or
 delivered-energy coverage. The 24 DA / 96 IDA fixture now reports raw DA/IDA
@@ -89,6 +98,10 @@ spring DA/IDA/reserve case now expects `AdapterUnavailableError`. The existing
 DA-only reserve EUR 480 checks on 23/24/25-hour days and the compatible autumn
 DA/IDA/reserve EUR 480 check remain. Solver-heavy integration tests remain
 part of the full-suite validation.
+
+Frozen patches, baseline failures, full-suite logs and portable reproduction
+commands are indexed in the [review evidence](../audits/README.md). The first
+Step 1b snapshot and its review remain distinguishable from the singleton fix.
 
 ## Remaining scope after Step 1b
 

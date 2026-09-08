@@ -1,0 +1,1305 @@
+Step 1 pre-fix regression output. Source root paths are replaced with <repo>.
+Compatibility controls that already passed are documented in the handoff; they are not claimed as red tests.
+
+===== replay-red =====
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 74 items / 58 deselected / 16 selected
+
+tests/test_simulation.py FFFFFFFFFFFFFFFF                                [100%]
+
+=================================== FAILURES ===================================
+_ test_continuous_mixed_cadence_does_not_inflate_quarter_hour_day[DA MILP Replay] _
+tests/test_simulation.py:882: in test_continuous_mixed_cadence_does_not_inflate_quarter_hour_day
+    assert quarter_day[[
+E   assert array([3792.,   96.,   48.]) == approx([948.0....0 ± 1.2e-05])
+E
+E     comparison failed. Mismatched elements: 3 / 3:
+E     Max absolute difference: 2844.0
+E     Max relative difference: 0.75
+E     Index | Obtained | Expected
+E     0     | 3792.0   | 948.0 ± 9.5e-04
+E     1     | 96.0     | 24.0 ± 2.4e-05
+E     2     | 48.0     | 12.0 ± 1.2e-05
+_ test_continuous_mixed_cadence_does_not_inflate_quarter_hour_day[DA + IDA1 Replay] _
+tests/test_simulation.py:882: in test_continuous_mixed_cadence_does_not_inflate_quarter_hour_day
+    assert quarter_day[[
+E   assert array([3792.,   96.,   48.]) == approx([948.0....0 ± 1.2e-05])
+E
+E     comparison failed. Mismatched elements: 3 / 3:
+E     Max absolute difference: 2844.0
+E     Max relative difference: 0.75
+E     Index | Obtained | Expected
+E     0     | 3792.0   | 948.0 ± 9.5e-04
+E     1     | 96.0     | 24.0 ± 2.4e-05
+E     2     | 48.0     | 12.0 ± 1.2e-05
+__________ test_continuous_mixed_cadence_preserves_hourly_day_revenue __________
+tests/test_simulation.py:909: in test_continuous_mixed_cadence_preserves_hourly_day_revenue
+    assert hourly_day["total_revenue_eur"] == pytest.approx(
+E   assert np.float64(237.0) == 316.0 ± 0.01
+E
+E     comparison failed
+E     Obtained: 237.0
+E     Expected: 316.0 ± 0.01
+___________ test_group_clean_runs_splits_cadence_without_losing_days ___________
+tests/test_simulation.py:929: in test_group_clean_runs_splits_cadence_without_losing_days
+    assert [run_dates for run_dates, _, _ in runs] == [days[:2], days[2:4], days[4:]]
+E   assert [[datetime.da...2025, 9, 29)]] == [[datetime.da...2025, 9, 29)]]
+E
+E     At index 0 diff: [datetime.date(2025, 9, 25), datetime.date(2025, 9, 26), datetime.date(2025, 9, 27), datetime.date(2025, 9, 28), datetime.date(2025, 9, 29)] != [datetime.date(2025, 9, 25), datetime.date(2025, 9, 26)]
+E     Right contains 2 more items, first extra item: [datetime.date(2025, 9, 27), datetime.date(2025, 9, 28)]
+E     Use -v to get more diff
+___________ test_replay_batch_no_cadence_split_reports_zero[0-True] ____________
+tests/test_simulation.py:944: in test_replay_batch_no_cadence_split_reports_zero
+    assert batch.attrs["n_cadence_splits"] == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'n_cadence_splits'
+___________ test_replay_batch_no_cadence_split_reports_zero[1-True] ____________
+tests/test_simulation.py:944: in test_replay_batch_no_cadence_split_reports_zero
+    assert batch.attrs["n_cadence_splits"] == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'n_cadence_splits'
+___________ test_replay_batch_no_cadence_split_reports_zero[2-True] ____________
+tests/test_simulation.py:944: in test_replay_batch_no_cadence_split_reports_zero
+    assert batch.attrs["n_cadence_splits"] == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'n_cadence_splits'
+___________ test_replay_batch_no_cadence_split_reports_zero[2-False] ___________
+tests/test_simulation.py:944: in test_replay_batch_no_cadence_split_reports_zero
+    assert batch.attrs["n_cadence_splits"] == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'n_cadence_splits'
+____ test_da_id_replay_rejects_mismatched_delivery_intervals[False-h-15min] ____
+tests/test_simulation.py:976: in test_da_id_replay_rejects_mismatched_delivery_intervals
+    assert result["summary"]["success"] is False
+E   assert True is False
+____ test_da_id_replay_rejects_mismatched_delivery_intervals[False-15min-h] ____
+tests/test_simulation.py:976: in test_da_id_replay_rejects_mismatched_delivery_intervals
+    assert result["summary"]["success"] is False
+E   assert True is False
+____ test_da_id_replay_rejects_mismatched_delivery_intervals[True-h-15min] _____
+tests/test_simulation.py:966: in test_da_id_replay_rejects_mismatched_delivery_intervals
+    assert batch.empty
+E   assert False
+E    +  where False =          date              mode  ...  soc_end_pct  n_intervals\n0  2025-09-01  DA + IDA1 Replay  ...          0.0           24\n1  2025-09-02  DA + IDA1 Replay  ...          0.0           24\n\n[2 rows x 16 columns].empty
+____ test_da_id_replay_rejects_mismatched_delivery_intervals[True-15min-h] _____
+tests/test_simulation.py:966: in test_da_id_replay_rejects_mismatched_delivery_intervals
+    assert batch.empty
+E   assert False
+E    +  where False =          date              mode  ...  soc_end_pct  n_intervals\n0  2025-09-01  DA + IDA1 Replay  ...          0.0           24\n1  2025-09-02  DA + IDA1 Replay  ...          0.0           24\n\n[2 rows x 16 columns].empty
+__ test_da_id_replay_nonfinite_price_returns_typed_failure[inf-price_eur_mwh] __
+tests/test_simulation.py:993: in test_da_id_replay_nonfinite_price_returns_typed_failure
+    result = simulate_da_id_replay(da, ida, simulation_date=da.index[0].date(), tz="UTC")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/simulation.py:292: in simulate_da_id_replay
+    result = solve_daily_da_id_dispatch(
+src/dispatch.py:660: in solve_daily_da_id_dispatch
+    stage_1 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ test_da_id_replay_nonfinite_price_returns_typed_failure[inf-intraday_price_eur_mwh] _
+tests/test_simulation.py:993: in test_da_id_replay_nonfinite_price_returns_typed_failure
+    result = simulate_da_id_replay(da, ida, simulation_date=da.index[0].date(), tz="UTC")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/simulation.py:292: in simulate_da_id_replay
+    result = solve_daily_da_id_dispatch(
+src/dispatch.py:669: in solve_daily_da_id_dispatch
+    stage_2 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ test_da_id_replay_nonfinite_price_returns_typed_failure[-inf-price_eur_mwh] __
+tests/test_simulation.py:993: in test_da_id_replay_nonfinite_price_returns_typed_failure
+    result = simulate_da_id_replay(da, ida, simulation_date=da.index[0].date(), tz="UTC")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/simulation.py:292: in simulate_da_id_replay
+    result = solve_daily_da_id_dispatch(
+src/dispatch.py:660: in solve_daily_da_id_dispatch
+    stage_1 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ test_da_id_replay_nonfinite_price_returns_typed_failure[-inf-intraday_price_eur_mwh] _
+tests/test_simulation.py:993: in test_da_id_replay_nonfinite_price_returns_typed_failure
+    result = simulate_da_id_replay(da, ida, simulation_date=da.index[0].date(), tz="UTC")
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/simulation.py:292: in simulate_da_id_replay
+    result = solve_daily_da_id_dispatch(
+src/dispatch.py:669: in solve_daily_da_id_dispatch
+    stage_2 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+=========================== short test summary info ============================
+FAILED tests/test_simulation.py::test_continuous_mixed_cadence_does_not_inflate_quarter_hour_day[DA MILP Replay]
+FAILED tests/test_simulation.py::test_continuous_mixed_cadence_does_not_inflate_quarter_hour_day[DA + IDA1 Replay]
+FAILED tests/test_simulation.py::test_continuous_mixed_cadence_preserves_hourly_day_revenue
+FAILED tests/test_simulation.py::test_group_clean_runs_splits_cadence_without_losing_days
+FAILED tests/test_simulation.py::test_replay_batch_no_cadence_split_reports_zero[0-True]
+FAILED tests/test_simulation.py::test_replay_batch_no_cadence_split_reports_zero[1-True]
+FAILED tests/test_simulation.py::test_replay_batch_no_cadence_split_reports_zero[2-True]
+FAILED tests/test_simulation.py::test_replay_batch_no_cadence_split_reports_zero[2-False]
+FAILED tests/test_simulation.py::test_da_id_replay_rejects_mismatched_delivery_intervals[False-h-15min]
+FAILED tests/test_simulation.py::test_da_id_replay_rejects_mismatched_delivery_intervals[False-15min-h]
+FAILED tests/test_simulation.py::test_da_id_replay_rejects_mismatched_delivery_intervals[True-h-15min]
+FAILED tests/test_simulation.py::test_da_id_replay_rejects_mismatched_delivery_intervals[True-15min-h]
+FAILED tests/test_simulation.py::test_da_id_replay_nonfinite_price_returns_typed_failure[inf-price_eur_mwh]
+FAILED tests/test_simulation.py::test_da_id_replay_nonfinite_price_returns_typed_failure[inf-intraday_price_eur_mwh]
+FAILED tests/test_simulation.py::test_da_id_replay_nonfinite_price_returns_typed_failure[-inf-price_eur_mwh]
+FAILED tests/test_simulation.py::test_da_id_replay_nonfinite_price_returns_typed_failure[-inf-intraday_price_eur_mwh]
+====================== 16 failed, 58 deselected in 0.79s =======================
+
+===== replay-count-red =====
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 81 items / 74 deselected / 7 selected
+
+tests/test_simulation.py FFFFF..                                         [100%]
+
+=================================== FAILURES ===================================
+____ test_replay_batch_cadence_split_count_ignores_gap_boundaries[omitted] _____
+tests/test_simulation.py:969: in test_replay_batch_cadence_split_count_ignores_gap_boundaries
+    assert batch.attrs["n_cadence_splits"] == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'n_cadence_splits'
+_____ test_replay_batch_cadence_split_count_ignores_gap_boundaries[empty] ______
+tests/test_simulation.py:969: in test_replay_batch_cadence_split_count_ignores_gap_boundaries
+    assert batch.attrs["n_cadence_splits"] == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'n_cadence_splits'
+______ test_replay_batch_cadence_split_count_ignores_gap_boundaries[nan] _______
+tests/test_simulation.py:969: in test_replay_batch_cadence_split_count_ignores_gap_boundaries
+    assert batch.attrs["n_cadence_splits"] == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'n_cadence_splits'
+_____ test_replay_batch_cadence_split_count_ignores_gap_boundaries[sparse] _____
+tests/test_simulation.py:969: in test_replay_batch_cadence_split_count_ignores_gap_boundaries
+    assert batch.attrs["n_cadence_splits"] == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'n_cadence_splits'
+___________ test_replay_batch_cadence_split_count_excludes_size_cap ____________
+tests/test_simulation.py:984: in test_replay_batch_cadence_split_count_excludes_size_cap
+    assert batch.attrs["n_cadence_splits"] == 1
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'n_cadence_splits'
+=========================== short test summary info ============================
+FAILED tests/test_simulation.py::test_replay_batch_cadence_split_count_ignores_gap_boundaries[omitted]
+FAILED tests/test_simulation.py::test_replay_batch_cadence_split_count_ignores_gap_boundaries[empty]
+FAILED tests/test_simulation.py::test_replay_batch_cadence_split_count_ignores_gap_boundaries[nan]
+FAILED tests/test_simulation.py::test_replay_batch_cadence_split_count_ignores_gap_boundaries[sparse]
+FAILED tests/test_simulation.py::test_replay_batch_cadence_split_count_excludes_size_cap
+================== 5 failed, 2 passed, 74 deselected in 0.35s ==================
+
+===== analytics-red =====
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 99 items / 97 deselected / 2 selected
+
+tests/test_analytics.py F.                                               [100%]
+
+=================================== FAILURES ===================================
+__ TestTwoStageDaIdDispatch.test_finer_ida_cannot_pass_da_only_coverage_gate ___
+tests/test_analytics.py:1263: in test_finer_ida_cannot_pass_da_only_coverage_gate
+    assert result.empty
+E   assert False
+E    +  where False =          date  da_revenue  ida_lp_value  ...  total_cash  da_n_cycles  ida_n_cycles\n0  2025-09-01        -0.0          -0.0  ...         0.0          0.0           0.0\n\n[1 rows x 8 columns].empty
+=========================== short test summary info ============================
+FAILED tests/test_analytics.py::TestTwoStageDaIdDispatch::test_finer_ida_cannot_pass_da_only_coverage_gate
+================== 1 failed, 1 passed, 97 deselected in 0.14s ==================
+
+===== caption-red =====
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 13 items / 10 deselected / 3 selected
+
+tests/test_ui_theme.py FF.                                               [100%]
+
+=================================== FAILURES ===================================
+_____________________ test_cadence_split_copy_is_verbatim ______________________
+tests/test_ui_theme.py:69: in test_cadence_split_copy_is_verbatim
+    assert getattr(cockpit, "_CADENCE_SPLIT_CAPTION", None) == _EXPECTED_CADENCE_SPLIT_CAPTION
+E   AssertionError: assert None == 'This window crosses a market resolution change. The continuous horizon is split at each cadence change: SoC carries between segments, but terminal-neutral equality is reapplied at each segment end.'
+E    +  where None = getattr(<module 'src.pages.simulation_cockpit' from '<repo>/src/pages/simulation_cockpit.py'>, '_CADENCE_SPLIT_CAPTION', None)
+____________ test_cadence_split_caption_is_rendered_after_batch_run ____________
+tests/test_ui_theme.py:83: in test_cadence_split_caption_is_rendered_after_batch_run
+    assert _EXPECTED_CADENCE_SPLIT_CAPTION in [caption.value for caption in app.caption]
+E   AssertionError: assert 'This window crosses a market resolution change. The continuous horizon is split at each cadence change: SoC carries between segments, but terminal-neutral equality is reapplied at each segment end.' in ['Runs the same interval-level replay across multiple loaded local days and aggregates daily KPI. This is still histor...00 FCE). Continuous-horizon MILP across the window — overnight SoC is free, terminal-neutral only at the segment end.']
+----------------------------- Captured stderr call -----------------------------
+2026-09-08 10:58:39.720 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+=========================== short test summary info ============================
+FAILED tests/test_ui_theme.py::test_cadence_split_copy_is_verbatim - Assertio...
+FAILED tests/test_ui_theme.py::test_cadence_split_caption_is_rendered_after_batch_run
+================== 2 failed, 1 passed, 10 deselected in 0.39s ==================
+
+===== solver-red =====
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 218 items / 170 deselected / 48 selected
+
+tests/test_dispatch.py FFFFFFFFFFFFFFFFFFFFFFFFFF                        [ 54%]
+tests/test_stochastic_dispatch.py FFFFFFFFFFFFFFFFFFFFFF                 [100%]
+
+=================================== FAILURES ===================================
+___ TestSolveDailyLp.test_infinite_prices_have_typed_failure_status[posinf] ____
+tests/test_dispatch.py:61: in test_infinite_prices_have_typed_failure_status
+    result = solve_daily_lp(np.array([20.0, bad_price, 80.0]), dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+___ TestSolveDailyLp.test_infinite_prices_have_typed_failure_status[neginf] ____
+tests/test_dispatch.py:61: in test_infinite_prices_have_typed_failure_status
+    result = solve_daily_lp(np.array([20.0, bad_price, 80.0]), dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveDailyJointCapacityLp.test_infinite_prices_have_typed_failure_status[posinf] _
+tests/test_dispatch.py:392: in test_infinite_prices_have_typed_failure_status
+    result = solve_daily_joint_capacity_lp(
+src/dispatch.py:393: in solve_daily_joint_capacity_lp
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveDailyJointCapacityLp.test_infinite_prices_have_typed_failure_status[neginf] _
+tests/test_dispatch.py:392: in test_infinite_prices_have_typed_failure_status
+    result = solve_daily_joint_capacity_lp(
+src/dispatch.py:393: in solve_daily_joint_capacity_lp
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveDailyDaIdDispatch.test_infinite_prices_have_typed_failure_status[da_prices-posinf] _
+tests/test_dispatch.py:610: in test_infinite_prices_have_typed_failure_status
+    result = solve_daily_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:660: in solve_daily_da_id_dispatch
+    stage_1 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveDailyDaIdDispatch.test_infinite_prices_have_typed_failure_status[da_prices-neginf] _
+tests/test_dispatch.py:610: in test_infinite_prices_have_typed_failure_status
+    result = solve_daily_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:660: in solve_daily_da_id_dispatch
+    stage_1 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveDailyDaIdDispatch.test_infinite_prices_have_typed_failure_status[ida_prices-posinf] _
+tests/test_dispatch.py:610: in test_infinite_prices_have_typed_failure_status
+    result = solve_daily_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:669: in solve_daily_da_id_dispatch
+    stage_2 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveDailyDaIdDispatch.test_infinite_prices_have_typed_failure_status[ida_prices-neginf] _
+tests/test_dispatch.py:610: in test_infinite_prices_have_typed_failure_status
+    result = solve_daily_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:669: in solve_daily_da_id_dispatch
+    stage_2 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveDailyDaIdReserveDispatch.test_infinite_prices_have_typed_failure_status[da_prices-posinf] _
+tests/test_dispatch.py:767: in test_infinite_prices_have_typed_failure_status
+    result = solve_daily_da_id_reserve_dispatch(
+src/dispatch.py:819: in solve_daily_da_id_reserve_dispatch
+    stage_1 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveDailyDaIdReserveDispatch.test_infinite_prices_have_typed_failure_status[da_prices-neginf] _
+tests/test_dispatch.py:767: in test_infinite_prices_have_typed_failure_status
+    result = solve_daily_da_id_reserve_dispatch(
+src/dispatch.py:819: in solve_daily_da_id_reserve_dispatch
+    stage_1 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveDailyDaIdReserveDispatch.test_infinite_prices_have_typed_failure_status[ida_prices-posinf] _
+tests/test_dispatch.py:767: in test_infinite_prices_have_typed_failure_status
+    result = solve_daily_da_id_reserve_dispatch(
+src/dispatch.py:828: in solve_daily_da_id_reserve_dispatch
+    stage_2 = solve_daily_joint_capacity_lp(
+src/dispatch.py:393: in solve_daily_joint_capacity_lp
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveDailyDaIdReserveDispatch.test_infinite_prices_have_typed_failure_status[ida_prices-neginf] _
+tests/test_dispatch.py:767: in test_infinite_prices_have_typed_failure_status
+    result = solve_daily_da_id_reserve_dispatch(
+src/dispatch.py:828: in solve_daily_da_id_reserve_dispatch
+    stage_2 = solve_daily_joint_capacity_lp(
+src/dispatch.py:393: in solve_daily_joint_capacity_lp
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdReserveDispatch.test_infinite_prices_have_typed_failure_status[da_forecast-posinf] _
+tests/test_dispatch.py:897: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_reserve_dispatch(
+src/dispatch.py:960: in solve_sequential_da_id_reserve_dispatch
+    stage_0 = solve_daily_joint_capacity_lp(
+src/dispatch.py:393: in solve_daily_joint_capacity_lp
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdReserveDispatch.test_infinite_prices_have_typed_failure_status[da_forecast-neginf] _
+tests/test_dispatch.py:897: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_reserve_dispatch(
+src/dispatch.py:960: in solve_sequential_da_id_reserve_dispatch
+    stage_0 = solve_daily_joint_capacity_lp(
+src/dispatch.py:393: in solve_daily_joint_capacity_lp
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdReserveDispatch.test_infinite_prices_have_typed_failure_status[da_realised-posinf] _
+tests/test_dispatch.py:897: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_reserve_dispatch(
+src/dispatch.py:975: in solve_sequential_da_id_reserve_dispatch
+    stage_1 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdReserveDispatch.test_infinite_prices_have_typed_failure_status[da_realised-neginf] _
+tests/test_dispatch.py:897: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_reserve_dispatch(
+src/dispatch.py:975: in solve_sequential_da_id_reserve_dispatch
+    stage_1 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdReserveDispatch.test_infinite_prices_have_typed_failure_status[ida_forecast-posinf] _
+tests/test_dispatch.py:897: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_reserve_dispatch(
+src/dispatch.py:984: in solve_sequential_da_id_reserve_dispatch
+    stage_2_fc = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdReserveDispatch.test_infinite_prices_have_typed_failure_status[ida_forecast-neginf] _
+tests/test_dispatch.py:897: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_reserve_dispatch(
+src/dispatch.py:984: in solve_sequential_da_id_reserve_dispatch
+    stage_2_fc = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdReserveDispatch.test_infinite_prices_have_typed_failure_status[ida_realised-posinf] _
+tests/test_dispatch.py:897: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_reserve_dispatch(
+src/dispatch.py:1005: in solve_sequential_da_id_reserve_dispatch
+    reserve_first = _solve_reserve_first_perfect(
+src/dispatch.py:1130: in _solve_reserve_first_perfect
+    stage_2 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdReserveDispatch.test_infinite_prices_have_typed_failure_status[ida_realised-neginf] _
+tests/test_dispatch.py:897: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_reserve_dispatch(
+src/dispatch.py:1005: in solve_sequential_da_id_reserve_dispatch
+    reserve_first = _solve_reserve_first_perfect(
+src/dispatch.py:1130: in _solve_reserve_first_perfect
+    stage_2 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdDispatch.test_infinite_prices_have_typed_failure_status[da_prices-posinf] _
+tests/test_dispatch.py:1144: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:1309: in solve_sequential_da_id_dispatch
+    stage_1 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdDispatch.test_infinite_prices_have_typed_failure_status[da_prices-neginf] _
+tests/test_dispatch.py:1144: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:1309: in solve_sequential_da_id_dispatch
+    stage_1 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdDispatch.test_infinite_prices_have_typed_failure_status[ida_forecast-posinf] _
+tests/test_dispatch.py:1144: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:1319: in solve_sequential_da_id_dispatch
+    stage_2_fc = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdDispatch.test_infinite_prices_have_typed_failure_status[ida_forecast-neginf] _
+tests/test_dispatch.py:1144: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:1319: in solve_sequential_da_id_dispatch
+    stage_2_fc = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdDispatch.test_infinite_prices_have_typed_failure_status[ida_realised-posinf] _
+tests/test_dispatch.py:1144: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:1369: in solve_sequential_da_id_dispatch
+    ceiling = solve_daily_da_id_dispatch(
+src/dispatch.py:669: in solve_daily_da_id_dispatch
+    stage_2 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestSolveSequentialDaIdDispatch.test_infinite_prices_have_typed_failure_status[ida_realised-neginf] _
+tests/test_dispatch.py:1144: in test_infinite_prices_have_typed_failure_status
+    result = solve_sequential_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:1369: in solve_sequential_da_id_dispatch
+    ceiling = solve_daily_da_id_dispatch(
+src/dispatch.py:669: in solve_daily_da_id_dispatch
+    stage_2 = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticCommitment.test_infinite_prices_have_typed_failure_status[da_prices-posinf] _
+tests/test_stochastic_dispatch.py:105: in test_infinite_prices_have_typed_failure_status
+    result = solve_stochastic_da_commitment(
+src/stochastic_dispatch.py:241: in solve_stochastic_da_commitment
+    return _solve_and_unpack(
+src/stochastic_dispatch.py:293: in _solve_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticCommitment.test_infinite_prices_have_typed_failure_status[da_prices-neginf] _
+tests/test_stochastic_dispatch.py:105: in test_infinite_prices_have_typed_failure_status
+    result = solve_stochastic_da_commitment(
+src/stochastic_dispatch.py:241: in solve_stochastic_da_commitment
+    return _solve_and_unpack(
+src/stochastic_dispatch.py:293: in _solve_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticCommitment.test_infinite_prices_have_typed_failure_status[scenarios-posinf] _
+tests/test_stochastic_dispatch.py:105: in test_infinite_prices_have_typed_failure_status
+    result = solve_stochastic_da_commitment(
+src/stochastic_dispatch.py:241: in solve_stochastic_da_commitment
+    return _solve_and_unpack(
+src/stochastic_dispatch.py:293: in _solve_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticCommitment.test_infinite_prices_have_typed_failure_status[scenarios-neginf] _
+tests/test_stochastic_dispatch.py:105: in test_infinite_prices_have_typed_failure_status
+    result = solve_stochastic_da_commitment(
+src/stochastic_dispatch.py:241: in solve_stochastic_da_commitment
+    return _solve_and_unpack(
+src/stochastic_dispatch.py:293: in _solve_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticExecution.test_infinite_prices_have_typed_failure_status[base_forecast-posinf] _
+tests/test_stochastic_dispatch.py:398: in test_infinite_prices_have_typed_failure_status
+    result = solve_stochastic_da_id_dispatch(
+src/stochastic_dispatch.py:802: in solve_stochastic_da_id_dispatch
+    return _execute_commitment(
+src/stochastic_dispatch.py:878: in _execute_commitment
+    stage2_fc = _solve_capped_stage2(
+src/stochastic_dispatch.py:661: in _solve_capped_stage2
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticExecution.test_infinite_prices_have_typed_failure_status[base_forecast-neginf] _
+tests/test_stochastic_dispatch.py:398: in test_infinite_prices_have_typed_failure_status
+    result = solve_stochastic_da_id_dispatch(
+src/stochastic_dispatch.py:802: in solve_stochastic_da_id_dispatch
+    return _execute_commitment(
+src/stochastic_dispatch.py:878: in _execute_commitment
+    stage2_fc = _solve_capped_stage2(
+src/stochastic_dispatch.py:661: in _solve_capped_stage2
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticExecution.test_infinite_prices_have_typed_failure_status[ida_realised-posinf] _
+tests/test_stochastic_dispatch.py:398: in test_infinite_prices_have_typed_failure_status
+    result = solve_stochastic_da_id_dispatch(
+src/stochastic_dispatch.py:802: in solve_stochastic_da_id_dispatch
+    return _execute_commitment(
+src/stochastic_dispatch.py:852: in _execute_commitment
+    ceiling_result = _stochastic_coopt_ceiling_result(
+src/stochastic_dispatch.py:578: in _stochastic_coopt_ceiling_result
+    res = solve_stochastic_da_commitment(
+src/stochastic_dispatch.py:241: in solve_stochastic_da_commitment
+    return _solve_and_unpack(
+src/stochastic_dispatch.py:293: in _solve_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticExecution.test_infinite_prices_have_typed_failure_status[ida_realised-neginf] _
+tests/test_stochastic_dispatch.py:398: in test_infinite_prices_have_typed_failure_status
+    result = solve_stochastic_da_id_dispatch(
+src/stochastic_dispatch.py:802: in solve_stochastic_da_id_dispatch
+    return _execute_commitment(
+src/stochastic_dispatch.py:852: in _execute_commitment
+    ceiling_result = _stochastic_coopt_ceiling_result(
+src/stochastic_dispatch.py:578: in _stochastic_coopt_ceiling_result
+    res = solve_stochastic_da_commitment(
+src/stochastic_dispatch.py:241: in solve_stochastic_da_commitment
+    return _solve_and_unpack(
+src/stochastic_dispatch.py:293: in _solve_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticExecution.test_myopic_infinite_prices_have_typed_failure_status[da_prices-posinf] _
+tests/test_stochastic_dispatch.py:418: in test_myopic_infinite_prices_have_typed_failure_status
+    result = solve_myopic_capped_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/stochastic_dispatch.py:1003: in solve_myopic_capped_da_id_dispatch
+    lp = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticExecution.test_myopic_infinite_prices_have_typed_failure_status[da_prices-neginf] _
+tests/test_stochastic_dispatch.py:418: in test_myopic_infinite_prices_have_typed_failure_status
+    result = solve_myopic_capped_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/stochastic_dispatch.py:1003: in solve_myopic_capped_da_id_dispatch
+    lp = solve_daily_lp(
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticExecution.test_myopic_infinite_prices_have_typed_failure_status[base_forecast-posinf] _
+tests/test_stochastic_dispatch.py:418: in test_myopic_infinite_prices_have_typed_failure_status
+    result = solve_myopic_capped_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/stochastic_dispatch.py:1022: in solve_myopic_capped_da_id_dispatch
+    return _execute_commitment(
+src/stochastic_dispatch.py:878: in _execute_commitment
+    stage2_fc = _solve_capped_stage2(
+src/stochastic_dispatch.py:661: in _solve_capped_stage2
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticExecution.test_myopic_infinite_prices_have_typed_failure_status[base_forecast-neginf] _
+tests/test_stochastic_dispatch.py:418: in test_myopic_infinite_prices_have_typed_failure_status
+    result = solve_myopic_capped_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/stochastic_dispatch.py:1022: in solve_myopic_capped_da_id_dispatch
+    return _execute_commitment(
+src/stochastic_dispatch.py:878: in _execute_commitment
+    stage2_fc = _solve_capped_stage2(
+src/stochastic_dispatch.py:661: in _solve_capped_stage2
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticExecution.test_myopic_infinite_prices_have_typed_failure_status[ida_realised-posinf] _
+tests/test_stochastic_dispatch.py:418: in test_myopic_infinite_prices_have_typed_failure_status
+    result = solve_myopic_capped_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/stochastic_dispatch.py:1022: in solve_myopic_capped_da_id_dispatch
+    return _execute_commitment(
+src/stochastic_dispatch.py:852: in _execute_commitment
+    ceiling_result = _stochastic_coopt_ceiling_result(
+src/stochastic_dispatch.py:578: in _stochastic_coopt_ceiling_result
+    res = solve_stochastic_da_commitment(
+src/stochastic_dispatch.py:241: in solve_stochastic_da_commitment
+    return _solve_and_unpack(
+src/stochastic_dispatch.py:293: in _solve_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticExecution.test_myopic_infinite_prices_have_typed_failure_status[ida_realised-neginf] _
+tests/test_stochastic_dispatch.py:418: in test_myopic_infinite_prices_have_typed_failure_status
+    result = solve_myopic_capped_da_id_dispatch(**prices, dt=1.0)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/stochastic_dispatch.py:1022: in solve_myopic_capped_da_id_dispatch
+    return _execute_commitment(
+src/stochastic_dispatch.py:852: in _execute_commitment
+    ceiling_result = _stochastic_coopt_ceiling_result(
+src/stochastic_dispatch.py:578: in _stochastic_coopt_ceiling_result
+    res = solve_stochastic_da_commitment(
+src/stochastic_dispatch.py:241: in solve_stochastic_da_commitment
+    return _solve_and_unpack(
+src/stochastic_dispatch.py:293: in _solve_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticReserveCommitment.test_infinite_prices_have_typed_failure_status[da_forecast-posinf] _
+tests/test_stochastic_dispatch.py:773: in test_infinite_prices_have_typed_failure_status
+    result = solve_stochastic_reserve_commitment(
+src/stochastic_dispatch.py:1184: in solve_stochastic_reserve_commitment
+    return _solve_stage0_and_unpack(
+src/stochastic_dispatch.py:1248: in _solve_stage0_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticReserveCommitment.test_infinite_prices_have_typed_failure_status[da_forecast-neginf] _
+tests/test_stochastic_dispatch.py:773: in test_infinite_prices_have_typed_failure_status
+    result = solve_stochastic_reserve_commitment(
+src/stochastic_dispatch.py:1184: in solve_stochastic_reserve_commitment
+    return _solve_stage0_and_unpack(
+src/stochastic_dispatch.py:1248: in _solve_stage0_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticReserveCommitment.test_infinite_prices_have_typed_failure_status[scenarios-posinf] _
+tests/test_stochastic_dispatch.py:773: in test_infinite_prices_have_typed_failure_status
+    result = solve_stochastic_reserve_commitment(
+src/stochastic_dispatch.py:1184: in solve_stochastic_reserve_commitment
+    return _solve_stage0_and_unpack(
+src/stochastic_dispatch.py:1248: in _solve_stage0_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticReserveCommitment.test_infinite_prices_have_typed_failure_status[scenarios-neginf] _
+tests/test_stochastic_dispatch.py:773: in test_infinite_prices_have_typed_failure_status
+    result = solve_stochastic_reserve_commitment(
+src/stochastic_dispatch.py:1184: in solve_stochastic_reserve_commitment
+    return _solve_stage0_and_unpack(
+src/stochastic_dispatch.py:1248: in _solve_stage0_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticTripleDispatch.test_v2_ceiling_infinite_prices_have_typed_failure_status[da_prices-posinf] _
+tests/test_stochastic_dispatch.py:1207: in test_v2_ceiling_infinite_prices_have_typed_failure_status
+    result = stochastic_dispatch._stochastic_coopt_ceiling_v2_result(**prices, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/stochastic_dispatch.py:1539: in _stochastic_coopt_ceiling_v2_result
+    res = _solve_stage0_and_unpack(
+src/stochastic_dispatch.py:1248: in _solve_stage0_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticTripleDispatch.test_v2_ceiling_infinite_prices_have_typed_failure_status[da_prices-neginf] _
+tests/test_stochastic_dispatch.py:1207: in test_v2_ceiling_infinite_prices_have_typed_failure_status
+    result = stochastic_dispatch._stochastic_coopt_ceiling_v2_result(**prices, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/stochastic_dispatch.py:1539: in _stochastic_coopt_ceiling_v2_result
+    res = _solve_stage0_and_unpack(
+src/stochastic_dispatch.py:1248: in _solve_stage0_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticTripleDispatch.test_v2_ceiling_infinite_prices_have_typed_failure_status[realised_ida-posinf] _
+tests/test_stochastic_dispatch.py:1207: in test_v2_ceiling_infinite_prices_have_typed_failure_status
+    result = stochastic_dispatch._stochastic_coopt_ceiling_v2_result(**prices, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/stochastic_dispatch.py:1539: in _stochastic_coopt_ceiling_v2_result
+    res = _solve_stage0_and_unpack(
+src/stochastic_dispatch.py:1248: in _solve_stage0_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+_ TestStochasticTripleDispatch.test_v2_ceiling_infinite_prices_have_typed_failure_status[realised_ida-neginf] _
+tests/test_stochastic_dispatch.py:1207: in test_v2_ceiling_infinite_prices_have_typed_failure_status
+    result = stochastic_dispatch._stochastic_coopt_ceiling_v2_result(**prices, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/stochastic_dispatch.py:1539: in _stochastic_coopt_ceiling_v2_result
+    res = _solve_stage0_and_unpack(
+src/stochastic_dispatch.py:1248: in _solve_stage0_and_unpack
+    result = linprog(
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog.py:649: in linprog
+    lp, solver_options = _parse_linprog(lp, options, meth)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:1026: in _parse_linprog
+    lp = _clean_inputs(lp._replace(A_ub=A_ub, A_eq=A_eq))
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.venv/lib/python3.13/site-packages/scipy/optimize/_linprog_util.py:306: in _clean_inputs
+    raise ValueError(
+E   ValueError: Invalid input for linprog: c must not contain values inf, nan, or None
+=============================== warnings summary ===============================
+tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-posinf]
+tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-neginf]
+  <repo>/src/dispatch.py:998: RuntimeWarning: invalid value encountered in multiply
+    implicit_mtm = float((da_net * ida * dt).sum())
+
+tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-posinf]
+tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-neginf]
+tests/test_dispatch.py::TestSolveSequentialDaIdDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-posinf]
+tests/test_dispatch.py::TestSolveSequentialDaIdDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-neginf]
+  <repo>/src/dispatch.py:1204: RuntimeWarning: invalid value encountered in multiply
+    discharge_cash = ((prices - DISPATCH_VOM_COST_EUR_MWH) * p_discharge * dt).sum()
+
+tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-posinf]
+tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-neginf]
+tests/test_dispatch.py::TestSolveSequentialDaIdDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-posinf]
+tests/test_dispatch.py::TestSolveSequentialDaIdDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-neginf]
+  <repo>/src/dispatch.py:1205: RuntimeWarning: invalid value encountered in multiply
+    charge_cash = ((prices + DISPATCH_VOM_COST_EUR_MWH) * p_charge * dt).sum()
+
+tests/test_dispatch.py::TestSolveSequentialDaIdDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-posinf]
+tests/test_dispatch.py::TestSolveSequentialDaIdDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-neginf]
+  <repo>/src/dispatch.py:1362: RuntimeWarning: invalid value encountered in multiply
+    implicit_mtm = float((da_net * ida_realised * dt).sum())
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_dispatch.py::TestSolveDailyLp::test_infinite_prices_have_typed_failure_status[posinf]
+FAILED tests/test_dispatch.py::TestSolveDailyLp::test_infinite_prices_have_typed_failure_status[neginf]
+FAILED tests/test_dispatch.py::TestSolveDailyJointCapacityLp::test_infinite_prices_have_typed_failure_status[posinf]
+FAILED tests/test_dispatch.py::TestSolveDailyJointCapacityLp::test_infinite_prices_have_typed_failure_status[neginf]
+FAILED tests/test_dispatch.py::TestSolveDailyDaIdDispatch::test_infinite_prices_have_typed_failure_status[da_prices-posinf]
+FAILED tests/test_dispatch.py::TestSolveDailyDaIdDispatch::test_infinite_prices_have_typed_failure_status[da_prices-neginf]
+FAILED tests/test_dispatch.py::TestSolveDailyDaIdDispatch::test_infinite_prices_have_typed_failure_status[ida_prices-posinf]
+FAILED tests/test_dispatch.py::TestSolveDailyDaIdDispatch::test_infinite_prices_have_typed_failure_status[ida_prices-neginf]
+FAILED tests/test_dispatch.py::TestSolveDailyDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[da_prices-posinf]
+FAILED tests/test_dispatch.py::TestSolveDailyDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[da_prices-neginf]
+FAILED tests/test_dispatch.py::TestSolveDailyDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[ida_prices-posinf]
+FAILED tests/test_dispatch.py::TestSolveDailyDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[ida_prices-neginf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[da_forecast-posinf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[da_forecast-neginf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[da_realised-posinf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[da_realised-neginf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[ida_forecast-posinf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[ida_forecast-neginf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-posinf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdReserveDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-neginf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdDispatch::test_infinite_prices_have_typed_failure_status[da_prices-posinf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdDispatch::test_infinite_prices_have_typed_failure_status[da_prices-neginf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdDispatch::test_infinite_prices_have_typed_failure_status[ida_forecast-posinf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdDispatch::test_infinite_prices_have_typed_failure_status[ida_forecast-neginf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-posinf]
+FAILED tests/test_dispatch.py::TestSolveSequentialDaIdDispatch::test_infinite_prices_have_typed_failure_status[ida_realised-neginf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticCommitment::test_infinite_prices_have_typed_failure_status[da_prices-posinf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticCommitment::test_infinite_prices_have_typed_failure_status[da_prices-neginf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticCommitment::test_infinite_prices_have_typed_failure_status[scenarios-posinf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticCommitment::test_infinite_prices_have_typed_failure_status[scenarios-neginf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticExecution::test_infinite_prices_have_typed_failure_status[base_forecast-posinf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticExecution::test_infinite_prices_have_typed_failure_status[base_forecast-neginf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticExecution::test_infinite_prices_have_typed_failure_status[ida_realised-posinf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticExecution::test_infinite_prices_have_typed_failure_status[ida_realised-neginf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticExecution::test_myopic_infinite_prices_have_typed_failure_status[da_prices-posinf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticExecution::test_myopic_infinite_prices_have_typed_failure_status[da_prices-neginf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticExecution::test_myopic_infinite_prices_have_typed_failure_status[base_forecast-posinf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticExecution::test_myopic_infinite_prices_have_typed_failure_status[base_forecast-neginf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticExecution::test_myopic_infinite_prices_have_typed_failure_status[ida_realised-posinf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticExecution::test_myopic_infinite_prices_have_typed_failure_status[ida_realised-neginf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticReserveCommitment::test_infinite_prices_have_typed_failure_status[da_forecast-posinf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticReserveCommitment::test_infinite_prices_have_typed_failure_status[da_forecast-neginf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticReserveCommitment::test_infinite_prices_have_typed_failure_status[scenarios-posinf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticReserveCommitment::test_infinite_prices_have_typed_failure_status[scenarios-neginf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticTripleDispatch::test_v2_ceiling_infinite_prices_have_typed_failure_status[da_prices-posinf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticTripleDispatch::test_v2_ceiling_infinite_prices_have_typed_failure_status[da_prices-neginf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticTripleDispatch::test_v2_ceiling_infinite_prices_have_typed_failure_status[realised_ida-posinf]
+FAILED tests/test_stochastic_dispatch.py::TestStochasticTripleDispatch::test_v2_ceiling_infinite_prices_have_typed_failure_status[realised_ida-neginf]
+=============== 48 failed, 170 deselected, 12 warnings in 1.65s ================
+
+===== import-red =====
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 307 items / 293 deselected / 14 selected
+
+tests/test_ingestion.py FFFF                                             [ 28%]
+tests/test_ancillary.py FFFFFFFFFF                                       [100%]
+
+=================================== FAILURES ===================================
+_ TestParseIntradayCsv.test_nonfinite_price_is_dropped_before_persistence[inf] _
+tests/test_ingestion.py:2628: in test_nonfinite_price_is_dropped_before_persistence
+    assert len(parsed) == 23
+E   assert 24 == 23
+E    +  where 24 = len(                            zone  sequence  intraday_price_eur_mwh\ntimestamp                                          ...00:00+00:00  DE_LU         2                    17.0\n2026-01-01 23:00:00+00:00  DE_LU         2                    18.0)
+_ TestParseIntradayCsv.test_nonfinite_price_is_dropped_before_persistence[-inf] _
+tests/test_ingestion.py:2628: in test_nonfinite_price_is_dropped_before_persistence
+    assert len(parsed) == 23
+E   assert 24 == 23
+E    +  where 24 = len(                            zone  sequence  intraday_price_eur_mwh\ntimestamp                                          ...00:00+00:00  DE_LU         2                    17.0\n2026-01-01 23:00:00+00:00  DE_LU         2                    18.0)
+_ TestParseIntradayCsv.test_nonfinite_rows_preserve_all_dropped_and_validation_order[inf] _
+tests/test_ingestion.py:2654: in test_nonfinite_rows_preserve_all_dropped_and_validation_order
+    parse_intraday_csv(header + bad_row)
+src/data_ingestion.py:2909: in parse_intraday_csv
+    seq = _coerce_intraday_sequence(out.pop("_seq_raw"), default_sequence)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/data_ingestion.py:2831: in _coerce_intraday_sequence
+    raise ValueError(
+E   ValueError: IDA 'sequence' values not understood: ['bogus']. Use 1/2/3 or IDA1/IDA2/IDA3.
+
+During handling of the above exception, another exception occurred:
+tests/test_ingestion.py:2653: in test_nonfinite_rows_preserve_all_dropped_and_validation_order
+    with pytest.raises(ValueError, match="No valid IDA rows"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E    Regex: 'No valid IDA rows'
+E    Input: "IDA 'sequence' values not understood: ['bogus']. Use 1/2/3 or IDA1/IDA2/IDA3."
+_ TestParseIntradayCsv.test_nonfinite_rows_preserve_all_dropped_and_validation_order[-inf] _
+tests/test_ingestion.py:2654: in test_nonfinite_rows_preserve_all_dropped_and_validation_order
+    parse_intraday_csv(header + bad_row)
+src/data_ingestion.py:2909: in parse_intraday_csv
+    seq = _coerce_intraday_sequence(out.pop("_seq_raw"), default_sequence)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/data_ingestion.py:2831: in _coerce_intraday_sequence
+    raise ValueError(
+E   ValueError: IDA 'sequence' values not understood: ['bogus']. Use 1/2/3 or IDA1/IDA2/IDA3.
+
+During handling of the above exception, another exception occurred:
+tests/test_ingestion.py:2653: in test_nonfinite_rows_preserve_all_dropped_and_validation_order
+    with pytest.raises(ValueError, match="No valid IDA rows"):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: Regex pattern did not match.
+E    Regex: 'No valid IDA rows'
+E    Input: "IDA 'sequence' values not understood: ['bogus']. Use 1/2/3 or IDA1/IDA2/IDA3."
+_ test_nonfinite_required_import_numbers_drop_rows_with_accounting[capacity-price-inf] _
+tests/test_ancillary.py:561: in test_nonfinite_required_import_numbers_drop_rows_with_accounting
+    assert len(parsed) == 1
+E   assert 3 == 1
+E    +  where 3 = len(                           capacity_price_eur_mw  ...   zone\ntimestamp                                         ...    ...0                    inf  ...  DE_LU\n2026-05-01 00:30:00+00:00                    inf  ...  DE_LU\n\n[3 rows x 9 columns])
+_ test_nonfinite_required_import_numbers_drop_rows_with_accounting[capacity-price--inf] _
+tests/test_ancillary.py:561: in test_nonfinite_required_import_numbers_drop_rows_with_accounting
+    assert len(parsed) == 1
+E   assert 3 == 1
+E    +  where 3 = len(                           capacity_price_eur_mw  ...   zone\ntimestamp                                         ...    ...0                   -inf  ...  DE_LU\n2026-05-01 00:30:00+00:00                   -inf  ...  DE_LU\n\n[3 rows x 9 columns])
+_ test_nonfinite_required_import_numbers_drop_rows_with_accounting[activation-price-inf] _
+tests/test_ancillary.py:561: in test_nonfinite_required_import_numbers_drop_rows_with_accounting
+    assert len(parsed) == 1
+E   assert 3 == 1
+E    +  where 3 = len(                            zone  ... system_activated_volume_mw\ntimestamp                         ...                ...  ...                        0.0\n2026-05-01 00:30:00+00:00  DE_LU  ...                        inf\n\n[3 rows x 5 columns])
+_ test_nonfinite_required_import_numbers_drop_rows_with_accounting[activation-price--inf] _
+tests/test_ancillary.py:561: in test_nonfinite_required_import_numbers_drop_rows_with_accounting
+    assert len(parsed) == 1
+E   assert 3 == 1
+E    +  where 3 = len(                            zone  ... system_activated_volume_mw\ntimestamp                         ...                ...  ...                        0.0\n2026-05-01 00:30:00+00:00  DE_LU  ...                       -inf\n\n[3 rows x 5 columns])
+_ test_nonfinite_required_import_numbers_drop_rows_with_accounting[activation-volume-inf] _
+tests/test_ancillary.py:561: in test_nonfinite_required_import_numbers_drop_rows_with_accounting
+    assert len(parsed) == 1
+E   assert 3 == 1
+E    +  where 3 = len(                            zone  ... system_activated_volume_mw\ntimestamp                         ...                ...  ...                        inf\n2026-05-01 00:30:00+00:00  DE_LU  ...                        inf\n\n[3 rows x 5 columns])
+_ test_nonfinite_required_import_numbers_drop_rows_with_accounting[activation-volume--inf] _
+tests/test_ancillary.py:561: in test_nonfinite_required_import_numbers_drop_rows_with_accounting
+    assert len(parsed) == 1
+E   assert 3 == 1
+E    +  where 3 = len(                            zone  ... system_activated_volume_mw\ntimestamp                         ...                ...  ...                       -inf\n2026-05-01 00:30:00+00:00  DE_LU  ...                       -inf\n\n[3 rows x 5 columns])
+_ test_nonfinite_required_import_numbers_drop_rows_with_accounting[imbalance-price-inf] _
+tests/test_ancillary.py:561: in test_nonfinite_required_import_numbers_drop_rows_with_accounting
+    assert len(parsed) == 1
+E   assert 3 == 1
+E    +  where 3 = len(                            zone  ...  system_imbalance_volume_mw\ntimestamp                         ...               ......                      -333.5\n2026-05-01 00:30:00+00:00  DE_LU  ...                         inf\n\n[3 rows x 3 columns])
+_ test_nonfinite_required_import_numbers_drop_rows_with_accounting[imbalance-price--inf] _
+tests/test_ancillary.py:561: in test_nonfinite_required_import_numbers_drop_rows_with_accounting
+    assert len(parsed) == 1
+E   assert 3 == 1
+E    +  where 3 = len(                            zone  ...  system_imbalance_volume_mw\ntimestamp                         ...               ......                      -333.5\n2026-05-01 00:30:00+00:00  DE_LU  ...                        -inf\n\n[3 rows x 3 columns])
+_ test_nonfinite_required_import_numbers_drop_rows_with_accounting[imbalance-volume-inf] _
+tests/test_ancillary.py:561: in test_nonfinite_required_import_numbers_drop_rows_with_accounting
+    assert len(parsed) == 1
+E   assert 3 == 1
+E    +  where 3 = len(                            zone  ...  system_imbalance_volume_mw\ntimestamp                         ...               ......                         inf\n2026-05-01 00:30:00+00:00  DE_LU  ...                         inf\n\n[3 rows x 3 columns])
+_ test_nonfinite_required_import_numbers_drop_rows_with_accounting[imbalance-volume--inf] _
+tests/test_ancillary.py:561: in test_nonfinite_required_import_numbers_drop_rows_with_accounting
+    assert len(parsed) == 1
+E   assert 3 == 1
+E    +  where 3 = len(                            zone  ...  system_imbalance_volume_mw\ntimestamp                         ...               ......                        -inf\n2026-05-01 00:30:00+00:00  DE_LU  ...                        -inf\n\n[3 rows x 3 columns])
+=========================== short test summary info ============================
+FAILED tests/test_ingestion.py::TestParseIntradayCsv::test_nonfinite_price_is_dropped_before_persistence[inf]
+FAILED tests/test_ingestion.py::TestParseIntradayCsv::test_nonfinite_price_is_dropped_before_persistence[-inf]
+FAILED tests/test_ingestion.py::TestParseIntradayCsv::test_nonfinite_rows_preserve_all_dropped_and_validation_order[inf]
+FAILED tests/test_ingestion.py::TestParseIntradayCsv::test_nonfinite_rows_preserve_all_dropped_and_validation_order[-inf]
+FAILED tests/test_ancillary.py::test_nonfinite_required_import_numbers_drop_rows_with_accounting[capacity-price-inf]
+FAILED tests/test_ancillary.py::test_nonfinite_required_import_numbers_drop_rows_with_accounting[capacity-price--inf]
+FAILED tests/test_ancillary.py::test_nonfinite_required_import_numbers_drop_rows_with_accounting[activation-price-inf]
+FAILED tests/test_ancillary.py::test_nonfinite_required_import_numbers_drop_rows_with_accounting[activation-price--inf]
+FAILED tests/test_ancillary.py::test_nonfinite_required_import_numbers_drop_rows_with_accounting[activation-volume-inf]
+FAILED tests/test_ancillary.py::test_nonfinite_required_import_numbers_drop_rows_with_accounting[activation-volume--inf]
+FAILED tests/test_ancillary.py::test_nonfinite_required_import_numbers_drop_rows_with_accounting[imbalance-price-inf]
+FAILED tests/test_ancillary.py::test_nonfinite_required_import_numbers_drop_rows_with_accounting[imbalance-price--inf]
+FAILED tests/test_ancillary.py::test_nonfinite_required_import_numbers_drop_rows_with_accounting[imbalance-volume-inf]
+FAILED tests/test_ancillary.py::test_nonfinite_required_import_numbers_drop_rows_with_accounting[imbalance-volume--inf]
+====================== 14 failed, 293 deselected in 0.38s ======================

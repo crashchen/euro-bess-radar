@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
 from src.analytics import (
+    _intraday_uplift_price_pairs,
     calculate_daily_dispatch,
     calculate_daily_spreads,
     calculate_imbalance_spread,
@@ -1206,10 +1206,7 @@ def _render_intraday_uplift_section(
                 f"equivalent would be €{unadjusted * power_mw:,.0f}/yr."
             )
 
-        merged = primary_df[["price_eur_mwh"]].join(
-            id_df[["intraday_price_eur_mwh"]], how="inner",
-        )
-        merged = merged.loc[np.isfinite(merged.to_numpy(dtype=float)).all(axis=1)]
+        merged = _intraday_uplift_price_pairs(primary_df, id_df, tz=zone_tz)
         if not merged.empty:
             signed = (
                 merged["intraday_price_eur_mwh"] - merged["price_eur_mwh"]
@@ -1228,7 +1225,9 @@ def _render_intraday_uplift_section(
         st.caption(
             f"Sample: {uplift['n_periods']} periods "
             f"(DA coverage: {uplift['da_coverage_pct']:.1f}%; "
-            f"IDA coverage: {uplift['ida_coverage_pct']:.1f}%, based on finite price pairs). "
+            f"IDA coverage: {uplift['ida_coverage_pct']:.1f}%, based on usable finite price pairs). "
+            "Days with unconfirmed delivery intervals are excluded from the sample; "
+            "coverage still uses all original source periods. "
             "The Phase-1 headline scales the annual estimate by the lower coverage "
             "instead of assuming sparse IDA prints represent a full year. This "
             "is a screening estimate at a fixed rebid share; the two-stage "

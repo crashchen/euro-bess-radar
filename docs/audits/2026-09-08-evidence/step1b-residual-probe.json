@@ -1,0 +1,70 @@
+{
+  "target": "2025-09-02",
+  "input_target_rows": {
+    "DA": 24,
+    "IDA": 96
+  },
+  "paths": {
+    "reserve_ceiling": {
+      "valid_days": 0,
+      "excluded_days": 1,
+      "model_available": false,
+      "rows": null,
+      "total_eur": 0.0,
+      "solver_calls": []
+    },
+    "sequential": {
+      "valid_days": 0,
+      "excluded_days": 1,
+      "model_available": false,
+      "rows": [],
+      "solver_calls": []
+    },
+    "sequential_reserve": {
+      "valid_days": 0,
+      "excluded_days": 1,
+      "model_available": false,
+      "rows": [],
+      "solver_calls": []
+    },
+    "stochastic": {
+      "valid_days": 0,
+      "excluded_days": 1,
+      "model_available": false,
+      "rows": [],
+      "solver_calls": []
+    },
+    "stochastic_triple": {
+      "valid_days": 0,
+      "excluded_days": 1,
+      "model_available": false,
+      "rows": [],
+      "solver_calls": []
+    }
+  },
+  "forecast": {
+    "n_rows": 96,
+    "coverage": 1.0,
+    "scenario_target_rows": 96,
+    "skill_n_points": 96,
+    "da_baseline_matched_points": 24,
+    "skill_naive_da_mae": 30.0,
+    "skill_vs_da": 0.33333333333333337
+  },
+  "intraday_uplift_diagnostic": {
+    "avg_abs_spread": 0.0,
+    "p50_abs": 0.0,
+    "p90_abs": 0.0,
+    "mean_signed": 0.0,
+    "coverage_pct": 0.0,
+    "annual_uplift_per_mw": 0.0,
+    "annual_uplift_unadjusted_per_mw": 0.0,
+    "coverage_adjustment_factor": 0.0,
+    "rebid_share": 0.25,
+    "n_periods": 0,
+    "model_available": false,
+    "reason": "Uplift unavailable: DA and IDA1 delivery grids are incompatible or cannot be verified. Use matching delivery intervals with enough observations to establish each day's cadence.",
+    "da_coverage_pct": 100.0,
+    "ida_coverage_pct": 25.0
+  }
+}

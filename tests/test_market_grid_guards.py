@@ -164,6 +164,43 @@ def test_uplift_reports_both_source_coverage_denominators(sample):
     assert result["annual_uplift_per_mw"] == pytest.approx(639.1875 * ratio, abs=0.01)
 
 
+@pytest.mark.parametrize("source", ["da", "ida"])
+@pytest.mark.parametrize("position", [0, 12, 23])
+def test_uplift_singleton_day_matches_absent_day(source, position):
+    """An extra unverified quote must neither veto nor inflate valid days."""
+    days = pd.date_range("2025-09-01", periods=5).strftime("%Y-%m-%d")
+    da = pd.concat([_market_day(day, "h") for day in days])
+    ida = pd.concat([_market_day(day, "h", ida=True) for day in days])
+    target = da if source == "da" else ida
+    missing_day = target.iloc[48:72]
+    sparse = target.drop(missing_day.index)
+    lone_quote = missing_day.iloc[[position]].copy()
+    lone_quote.iloc[0, 0] = 1_000_000.0
+    singleton = pd.concat([sparse, lone_quote]).sort_index()
+
+    def estimate(frame):
+        return calculate_intraday_uplift(
+            frame if source == "da" else da,
+            frame if source == "ida" else ida, tz="Europe/Berlin",
+        )
+
+    absent_result = estimate(sparse)
+    singleton_result = estimate(singleton)
+    for result in [absent_result, singleton_result]:
+        assert result["model_available"] is True
+        assert result["n_periods"] == 96
+        assert result["avg_abs_spread"] == 10.0
+        assert result["p90_abs"] == 10.0
+        assert result["mean_signed"] == 10.0
+        assert result["coverage_adjustment_factor"] == 0.8
+        assert result["annual_uplift_per_mw"] == 511.35
+    # Do not silently shrink the sparse source's denominator from 97 to 96.
+    assert absent_result[f"{source}_coverage_pct"] == 100.0
+    assert singleton_result[f"{source}_coverage_pct"] == 99.0
+    other = "ida" if source == "da" else "da"
+    assert singleton_result[f"{other}_coverage_pct"] == 80.0
+
+
 @pytest.mark.parametrize("column", ["price_eur_mwh", "intraday_price_eur_mwh"])
 @pytest.mark.parametrize("value", [np.inf, -np.inf])
 def test_uplift_counts_only_finite_price_pairs(column, value):
@@ -228,12 +265,18 @@ def _uplift_app(sample):
     ida_index = pd.date_range(start, periods=96, freq="15min").tz_convert("UTC")
     if sample == "sparse":
         ida_index = da_index[:-1]
+    elif sample == "singleton":
+        da_index = pd.date_range(start, periods=48, freq="h").tz_convert("UTC")
+        ida_index = da_index[:25]
     da = pd.DataFrame({"price_eur_mwh": 50.0}, index=da_index)
     ida = pd.DataFrame({"intraday_price_eur_mwh": 60.0}, index=ida_index)
-    st.session_state["intraday_cache::DE_LU::2025-09-01::2025-09-01"] = ida
+    if sample == "singleton":
+        ida.iloc[-1, 0] = 1_000_000.0
+    end = date(2025, 9, 2 if sample == "singleton" else 1)
+    st.session_state[f"intraday_cache::DE_LU::2025-09-01::{end}"] = ida
     _render_intraday_uplift_section(
         primary_zone="DE_LU", primary_df=da, zone_tz="Europe/Berlin",
-        start_date=date(2025, 9, 1), end_date=date(2025, 9, 1),
+        start_date=date(2025, 9, 1), end_date=end,
         power_mw=1.0, duration_hours=1.0, efficiency=1.0,
         capture_rate=0.70, chart_template="plotly_dark",
     )
@@ -256,3 +299,26 @@ def test_revenue_panel_discloses_da_and_ida_coverage_for_sparse_sample():
     assert "Coverage-adjusted uplift" in [metric.label for metric in app.metric]
     assert any("DA coverage: 95.8%" in caption.value and "IDA coverage: 100.0%" in caption.value
                for caption in app.caption)
+
+
+def test_revenue_panel_excludes_singleton_from_headline_and_histogram(monkeypatch):
+    import plotly.express as px
+    from streamlit.testing.v1 import AppTest
+
+    histogram = px.histogram
+    plotted = []
+
+    def capture_sample(data_frame, *args, **kwargs):
+        plotted.append(data_frame[kwargs["x"]].copy())
+        return histogram(data_frame, *args, **kwargs)
+
+    monkeypatch.setattr(px, "histogram", capture_sample)
+    app = AppTest.from_function(_uplift_app, args=("singleton",)).run(timeout=30)
+    assert not app.exception
+    headlines = [metric.value for metric in app.metric if metric.label == "Coverage-adjusted uplift"]
+    assert headlines == ["€320"]
+    assert len(plotted) == 1
+    assert len(plotted[0]) == 24
+    assert plotted[0].eq(10.0).all()
+    assert any("Sample: 24 periods" in caption.value and "DA coverage: 50.0%" in caption.value
+               and "IDA coverage: 96.0%" in caption.value for caption in app.caption)

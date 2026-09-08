@@ -1,0 +1,51 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: /private<baseline-repo>
+configfile: pyproject.toml
+collected 78 items / 71 deselected / 7 selected
+
+tests/test_market_grid_guards.py FFFFFFF                                 [100%]
+
+=================================== FAILURES ===================================
+______________ test_uplift_singleton_day_matches_absent_day[0-da] ______________
+tests/test_market_grid_guards.py:190: in test_uplift_singleton_day_matches_absent_day
+    assert result["model_available"] is True
+E   assert False is True
+_____________ test_uplift_singleton_day_matches_absent_day[0-ida] ______________
+tests/test_market_grid_guards.py:190: in test_uplift_singleton_day_matches_absent_day
+    assert result["model_available"] is True
+E   assert False is True
+_____________ test_uplift_singleton_day_matches_absent_day[12-da] ______________
+tests/test_market_grid_guards.py:190: in test_uplift_singleton_day_matches_absent_day
+    assert result["model_available"] is True
+E   assert False is True
+_____________ test_uplift_singleton_day_matches_absent_day[12-ida] _____________
+tests/test_market_grid_guards.py:190: in test_uplift_singleton_day_matches_absent_day
+    assert result["model_available"] is True
+E   assert False is True
+_____________ test_uplift_singleton_day_matches_absent_day[23-da] ______________
+tests/test_market_grid_guards.py:190: in test_uplift_singleton_day_matches_absent_day
+    assert result["model_available"] is True
+E   assert False is True
+_____________ test_uplift_singleton_day_matches_absent_day[23-ida] _____________
+tests/test_market_grid_guards.py:190: in test_uplift_singleton_day_matches_absent_day
+    assert result["model_available"] is True
+E   assert False is True
+______ test_revenue_panel_excludes_singleton_from_headline_and_histogram _______
+tests/test_market_grid_guards.py:319: in test_revenue_panel_excludes_singleton_from_headline_and_histogram
+    assert headlines == ["€320"]
+E   AssertionError: assert [] == ['€320']
+E
+E     Right contains one more item: '€320'
+E     Use -v to get more diff
+----------------------------- Captured stderr call -----------------------------
+2026-09-08 13:41:53.536 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+=========================== short test summary info ============================
+FAILED tests/test_market_grid_guards.py::test_uplift_singleton_day_matches_absent_day[0-da]
+FAILED tests/test_market_grid_guards.py::test_uplift_singleton_day_matches_absent_day[0-ida]
+FAILED tests/test_market_grid_guards.py::test_uplift_singleton_day_matches_absent_day[12-da]
+FAILED tests/test_market_grid_guards.py::test_uplift_singleton_day_matches_absent_day[12-ida]
+FAILED tests/test_market_grid_guards.py::test_uplift_singleton_day_matches_absent_day[23-da]
+FAILED tests/test_market_grid_guards.py::test_uplift_singleton_day_matches_absent_day[23-ida]
+FAILED tests/test_market_grid_guards.py::test_revenue_panel_excludes_singleton_from_headline_and_histogram
+======================= 7 failed, 71 deselected in 0.36s =======================

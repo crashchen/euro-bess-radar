@@ -1,0 +1,12 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 1677 items / 1656 deselected / 21 selected
+
+tests/test_project_case_adapters.py .......                              [ 33%]
+tests/test_project_case_ui.py .                                          [ 38%]
+tests/test_stochastic_batch.py ...........                               [ 90%]
+tests/test_stochastic_dispatch.py ..                                     [100%]
+
+=============== 21 passed, 1656 deselected in 290.48s (0:04:50) ================
