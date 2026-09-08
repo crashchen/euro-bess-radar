@@ -1,0 +1,11 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 101 items / 89 deselected / 12 selected
+
+tests/test_step2_views.py ....                                           [ 33%]
+tests/test_ui_theme.py .....                                             [ 75%]
+tests/test_market_grid_guards.py ...                                     [100%]
+
+====================== 12 passed, 89 deselected in 0.60s =======================

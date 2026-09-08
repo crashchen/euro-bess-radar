@@ -36,6 +36,10 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 
 ## Quick Start
 
+Requires Python 3.11+ and Streamlit >=1.55,<2.0. CI covers the complete suite
+on Python 3.13 and real-panel smoke checks on Python 3.11 / Streamlit 1.55.0.
+Revision-specific results and replay contracts are in the [audit index](docs/audits/README.md).
+
 ```bash
 # Clone and setup
 git clone <your-repo-url>
@@ -88,7 +92,7 @@ euro-bess-radar/
 │   ├── activation_overlay.py # Activation-energy replay overlay (screening, non-additive)
 │   ├── imbalance_overlay.py  # reBAP/imbalance replay overlay primitive
 │   └── export.py             # Excel/PDF reports + audited Project Case v1.1 workbook sheets
-├── tests/                    # 1585 passing tests (solver-heavy suite); 2 PDF tests may skip
+├── tests/                    # Unit, panel and solver integration tests; opt-in PDF rendering
 ├── scripts/                  # Maintenance/demo scripts (seed + Netztransparenz converter)
 ├── samples/                  # Generated demo CSVs from seed_demo_9_2b.py (git-ignored)
 ├── docs/runbooks/            # Operator runbooks (9.2b + imbalance validation, manual UI smoke)

@@ -1,0 +1,75 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 10 items
+
+tests/test_step2_views.py FFFFFF.FFF                                     [100%]
+
+=================================== FAILURES ===================================
+_ test_forecast_baseline_reports_its_own_finite_comparison_population[quarter_da] _
+tests/test_step2_views.py:32: in test_forecast_baseline_reports_its_own_finite_comparison_population
+    assert result["da_baseline_n_points"] == count
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'da_baseline_n_points'
+_ test_forecast_baseline_reports_its_own_finite_comparison_population[missing] _
+tests/test_step2_views.py:32: in test_forecast_baseline_reports_its_own_finite_comparison_population
+    assert result["da_baseline_n_points"] == count
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'da_baseline_n_points'
+_ test_forecast_baseline_reports_its_own_finite_comparison_population[infinite] _
+tests/test_step2_views.py:32: in test_forecast_baseline_reports_its_own_finite_comparison_population
+    assert result["da_baseline_n_points"] == count
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'da_baseline_n_points'
+_ test_forecast_baseline_reports_its_own_finite_comparison_population[duplicate] _
+tests/test_step2_views.py:30: in test_forecast_baseline_reports_its_own_finite_comparison_population
+    assert result["n_points"] == 96
+E   assert 97 == 96
+__ test_forecast_baseline_reports_its_own_finite_comparison_population[none] ___
+tests/test_step2_views.py:32: in test_forecast_baseline_reports_its_own_finite_comparison_population
+    assert result["da_baseline_n_points"] == count
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'da_baseline_n_points'
+______________ test_forecast_panel_discloses_da_subset_separately ______________
+tests/test_step2_views.py:56: in test_forecast_panel_discloses_da_subset_separately
+    assert any("24/96" in caption.value and "25.0%" in caption.value for caption in app.caption)
+E   assert False
+E    +  where False = any(<generator object test_forecast_panel_discloses_da_subset_separately.<locals>.<genexpr> at 0x11a929ff0>)
+----------------------------- Captured stderr call -----------------------------
+2026-09-08 14:18:59.577 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_ test_real_market_chart_uses_30_physical_days_and_24_hours_warmup[quarter-96] _
+tests/test_step2_views.py:91: in test_real_market_chart_uses_30_physical_days_and_24_hours_warmup
+    assert np.isnan(values[:warmup - 1]).all()
+E   AssertionError: assert np.False_
+E    +  where np.False_ = <built-in method all of numpy.ndarray object at 0x11a9f51d0>()
+E    +    where <built-in method all of numpy.ndarray object at 0x11a9f51d0> = array([ True,  True,  True,  True,  True,  True,  True,  True,  True,\n        True,  True,  True,  True,  True,  True,...False,\n       False, False, False, False, False, False, False, False, False,\n       False, False, False, False, False]).all
+E    +      where array([ True,  True,  True,  True,  True,  True,  True,  True,  True,\n        True,  True,  True,  True,  True,  True,...False,\n       False, False, False, False, False, False, False, False, False,\n       False, False, False, False, False]) = <ufunc 'isnan'>(array([nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n       nan, nan, nan, nan, nan, nan, nan, nan,...10., 10., 10., 10.,\n       10., 10., 10., 10., 10., 10., 10., 10., 10., 10., 10., 10., 10.,\n       10., 10., 10., 10.]))
+E    +        where <ufunc 'isnan'> = np.isnan
+----------------------------- Captured stderr call -----------------------------
+2026-09-08 14:18:59.769 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+__ test_real_market_chart_uses_30_physical_days_and_24_hours_warmup[mixed-24] __
+tests/test_step2_views.py:93: in test_real_market_chart_uses_30_physical_days_and_24_hours_warmup
+    assert values[-1] == pytest.approx(40.0)
+E   assert np.float64(100.0) == 40.0 ± 4.0e-05
+E
+E     comparison failed
+E     Obtained: 100.0
+E     Expected: 40.0 ± 4.0e-05
+----------------------------- Captured stderr call -----------------------------
+2026-09-08 14:18:59.831 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_______ test_rolling_window_clips_a_partial_old_interval_and_ignores_nan _______
+tests/test_step2_views.py:97: in test_rolling_window_clips_a_partial_old_interval_and_ignores_nan
+    from src.analytics import time_weighted_rolling_price_mean
+E   ImportError: cannot import name 'time_weighted_rolling_price_mean' from 'src.analytics' (<repo>/src/analytics.py)
+=========================== short test summary info ============================
+FAILED tests/test_step2_views.py::test_forecast_baseline_reports_its_own_finite_comparison_population[quarter_da]
+FAILED tests/test_step2_views.py::test_forecast_baseline_reports_its_own_finite_comparison_population[missing]
+FAILED tests/test_step2_views.py::test_forecast_baseline_reports_its_own_finite_comparison_population[infinite]
+FAILED tests/test_step2_views.py::test_forecast_baseline_reports_its_own_finite_comparison_population[duplicate]
+FAILED tests/test_step2_views.py::test_forecast_baseline_reports_its_own_finite_comparison_population[none]
+FAILED tests/test_step2_views.py::test_forecast_panel_discloses_da_subset_separately
+FAILED tests/test_step2_views.py::test_real_market_chart_uses_30_physical_days_and_24_hours_warmup[quarter-96]
+FAILED tests/test_step2_views.py::test_real_market_chart_uses_30_physical_days_and_24_hours_warmup[mixed-24]
+FAILED tests/test_step2_views.py::test_rolling_window_clips_a_partial_old_interval_and_ignores_nan
+========================= 9 failed, 1 passed in 0.57s ==========================

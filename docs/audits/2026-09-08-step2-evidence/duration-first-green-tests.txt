@@ -1,0 +1,10 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 72 items
+
+tests/test_delivery_durations.py ....................................... [ 54%]
+.................................                                        [100%]
+
+============================== 72 passed in 0.72s ==============================

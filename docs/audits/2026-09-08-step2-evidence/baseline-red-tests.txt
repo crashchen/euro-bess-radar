@@ -1,0 +1,593 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: /private<baseline-repo>
+configfile: pyproject.toml
+collected 90 items
+
+tests/test_delivery_durations.py FFFFFFFFFFFFFF.FFFFFFFFFFFFFFFFFFFFFFFF [ 43%]
+FFFFFFFFFFFFFFFFFFFFFFFFFFF......FFFFFFFF                                [ 88%]
+tests/test_step2_views.py FFFFFF.FFF                                     [100%]
+
+=================================== FAILURES ===================================
+_____________ test_joint_capacity_preserves_24_physical_hours[BG] ______________
+tests/test_delivery_durations.py:40: in test_joint_capacity_preserves_24_physical_hours
+    assert result.iloc[0]["joint_capacity_revenue"] == pytest.approx(114.0)
+E   assert np.float64(110.4375) == 114.0 ± 1.1e-04
+E
+E     comparison failed
+E     Obtained: 110.4375
+E     Expected: 114.0 ± 1.1e-04
+_____________ test_joint_capacity_preserves_24_physical_hours[EE] ______________
+tests/test_delivery_durations.py:40: in test_joint_capacity_preserves_24_physical_hours
+    assert result.iloc[0]["joint_capacity_revenue"] == pytest.approx(114.0)
+E   assert np.float64(110.4375) == 114.0 ± 1.1e-04
+E
+E     comparison failed
+E     Obtained: 110.4375
+E     Expected: 114.0 ± 1.1e-04
+_____________ test_joint_capacity_preserves_24_physical_hours[FI] ______________
+tests/test_delivery_durations.py:40: in test_joint_capacity_preserves_24_physical_hours
+    assert result.iloc[0]["joint_capacity_revenue"] == pytest.approx(114.0)
+E   assert np.float64(110.4375) == 114.0 ± 1.1e-04
+E
+E     comparison failed
+E     Obtained: 110.4375
+E     Expected: 114.0 ± 1.1e-04
+_____________ test_joint_capacity_preserves_24_physical_hours[GR] ______________
+tests/test_delivery_durations.py:40: in test_joint_capacity_preserves_24_physical_hours
+    assert result.iloc[0]["joint_capacity_revenue"] == pytest.approx(114.0)
+E   assert np.float64(110.4375) == 114.0 ± 1.1e-04
+E
+E     comparison failed
+E     Obtained: 110.4375
+E     Expected: 114.0 ± 1.1e-04
+_____________ test_joint_capacity_preserves_24_physical_hours[LT] ______________
+tests/test_delivery_durations.py:40: in test_joint_capacity_preserves_24_physical_hours
+    assert result.iloc[0]["joint_capacity_revenue"] == pytest.approx(114.0)
+E   assert np.float64(110.4375) == 114.0 ± 1.1e-04
+E
+E     comparison failed
+E     Obtained: 110.4375
+E     Expected: 114.0 ± 1.1e-04
+_____________ test_joint_capacity_preserves_24_physical_hours[LV] ______________
+tests/test_delivery_durations.py:40: in test_joint_capacity_preserves_24_physical_hours
+    assert result.iloc[0]["joint_capacity_revenue"] == pytest.approx(114.0)
+E   assert np.float64(110.4375) == 114.0 ± 1.1e-04
+E
+E     comparison failed
+E     Obtained: 110.4375
+E     Expected: 114.0 ± 1.1e-04
+_____________ test_joint_capacity_preserves_24_physical_hours[PT] ______________
+tests/test_delivery_durations.py:40: in test_joint_capacity_preserves_24_physical_hours
+    assert result.iloc[0]["joint_capacity_revenue"] == pytest.approx(114.0)
+E   assert np.float64(128.25) == 114.0 ± 1.1e-04
+E
+E     comparison failed
+E     Obtained: 128.25
+E     Expected: 114.0 ± 1.1e-04
+_____________ test_joint_capacity_preserves_24_physical_hours[RO] ______________
+tests/test_delivery_durations.py:40: in test_joint_capacity_preserves_24_physical_hours
+    assert result.iloc[0]["joint_capacity_revenue"] == pytest.approx(114.0)
+E   assert np.float64(110.4375) == 114.0 ± 1.1e-04
+E
+E     comparison failed
+E     Obtained: 110.4375
+E     Expected: 114.0 ± 1.1e-04
+_________ test_daily_greedy_and_milp_use_native_delivery_duration[BG] __________
+tests/test_delivery_durations.py:49: in test_daily_greedy_and_milp_use_native_delivery_duration
+    assert result.iloc[0]["spread"] == pytest.approx(100.0)
+E   assert np.float64(25.0) == 100.0 ± 1.0e-04
+E
+E     comparison failed
+E     Obtained: 25.0
+E     Expected: 100.0 ± 1.0e-04
+_________ test_daily_greedy_and_milp_use_native_delivery_duration[EE] __________
+tests/test_delivery_durations.py:49: in test_daily_greedy_and_milp_use_native_delivery_duration
+    assert result.iloc[0]["spread"] == pytest.approx(100.0)
+E   assert np.float64(25.0) == 100.0 ± 1.0e-04
+E
+E     comparison failed
+E     Obtained: 25.0
+E     Expected: 100.0 ± 1.0e-04
+_________ test_daily_greedy_and_milp_use_native_delivery_duration[FI] __________
+tests/test_delivery_durations.py:49: in test_daily_greedy_and_milp_use_native_delivery_duration
+    assert result.iloc[0]["spread"] == pytest.approx(100.0)
+E   assert np.float64(25.0) == 100.0 ± 1.0e-04
+E
+E     comparison failed
+E     Obtained: 25.0
+E     Expected: 100.0 ± 1.0e-04
+_________ test_daily_greedy_and_milp_use_native_delivery_duration[GR] __________
+tests/test_delivery_durations.py:49: in test_daily_greedy_and_milp_use_native_delivery_duration
+    assert result.iloc[0]["spread"] == pytest.approx(100.0)
+E   assert np.float64(25.0) == 100.0 ± 1.0e-04
+E
+E     comparison failed
+E     Obtained: 25.0
+E     Expected: 100.0 ± 1.0e-04
+_________ test_daily_greedy_and_milp_use_native_delivery_duration[LT] __________
+tests/test_delivery_durations.py:49: in test_daily_greedy_and_milp_use_native_delivery_duration
+    assert result.iloc[0]["spread"] == pytest.approx(100.0)
+E   assert np.float64(25.0) == 100.0 ± 1.0e-04
+E
+E     comparison failed
+E     Obtained: 25.0
+E     Expected: 100.0 ± 1.0e-04
+_________ test_daily_greedy_and_milp_use_native_delivery_duration[LV] __________
+tests/test_delivery_durations.py:49: in test_daily_greedy_and_milp_use_native_delivery_duration
+    assert result.iloc[0]["spread"] == pytest.approx(100.0)
+E   assert np.float64(25.0) == 100.0 ± 1.0e-04
+E
+E     comparison failed
+E     Obtained: 25.0
+E     Expected: 100.0 ± 1.0e-04
+_________ test_daily_greedy_and_milp_use_native_delivery_duration[RO] __________
+tests/test_delivery_durations.py:49: in test_daily_greedy_and_milp_use_native_delivery_duration
+    assert result.iloc[0]["spread"] == pytest.approx(100.0)
+E   assert np.float64(25.0) == 100.0 ± 1.0e-04
+E
+E     comparison failed
+E     Obtained: 25.0
+E     Expected: 100.0 ± 1.0e-04
+_____ test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[BG] _____
+tests/test_delivery_durations.py:62: in test_single_replay_retains_mixed_day_energy_vwap_and_event_hours
+    assert summary["success"] is True
+E   assert False is True
+_____ test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[EE] _____
+tests/test_delivery_durations.py:62: in test_single_replay_retains_mixed_day_energy_vwap_and_event_hours
+    assert summary["success"] is True
+E   assert False is True
+_____ test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[FI] _____
+tests/test_delivery_durations.py:62: in test_single_replay_retains_mixed_day_energy_vwap_and_event_hours
+    assert summary["success"] is True
+E   assert False is True
+_____ test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[GR] _____
+tests/test_delivery_durations.py:62: in test_single_replay_retains_mixed_day_energy_vwap_and_event_hours
+    assert summary["success"] is True
+E   assert False is True
+_____ test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[LT] _____
+tests/test_delivery_durations.py:62: in test_single_replay_retains_mixed_day_energy_vwap_and_event_hours
+    assert summary["success"] is True
+E   assert False is True
+_____ test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[LV] _____
+tests/test_delivery_durations.py:62: in test_single_replay_retains_mixed_day_energy_vwap_and_event_hours
+    assert summary["success"] is True
+E   assert False is True
+_____ test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[PT] _____
+tests/test_delivery_durations.py:62: in test_single_replay_retains_mixed_day_energy_vwap_and_event_hours
+    assert summary["success"] is True
+E   assert False is True
+_____ test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[RO] _____
+tests/test_delivery_durations.py:62: in test_single_replay_retains_mixed_day_energy_vwap_and_event_hours
+    assert summary["success"] is True
+E   assert False is True
+________________ test_batch_replay_retains_mixed_day[False-BG] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+________________ test_batch_replay_retains_mixed_day[False-EE] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+________________ test_batch_replay_retains_mixed_day[False-FI] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+________________ test_batch_replay_retains_mixed_day[False-GR] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+________________ test_batch_replay_retains_mixed_day[False-LT] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+________________ test_batch_replay_retains_mixed_day[False-LV] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+________________ test_batch_replay_retains_mixed_day[False-PT] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+________________ test_batch_replay_retains_mixed_day[False-RO] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+_________________ test_batch_replay_retains_mixed_day[True-BG] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+_________________ test_batch_replay_retains_mixed_day[True-EE] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+_________________ test_batch_replay_retains_mixed_day[True-FI] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+_________________ test_batch_replay_retains_mixed_day[True-GR] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+_________________ test_batch_replay_retains_mixed_day[True-LT] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+_________________ test_batch_replay_retains_mixed_day[True-LV] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+_________________ test_batch_replay_retains_mixed_day[True-PT] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+_________________ test_batch_replay_retains_mixed_day[True-RO] _________________
+tests/test_delivery_durations.py:86: in test_batch_replay_retains_mixed_day
+    assert result.attrs["model_available"] is True
+E   assert False is True
+____________ test_negative_hours_are_physical_even_on_utc_index[BG] ____________
+tests/test_delivery_durations.py:97: in test_negative_hours_are_physical_even_on_utc_index
+    assert calculate_negative_price_hours(prices)["negative_hours"] == 24.0
+E   assert 23.25 == 24.0
+____________ test_negative_hours_are_physical_even_on_utc_index[EE] ____________
+tests/test_delivery_durations.py:97: in test_negative_hours_are_physical_even_on_utc_index
+    assert calculate_negative_price_hours(prices)["negative_hours"] == 24.0
+E   assert 23.25 == 24.0
+____________ test_negative_hours_are_physical_even_on_utc_index[FI] ____________
+tests/test_delivery_durations.py:97: in test_negative_hours_are_physical_even_on_utc_index
+    assert calculate_negative_price_hours(prices)["negative_hours"] == 24.0
+E   assert 23.25 == 24.0
+____________ test_negative_hours_are_physical_even_on_utc_index[GR] ____________
+tests/test_delivery_durations.py:97: in test_negative_hours_are_physical_even_on_utc_index
+    assert calculate_negative_price_hours(prices)["negative_hours"] == 24.0
+E   assert 23.25 == 24.0
+____________ test_negative_hours_are_physical_even_on_utc_index[LT] ____________
+tests/test_delivery_durations.py:97: in test_negative_hours_are_physical_even_on_utc_index
+    assert calculate_negative_price_hours(prices)["negative_hours"] == 24.0
+E   assert 23.25 == 24.0
+____________ test_negative_hours_are_physical_even_on_utc_index[LV] ____________
+tests/test_delivery_durations.py:97: in test_negative_hours_are_physical_even_on_utc_index
+    assert calculate_negative_price_hours(prices)["negative_hours"] == 24.0
+E   assert 23.25 == 24.0
+____________ test_negative_hours_are_physical_even_on_utc_index[PT] ____________
+tests/test_delivery_durations.py:97: in test_negative_hours_are_physical_even_on_utc_index
+    assert calculate_negative_price_hours(prices)["negative_hours"] == 24.0
+E   assert 27.0 == 24.0
+____________ test_negative_hours_are_physical_even_on_utc_index[RO] ____________
+tests/test_delivery_durations.py:97: in test_negative_hours_are_physical_even_on_utc_index
+    assert calculate_negative_price_hours(prices)["negative_hours"] == 24.0
+E   assert 23.25 == 24.0
+______ test_duration_vector_known_answer_and_soc_balance[solve_daily_lp] _______
+tests/test_delivery_durations.py:105: in test_duration_vector_known_answer_and_soc_balance
+    result = solver(prices, dt, efficiency=1.0, soc_init_frac=0.0, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:135: in solve_daily_lp
+    row_upper[:t] = sqrt_eff * dt
+    ^^^^^^^^^^^^^
+E   ValueError: could not broadcast input array from shape (5,) into shape (1,)
+_ test_duration_vector_known_answer_and_soc_balance[solve_daily_joint_capacity_lp] _
+tests/test_delivery_durations.py:105: in test_duration_vector_known_answer_and_soc_balance
+    result = solver(prices, dt, efficiency=1.0, soc_init_frac=0.0, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:378: in solve_daily_joint_capacity_lp
+    row_upper[:t] = sqrt_eff * dt
+    ^^^^^^^^^^^^^
+E   ValueError: could not broadcast input array from shape (5,) into shape (1,)
+_ test_bad_duration_returns_typed_failure_before_optimisation[0.0-solve_daily_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+tests/test_delivery_durations.py:120: in unexpected
+    pytest.fail("Invalid duration reached linprog")
+E   Failed: Invalid duration reached linprog
+_ test_bad_duration_returns_typed_failure_before_optimisation[0.0-solve_daily_joint_capacity_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:393: in solve_daily_joint_capacity_lp
+    result = linprog(
+tests/test_delivery_durations.py:120: in unexpected
+    pytest.fail("Invalid duration reached linprog")
+E   Failed: Invalid duration reached linprog
+_ test_bad_duration_returns_typed_failure_before_optimisation[-0.25-solve_daily_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+tests/test_delivery_durations.py:120: in unexpected
+    pytest.fail("Invalid duration reached linprog")
+E   Failed: Invalid duration reached linprog
+_ test_bad_duration_returns_typed_failure_before_optimisation[-0.25-solve_daily_joint_capacity_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:393: in solve_daily_joint_capacity_lp
+    result = linprog(
+tests/test_delivery_durations.py:120: in unexpected
+    pytest.fail("Invalid duration reached linprog")
+E   Failed: Invalid duration reached linprog
+_ test_bad_duration_returns_typed_failure_before_optimisation[inf-solve_daily_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+tests/test_delivery_durations.py:120: in unexpected
+    pytest.fail("Invalid duration reached linprog")
+E   Failed: Invalid duration reached linprog
+_ test_bad_duration_returns_typed_failure_before_optimisation[inf-solve_daily_joint_capacity_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:393: in solve_daily_joint_capacity_lp
+    result = linprog(
+tests/test_delivery_durations.py:120: in unexpected
+    pytest.fail("Invalid duration reached linprog")
+E   Failed: Invalid duration reached linprog
+_ test_bad_duration_returns_typed_failure_before_optimisation[nan-solve_daily_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:162: in solve_daily_lp
+    result = linprog(c, A_ub=a_ub, b_ub=b_ub, A_eq=a_eq, b_eq=b_eq,
+tests/test_delivery_durations.py:120: in unexpected
+    pytest.fail("Invalid duration reached linprog")
+E   Failed: Invalid duration reached linprog
+_ test_bad_duration_returns_typed_failure_before_optimisation[nan-solve_daily_joint_capacity_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:393: in solve_daily_joint_capacity_lp
+    result = linprog(
+tests/test_delivery_durations.py:120: in unexpected
+    pytest.fail("Invalid duration reached linprog")
+E   Failed: Invalid duration reached linprog
+_ test_bad_duration_returns_typed_failure_before_optimisation[dt4-solve_daily_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:135: in solve_daily_lp
+    row_upper[:t] = sqrt_eff * dt
+                    ^^^^^^^^^^^^^
+E   TypeError: can't multiply sequence by non-int of type 'float'
+_ test_bad_duration_returns_typed_failure_before_optimisation[dt4-solve_daily_joint_capacity_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:378: in solve_daily_joint_capacity_lp
+    row_upper[:t] = sqrt_eff * dt
+                    ^^^^^^^^^^^^^
+E   TypeError: can't multiply sequence by non-int of type 'float'
+_ test_bad_duration_returns_typed_failure_before_optimisation[dt5-solve_daily_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:135: in solve_daily_lp
+    row_upper[:t] = sqrt_eff * dt
+                    ^^^^^^^^^^^^^
+E   TypeError: can't multiply sequence by non-int of type 'float'
+_ test_bad_duration_returns_typed_failure_before_optimisation[dt5-solve_daily_joint_capacity_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:378: in solve_daily_joint_capacity_lp
+    row_upper[:t] = sqrt_eff * dt
+                    ^^^^^^^^^^^^^
+E   TypeError: can't multiply sequence by non-int of type 'float'
+_ test_bad_duration_returns_typed_failure_before_optimisation[dt6-solve_daily_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:135: in solve_daily_lp
+    row_upper[:t] = sqrt_eff * dt
+                    ^^^^^^^^^^^^^
+E   TypeError: can't multiply sequence by non-int of type 'float'
+_ test_bad_duration_returns_typed_failure_before_optimisation[dt6-solve_daily_joint_capacity_lp] _
+tests/test_delivery_durations.py:124: in test_bad_duration_returns_typed_failure_before_optimisation
+    result = solver(np.array([0.0, 100.0]), dt, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/dispatch.py:378: in solve_daily_joint_capacity_lp
+    row_upper[:t] = sqrt_eff * dt
+                    ^^^^^^^^^^^^^
+E   TypeError: can't multiply sequence by non-int of type 'float'
+_____________ test_duration_vector_cycle_cap_and_canonical_energy ______________
+tests/test_delivery_durations.py:132: in test_duration_vector_cycle_cap_and_canonical_energy
+    result = solve_daily_lp(
+src/dispatch.py:135: in solve_daily_lp
+    row_upper[:t] = sqrt_eff * dt
+    ^^^^^^^^^^^^^
+E   ValueError: could not broadcast input array from shape (5,) into shape (1,)
+____________________ test_vwap_weights_each_interval_energy ____________________
+tests/test_delivery_durations.py:144: in test_vwap_weights_each_interval_energy
+    result = calculate_dispatch_price_vwaps(
+src/analytics.py:29: in calculate_dispatch_price_vwaps
+    if dt_hours <= 0 or not np.isfinite(dt_hours):
+       ^^^^^^^^^^^^^
+E   ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+_______ test_cycle_frontier_keeps_common_mixed_day_and_physical_fec[FI] ________
+tests/test_delivery_durations.py:177: in test_cycle_frontier_keeps_common_mixed_day_and_physical_fec
+    assert summary["valid_days"] == 1
+E   assert 0 == 1
+_______ test_cycle_frontier_keeps_common_mixed_day_and_physical_fec[PT] ________
+tests/test_delivery_durations.py:177: in test_cycle_frontier_keeps_common_mixed_day_and_physical_fec
+    assert summary["valid_days"] == 1
+E   assert 0 == 1
+_____ test_continuous_replay_slices_duration_vectors_back_to_each_day[FI] ______
+tests/test_delivery_durations.py:197: in test_continuous_replay_slices_duration_vectors_back_to_each_day
+    assert result.attrs["valid_days"] == 3
+E   assert 2 == 3
+_____ test_continuous_replay_slices_duration_vectors_back_to_each_day[PT] ______
+tests/test_delivery_durations.py:197: in test_continuous_replay_slices_duration_vectors_back_to_each_day
+    assert result.attrs["valid_days"] == 3
+E   assert 2 == 3
+________ test_project_case_da_accepts_existing_registered_mixed_day[FI] ________
+tests/test_delivery_durations.py:208: in test_project_case_da_accepts_existing_registered_mixed_day
+    result = emit_da_only(
+src/project_case/adapters.py:462: in emit_da_only
+    return _build_result(
+src/project_case/adapters.py:241: in _build_result
+    raise AdapterUnavailableError(
+E   src.project_case.audit.AdapterUnavailableError: PC_ADP_DA_ONLY: no valid dates (result unavailable)
+________ test_project_case_da_accepts_existing_registered_mixed_day[PT] ________
+tests/test_delivery_durations.py:208: in test_project_case_da_accepts_existing_registered_mixed_day
+    result = emit_da_only(
+src/project_case/adapters.py:462: in emit_da_only
+    return _build_result(
+src/project_case/adapters.py:241: in _build_result
+    raise AdapterUnavailableError(
+E   src.project_case.audit.AdapterUnavailableError: PC_ADP_DA_ONLY: no valid dates (result unavailable)
+_______ test_joint_vector_reserve_average_and_cash_are_duration_weighted _______
+tests/test_delivery_durations.py:219: in test_joint_vector_reserve_average_and_cash_are_duration_weighted
+    result = solve_daily_joint_capacity_lp(
+src/dispatch.py:378: in solve_daily_joint_capacity_lp
+    row_upper[:t] = sqrt_eff * dt
+    ^^^^^^^^^^^^^
+E   ValueError: could not broadcast input array from shape (2,) into shape (1,)
+__________ test_unknown_grid_does_not_fabricate_negative_price_hours ___________
+tests/test_delivery_durations.py:236: in test_unknown_grid_does_not_fabricate_negative_price_hours
+    assert np.isnan(result["negative_hours"])
+E   AssertionError: assert np.False_
+E    +  where np.False_ = <ufunc 'isnan'>(3.0)
+E    +    where <ufunc 'isnan'> = np.isnan
+_ test_forecast_baseline_reports_its_own_finite_comparison_population[quarter_da] _
+tests/test_step2_views.py:32: in test_forecast_baseline_reports_its_own_finite_comparison_population
+    assert result["da_baseline_n_points"] == count
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'da_baseline_n_points'
+_ test_forecast_baseline_reports_its_own_finite_comparison_population[missing] _
+tests/test_step2_views.py:32: in test_forecast_baseline_reports_its_own_finite_comparison_population
+    assert result["da_baseline_n_points"] == count
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'da_baseline_n_points'
+_ test_forecast_baseline_reports_its_own_finite_comparison_population[infinite] _
+tests/test_step2_views.py:32: in test_forecast_baseline_reports_its_own_finite_comparison_population
+    assert result["da_baseline_n_points"] == count
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'da_baseline_n_points'
+_ test_forecast_baseline_reports_its_own_finite_comparison_population[duplicate] _
+tests/test_step2_views.py:30: in test_forecast_baseline_reports_its_own_finite_comparison_population
+    assert result["n_points"] == 96
+E   assert 97 == 96
+__ test_forecast_baseline_reports_its_own_finite_comparison_population[none] ___
+tests/test_step2_views.py:32: in test_forecast_baseline_reports_its_own_finite_comparison_population
+    assert result["da_baseline_n_points"] == count
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'da_baseline_n_points'
+______________ test_forecast_panel_discloses_da_subset_separately ______________
+tests/test_step2_views.py:56: in test_forecast_panel_discloses_da_subset_separately
+    assert any("24/96" in caption.value and "25.0%" in caption.value for caption in app.caption)
+E   assert False
+E    +  where False = any(<generator object test_forecast_panel_discloses_da_subset_separately.<locals>.<genexpr> at 0x11748fed0>)
+----------------------------- Captured stderr call -----------------------------
+2026-09-08 14:25:36.310 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_ test_real_market_chart_uses_30_physical_days_and_24_hours_warmup[quarter-96] _
+tests/test_step2_views.py:95: in test_real_market_chart_uses_30_physical_days_and_24_hours_warmup
+    assert np.isnan(values[:warmup - 1]).all()
+E   AssertionError: assert np.False_
+E    +  where np.False_ = <built-in method all of numpy.ndarray object at 0x117ee7e70>()
+E    +    where <built-in method all of numpy.ndarray object at 0x117ee7e70> = array([ True,  True,  True,  True,  True,  True,  True,  True,  True,\n        True,  True,  True,  True,  True,  True,...False,\n       False, False, False, False, False, False, False, False, False,\n       False, False, False, False, False]).all
+E    +      where array([ True,  True,  True,  True,  True,  True,  True,  True,  True,\n        True,  True,  True,  True,  True,  True,...False,\n       False, False, False, False, False, False, False, False, False,\n       False, False, False, False, False]) = <ufunc 'isnan'>(array([nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan, nan,\n       nan, nan, nan, nan, nan, nan, nan, nan,...10., 10., 10., 10.,\n       10., 10., 10., 10., 10., 10., 10., 10., 10., 10., 10., 10., 10.,\n       10., 10., 10., 10.]))
+E    +        where <ufunc 'isnan'> = np.isnan
+----------------------------- Captured stderr call -----------------------------
+2026-09-08 14:25:36.562 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+__ test_real_market_chart_uses_30_physical_days_and_24_hours_warmup[mixed-24] __
+tests/test_step2_views.py:97: in test_real_market_chart_uses_30_physical_days_and_24_hours_warmup
+    assert values[-1] == pytest.approx(40.0)
+E   assert np.float64(100.0) == 40.0 ± 4.0e-05
+E
+E     comparison failed
+E     Obtained: 100.0
+E     Expected: 40.0 ± 4.0e-05
+----------------------------- Captured stderr call -----------------------------
+2026-09-08 14:25:36.634 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_______ test_rolling_window_clips_a_partial_old_interval_and_ignores_nan _______
+tests/test_step2_views.py:101: in test_rolling_window_clips_a_partial_old_interval_and_ignores_nan
+    from src.analytics import time_weighted_rolling_price_mean
+E   ImportError: cannot import name 'time_weighted_rolling_price_mean' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+=========================== short test summary info ============================
+FAILED tests/test_delivery_durations.py::test_joint_capacity_preserves_24_physical_hours[BG]
+FAILED tests/test_delivery_durations.py::test_joint_capacity_preserves_24_physical_hours[EE]
+FAILED tests/test_delivery_durations.py::test_joint_capacity_preserves_24_physical_hours[FI]
+FAILED tests/test_delivery_durations.py::test_joint_capacity_preserves_24_physical_hours[GR]
+FAILED tests/test_delivery_durations.py::test_joint_capacity_preserves_24_physical_hours[LT]
+FAILED tests/test_delivery_durations.py::test_joint_capacity_preserves_24_physical_hours[LV]
+FAILED tests/test_delivery_durations.py::test_joint_capacity_preserves_24_physical_hours[PT]
+FAILED tests/test_delivery_durations.py::test_joint_capacity_preserves_24_physical_hours[RO]
+FAILED tests/test_delivery_durations.py::test_daily_greedy_and_milp_use_native_delivery_duration[BG]
+FAILED tests/test_delivery_durations.py::test_daily_greedy_and_milp_use_native_delivery_duration[EE]
+FAILED tests/test_delivery_durations.py::test_daily_greedy_and_milp_use_native_delivery_duration[FI]
+FAILED tests/test_delivery_durations.py::test_daily_greedy_and_milp_use_native_delivery_duration[GR]
+FAILED tests/test_delivery_durations.py::test_daily_greedy_and_milp_use_native_delivery_duration[LT]
+FAILED tests/test_delivery_durations.py::test_daily_greedy_and_milp_use_native_delivery_duration[LV]
+FAILED tests/test_delivery_durations.py::test_daily_greedy_and_milp_use_native_delivery_duration[RO]
+FAILED tests/test_delivery_durations.py::test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[BG]
+FAILED tests/test_delivery_durations.py::test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[EE]
+FAILED tests/test_delivery_durations.py::test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[FI]
+FAILED tests/test_delivery_durations.py::test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[GR]
+FAILED tests/test_delivery_durations.py::test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[LT]
+FAILED tests/test_delivery_durations.py::test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[LV]
+FAILED tests/test_delivery_durations.py::test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[PT]
+FAILED tests/test_delivery_durations.py::test_single_replay_retains_mixed_day_energy_vwap_and_event_hours[RO]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[False-BG]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[False-EE]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[False-FI]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[False-GR]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[False-LT]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[False-LV]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[False-PT]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[False-RO]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[True-BG]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[True-EE]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[True-FI]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[True-GR]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[True-LT]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[True-LV]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[True-PT]
+FAILED tests/test_delivery_durations.py::test_batch_replay_retains_mixed_day[True-RO]
+FAILED tests/test_delivery_durations.py::test_negative_hours_are_physical_even_on_utc_index[BG]
+FAILED tests/test_delivery_durations.py::test_negative_hours_are_physical_even_on_utc_index[EE]
+FAILED tests/test_delivery_durations.py::test_negative_hours_are_physical_even_on_utc_index[FI]
+FAILED tests/test_delivery_durations.py::test_negative_hours_are_physical_even_on_utc_index[GR]
+FAILED tests/test_delivery_durations.py::test_negative_hours_are_physical_even_on_utc_index[LT]
+FAILED tests/test_delivery_durations.py::test_negative_hours_are_physical_even_on_utc_index[LV]
+FAILED tests/test_delivery_durations.py::test_negative_hours_are_physical_even_on_utc_index[PT]
+FAILED tests/test_delivery_durations.py::test_negative_hours_are_physical_even_on_utc_index[RO]
+FAILED tests/test_delivery_durations.py::test_duration_vector_known_answer_and_soc_balance[solve_daily_lp]
+FAILED tests/test_delivery_durations.py::test_duration_vector_known_answer_and_soc_balance[solve_daily_joint_capacity_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[0.0-solve_daily_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[0.0-solve_daily_joint_capacity_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[-0.25-solve_daily_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[-0.25-solve_daily_joint_capacity_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[inf-solve_daily_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[inf-solve_daily_joint_capacity_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[nan-solve_daily_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[nan-solve_daily_joint_capacity_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[dt4-solve_daily_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[dt4-solve_daily_joint_capacity_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[dt5-solve_daily_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[dt5-solve_daily_joint_capacity_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[dt6-solve_daily_lp]
+FAILED tests/test_delivery_durations.py::test_bad_duration_returns_typed_failure_before_optimisation[dt6-solve_daily_joint_capacity_lp]
+FAILED tests/test_delivery_durations.py::test_duration_vector_cycle_cap_and_canonical_energy
+FAILED tests/test_delivery_durations.py::test_vwap_weights_each_interval_energy
+FAILED tests/test_delivery_durations.py::test_cycle_frontier_keeps_common_mixed_day_and_physical_fec[FI]
+FAILED tests/test_delivery_durations.py::test_cycle_frontier_keeps_common_mixed_day_and_physical_fec[PT]
+FAILED tests/test_delivery_durations.py::test_continuous_replay_slices_duration_vectors_back_to_each_day[FI]
+FAILED tests/test_delivery_durations.py::test_continuous_replay_slices_duration_vectors_back_to_each_day[PT]
+FAILED tests/test_delivery_durations.py::test_project_case_da_accepts_existing_registered_mixed_day[FI]
+FAILED tests/test_delivery_durations.py::test_project_case_da_accepts_existing_registered_mixed_day[PT]
+FAILED tests/test_delivery_durations.py::test_joint_vector_reserve_average_and_cash_are_duration_weighted
+FAILED tests/test_delivery_durations.py::test_unknown_grid_does_not_fabricate_negative_price_hours
+FAILED tests/test_step2_views.py::test_forecast_baseline_reports_its_own_finite_comparison_population[quarter_da]
+FAILED tests/test_step2_views.py::test_forecast_baseline_reports_its_own_finite_comparison_population[missing]
+FAILED tests/test_step2_views.py::test_forecast_baseline_reports_its_own_finite_comparison_population[infinite]
+FAILED tests/test_step2_views.py::test_forecast_baseline_reports_its_own_finite_comparison_population[duplicate]
+FAILED tests/test_step2_views.py::test_forecast_baseline_reports_its_own_finite_comparison_population[none]
+FAILED tests/test_step2_views.py::test_forecast_panel_discloses_da_subset_separately
+FAILED tests/test_step2_views.py::test_real_market_chart_uses_30_physical_days_and_24_hours_warmup[quarter-96]
+FAILED tests/test_step2_views.py::test_real_market_chart_uses_30_physical_days_and_24_hours_warmup[mixed-24]
+FAILED tests/test_step2_views.py::test_rolling_window_clips_a_partial_old_interval_and_ignores_nan
+========================= 82 failed, 8 passed in 1.25s =========================

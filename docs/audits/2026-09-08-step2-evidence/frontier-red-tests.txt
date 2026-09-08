@@ -1,0 +1,21 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 79 items / 77 deselected / 2 selected
+
+tests/test_delivery_durations.py FF                                      [100%]
+
+=================================== FAILURES ===================================
+_______ test_cycle_frontier_keeps_common_mixed_day_and_physical_fec[FI] ________
+tests/test_delivery_durations.py:177: in test_cycle_frontier_keeps_common_mixed_day_and_physical_fec
+    assert summary["valid_days"] == 1
+E   assert 0 == 1
+_______ test_cycle_frontier_keeps_common_mixed_day_and_physical_fec[PT] ________
+tests/test_delivery_durations.py:177: in test_cycle_frontier_keeps_common_mixed_day_and_physical_fec
+    assert summary["valid_days"] == 1
+E   assert 0 == 1
+=========================== short test summary info ============================
+FAILED tests/test_delivery_durations.py::test_cycle_frontier_keeps_common_mixed_day_and_physical_fec[FI]
+FAILED tests/test_delivery_durations.py::test_cycle_frontier_keeps_common_mixed_day_and_physical_fec[PT]
+======================= 2 failed, 77 deselected in 0.07s =======================

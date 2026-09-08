@@ -3,7 +3,9 @@
 ## Step 1: reviewed behavior
 
 Continuous DA and ordinary DA/IDA replay split clean runs when the daily market
-cadence changes. Each segment has one interval duration. SoC carries between
+cadence changes. In Step 1 each segment had one interval duration; the later
+[Step 2 duration contract](delivery-duration-v1.md) admits verified native mixed
+DA days with per-interval durations inside that same partition. SoC carries between
 segments, with terminal-neutral equality reapplied at each segment end, as for
 the existing 576-interval size cap. No input is resampled.
 
@@ -103,13 +105,13 @@ Frozen patches, baseline failures, full-suite logs and portable reproduction
 commands are indexed in the [review evidence](../audits/README.md). The first
 Step 1b snapshot and its review remain distinguishable from the singleton fix.
 
-## Remaining scope after Step 1b
+## Subsequent Step 2 and remaining scope
 
-Step 2 covers interval-duration vectors for local-day-internal resolution
-changes in BG, EE, FI, GR, LT, LV, PT and RO. The FI joint-capacity fixture still
-reports EUR 110.4375 instead of EUR 114. The current regular-day guard remains
-unchanged; neither step resolves that case. Forecast skill's DA-baseline
-coverage disclosure remains a separate item: preserving the forecast's own
-timestamps does not imply complete coverage of its DA comparator. Moving-window calculations,
-dependency bounds, other interaction/visual changes and project-note
-housekeeping retain their separate planned scope.
+The [Step 2 contract](delivery-duration-v1.md) covers native DA duration vectors
+in BG, EE, FI, GR, LT, LV, PT and RO and corrects the FI joint-capacity fixture
+from EUR 110.4375 to EUR 114. It adds a DA-only full-day guard while retaining
+the strict DA/IDA checks above. It also discloses forecast DA-baseline coverage,
+weights the moving average over physical time and sets a tested UI dependency
+floor. See the [Step 2 evidence](../audits/2026-09-08-step2-handoff.md).
+Other interaction/visual changes, DST settlement disclosure and full project-note
+housekeeping remain in the [next-step sequence](../audits/README.md).

@@ -3384,6 +3384,19 @@ def _render_forecast_skill(skill: dict, chart_template: str) -> None:
         "forecast-driven rebid rests on thin ice — widen the deadband."
     )
     by_hour = skill.get("by_hour")
+    baseline_count = int(skill.get("da_baseline_n_points", 0))
+    baseline_coverage = float(skill.get("da_baseline_coverage_pct", 0.0))
+    if baseline_count:
+        st.caption(
+            f"DA baseline comparison: {baseline_count:,}/{skill['n_points']:,} "
+            f"forecast intervals ({baseline_coverage:.1f}%). Skill vs DA uses only "
+            "this common subset: forecast MAE "
+            f"EUR {skill['forecast_mae_on_da_overlap']:.1f}/MWh versus DA MAE "
+            f"EUR {skill['naive_da_mae']:.1f}/MWh. "
+            "Timestamp overlap is a price-space diagnostic, not proof of matching delivery products."
+        )
+    else:
+        st.caption(f"DA baseline coverage unavailable: {skill.get('da_baseline_reason', 'Coverage was not recorded for this result.')}")
     if by_hour is not None and not by_hour.empty:
         fig = go.Figure(
             go.Bar(x=by_hour["hour"], y=by_hour["mae"], marker_color=_C_PRICE_IDA),
