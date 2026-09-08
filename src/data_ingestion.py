@@ -2810,6 +2810,28 @@ def generate_intraday_template_csv() -> str:
     )
 
 
+def _finite_import_numbers(
+    *columns: pd.Series, source: str,
+) -> tuple[pd.Series, ...]:
+    """Coerce non-finite required import numbers to NaN and account by row.
+
+    Call after ``pd.to_numeric(errors="coerce")`` and before each importer's
+    existing invalid-row filter. A row with both an invalid price and volume
+    counts once; surviving-row metadata validation stays with the importer.
+    """
+    finite_masks = tuple(np.isfinite(column.to_numpy()) for column in columns)
+    dropped = int((~np.logical_and.reduce(finite_masks)).sum())
+    if dropped:
+        logger.warning(
+            "Dropped %d %s CSV rows with non-finite price/volume values.",
+            dropped, source,
+        )
+    return tuple(
+        column.where(finite)
+        for column, finite in zip(columns, finite_masks, strict=True)
+    )
+
+
 def _coerce_intraday_sequence(
     values: pd.Series, default_sequence: int,
 ) -> pd.Series:
@@ -2847,8 +2869,8 @@ def parse_intraday_csv(
     is case-insensitive). Optional ``sequence`` (``1/2/3`` or ``IDA1/2/3``)
     and ``zone`` columns fall back to ``default_sequence`` / ``default_zone``
     when absent or blank. Timestamps are coerced to UTC (a naive value is
-    assumed UTC). Negative prices are retained; only unparseable
-    timestamp/price rows are dropped.
+    assumed UTC). Negative prices are retained; unparseable timestamps and
+    non-finite prices are dropped, with numeric-drop counts logged.
 
     Args:
         content: Raw CSV text.
@@ -2882,6 +2904,9 @@ def parse_intraday_csv(
             raw[cols["ida_price_eur_mwh"]], errors="coerce",
         ),
     })
+    (out["intraday_price_eur_mwh"],) = _finite_import_numbers(
+        out["intraday_price_eur_mwh"], source="IDA",
+    )
     # Carry raw sequence/zone so validation runs only on rows that survive the
     # timestamp/price dropna (garbage in an already-dropped row must not fail
     # the whole upload).

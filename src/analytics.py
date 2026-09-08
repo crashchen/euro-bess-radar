@@ -1161,6 +1161,12 @@ def calculate_two_stage_da_id_dispatch(
         .size()
         .to_dict()
     )
+    ida_daily_counts = (
+        ida_local["intraday_price_eur_mwh"].dropna()
+        .groupby(ida_local.dropna(subset=["intraday_price_eur_mwh"]).index.date)
+        .size()
+        .to_dict()
+    )
 
     records = []
     excluded = 0
@@ -1181,9 +1187,16 @@ def calculate_two_stage_da_id_dispatch(
         if sorted_group.isna().any().any() or len(sorted_group) < min_required:
             excluded += 1
             continue
-        # IDA must cover at least 90% of the DA day to be a usable rebid sample.
+        # The intersection must retain at least 90% of EACH source day.
+        # Checking only DA lets hourly DA discard 75% of quarter-hour IDA
+        # while still looking complete. Keep the existing sparse-IDA tolerance.
         da_count = int(da_daily_counts.get(date, 0))
-        if da_count > 0 and len(sorted_group) < round(0.9 * da_count):
+        ida_count = int(ida_daily_counts.get(date, 0))
+        if (
+            da_count > 0 and len(sorted_group) < round(0.9 * da_count)
+        ) or (
+            ida_count > 0 and len(sorted_group) < round(0.9 * ida_count)
+        ):
             excluded += 1
             continue
         result = solve_daily_da_id_dispatch(

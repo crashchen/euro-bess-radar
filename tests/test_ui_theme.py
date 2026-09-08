@@ -18,6 +18,82 @@ from src.pages.simulation_cockpit import (
 )
 from src.ui_theme import cockpit_chart_template
 
+_EXPECTED_CADENCE_SPLIT_CAPTION = (
+    "This window crosses a market resolution change. The continuous horizon "
+    "is split at each cadence change: SoC carries between segments, but "
+    "terminal-neutral equality is reapplied at each segment end."
+)
+
+
+def _cadence_panel_app() -> None:
+    import pandas as pd
+
+    from src.pages.simulation_cockpit import _render_multi_day_summary
+
+    index = pd.date_range("2025-09-30", periods=48, freq="h", tz="UTC")
+    prices = pd.DataFrame({"price_eur_mwh": 50.0}, index=index)
+    _render_multi_day_summary(
+        primary_df=prices,
+        intraday_df=None,
+        dates=sorted(set(index.date)),
+        mode="DA MILP Replay",
+        zone_tz="UTC",
+        power_mw=1.0,
+        duration_hours=4.0,
+        efficiency=1.0,
+        capture_rate=1.0,
+        capex_eur_kwh=0.0,
+        chart_template="plotly_dark",
+    )
+
+
+def _cadence_batch(splits: int) -> pd.DataFrame:
+    batch = pd.DataFrame({
+        "date": pd.date_range("2025-09-30", periods=2).date,
+        "total_revenue_eur": [316.0, 0.0],
+        "annualized_eur_per_mw": [115419.0, 0.0],
+        "daily_fce": [1.0, 0.0],
+    })
+    batch.attrs.update({
+        "n_cadence_splits": splits,
+        "carry_mode": "continuous_horizon",
+        "excluded_days": 0,
+        "model_available": True,
+    })
+    return batch
+
+
+def test_cadence_split_copy_is_verbatim() -> None:
+    import src.pages.simulation_cockpit as cockpit
+
+    assert getattr(cockpit, "_CADENCE_SPLIT_CAPTION", None) == _EXPECTED_CADENCE_SPLIT_CAPTION
+
+
+def test_cadence_split_caption_is_rendered_after_batch_run(monkeypatch) -> None:
+    from streamlit.testing.v1 import AppTest
+
+    import src.pages.simulation_cockpit as cockpit
+
+    monkeypatch.setattr(cockpit, "simulate_replay_batch", lambda *a, **kw: _cadence_batch(1))
+    app = AppTest.from_function(_cadence_panel_app).run(timeout=30)
+    assert not app.exception
+    assert _EXPECTED_CADENCE_SPLIT_CAPTION not in [caption.value for caption in app.caption]
+    app.button(key="simulation_batch_run").click().run(timeout=30)
+    assert not app.exception
+    assert _EXPECTED_CADENCE_SPLIT_CAPTION in [caption.value for caption in app.caption]
+
+
+def test_single_cadence_batch_has_no_split_caption(monkeypatch) -> None:
+    from streamlit.testing.v1 import AppTest
+
+    import src.pages.simulation_cockpit as cockpit
+
+    monkeypatch.setattr(cockpit, "simulate_replay_batch", lambda *a, **kw: _cadence_batch(0))
+    app = AppTest.from_function(_cadence_panel_app).run(timeout=30)
+    app.button(key="simulation_batch_run").click().run(timeout=30)
+    assert not app.exception
+    assert _EXPECTED_CADENCE_SPLIT_CAPTION not in [caption.value for caption in app.caption]
+
 
 def test_cockpit_chart_template_registers_idempotently() -> None:
     """Repeated access should return the same registered template name."""

@@ -91,6 +91,25 @@ def _forced_solver_failure(stage: str) -> dict:
 
 
 class TestStochasticCommitment:
+    @pytest.mark.parametrize("bad_price", [np.inf, -np.inf], ids=["posinf", "neginf"])
+    @pytest.mark.parametrize("bad_field", ["da_prices", "scenarios"])
+    def test_infinite_prices_have_typed_failure_status(
+        self, bad_price: float, bad_field: str,
+    ) -> None:
+        prices = {
+            "da_prices": np.array([20.0, 50.0, 80.0]),
+            "scenarios": np.array([[30.0, 50.0, 70.0], [10.0, 50.0, 90.0]]),
+        }
+        prices[bad_field].flat[1] = bad_price
+
+        result = solve_stochastic_da_commitment(
+            **prices, weights=np.array([0.5, 0.5]), dt=1.0,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "invalid_input"
+        assert "non-finite" in result["message"]
+
     def test_default_path_reports_canonical_tiebreak_applied(self) -> None:
         da = _da_shape(8)
         scen, w = _mean_centred_scenarios(da + 5, 3, 4.0, seed=31)
@@ -368,6 +387,42 @@ class TestStochasticCommitment:
 
 class TestStochasticExecution:
     """Increment B2: forecast-driven realised execution + decomposition."""
+
+    @pytest.mark.parametrize("bad_price", [np.inf, -np.inf], ids=["posinf", "neginf"])
+    @pytest.mark.parametrize("bad_field", ["base_forecast", "ida_realised"])
+    def test_infinite_prices_have_typed_failure_status(
+        self, bad_price: float, bad_field: str,
+    ) -> None:
+        da = np.array([20.0, 50.0, 80.0])
+        prices = {field: da.copy() for field in ("base_forecast", "ida_realised")}
+        prices[bad_field][1] = bad_price
+
+        result = solve_stochastic_da_id_dispatch(
+            da, da[None, :], np.array([1.0]), **prices, dt=1.0,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "invalid_input"
+        assert result["failure_stage"] == "input"
+        assert "non-finite" in result["message"]
+
+    @pytest.mark.parametrize("bad_price", [np.inf, -np.inf], ids=["posinf", "neginf"])
+    @pytest.mark.parametrize("bad_field", ["da_prices", "base_forecast", "ida_realised"])
+    def test_myopic_infinite_prices_have_typed_failure_status(
+        self, bad_price: float, bad_field: str,
+    ) -> None:
+        prices = {
+            field: np.array([20.0, 50.0, 80.0])
+            for field in ("da_prices", "base_forecast", "ida_realised")
+        }
+        prices[bad_field][1] = bad_price
+
+        result = solve_myopic_capped_da_id_dispatch(**prices, dt=1.0)
+
+        assert result["success"] is False
+        assert result["status"] == "invalid_input"
+        assert result["failure_stage"] == "input"
+        assert "non-finite" in result["message"]
 
     @staticmethod
     def _case(n=12, s=6, seed=0, spread=5.0):
@@ -713,6 +768,27 @@ class TestStochasticReserveCommitment:
     solution sitting at the allowed bound can trip the backstop — a benign
     fallback, but core fixtures must have ZERO Stage-0 fallback per §2.2).
     """
+
+    @pytest.mark.parametrize("bad_price", [np.inf, -np.inf], ids=["posinf", "neginf"])
+    @pytest.mark.parametrize("bad_field", ["da_forecast", "scenarios"])
+    def test_infinite_prices_have_typed_failure_status(
+        self, bad_price: float, bad_field: str,
+    ) -> None:
+        prices = {
+            "da_forecast": np.array([20.0, 50.0, 80.0]),
+            "scenarios": np.array([[30.0, 50.0, 70.0], [10.0, 50.0, 90.0]]),
+        }
+        prices[bad_field].flat[1] = bad_price
+
+        result = solve_stochastic_reserve_commitment(
+            **prices, weights=np.array([0.5, 0.5]), dt=1.0,
+            reserve_price_forecast_eur_mw_h=5.0,
+        )
+
+        assert result["success"] is False
+        assert result["status"] == "invalid_input"
+        assert result["skipped"] is False
+        assert "non-finite" in result["message"]
 
     @staticmethod
     def _dispersed_case(n: int = 8, amp: float = 40.0):
@@ -1118,6 +1194,31 @@ class TestStochasticTripleDispatch:
     (deadband inert, commit-under-forecast/settle-at-realised, skip-ordering,
     selector-disabled ceilings per §4).
     """
+
+    @pytest.mark.parametrize("bad_price", [np.inf, -np.inf], ids=["posinf", "neginf"])
+    @pytest.mark.parametrize("bad_field", ["da_prices", "realised_ida"])
+    def test_v2_ceiling_infinite_prices_have_typed_failure_status(
+        self, bad_price: float, bad_field: str,
+    ) -> None:
+        prices = {
+            field: np.array([20.0, 50.0, 80.0])
+            for field in ("da_prices", "realised_ida")
+        }
+        prices[bad_field][1] = bad_price
+        kwargs = dict(
+            dt=1.0, reserve_price_realised_eur_mw_h=5.0, power_mw=1.0,
+            duration_hours=1.0, efficiency=0.88, soc_init_frac=0.5,
+            rebid_cap_mw=None, availability=0.95,
+        )
+
+        result = stochastic_dispatch._stochastic_coopt_ceiling_v2_result(**prices, **kwargs)
+
+        assert result["success"] is False
+        assert result["status"] == "invalid_input"
+        assert result["failure_stage"] == "coopt_ceiling_v2"
+        assert "non-finite" in result["message"]
+        # The public scalar API retains its established unavailable-value contract.
+        assert np.isnan(stochastic_coopt_ceiling_v2(**prices, **kwargs))
 
     @staticmethod
     def _case(n: int = 8, seed: int = 0):

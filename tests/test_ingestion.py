@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import ClassVar
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pandas as pd
 import pytest
 import requests
@@ -2608,6 +2609,57 @@ class TestFetchIntradayPrices:
 # ── Test 14b: Manual IDA CSV import ─────────────────────────────────────────
 
 class TestParseIntradayCsv:
+    @pytest.mark.parametrize("bad_price", ["inf", "-inf"])
+    def test_nonfinite_price_is_dropped_before_persistence(
+        self, bad_price, tmp_path, monkeypatch, caplog,
+    ) -> None:
+        """F3/T6: a 24-row upload cannot persist an infinite 13th price."""
+        from src import data_ingestion as di
+
+        monkeypatch.setattr(di, "DB_PATH", tmp_path / "bess.db")
+        timestamps = pd.date_range("2026-01-01", periods=24, freq="h", tz="UTC")
+        content = "timestamp,ida_price_eur_mwh,sequence,zone\n" + "".join(
+            f"{ts.isoformat()},{bad_price if i == 12 else i - 5},2,DE_LU\n"
+            for i, ts in enumerate(timestamps)
+        )
+        with caplog.at_level(logging.WARNING):
+            parsed = parse_intraday_csv(content)
+
+        assert len(parsed) == 23
+        assert timestamps[12] not in parsed.index
+        assert np.isfinite(parsed["intraday_price_eur_mwh"]).all()
+        assert parsed["intraday_price_eur_mwh"].iloc[0] == -5.0
+        assert parsed["intraday_price_eur_mwh"].iloc[5] == 0.0
+        warnings = [record.message for record in caplog.records if record.levelno == logging.WARNING]
+        assert len(warnings) == 1
+        assert "Dropped 1" in warnings[0] and "non-finite" in warnings[0]
+
+        summaries = persist_intraday_frame(parsed)
+        assert summaries[0]["rows"] == 23
+        cached = read_intraday_cache(
+            "DE_LU", timestamps[0], timestamps[0] + pd.Timedelta(days=1), sequence=2,
+        )
+        assert cached is not None and len(cached) == 23
+        assert np.isfinite(cached["intraday_price_eur_mwh"]).all()
+        assert di.read_intraday_sources()[("DE_LU", 2)]["source"] == di.IDA_SOURCE_MANUAL
+
+    @pytest.mark.parametrize("bad_price", ["inf", "-inf"])
+    def test_nonfinite_rows_preserve_all_dropped_and_validation_order(
+        self, bad_price, caplog,
+    ) -> None:
+        header = "timestamp,ida_price_eur_mwh,sequence,zone\n"
+        bad_row = f"2026-01-01T00:00:00+00:00,{bad_price},bogus,XX_FAKE\n"
+        with caplog.at_level(logging.WARNING):
+            with pytest.raises(ValueError, match="No valid IDA rows"):
+                parse_intraday_csv(header + bad_row)
+            parsed = parse_intraday_csv(
+                header + bad_row + "2026-01-01T01:00:00+00:00,50,IDA3,NL\n",
+            )
+        assert len(parsed) == 1
+        assert parsed["sequence"].iloc[0] == 3
+        assert parsed["zone"].iloc[0] == "NL"
+        assert sum("Dropped 1" in record.message for record in caplog.records) == 2
+
     def test_template_round_trips(self) -> None:
         df = parse_intraday_csv(generate_intraday_template_csv(), default_zone="DE_LU")
         assert list(df.columns) == ["zone", "sequence", "intraday_price_eur_mwh"]

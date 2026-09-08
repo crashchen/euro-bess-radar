@@ -1248,6 +1248,39 @@ class TestTwoStageDaIdDispatch:
         diff = (result["total_cash"] - (result["da_revenue"] + result["rebid_uplift"])).abs()
         assert diff.max() < 0.01
 
+    def test_finer_ida_cannot_pass_da_only_coverage_gate(self) -> None:
+        """A full DA day cannot conceal 72 discarded quarter-hour IDA periods."""
+        da_index = pd.date_range("2025-09-01", periods=24, freq="h", tz="UTC")
+        ida_index = pd.date_range("2025-09-01", periods=96, freq="15min", tz="UTC")
+        da = pd.DataFrame({"price_eur_mwh": 50.0}, index=da_index)
+        ida = pd.DataFrame(
+            {"intraday_price_eur_mwh": np.tile([20.0, 100.0, 20.0, 20.0], 24)},
+            index=ida_index,
+        )
+
+        result = calculate_two_stage_da_id_dispatch(da, ida, tz="UTC", efficiency=1.0)
+
+        assert result.empty
+        assert result.attrs["observed_days"] == 1
+        assert result.attrs["valid_days"] == 0
+        assert result.attrs["excluded_days_due_to_missing"] == 1
+        assert result.attrs["excluded_days_due_to_solver_failure"] == 0
+        assert result.attrs["model_available"] is False
+
+    def test_ida_missing_one_hour_preserves_legacy_coverage_tolerance(self) -> None:
+        """The symmetric gate keeps the existing 23/24 hourly sample policy."""
+        index = pd.date_range("2025-09-01", periods=24, freq="h", tz="UTC")
+        da = pd.DataFrame({"price_eur_mwh": [20.0] * 12 + [100.0] * 12}, index=index)
+        ida = da.rename(columns={"price_eur_mwh": "intraday_price_eur_mwh"}).drop(index[8])
+
+        result = calculate_two_stage_da_id_dispatch(da, ida, tz="UTC", efficiency=1.0)
+
+        assert len(result) == 1
+        assert result.attrs["valid_days"] == 1
+        assert result.attrs["excluded_days_due_to_missing"] == 0
+        assert result.attrs["model_available"] is True
+        assert result.iloc[0]["total_cash"] > 0.0
+
     def test_mixed_resolution_same_physical_shape_same_revenue(self) -> None:
         """Two adjacent days with identical 24h physical price shape, one at
         60-min cadence and one at 15-min cadence. Per-day dt must give both

@@ -15,7 +15,11 @@ from src.config import (
     ANCILLARY_ENERGY_ACTIVATION_SHARE,
     HOURS_PER_YEAR,
 )
-from src.data_ingestion import DataSourceParseError, validate_import_zone
+from src.data_ingestion import (
+    DataSourceParseError,
+    _finite_import_numbers,
+    validate_import_zone,
+)
 from src.time_utils import (
     gb_settlement_period_to_utc,
     parse_regelleistung_time_block_start,
@@ -336,8 +340,8 @@ def parse_imbalance_import_csv(
     is given. ``imbalance_price_eur_mwh`` is treated as a published cash-flow
     settlement price, so positive/negative signs are preserved and no direction
     sign flip is applied. ``system_imbalance_volume_mw`` is kept SYSTEM/area
-    level exactly as imported. Rows with an unparseable timestamp, price, or
-    volume are dropped.
+    level exactly as imported. Rows with an unparseable timestamp or non-finite
+    price/volume are dropped, with numeric-drop counts logged.
 
     Returns a frame indexed by UTC ``timestamp`` with columns ``zone``,
     ``imbalance_price_eur_mwh``, and ``system_imbalance_volume_mw``. Raises
@@ -366,6 +370,7 @@ def parse_imbalance_import_csv(
 
     price = pd.to_numeric(raw["imbalance_price_eur_mwh"], errors="coerce")
     volume = pd.to_numeric(raw["system_imbalance_volume_mw"], errors="coerce")
+    price, volume = _finite_import_numbers(price, volume, source="Imbalance")
     tz_col = raw["timezone"] if "timezone" in raw.columns else None
     index = _import_utc_index(raw["timestamp"], tz_col)
     valid = price.notna().to_numpy() & volume.notna().to_numpy() & ~pd.isna(index)
@@ -471,7 +476,8 @@ def parse_capacity_import_csv(
     ``capacity_price_eur_mw_h`` maps to the established frame column
     ``capacity_price_eur_mw`` (same unit), and ``product_type``/``direction``
     are kept faithful to the CSV (direction is NOT folded into the product
-    label here). Rows with an unparseable timestamp or price are dropped.
+    label here). Rows with an unparseable timestamp or non-finite price are
+    dropped, with numeric-drop counts logged.
 
     Returns a standard ancillary frame (timestamp-indexed, UTC) ready to merge
     via ``build_ancillary_dataset``. Raises ``DataSourceParseError`` on missing
@@ -498,6 +504,7 @@ def parse_capacity_import_csv(
         )
 
     price = pd.to_numeric(raw["capacity_price_eur_mw_h"], errors="coerce")
+    (price,) = _finite_import_numbers(price, source="Capacity")
     tz_col = raw["timezone"] if "timezone" in raw.columns else None
     index = _import_utc_index(raw["timestamp"], tz_col)
     valid = price.notna().to_numpy() & ~pd.isna(index)
@@ -579,7 +586,8 @@ def parse_activation_import_csv(
     strictness as the capacity/IDA importers. ``system_activated_volume_mw`` is
     kept SYSTEM-level exactly as imported — the asset/capture share is a model
     assumption applied downstream, NEVER multiplied in here (red-line). Rows with
-    an unparseable timestamp, price, or volume are dropped.
+    an unparseable timestamp or non-finite price/volume are dropped, with
+    numeric-drop counts logged.
 
     Returns a frame indexed by UTC ``timestamp`` with columns ``zone``,
     ``product_type``, ``direction``, ``activation_price_eur_mwh``,
@@ -609,6 +617,7 @@ def parse_activation_import_csv(
 
     price = pd.to_numeric(raw["activation_price_eur_mwh"], errors="coerce")
     volume = pd.to_numeric(raw["system_activated_volume_mw"], errors="coerce")
+    price, volume = _finite_import_numbers(price, volume, source="Activation")
     tz_col = raw["timezone"] if "timezone" in raw.columns else None
     index = _import_utc_index(raw["timestamp"], tz_col)
     valid = price.notna().to_numpy() & volume.notna().to_numpy() & ~pd.isna(index)
