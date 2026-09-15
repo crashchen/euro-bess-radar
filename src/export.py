@@ -19,9 +19,11 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from src.analytics import (
+    UNAVAILABLE_DISPLAY,
     build_price_heatmap,
     calculate_negative_price_hours,
     filter_to_complete_local_days,
+    negative_price_hours_reason,
 )
 from src.config import CACHE_DIR
 from src.data_ingestion import summarize_price_data_quality
@@ -461,7 +463,15 @@ def _build_summary_sheet(
         )
     row += 1
 
-    row = _write_kv_pair(ws, row, "Negative Price Hours", negative_stats["negative_hours"])
+    neg_hours_reason = negative_price_hours_reason(negative_stats)
+    row = _write_kv_pair(
+        ws, row, "Negative Price Hours",
+        UNAVAILABLE_DISPLAY if neg_hours_reason else negative_stats["negative_hours"],
+    )
+    if neg_hours_reason:
+        row = _write_kv_pair(
+            ws, row, "Negative Price Hours Unavailable Because", neg_hours_reason,
+        )
     row = _write_kv_pair(
         ws, row, "Negative Price Intervals", negative_stats["negative_intervals"],
     )
@@ -2407,8 +2417,14 @@ def _build_pdf_report(
         rows.append(("Cash NPV Includes Shadow Wear",
                      str(revenue_estimate["cash_npv_includes_shadow_wear"])))
     rows.append(("", ""))
-    rows.append(("Negative Price Hours",
-                  str(negative_stats.get("negative_hours", 0))))
+    neg_hours_reason = negative_price_hours_reason(negative_stats)
+    rows.append((
+        "Negative Price Hours",
+        UNAVAILABLE_DISPLAY if neg_hours_reason
+        else str(negative_stats.get("negative_hours", 0)),
+    ))
+    if neg_hours_reason:
+        rows.append(("Negative Price Hours Unavailable Because", neg_hours_reason))
     rows.append(("Negative Price Intervals",
                   str(negative_stats.get("negative_intervals", 0))))
     rows.append(("Negative Price % of Intervals",

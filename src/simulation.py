@@ -1400,6 +1400,10 @@ def simulate_sequential_da_id_reserve_batch(
             "forecast_effect_eur": result["forecast_cost_eur"],
             "timing_cost_eur": result["timing_cost_eur"],
             "full_gap_eur": result["full_gap_eur"],
+            # Unweighted mean: this path's public contract is scalar
+            # interval_hours, so every interval carries the same duration
+            # and the arithmetic mean equals the duration-weighted one.
+            # See docs/design/delivery-duration-v1.md "Reserve average power".
             "avg_reserve_mw": float(np.mean(result["reserve_mw"])),
         })
 
@@ -2233,6 +2237,10 @@ def _triple_stochastic_day(
         "distribution_value_eur": (
             stoch["realised_total_eur"] - coopt["realised_total_eur"]
         ),
+        # Unweighted means: the stochastic triple path is scalar-dt only, so
+        # these equal their duration-weighted counterparts. Generalising this
+        # path to a duration vector requires weighting them first — see
+        # docs/design/delivery-duration-v1.md "Reserve average power".
         "myopic_avg_reserve_mw": float(np.mean(myopic_stage0["reserve_mw"])),
         "stochastic_avg_reserve_mw": float(np.mean(stoch["reserve_mw"])),
         "stage0_skipped": bool(stoch["stage0_skipped"]),

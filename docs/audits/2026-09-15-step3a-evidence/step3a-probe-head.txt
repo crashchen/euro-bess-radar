@@ -1,0 +1,29 @@
+[1] unverifiable grid, 24 negative hourly intervals + one unknown day
+    negative_hours          = nan
+    negative_intervals      = 24
+    pct_negative            = 88.89
+    negative_hours_reason   = 'the delivery interval grid could not be verified on 2026-01-02 (local date of the first unverified day)'
+    Excel 'Negative Price Hours'                  = 'n/a'
+    Excel 'Negative Price Hours Unavailable Because' = 'the delivery interval grid could not be verified on 2026-01-02 (local date of the first unverified day)'
+    Excel 'Negative Price Intervals'              = 24
+    PDF summary excerpt = 'Negative Price Hours n/a Negative Price Hours Unavailable Because the delivery interval grid could not be verified on 2026-01-02 (local date of the first unverified day) '
+    PDF contains literal 'nan' = False
+    control (48 verifiable negative hours): Excel cell = 48 | reason row present = False
+
+[2] market page with a defective price index
+    duplicate exception=None
+              price_ts traces=['Day-Ahead']
+              errors=[]
+              warnings=['30-Day MA is unavailable because the price index repeats the same deli']
+    unsorted  exception=None
+              price_ts traces=None
+              errors=['Day-Ahead price chart and 30-Day MA are unavailable because the price ']
+              warnings=[]
+    nat       exception=None
+              price_ts traces=None
+              errors=['Day-Ahead price chart and 30-Day MA are unavailable because the price ']
+              warnings=[]
+    clean     exception=None
+              price_ts traces=['Day-Ahead', '30-Day MA']
+              errors=[]
+              warnings=[]

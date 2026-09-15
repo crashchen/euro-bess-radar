@@ -14,8 +14,9 @@ bytes, including the space prefix on blank context lines.
 |---|---|---|
 | Step 1 | `8f9eab7` → `3823acd`; merged in [#86](https://github.com/crashchen/euro-bess-radar/pull/86) as `850343d` | [Specification](2026-09-08-step1-spec.md), [acceptance and evidence](2026-09-08-step1-handoff.md) |
 | Step 1b, first review | `3823acd` → `0b5d718`; 1747 passed / 2 skipped locally and independently reproduced by the user's reviewer | [Frozen historical handoff](2026-09-08-step1b-handoff.md) |
-| Step 1b, singleton correction | Increment relative to `0b5d718`, in [#87](https://github.com/crashchen/euro-bess-radar/pull/87), now targeting main | [Current handoff](2026-09-08-step1b-r2-handoff.md), [PR description](2026-09-08-step1b-pr.md) |
-| Step 2 | Increment relative to `c46aaf9`, stacked on #87 | [Duration contract](../design/delivery-duration-v1.md), [handoff and evidence](2026-09-08-step2-handoff.md) |
+| Step 1b, singleton correction | Increment relative to `0b5d718`; merged in [#87](https://github.com/crashchen/euro-bess-radar/pull/87) as `140fed5` | [Current handoff](2026-09-08-step1b-r2-handoff.md), [PR description](2026-09-08-step1b-pr.md) |
+| Step 2 | Increment relative to `c46aaf9`, stacked on #87; merged in [#88](https://github.com/crashchen/euro-bess-radar/pull/88) as `95f6d09` | [Duration contract](../design/delivery-duration-v1.md), [handoff and evidence](2026-09-08-step2-handoff.md) |
+| Step 3A | Increment relative to `95f6d09` | [Handoff and evidence](2026-09-15-step3a-handoff.md) |
 
 The original Step 1b patch is unchanged: its SHA-256 remains
 `a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12`.
@@ -30,6 +31,7 @@ historical retain their original validation counts and limitations; use the
 shasum -a 256 docs/audits/2026-09-08-evidence/*source.patch
 PYTHONPATH=. .venv/bin/python docs/audits/2026-09-08-evidence/step1-residual-probe.py
 PYTHONPATH=. .venv/bin/python docs/audits/2026-09-08-evidence/step1b-r2-probe.py
+PYTHONPATH=. .venv/bin/python docs/audits/2026-09-15-step3a-evidence/step3a-probe.py
 .venv/bin/python -m pytest tests/test_market_grid_guards.py -q
 .venv/bin/python -m pytest tests/ -q
 ```
@@ -43,16 +45,28 @@ Remote CI status is attached to each PR's exact head in GitHub Checks.
 
 ## Remaining optimization sequence
 
-Step 2 is implemented for the bounded native DA contract, FI physical capacity
-cash, forecast comparator coverage, physical-time moving average and the UI
-runtime floor. It is awaiting the user's combined external review with #87.
+Steps 1, 1b and 2 are merged. Step 2 delivered the bounded native DA contract,
+FI physical capacity cash, forecast comparator coverage, the physical-time
+moving average and the UI runtime floor, and was externally reviewed with #87
+before #88 merged. Step 3 is split into four separately reviewed increments.
 
-1. Step 3: retain replay results across unrelated reruns using the existing
-   fingerprint pattern; make monetary KPIs and Project Case quantiles readable
-   at desktop and mobile widths; clarify DST capacity settlement conventions.
-2. Step 4: reconcile README, CLAUDE.md, validation instructions and project notes
-   against verified behavior. The current publication repairs the audit evidence
-   trail; it is not a claim that all documentation or Vault housekeeping is done.
+1. Step 3A (this increment): show an explained `n/a` wherever a physical
+   duration cannot be verified, name the compatibility CI job accurately,
+   replace the market page's bare index exception with a visible diagnostic,
+   and record the reserve-average-power uniform-grid premise.
+2. Step 3B: retain batch replay and forecast results across unrelated reruns
+   behind a content fingerprint, marking stale results and blocking their
+   downloads.
+3. Step 3C: put the overall average price on the shared duration-weighted
+   basis across all four consumers, and make key monetary values and
+   quantiles readable at desktop and mobile widths.
+4. Step 3D: disclose the zone/product-qualified DST capacity settlement basis
+   on the pages, the strategy table and the exports, retaining both existing
+   sets of numbers.
+5. Step 4: reconcile README, CLAUDE.md, validation instructions and project
+   notes against verified behavior, against one dated verification snapshot.
+   The current publication repairs the audit evidence trail; it is not a claim
+   that all documentation or Vault housekeeping is done.
 
 External reviewer results here were supplied by the user. This task did not
 invoke or send code to CC or another external reviewer.

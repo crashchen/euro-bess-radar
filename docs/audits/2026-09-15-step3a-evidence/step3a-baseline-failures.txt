@@ -1,0 +1,22 @@
+tests/test_step3a_display_contract.py:327: in test_page_discloses_unverifiable_negative_hours_without_dropping_counts
+    assert any(
+E   assert False
+E    +  where False = any(<generator object test_page_discloses_unverifiable_negative_hours_without_dropping_counts.<locals>.<genexpr> at 0x132b631d0>)
+----------------------------- Captured stderr call -----------------------------
+2026-09-15 15:41:25.786 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+=========================== short test summary info ============================
+FAILED tests/test_step3a_display_contract.py::test_unverifiable_grid_reports_a_reason_and_keeps_interval_counts
+FAILED tests/test_step3a_display_contract.py::test_verifiable_grid_has_no_reason[-50.0-48.0]
+FAILED tests/test_step3a_display_contract.py::test_verifiable_grid_has_no_reason[50.0-0.0]
+FAILED tests/test_step3a_display_contract.py::test_excel_summary_shows_na_and_reason_for_unverifiable_hours
+FAILED tests/test_step3a_display_contract.py::test_pdf_summary_shows_na_and_reason_instead_of_a_literal_nan
+FAILED tests/test_step3a_display_contract.py::test_pdf_reason_row_fits_inside_the_page_margins
+FAILED tests/test_step3a_display_contract.py::test_defective_index_is_classified[duplicate-True-repeats the same delivery timestamp]
+FAILED tests/test_step3a_display_contract.py::test_defective_index_is_classified[unsorted-False-not sorted into delivery order]
+FAILED tests/test_step3a_display_contract.py::test_defective_index_is_classified[nat-False-unset (NaT) timestamps]
+FAILED tests/test_step3a_display_contract.py::test_clean_index_has_no_issue
+FAILED tests/test_step3a_display_contract.py::test_repeated_timestamps_keep_the_raw_chart_but_drop_the_moving_average
+FAILED tests/test_step3a_display_contract.py::test_unplottable_index_reports_a_reason_and_clears_the_stale_export_figure[unsorted-not sorted into delivery order]
+FAILED tests/test_step3a_display_contract.py::test_unplottable_index_reports_a_reason_and_clears_the_stale_export_figure[nat-unset (NaT) timestamps]
+FAILED tests/test_step3a_display_contract.py::test_page_discloses_unverifiable_negative_hours_without_dropping_counts
+========================= 14 failed, 7 passed in 0.70s =========================

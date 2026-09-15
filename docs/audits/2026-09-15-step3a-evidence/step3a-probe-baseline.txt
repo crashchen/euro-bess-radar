@@ -1,0 +1,89 @@
+2026-09-15 15:32:56.576 Uncaught app execution
+Traceback (most recent call last):
+  File "<repo>/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "<repo>/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmp_pjc97ox/e8f687628494381ea508aad2717409e0", line 35, in <module>
+    _page_app(*__args, **__kwargs)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmp_pjc97ox/e8f687628494381ea508aad2717409e0", line 28, in _page_app
+    render("DE_LU", frame, daily, calculate_spread_percentiles(daily),
+    ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+           calculate_negative_price_hours(frame), 1, "UTC", "plotly_dark", figures)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<repo>/src/pages/market_overview.py", line 90, in render
+    ma_series = time_weighted_rolling_price_mean(primary_df["price_eur_mwh"])
+  File "<repo>/src/analytics.py", line 103, in time_weighted_rolling_price_mean
+    raise ValueError("Rolling prices require unique increasing finite timestamps")
+ValueError: Rolling prices require unique increasing finite timestamps
+2026-09-15 15:32:56.592 Uncaught app execution
+Traceback (most recent call last):
+  File "<repo>/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "<repo>/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmp_pjc97ox/e8f687628494381ea508aad2717409e0", line 35, in <module>
+    _page_app(*__args, **__kwargs)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmp_pjc97ox/e8f687628494381ea508aad2717409e0", line 28, in _page_app
+    render("DE_LU", frame, daily, calculate_spread_percentiles(daily),
+    ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+           calculate_negative_price_hours(frame), 1, "UTC", "plotly_dark", figures)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<repo>/src/pages/market_overview.py", line 90, in render
+    ma_series = time_weighted_rolling_price_mean(primary_df["price_eur_mwh"])
+  File "<repo>/src/analytics.py", line 103, in time_weighted_rolling_price_mean
+    raise ValueError("Rolling prices require unique increasing finite timestamps")
+ValueError: Rolling prices require unique increasing finite timestamps
+2026-09-15 15:32:56.611 Uncaught app execution
+Traceback (most recent call last):
+  File "<repo>/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "<repo>/.venv/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmp_pjc97ox/e8f687628494381ea508aad2717409e0", line 35, in <module>
+    _page_app(*__args, **__kwargs)
+    ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmp_pjc97ox/e8f687628494381ea508aad2717409e0", line 28, in _page_app
+    render("DE_LU", frame, daily, calculate_spread_percentiles(daily),
+    ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+           calculate_negative_price_hours(frame), 1, "UTC", "plotly_dark", figures)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<repo>/src/pages/market_overview.py", line 90, in render
+    ma_series = time_weighted_rolling_price_mean(primary_df["price_eur_mwh"])
+  File "<repo>/src/analytics.py", line 103, in time_weighted_rolling_price_mean
+    raise ValueError("Rolling prices require unique increasing finite timestamps")
+ValueError: Rolling prices require unique increasing finite timestamps
+[1] unverifiable grid, 24 negative hourly intervals + one unknown day
+    negative_hours          = nan
+    negative_intervals      = 24
+    pct_negative            = 88.89
+    negative_hours_reason   = None
+    Excel 'Negative Price Hours'                  = None
+    Excel 'Negative Price Hours Unavailable Because' = None
+    Excel 'Negative Price Intervals'              = 24
+    PDF summary excerpt = 'Negative Price Hours nan Negative Price Intervals 24 Negative Price % of Intervals 88.9%'
+    PDF contains literal 'nan' = True
+    control (48 verifiable negative hours): Excel cell = 48 | reason row present = False
+
+[2] market page with a defective price index
+    duplicate exception='Rolling prices require unique increasing finite timestamps'
+              price_ts traces='<not reached>'
+              errors=[]
+              warnings=[]
+    unsorted  exception='Rolling prices require unique increasing finite timestamps'
+              price_ts traces='<not reached>'
+              errors=[]
+              warnings=[]
+    nat       exception='Rolling prices require unique increasing finite timestamps'
+              price_ts traces='<not reached>'
+              errors=[]
+              warnings=[]
+    clean     exception=None
+              price_ts traces=['Day-Ahead', '30-Day MA']
+              errors=[]
+              warnings=[]

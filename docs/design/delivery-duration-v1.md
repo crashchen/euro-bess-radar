@@ -67,6 +67,24 @@ still choose fractional power within a native product.
 
 Negative-price hours sum delivery durations. Unknown irregular grids retain
 the observed negative-interval count but report hours as unavailable.
+`calculate_negative_price_hours` carries `negative_hours_reason`, naming the
+first local date whose grid could not be verified, and
+`negative_price_hours_display` is the one rendering shared by the page, the
+Excel summary and the PDF summary. All three show `n/a` plus that reason,
+never a raw NaN, a literal `nan` string or a substituted zero. The observed
+interval count, its share of intervals and the average/most negative prices
+remain real numbers, because they are counts rather than durations.
+
+`describe_price_index_issue` is the single definition of a usable price index
+shared by the trailing mean and the pages that explain its absence.
+`time_weighted_rolling_price_mean` still rejects a defective index. The market
+page classifies the defect before calling it rather than catching its error,
+so an unrelated programming error is never presented as unavailable data.
+Repeated delivery timestamps suppress only the trailing mean and are disclosed;
+an unsorted index or an unset (NaT) timestamp additionally suppresses the price
+chart, because drawing those rows in their given order would misrepresent the
+market, and the corresponding PDF export figure is dropped in the same branch.
+Rows are never reordered, de-duplicated or gap-filled to make a chart drawable.
 
 The market price chart's 30-Day MA uses the trailing 720 physical hours through
 each delivery interval's end. Prices are weighted by the covered portion of
@@ -83,6 +101,23 @@ compares both errors on that same subset, with its forecast MAE disclosed.
 Duplicate DA timestamps make only the DA comparator unavailable; they cannot
 multiply the main forecast population. Timestamp overlap is a price-space
 diagnostic and is explicitly not proof of matching delivery products.
+
+## Reserve average power
+
+`solve_daily_joint_capacity_lp` reports `avg_reserve_mw` as a duration-weighted
+average, matching its duration-weighted capacity cash. The sequential reserve
+and stochastic triple batches report their `avg_reserve_mw`,
+`myopic_avg_reserve_mw` and `stochastic_avg_reserve_mw` as unweighted means.
+That is not a present-day error: those paths keep a scalar `interval_hours`
+public contract, so every interval carries the same duration and the two
+averages coincide. It is recorded here because the equality is a premise,
+not an invariant of the expression.
+
+Extending any of those paths to a duration vector must first make these
+reporting means duration weighted and add a nonuniform known-answer case;
+a mixed-duration day would otherwise let dense intervals dominate a reported
+average power. This step does not generalise the sequential or stochastic
+`dt`, and does not change any settled cash.
 
 ## Runtime and validation
 
