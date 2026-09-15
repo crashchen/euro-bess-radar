@@ -38,6 +38,22 @@
 - 未泛化顺序／随机策略的 vector dt；F4 只落文档与注释。
 - 未写入真实市场缓存；未删除或改写既有测试。
 
+## 冻结与独立复现
+
+- 基线：`95f6d09e0bfc99f1022e45c72fbdebcd3465d6a0`。分支 `step3a-display-contract-repairs`。
+- [冻结代码补丁](2026-09-15-step3a-evidence/step3a-code.patch)，SHA-256：
+  `88c1837b6f0adff7b3def14d73cba3e6f96b7ce49410ab9ab0b6a678a2474962`。
+- hash 范围为 `src/ tests/ .github/workflows/ci.yml`；文档与日志不在代码 hash 内。
+  新测试文件已加入版本控制，不会因 untracked 漏出补丁。
+  Step 1、1b、1b-R2、Step 2 的原有补丁保持原字节。
+
+在本分支检出执行：
+
+```sh
+git diff --binary --full-index 95f6d09e0bfc99f1022e45c72fbdebcd3465d6a0 HEAD -- src/ tests/ .github/workflows/ci.yml | shasum -a 256
+shasum -a 256 docs/audits/2026-09-15-step3a-evidence/step3a-code.patch
+```
+
 ## 验证
 
 ```sh
