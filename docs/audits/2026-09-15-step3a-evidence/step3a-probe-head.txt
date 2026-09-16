@@ -1,3 +1,7 @@
+2026-09-16 02:20:35.592 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-16 02:20:35.748 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-16 02:20:35.766 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-16 02:20:35.783 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
 [1] unverifiable grid, 24 negative hourly intervals + one unknown day
     negative_hours          = nan
     negative_intervals      = 24
@@ -9,6 +13,23 @@
     PDF summary excerpt = 'Negative Price Hours n/a Negative Price Hours Unavailable Because the delivery interval grid could not be verified on 2026-01-02 (local date of the first unverified day) '
     PDF contains literal 'nan' = False
     control (48 verifiable negative hours): Excel cell = 48 | reason row present = False
+
+[1b] 47 positive hours + one negative price at an unset (NaT) instant
+    negative_hours          = nan
+    negative_intervals      = 1
+    pct_negative            = 2.08
+    avg_negative_price      = -50.0
+    negative_hours_reason   = '1 record(s) carry an unset (NaT) delivery timestamp, so the delivery interval grid could not be verified'
+    Excel 'Negative Price Hours'                  = 'n/a'
+    Excel 'Negative Price Hours Unavailable Because' = '1 record(s) carry an unset (NaT) delivery timestamp, so the delivery interval grid could not be verified'
+    Excel 'Negative Price Intervals'              = 1
+    PDF summary excerpt = 'Negative Price Hours n/a Negative Price Hours Unavailable Because 1 record(s) carry an unset (NaT) delivery timestamp, so the delivery interval grid could not be verified'
+    PDF contains literal 'nan' = False
+
+[1c] Excel reason label readability
+    label length=40 column A width=30.0
+    value cell B occupied=True
+    wrap_text=True row height=30.0
 
 [2] market page with a defective price index
     duplicate exception=None

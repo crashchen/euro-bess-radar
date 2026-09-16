@@ -43,6 +43,19 @@ def unverifiable_frame() -> pd.DataFrame:
     )
 
 
+def unset_instant_frame() -> pd.DataFrame:
+    """47 ordinary positive hours plus a negative price with no delivery instant.
+
+    Grouping by local date drops a NaT key, so this record never reaches the
+    delivery-grid check. Codex raised it as the Step 3A counterexample.
+    """
+    index = pd.DatetimeIndex(
+        [*pd.date_range("2026-01-01", periods=47, freq="h", tz="UTC"), pd.NaT],
+        name="timestamp",
+    )
+    return pd.DataFrame({"price_eur_mwh": [60.0] * 47 + [-50.0]}, index=index)
+
+
 def pdf_text(data: bytes) -> str:
     chunks: list[str] = []
     for stream in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", data, re.S):
@@ -102,6 +115,46 @@ def probe_negative_hours(out_dir: Path) -> None:
           "| reason row present =", "Negative Price Hours Unavailable Because" in pairs)
 
 
+def probe_unset_delivery_instant(out_dir: Path) -> None:
+    frame = unset_instant_frame()
+    stats = calculate_negative_price_hours(frame)
+    print("\n[1b] 47 positive hours + one negative price at an unset (NaT) instant")
+    print(f"    negative_hours          = {stats['negative_hours']!r}")
+    print(f"    negative_intervals      = {stats['negative_intervals']!r}")
+    print(f"    pct_negative            = {stats['pct_negative']!r}")
+    print(f"    avg_negative_price      = {stats['avg_negative_price']!r}")
+    print(f"    negative_hours_reason   = {stats.get('negative_hours_reason')!r}")
+
+    args = export_args(frame)
+    xlsx = out_dir / "unset-instant.xlsx"
+    xlsx.write_bytes(export_to_bytes(**args))
+    ws = load_workbook(BytesIO(xlsx.read_bytes()))["Summary"]
+    pairs = {r[0].value: r[1].value for r in ws.iter_rows(min_col=1, max_col=2) if r[0].value}
+    print("    Excel 'Negative Price Hours'                  =", repr(pairs.get("Negative Price Hours")))
+    print("    Excel 'Negative Price Hours Unavailable Because' =",
+          repr(pairs.get("Negative Price Hours Unavailable Because")))
+    print("    Excel 'Negative Price Intervals'              =", repr(pairs.get("Negative Price Intervals")))
+
+    text = pdf_text(export_to_pdf_bytes(**args))
+    start = text.find("Negative Price Hours")
+    print("    PDF summary excerpt =", repr(text[start:start + 170]))
+    print("    PDF contains literal 'nan' =", "nan" in text.lower())
+
+
+def probe_excel_reason_label() -> None:
+    """The reason row is only useful if its label is not clipped by column B."""
+    print("\n[1c] Excel reason label readability")
+    ws = load_workbook(BytesIO(export_to_bytes(**export_args(unverifiable_frame()))))["Summary"]
+    label = "Negative Price Hours Unavailable Because"
+    cell = next((c for c in ws["A"] if c.value == label), None)
+    if cell is None:
+        print("    reason row absent at this revision")
+        return
+    print(f"    label length={len(label)} column A width={ws.column_dimensions['A'].width!r}")
+    print(f"    value cell B occupied={bool(ws.cell(row=cell.row, column=2).value)}")
+    print(f"    wrap_text={cell.alignment.wrap_text!r} row height={ws.row_dimensions[cell.row].height!r}")
+
+
 def probe_market_page() -> None:
     from streamlit.testing.v1 import AppTest
 
@@ -157,4 +210,6 @@ def _page_app(defect: str) -> None:
 if __name__ == "__main__":
     with tempfile.TemporaryDirectory() as tmp:
         probe_negative_hours(Path(tmp))
+        probe_unset_delivery_instant(Path(tmp))
+        probe_excel_reason_label()
     probe_market_page()

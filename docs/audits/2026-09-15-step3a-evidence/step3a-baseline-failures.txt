@@ -1,16 +1,234 @@
-tests/test_step3a_display_contract.py:327: in test_page_discloses_unverifiable_negative_hours_without_dropping_counts
+============================= test session starts ==============================
+collected 27 items
+
+tests/test_step3a_display_contract.py FFFFFF..FFFFF.FFFF.FFF...FF        [100%]
+
+=================================== FAILURES ===================================
+______ test_unverifiable_grid_reports_a_reason_and_keeps_interval_counts _______
+tests/test_step3a_display_contract.py:101: in test_unverifiable_grid_reports_a_reason_and_keeps_interval_counts
+    from src.analytics import negative_price_hours_reason
+E   ImportError: cannot import name 'negative_price_hours_reason' from 'src.analytics' (<repo>/src/analytics.py)
+___________ test_unset_delivery_instant_is_not_counted_as_zero_hours ___________
+tests/test_step3a_display_contract.py:117: in test_unset_delivery_instant_is_not_counted_as_zero_hours
+    from src.analytics import negative_price_hours_reason
+E   ImportError: cannot import name 'negative_price_hours_reason' from 'src.analytics' (<repo>/src/analytics.py)
+________________ test_verifiable_grid_has_no_reason[-50.0-48.0] ________________
+tests/test_step3a_display_contract.py:134: in test_verifiable_grid_has_no_reason
+    from src.analytics import negative_price_hours_reason
+E   ImportError: cannot import name 'negative_price_hours_reason' from 'src.analytics' (<repo>/src/analytics.py)
+_________________ test_verifiable_grid_has_no_reason[50.0-0.0] _________________
+tests/test_step3a_display_contract.py:134: in test_verifiable_grid_has_no_reason
+    from src.analytics import negative_price_hours_reason
+E   ImportError: cannot import name 'negative_price_hours_reason' from 'src.analytics' (<repo>/src/analytics.py)
+________ test_excel_summary_shows_na_and_reason_for_unverifiable_hours _________
+tests/test_step3a_display_contract.py:155: in test_excel_summary_shows_na_and_reason_for_unverifiable_hours
+    assert pairs["Negative Price Hours"] == "n/a"
+E   AssertionError: assert None == 'n/a'
+____________ test_excel_summary_discloses_an_unset_delivery_instant ____________
+tests/test_step3a_display_contract.py:167: in test_excel_summary_discloses_an_unset_delivery_instant
+    assert pairs["Negative Price Hours"] == "n/a"
+E   AssertionError: assert 0 == 'n/a'
+____________ test_excel_reason_label_wraps_instead_of_being_clipped ____________
+tests/test_step3a_display_contract.py:189: in test_excel_reason_label_wraps_instead_of_being_clipped
+    from src.export import _MAX_COLUMN_WIDTH, _ROW_HEIGHT_PER_LINE
+E   ImportError: cannot import name '_MAX_COLUMN_WIDTH' from 'src.export' (<repo>/src/export.py)
+________ test_pdf_summary_shows_na_and_reason_instead_of_a_literal_nan _________
+tests/test_step3a_display_contract.py:207: in test_pdf_summary_shows_na_and_reason_instead_of_a_literal_nan
+    assert "Negative Price Hours n/a" in text
+E   AssertionError: assert 'Negative Price Hours n/a' in 'BESS Pulse - Market Report Zone DE_LU Timezone UTC Date Range 2026-01-01  to  2026-01-02 Total Days 2 Avg Price (EUR/...0 Capture Rate Assumption 0.7 Negative Price Hours nan Negative Price Intervals 24 Negative Price % of Intervals 88.9%'
+_____________ test_pdf_summary_discloses_an_unset_delivery_instant _____________
+tests/test_step3a_display_contract.py:217: in test_pdf_summary_discloses_an_unset_delivery_instant
+    assert "Negative Price Hours n/a" in text
+E   AssertionError: assert 'Negative Price Hours n/a' in 'BESS Pulse - Market Report Zone DE_LU Timezone UTC Date Range 2026-01-01  to  2026-01-02 Total Days 2 Avg Price (EUR/...1.0 Capture Rate Assumption 0.7 Negative Price Hours 0.0 Negative Price Intervals 1 Negative Price % of Intervals 2.1%'
+____ test_pdf_reason_row_fits_inside_the_page_margins[_unverifiable_frame] _____
+tests/test_step3a_display_contract.py:235: in test_pdf_reason_row_fits_inside_the_page_margins
+    reason = calculate_negative_price_hours(builder())["negative_hours_reason"]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'negative_hours_reason'
+____ test_pdf_reason_row_fits_inside_the_page_margins[_unset_instant_frame] ____
+tests/test_step3a_display_contract.py:235: in test_pdf_reason_row_fits_inside_the_page_margins
+    reason = calculate_negative_price_hours(builder())["negative_hours_reason"]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'negative_hours_reason'
+_ test_defective_index_is_classified[duplicate-True-repeats the same delivery timestamp] _
+tests/test_step3a_display_contract.py:276: in test_defective_index_is_classified
+    from src.analytics import describe_price_index_issue, time_weighted_rolling_price_mean
+E   ImportError: cannot import name 'describe_price_index_issue' from 'src.analytics' (<repo>/src/analytics.py)
+_ test_defective_index_is_classified[unsorted-False-not sorted into delivery order] _
+tests/test_step3a_display_contract.py:276: in test_defective_index_is_classified
+    from src.analytics import describe_price_index_issue, time_weighted_rolling_price_mean
+E   ImportError: cannot import name 'describe_price_index_issue' from 'src.analytics' (<repo>/src/analytics.py)
+_____ test_defective_index_is_classified[nat-False-unset (NaT) timestamps] _____
+tests/test_step3a_display_contract.py:276: in test_defective_index_is_classified
+    from src.analytics import describe_price_index_issue, time_weighted_rolling_price_mean
+E   ImportError: cannot import name 'describe_price_index_issue' from 'src.analytics' (<repo>/src/analytics.py)
+________________________ test_clean_index_has_no_issue _________________________
+tests/test_step3a_display_contract.py:288: in test_clean_index_has_no_issue
+    from src.analytics import describe_price_index_issue
+E   ImportError: cannot import name 'describe_price_index_issue' from 'src.analytics' (<repo>/src/analytics.py)
+___ test_repeated_timestamps_keep_the_raw_chart_but_drop_the_moving_average ____
+tests/test_step3a_display_contract.py:337: in test_repeated_timestamps_keep_the_raw_chart_but_drop_the_moving_average
+    app = _run_market_app("duplicate")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_step3a_display_contract.py:324: in _run_market_app
+    assert not app.exception
+E   assert not ElementList(_list=[Exception(message='Rolling prices require unique increasing finite timestamps', stack_trace=['File ...me_weighted_rolling_price_mean\n    raise ValueError("Rolling prices require unique increasing finite timestamps")'])])
+E    +  where ElementList(_list=[Exception(message='Rolling prices require unique increasing finite timestamps', stack_trace=['File ...me_weighted_rolling_price_mean\n    raise ValueError("Rolling prices require unique increasing finite timestamps")'])]) = AppTest(\n    _script_path='/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpf8syux6f/23d1904b6368bd0552d34a15864863...SpecialBlock(\n            type='sidebar'\n        ),\n        2: SpecialBlock(\n            type='event'\n        )\n    }\n).exception
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 02:21:34.158 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-16 02:21:34.168 Uncaught app execution
+Traceback (most recent call last):
+  File "<venv>/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "<venv>/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpf8syux6f/23d1904b6368bd0552d34a15864863c5", line 25, in <module>
+    _market_app(*__args, **__kwargs)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpf8syux6f/23d1904b6368bd0552d34a15864863c5", line 15, in _market_app
+    render(
+    ~~~~~~^
+        "DE_LU", frame, daily, calculate_spread_percentiles(daily),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        calculate_negative_price_hours(frame), 1, "UTC", "plotly_dark", figures,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "<repo>/src/pages/market_overview.py", line 90, in render
+    ma_series = time_weighted_rolling_price_mean(primary_df["price_eur_mwh"])
+  File "<repo>/src/analytics.py", line 103, in time_weighted_rolling_price_mean
+    raise ValueError("Rolling prices require unique increasing finite timestamps")
+ValueError: Rolling prices require unique increasing finite timestamps
+_ test_unplottable_index_reports_a_reason_and_clears_the_stale_export_figure[unsorted-not sorted into delivery order] _
+tests/test_step3a_display_contract.py:354: in test_unplottable_index_reports_a_reason_and_clears_the_stale_export_figure
+    app = _run_market_app(defect)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_step3a_display_contract.py:324: in _run_market_app
+    assert not app.exception
+E   assert not ElementList(_list=[Exception(message='Rolling prices require unique increasing finite timestamps', stack_trace=['File ...me_weighted_rolling_price_mean\n    raise ValueError("Rolling prices require unique increasing finite timestamps")'])])
+E    +  where ElementList(_list=[Exception(message='Rolling prices require unique increasing finite timestamps', stack_trace=['File ...me_weighted_rolling_price_mean\n    raise ValueError("Rolling prices require unique increasing finite timestamps")'])]) = AppTest(\n    _script_path='/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpf8syux6f/23d1904b6368bd0552d34a15864863...SpecialBlock(\n            type='sidebar'\n        ),\n        2: SpecialBlock(\n            type='event'\n        )\n    }\n).exception
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 02:21:34.174 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-16 02:21:34.184 Uncaught app execution
+Traceback (most recent call last):
+  File "<venv>/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "<venv>/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpf8syux6f/23d1904b6368bd0552d34a15864863c5", line 25, in <module>
+    _market_app(*__args, **__kwargs)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpf8syux6f/23d1904b6368bd0552d34a15864863c5", line 15, in _market_app
+    render(
+    ~~~~~~^
+        "DE_LU", frame, daily, calculate_spread_percentiles(daily),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        calculate_negative_price_hours(frame), 1, "UTC", "plotly_dark", figures,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "<repo>/src/pages/market_overview.py", line 90, in render
+    ma_series = time_weighted_rolling_price_mean(primary_df["price_eur_mwh"])
+  File "<repo>/src/analytics.py", line 103, in time_weighted_rolling_price_mean
+    raise ValueError("Rolling prices require unique increasing finite timestamps")
+ValueError: Rolling prices require unique increasing finite timestamps
+_ test_unplottable_index_reports_a_reason_and_clears_the_stale_export_figure[nat-unset (NaT) timestamps] _
+tests/test_step3a_display_contract.py:354: in test_unplottable_index_reports_a_reason_and_clears_the_stale_export_figure
+    app = _run_market_app(defect)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_step3a_display_contract.py:324: in _run_market_app
+    assert not app.exception
+E   assert not ElementList(_list=[Exception(message='Rolling prices require unique increasing finite timestamps', stack_trace=['File ...me_weighted_rolling_price_mean\n    raise ValueError("Rolling prices require unique increasing finite timestamps")'])])
+E    +  where ElementList(_list=[Exception(message='Rolling prices require unique increasing finite timestamps', stack_trace=['File ...me_weighted_rolling_price_mean\n    raise ValueError("Rolling prices require unique increasing finite timestamps")'])]) = AppTest(\n    _script_path='/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpf8syux6f/23d1904b6368bd0552d34a15864863...SpecialBlock(\n            type='sidebar'\n        ),\n        2: SpecialBlock(\n            type='event'\n        )\n    }\n).exception
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 02:21:34.189 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-16 02:21:34.199 Uncaught app execution
+Traceback (most recent call last):
+  File "<venv>/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "<venv>/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpf8syux6f/23d1904b6368bd0552d34a15864863c5", line 25, in <module>
+    _market_app(*__args, **__kwargs)
+    ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpf8syux6f/23d1904b6368bd0552d34a15864863c5", line 15, in _market_app
+    render(
+    ~~~~~~^
+        "DE_LU", frame, daily, calculate_spread_percentiles(daily),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        calculate_negative_price_hours(frame), 1, "UTC", "plotly_dark", figures,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "<repo>/src/pages/market_overview.py", line 90, in render
+    ma_series = time_weighted_rolling_price_mean(primary_df["price_eur_mwh"])
+  File "<repo>/src/analytics.py", line 103, in time_weighted_rolling_price_mean
+    raise ValueError("Rolling prices require unique increasing finite timestamps")
+ValueError: Rolling prices require unique increasing finite timestamps
+_ test_page_discloses_unverifiable_negative_hours_without_dropping_counts[unverifiable-2026-01-02-24] _
+tests/test_step3a_display_contract.py:405: in test_page_discloses_unverifiable_negative_hours_without_dropping_counts
     assert any(
 E   assert False
-E    +  where False = any(<generator object test_page_discloses_unverifiable_negative_hours_without_dropping_counts.<locals>.<genexpr> at 0x132b631d0>)
+E    +  where False = any(<generator object test_page_discloses_unverifiable_negative_hours_without_dropping_counts.<locals>.<genexpr> at 0x127118ba0>)
 ----------------------------- Captured stderr call -----------------------------
-2026-09-15 15:41:25.786 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-16 02:21:34.237 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_ test_page_discloses_unverifiable_negative_hours_without_dropping_counts[unset_instant-unset (NaT) delivery-1] _
+tests/test_step3a_display_contract.py:403: in test_page_discloses_unverifiable_negative_hours_without_dropping_counts
+    assert not app.exception
+E   assert not ElementList(_list=[Exception(message='Rolling prices require unique increasing finite timestamps', stack_trace=['File ...me_weighted_rolling_price_mean\n    raise ValueError("Rolling prices require unique increasing finite timestamps")'])])
+E    +  where ElementList(_list=[Exception(message='Rolling prices require unique increasing finite timestamps', stack_trace=['File ...me_weighted_rolling_price_mean\n    raise ValueError("Rolling prices require unique increasing finite timestamps")'])]) = AppTest(\n    _script_path='/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpf8syux6f/e3603c3bb6b61969c6212adb137d35...SpecialBlock(\n            type='sidebar'\n        ),\n        2: SpecialBlock(\n            type='event'\n        )\n    }\n).exception
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 02:21:34.271 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-16 02:21:34.280 Uncaught app execution
+Traceback (most recent call last):
+  File "<venv>/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/exec_code.py", line 129, in exec_func_with_error_handling
+    result = func()
+  File "<venv>/lib/python3.13/site-packages/streamlit/runtime/scriptrunner/script_runner.py", line 689, in code_to_exec
+    exec(code, module.__dict__)  # noqa: S102
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpf8syux6f/e3603c3bb6b61969c6212adb137d3580", line 17, in <module>
+    _negative_hours_market_app(*__args, **__kwargs)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+  File "/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpf8syux6f/e3603c3bb6b61969c6212adb137d3580", line 12, in _negative_hours_market_app
+    render(
+    ~~~~~~^
+        "DE_LU", frame, daily, calculate_spread_percentiles(daily),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        calculate_negative_price_hours(frame), 1, "UTC", "plotly_dark", {},
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "<repo>/src/pages/market_overview.py", line 90, in render
+    ma_series = time_weighted_rolling_price_mean(primary_df["price_eur_mwh"])
+  File "<repo>/src/analytics.py", line 103, in time_weighted_rolling_price_mean
+    raise ValueError("Rolling prices require unique increasing finite timestamps")
+ValueError: Rolling prices require unique increasing finite timestamps
+==================================== PASSES ====================================
+_________ test_clean_index_still_renders_the_chart_and_moving_average __________
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 02:21:34.025 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
 =========================== short test summary info ============================
+PASSED tests/test_step3a_display_contract.py::test_excel_summary_keeps_verifiable_hours_and_omits_the_reason[-50.0-48.0]
+PASSED tests/test_step3a_display_contract.py::test_excel_summary_keeps_verifiable_hours_and_omits_the_reason[50.0-0.0]
+PASSED tests/test_step3a_display_contract.py::test_pdf_summary_keeps_verifiable_hours
+PASSED tests/test_step3a_display_contract.py::test_clean_index_still_renders_the_chart_and_moving_average
+PASSED tests/test_step3a_display_contract.py::test_defective_rows_still_reach_the_excel_export_unchanged[duplicate]
+PASSED tests/test_step3a_display_contract.py::test_defective_rows_still_reach_the_excel_export_unchanged[unsorted]
+PASSED tests/test_step3a_display_contract.py::test_defective_rows_still_reach_the_excel_export_unchanged[nat]
 FAILED tests/test_step3a_display_contract.py::test_unverifiable_grid_reports_a_reason_and_keeps_interval_counts
+FAILED tests/test_step3a_display_contract.py::test_unset_delivery_instant_is_not_counted_as_zero_hours
 FAILED tests/test_step3a_display_contract.py::test_verifiable_grid_has_no_reason[-50.0-48.0]
 FAILED tests/test_step3a_display_contract.py::test_verifiable_grid_has_no_reason[50.0-0.0]
 FAILED tests/test_step3a_display_contract.py::test_excel_summary_shows_na_and_reason_for_unverifiable_hours
+FAILED tests/test_step3a_display_contract.py::test_excel_summary_discloses_an_unset_delivery_instant
+FAILED tests/test_step3a_display_contract.py::test_excel_reason_label_wraps_instead_of_being_clipped
 FAILED tests/test_step3a_display_contract.py::test_pdf_summary_shows_na_and_reason_instead_of_a_literal_nan
-FAILED tests/test_step3a_display_contract.py::test_pdf_reason_row_fits_inside_the_page_margins
+FAILED tests/test_step3a_display_contract.py::test_pdf_summary_discloses_an_unset_delivery_instant
+FAILED tests/test_step3a_display_contract.py::test_pdf_reason_row_fits_inside_the_page_margins[_unverifiable_frame]
+FAILED tests/test_step3a_display_contract.py::test_pdf_reason_row_fits_inside_the_page_margins[_unset_instant_frame]
 FAILED tests/test_step3a_display_contract.py::test_defective_index_is_classified[duplicate-True-repeats the same delivery timestamp]
 FAILED tests/test_step3a_display_contract.py::test_defective_index_is_classified[unsorted-False-not sorted into delivery order]
 FAILED tests/test_step3a_display_contract.py::test_defective_index_is_classified[nat-False-unset (NaT) timestamps]
@@ -18,5 +236,6 @@ FAILED tests/test_step3a_display_contract.py::test_clean_index_has_no_issue
 FAILED tests/test_step3a_display_contract.py::test_repeated_timestamps_keep_the_raw_chart_but_drop_the_moving_average
 FAILED tests/test_step3a_display_contract.py::test_unplottable_index_reports_a_reason_and_clears_the_stale_export_figure[unsorted-not sorted into delivery order]
 FAILED tests/test_step3a_display_contract.py::test_unplottable_index_reports_a_reason_and_clears_the_stale_export_figure[nat-unset (NaT) timestamps]
-FAILED tests/test_step3a_display_contract.py::test_page_discloses_unverifiable_negative_hours_without_dropping_counts
-========================= 14 failed, 7 passed in 0.70s =========================
+FAILED tests/test_step3a_display_contract.py::test_page_discloses_unverifiable_negative_hours_without_dropping_counts[unverifiable-2026-01-02-24]
+FAILED tests/test_step3a_display_contract.py::test_page_discloses_unverifiable_negative_hours_without_dropping_counts[unset_instant-unset (NaT) delivery-1]
+========================= 20 failed, 7 passed in 0.66s =========================
