@@ -7,7 +7,7 @@
 
 | 轮次 | head | 结论 |
 |---|---|---|
-| 首次提交 | 见 PR 的 Checks | 待复核 |
+| 首次提交 | 见 [PR #90](https://github.com/crashchen/euro-bess-radar/pull/90) 的 Checks | 待复核 |
 
 ## 问题与最终行为
 
