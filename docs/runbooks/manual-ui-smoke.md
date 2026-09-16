@@ -80,6 +80,21 @@ a non-zero CapEx, then scroll to **Project Case — lifecycle valuation**.
 | 26 | Disclosure follows the result, not the widgets | After the run, change a contract term **without** re-running | Result and disclosure disappear behind "Project Case inputs changed. The stale result is hidden; run again." — you must never see a disclosure describing terms the result was not computed from. This item deliberately destroys the result |
 | 27 | Cockpit mirror | Undo item 26's edit (or re-enter valid terms), **re-run**, then open **Project Case NPV — read-only Revenue-tab result** in the Simulation Cockpit | Mirrors both NPV blocks, repeats the flipped lifecycle caption, and adds a one-line "Contract settlement applied: …" caption plus the fingerprint. It is a caption, not a nested expander. Without the re-run there is no result to mirror — the mirror correctly shows nothing, which is not a pass |
 
+## Checklist — Simulation Cockpit batch panels (Step 3B)
+
+AppTest counts every solver call across reruns, but it cannot click a download
+button. Run this after changes to the multi-day replay or forecast-policy
+panels in `src/pages/simulation_cockpit.py`.
+
+Setup: load a zone with several clean days (and IDA1 for items 30–31).
+
+| # | Entry | Action | Expect |
+|---|-------|--------|--------|
+| 28 | Multi-day replay survives a download | **Run multi-day replay**, then click **Download multi-day replay (Excel)** | The workbook downloads; KPIs, charts and table stay on screen with no solve spinner |
+| 29 | Multi-day stale state | Toggle **Continuous SoC across days**, then toggle it back | While changed: "Inputs changed since the last run…" warning, no charts, table or download. Toggled back: the same result returns without a spinner |
+| 30 | Forecast policy survives a download | **Run forecast policy** (tick the stochastic option if you have time), then click its Excel download | Strategy table, attribution and download stay; no "Solving…" spinner |
+| 31 | Forecast stale state | Change **Rebid deadband**, then click **Run forecast policy** | Stale warning and no download until Run; Run recomputes and shows the new result |
+
 ## Downstream spot-checks (after 3/4/7/8)
 
 - **Data Trust coverage matrix**: the touched zone row shows the stream

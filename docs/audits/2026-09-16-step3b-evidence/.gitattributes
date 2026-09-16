@@ -1,0 +1,2 @@
+# Frozen patches retain the space prefix on blank context lines.
+*.patch -text whitespace=-blank-at-eol
