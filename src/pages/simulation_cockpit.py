@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from html import escape
 
 import pandas as pd
@@ -16,7 +17,11 @@ from src.ancillary import (
     list_capacity_products,
 )
 from src.assumptions import CAPTURE_PARAM_LABEL
-from src.config import ANCILLARY_CAPACITY_AVAILABILITY
+from src.config import (
+    ANCILLARY_CAPACITY_AVAILABILITY,
+    MAX_CONTINUOUS_REPLAY_INTERVALS,
+)
+from src.content_fingerprint import frame_content_hash, payload_digest
 from src.contracted_floor import (
     MAX_FLOOR_TRAJECTORY_YEARS,
     compute_decaying_contracted_floor_overlay,
@@ -32,7 +37,7 @@ from src.data_ingestion import (
     read_imbalance_cache,
 )
 from src.degradation import DEFAULT_CYCLE_LIFE
-from src.dispatch import solve_joint_capacity_batch
+from src.dispatch import DISPATCH_VOM_COST_EUR_MWH, solve_joint_capacity_batch
 from src.export import cockpit_tables_to_excel
 from src.imbalance_overlay import compute_imbalance_overlay
 from src.liquidity import compute_liquidity_cap
@@ -69,6 +74,35 @@ _CADENCE_SPLIT_CAPTION = (
 # opt-in run is reproducible; the load-bearing rebid cap is the one exposed knob.
 _STOCHASTIC_N_SCENARIOS = 10
 _STOCHASTIC_SEED = 0
+
+# Step 3B: the two button-run batch panels keep their last result in session
+# state, bound to a content fingerprint of every input the solvers read. Bump a
+# panel id when its compute path changes meaning, so a result produced by older
+# code in the same session (Streamlit keeps session state across a hot reload)
+# can never be shown as current.
+_MULTI_DAY_RESULT_KEY = "simulation_batch_result"
+_MULTI_DAY_PANEL_ID = "cockpit-multi-day-replay/v1"
+_FORECAST_POLICY_RESULT_KEY = "forecast_policy_result"
+_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v1"
+
+
+def _solver_constants() -> dict[str, object]:
+    """Module constants the batch panels' numbers depend on."""
+    return {
+        "vom_eur_mwh": float(DISPATCH_VOM_COST_EUR_MWH),
+        "capacity_availability": float(ANCILLARY_CAPACITY_AVAILABILITY),
+        "max_continuous_replay_intervals": int(MAX_CONTINUOUS_REPLAY_INTERVALS),
+        "stochastic_n_scenarios": int(_STOCHASTIC_N_SCENARIOS),
+        "stochastic_seed": int(_STOCHASTIC_SEED),
+    }
+
+
+def _stale_result_message(run_label: str) -> str:
+    """Stale-state notice shared by the batch panels."""
+    return (
+        "Inputs changed since the last run. The previous result is hidden and "
+        f"its Excel export is blocked; click **{run_label}** to recompute."
+    )
 
 
 def _cockpit_export_assumptions(
@@ -241,6 +275,7 @@ def render(
 
     _render_event_table(build_dispatch_event_table(ts))
     _render_multi_day_summary(
+        primary_zone=primary_zone,
         primary_df=primary_df,
         intraday_df=intraday_df,
         dates=dates,
@@ -818,8 +853,7 @@ def _render_solver_failure_notice(summary: dict, *, label: str) -> bool:
     failed = int(summary.get("excluded_days_due_to_solver_failure", 0))
     if failed <= 0:
         return False
-    available = bool(summary.get("model_available", summary.get("valid_days", 0) > 0))
-    if not available:
+    if _batch_model_unavailable(summary):
         st.error(
             f"{label} unavailable: all otherwise usable optimisation days failed "
             f"({failed} day(s)). Failed solves were excluded, not priced at €0."
@@ -830,6 +864,127 @@ def _render_solver_failure_notice(summary: dict, *, label: str) -> bool:
         "and annualisation use valid days only; failures were not priced at €0."
     )
     return False
+
+
+def _multi_day_fingerprint(
+    *,
+    primary_zone: str | None,
+    primary_df: pd.DataFrame,
+    intraday_df: pd.DataFrame | None,
+    batch_dates: list,
+    mode: str,
+    zone_tz: str,
+    carry_soc: bool,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    capture_rate: float,
+    capex_eur_kwh: float,
+) -> str:
+    """Identity of every input the multi-day replay batch actually reads.
+
+    The full DA frame is hashed (not just the replay window) because the
+    batch receives the full frame. IDA content is part of the identity only
+    in DA + IDA1 mode — the DA-only replay never reads it. Display inputs
+    (chart theme) are deliberately absent.
+    """
+    is_da_id = mode == "DA + IDA1 Replay"
+    return payload_digest({
+        "panel": _MULTI_DAY_PANEL_ID,
+        "constants": _solver_constants(),
+        "zone": None if primary_zone is None else str(primary_zone),
+        "tz": str(zone_tz),
+        "mode": str(mode),
+        "dates": [str(day) for day in batch_dates],
+        "carry_soc": bool(carry_soc),
+        "power_mw": float(power_mw),
+        "duration_hours": float(duration_hours),
+        "efficiency": float(efficiency),
+        "capture_rate": float(capture_rate),
+        "capex_eur_kwh": float(capex_eur_kwh),
+        "da_content": frame_content_hash(primary_df),
+        "ida_content": frame_content_hash(intraday_df) if is_da_id else None,
+    })
+
+
+def _compute_multi_day_bundle(
+    *,
+    fingerprint: str,
+    primary_df: pd.DataFrame,
+    intraday_df: pd.DataFrame | None,
+    batch_dates: list,
+    mode: str,
+    zone_tz: str,
+    carry_soc: bool,
+    power_mw: float,
+    duration_hours: int,
+    efficiency: float,
+    capture_rate: float,
+    capex_eur_kwh: float,
+    assumptions: pd.DataFrame | None,
+) -> dict:
+    """Solve the multi-day replay once and package everything it renders."""
+    with st.spinner(f"Running {len(batch_dates)} daily replay(s)..."):
+        batch = simulate_replay_batch(
+            primary_df,
+            mode=mode,
+            intraday_df=intraday_df,
+            tz=zone_tz,
+            dates=batch_dates,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            capture_rate=capture_rate,
+            capex_eur_kwh=capex_eur_kwh,
+            carry_soc=carry_soc,
+        )
+    # `capture_rate` here is the cockpit's own haircut, not the sidebar's.
+    # The assumptions are snapshotted with the result so a later export can
+    # never pair this batch with a newer assumptions table.
+    export_assumptions = _cockpit_export_assumptions(
+        assumptions,
+        capture_value=f"{capture_rate:.0%}",
+        capture_affects=(
+            "Haircut on cockpit replay revenue (the sidebar capture rate "
+            "is intentionally ignored in the cockpit)"
+        ),
+    )
+    return {
+        "fingerprint": fingerprint,
+        "batch": batch,
+        "requested_days": len(batch_dates),
+        "export_assumptions": export_assumptions,
+    }
+
+
+def _render_multi_day_bundle(bundle: dict, chart_template: str) -> None:
+    """Render a stored multi-day replay result; never re-solves."""
+    batch = bundle["batch"]
+    excluded = int(batch.attrs.get("excluded_days", 0))
+    if _render_solver_failure_notice(batch.attrs, label="Replay model"):
+        return
+    if batch.empty:
+        st.warning(f"No valid replay days in this sample. Excluded days: {excluded}.")
+        return
+    carry_mode = str(batch.attrs.get("carry_mode", "per_day_reset"))
+    _render_batch_kpis(
+        batch, requested_days=bundle["requested_days"],
+        excluded_days=excluded, carry_mode=carry_mode,
+    )
+    if batch.attrs.get("n_cadence_splits", 0) > 0:
+        st.caption(_CADENCE_SPLIT_CAPTION)
+    _plot_batch_summary(batch, chart_template)
+    if len(batch) >= 3:
+        _plot_rolling_summary(batch, chart_template)
+    if len(batch) >= 7:
+        _plot_weekday_heatmap(batch, chart_template)
+    st.dataframe(batch, width="stretch", hide_index=True)
+    _cockpit_download_button(
+        {"Multi-day Replay": batch}, bundle["export_assumptions"],
+        key="dl_multi_day_replay",
+        label="\U0001f4e5 Download multi-day replay (Excel)",
+        file_name="cockpit_multiday_replay.xlsx",
+    )
 
 
 def _render_multi_day_summary(
@@ -846,6 +1001,7 @@ def _render_multi_day_summary(
     capex_eur_kwh: float,
     chart_template: str,
     assumptions: pd.DataFrame | None = None,
+    primary_zone: str | None = None,
 ) -> None:
     with st.expander("Multi-day replay summary", expanded=False):
         st.caption(
@@ -874,61 +1030,50 @@ def _render_multi_day_summary(
         if mode == "DA + IDA1 Replay" and (intraday_df is None or intraday_df.empty):
             st.info("Load IDA1 data before running a DA + IDA1 multi-day replay.")
             return
-        if not run:
+        if not run and _MULTI_DAY_RESULT_KEY not in st.session_state:
             st.info("Choose a replay sample and click Run to aggregate loaded days.")
             return
 
         limit = _sample_limit(sample)
         batch_dates = dates if limit is None else dates[-limit:]
-        with st.spinner(f"Running {len(batch_dates)} daily replay(s)..."):
-            batch = simulate_replay_batch(
-                primary_df,
-                mode=mode,
+        fingerprint = _multi_day_fingerprint(
+            primary_zone=primary_zone,
+            primary_df=primary_df,
+            intraday_df=intraday_df,
+            batch_dates=batch_dates,
+            mode=mode,
+            zone_tz=zone_tz,
+            carry_soc=carry_soc,
+            power_mw=power_mw,
+            duration_hours=duration_hours,
+            efficiency=efficiency,
+            capture_rate=capture_rate,
+            capex_eur_kwh=capex_eur_kwh,
+        )
+        if run:
+            # Drop the previous result first: a recompute that raises must not
+            # leave an older result on screen as if it were current.
+            st.session_state.pop(_MULTI_DAY_RESULT_KEY, None)
+            st.session_state[_MULTI_DAY_RESULT_KEY] = _compute_multi_day_bundle(
+                fingerprint=fingerprint,
+                primary_df=primary_df,
                 intraday_df=intraday_df,
-                tz=zone_tz,
-                dates=batch_dates,
+                batch_dates=batch_dates,
+                mode=mode,
+                zone_tz=zone_tz,
+                carry_soc=carry_soc,
                 power_mw=power_mw,
                 duration_hours=duration_hours,
                 efficiency=efficiency,
                 capture_rate=capture_rate,
                 capex_eur_kwh=capex_eur_kwh,
-                carry_soc=carry_soc,
+                assumptions=assumptions,
             )
-
-        excluded = int(batch.attrs.get("excluded_days", 0))
-        if _render_solver_failure_notice(batch.attrs, label="Replay model"):
+        bundle = st.session_state[_MULTI_DAY_RESULT_KEY]
+        if bundle["fingerprint"] != fingerprint:
+            st.warning(_stale_result_message("Run multi-day replay"))
             return
-        if batch.empty:
-            st.warning(f"No valid replay days in this sample. Excluded days: {excluded}.")
-            return
-        carry_mode = str(batch.attrs.get("carry_mode", "per_day_reset"))
-        _render_batch_kpis(
-            batch, requested_days=len(batch_dates),
-            excluded_days=excluded, carry_mode=carry_mode,
-        )
-        if batch.attrs.get("n_cadence_splits", 0) > 0:
-            st.caption(_CADENCE_SPLIT_CAPTION)
-        _plot_batch_summary(batch, chart_template)
-        if len(batch) >= 3:
-            _plot_rolling_summary(batch, chart_template)
-        if len(batch) >= 7:
-            _plot_weekday_heatmap(batch, chart_template)
-        st.dataframe(batch, width="stretch", hide_index=True)
-        # `capture_rate` here is the cockpit's own haircut, not the sidebar's.
-        export_assumptions = _cockpit_export_assumptions(
-            assumptions,
-            capture_value=f"{capture_rate:.0%}",
-            capture_affects=(
-                "Haircut on cockpit replay revenue (the sidebar capture rate "
-                "is intentionally ignored in the cockpit)"
-            ),
-        )
-        _cockpit_download_button(
-            {"Multi-day Replay": batch}, export_assumptions,
-            key="dl_multi_day_replay",
-            label="\U0001f4e5 Download multi-day replay (Excel)",
-            file_name="cockpit_multiday_replay.xlsx",
-        )
+        _render_multi_day_bundle(bundle, chart_template)
 
 
 def _frontier_cap_options() -> list[str]:
@@ -2329,6 +2474,7 @@ def _reserve_coopt_total(
     power_mw: float,
     duration_hours: int,
     efficiency: float,
+    warn: Callable[[str], object] | None = None,
 ) -> tuple[float | None, str | None, float | None]:
     """DA + reserve-capacity co-opt window total for the strategy comparison.
 
@@ -2343,6 +2489,8 @@ def _reserve_coopt_total(
     row is omitted rather than priced off the full sample. The joint MILP makes
     reserve headroom compete with DA for power (not additive) and excludes
     activation energy, so the red-line is enforced by the solver, not labelling.
+    ``warn`` receives the solver-failure notice (default: ``st.warning``); the
+    forecast-policy panel collects it so a cached result can re-show it.
     """
     if not reserve_product or not valid_dates:
         return None, None, None
@@ -2367,7 +2515,7 @@ def _reserve_coopt_total(
         joint.attrs.get("excluded_days_due_to_solver_failure", 0)
     )
     if solver_failed_days > 0:
-        st.warning(
+        (warn or st.warning)(
             f"DA + reserve strategy row omitted: {solver_failed_days} joint "
             "MILP day(s) failed, so a common valid-day denominator cannot be "
             "guaranteed. Failed days were not priced at €0."
@@ -3137,230 +3285,434 @@ def _render_forecast_policy_section(
             )
 
         run = st.button("Run forecast policy", key="forecast_policy_run")
-        if not run:
+        if not run and _FORECAST_POLICY_RESULT_KEY not in st.session_state:
             st.info("Choose a sample and click Run to compare against the ceiling.")
             return
 
-        bucket = "hour_of_week" if bucket_label == "Hour-of-week" else "hour_of_day"
-        forecast_mode = "walk_forward" if mode_label == "Walk-forward" else "loo"
-        # The solver gate is an absolute per-day EUR hurdle; the UI knob is
-        # power-normalised so it is comparable across system sizes.
-        min_rebid_uplift_eur = float(deadband_eur_per_mw) * power_mw
         limit = _sample_limit(sample)
-        batch_dates = dates if limit is None else dates[-limit:]
-        with st.spinner(f"Solving {len(batch_dates)} day(s) under forecast + ceiling..."):
-            per_day, summary = simulate_sequential_da_id_batch(
-                primary_df,
-                intraday_df,
-                dates=batch_dates,
-                tz=zone_tz,
-                power_mw=power_mw,
-                duration_hours=duration_hours,
-                efficiency=efficiency,
-                bucket=bucket,
-                forecast_mode=forecast_mode,
-                min_rebid_uplift_eur=min_rebid_uplift_eur,
-            )
-
-        if _render_solver_failure_notice(summary, label="Forecast-policy model"):
-            return
-        if per_day.empty:
-            st.warning(
-                f"No valid forecast-policy days in this sample. "
-                f"Excluded: {summary['excluded_days']}. A leave-one-day-out "
-                "forecast needs at least 2 loaded days; walk-forward needs at "
-                "least one day before the target."
-            )
-            return
-
-        _render_forecast_policy_kpis(summary)
-        _plot_forecast_policy(per_day, chart_template)
-        meta = summary["forecast_meta"]
-        mode_note = {
-            "loo": "LOO cross-validation (may use future days except target)",
-            "walk_forward": "walk-forward (prior days only)",
-            "in_sample": "in-sample (includes target day)",
-        }.get(meta["forecast_mode"], meta["forecast_mode"])
-        st.caption(
-            f"Forecast support: {meta['n_buckets_filled']}/"
-            f"{meta['n_buckets_requested']} buckets backed by history, "
-            f"{meta['fallback_points']} global-mean fallback points "
-            f"(coverage {meta['coverage']:.0%}, {mode_note}). Shape/order is "
-            "the primary signal, but level error still affects the cycling "
-            "decision via round-trip efficiency loss and VOM."
+        inputs = {
+            "primary_df": primary_df,
+            "intraday_df": intraday_df,
+            "capacity_df": capacity_df,
+            "reserve_product": reserve_product,
+            "batch_dates": dates if limit is None else dates[-limit:],
+            "zone_tz": zone_tz,
+            "power_mw": power_mw,
+            "duration_hours": duration_hours,
+            "efficiency": efficiency,
+            "bucket": "hour_of_week" if bucket_label == "Hour-of-week" else "hour_of_day",
+            "forecast_mode": "walk_forward" if mode_label == "Walk-forward" else "loo",
+            "deadband_eur_per_mw": float(deadband_eur_per_mw),
+            "include_stochastic": bool(include_stochastic),
+            "stochastic_cap_pct": float(stochastic_cap_pct),
+        }
+        fingerprint = _forecast_policy_fingerprint(
+            primary_zone=primary_zone, capacity_source=capacity_source, **inputs,
         )
-        _render_forecast_skill(summary.get("forecast_skill", {}), chart_template)
+        if run:
+            # Drop the previous result first: a recompute that raises must not
+            # leave an older result on screen as if it were current.
+            st.session_state.pop(_FORECAST_POLICY_RESULT_KEY, None)
+            st.session_state[_FORECAST_POLICY_RESULT_KEY] = (
+                _compute_forecast_policy_bundle(
+                    fingerprint=fingerprint, assumptions=assumptions, **inputs,
+                )
+            )
+        bundle = st.session_state[_FORECAST_POLICY_RESULT_KEY]
+        if bundle["fingerprint"] != fingerprint:
+            st.warning(_stale_result_message("Run forecast policy"))
+            return
+        _render_forecast_policy_bundle(bundle, chart_template)
 
-        valid_dates = set(per_day["date"])
-        reserve_total, reserve_label, reserve_price = _reserve_coopt_total(
+
+def _forecast_policy_fingerprint(
+    *,
+    primary_zone: str,
+    primary_df: pd.DataFrame,
+    intraday_df: pd.DataFrame,
+    capacity_df: pd.DataFrame | None,
+    capacity_source: str,
+    reserve_product: str | None,
+    batch_dates: list,
+    zone_tz: str,
+    power_mw: float,
+    duration_hours: float,
+    efficiency: float,
+    bucket: str,
+    forecast_mode: str,
+    deadband_eur_per_mw: float,
+    include_stochastic: bool,
+    stochastic_cap_pct: float,
+) -> str:
+    """Identity of every input the forecast-policy panel's solvers read.
+
+    DA and IDA are hashed in full: the LOO / walk-forward climatology trains on
+    loaded days outside the scored window, so hashing only the window would
+    miss a training-history correction. The resolved capacity frame, its source
+    label and the selected product enter only when a reserve product is
+    selected (no reserve solver runs otherwise). The rebid cap enters only when
+    the stochastic run is included. Display inputs (chart theme) are absent.
+    """
+    has_reserve = reserve_product is not None
+    return payload_digest({
+        "panel": _FORECAST_POLICY_PANEL_ID,
+        "constants": _solver_constants(),
+        "zone": str(primary_zone),
+        "tz": str(zone_tz),
+        "dates": [str(day) for day in batch_dates],
+        "power_mw": float(power_mw),
+        "duration_hours": float(duration_hours),
+        "efficiency": float(efficiency),
+        "bucket": str(bucket),
+        "forecast_mode": str(forecast_mode),
+        "deadband_eur_per_mw": float(deadband_eur_per_mw),
+        "da_content": frame_content_hash(primary_df),
+        "ida_content": frame_content_hash(intraday_df),
+        "reserve_product": str(reserve_product) if has_reserve else None,
+        "capacity_source": str(capacity_source) if has_reserve else None,
+        "capacity_content": frame_content_hash(capacity_df) if has_reserve else None,
+        "include_stochastic": bool(include_stochastic),
+        "stochastic_cap_pct": (
+            float(stochastic_cap_pct) if include_stochastic else None
+        ),
+    })
+
+
+def _compute_forecast_policy_bundle(
+    *,
+    fingerprint: str,
+    primary_df: pd.DataFrame,
+    intraday_df: pd.DataFrame,
+    capacity_df: pd.DataFrame | None,
+    reserve_product: str | None,
+    batch_dates: list,
+    zone_tz: str,
+    power_mw: float,
+    duration_hours: int,
+    efficiency: float,
+    bucket: str,
+    forecast_mode: str,
+    deadband_eur_per_mw: float,
+    include_stochastic: bool,
+    stochastic_cap_pct: float,
+    assumptions: pd.DataFrame | None,
+) -> dict:
+    """Run every forecast-policy solver once and package what the panel renders.
+
+    Stops after the sequential DA+ID batch when that model is unavailable or
+    keeps no day — exactly where the panel stops rendering — so no reserve,
+    triple or stochastic solve runs for a result that cannot be shown.
+    """
+    # The solver gate is an absolute per-day EUR hurdle; the UI knob is
+    # power-normalised so it is comparable across system sizes.
+    min_rebid_uplift_eur = float(deadband_eur_per_mw) * power_mw
+    with st.spinner(f"Solving {len(batch_dates)} day(s) under forecast + ceiling..."):
+        per_day, summary = simulate_sequential_da_id_batch(
             primary_df,
-            reserve_product,
-            capacity_df,
-            valid_dates=valid_dates,
+            intraday_df,
+            dates=batch_dates,
             tz=zone_tz,
             power_mw=power_mw,
             duration_hours=duration_hours,
             efficiency=efficiency,
+            bucket=bucket,
+            forecast_mode=forecast_mode,
+            min_rebid_uplift_eur=min_rebid_uplift_eur,
         )
-        # Rows 5 & 6: 9.2a perfect-foresight ceiling and 9.2b forecast-driven
-        # realistic triple, BOTH priced off the SAME per-interval reserve series
-        # (windowed to the DA+ID valid dates so an out-of-window print can't
-        # leak), scored over the 9.2b walk-forward window. capacity_df is
-        # cache-first (imported unified capacity), else the session ancillary.
-        window_anc = _slice_to_local_dates(capacity_df, valid_dates, zone_tz)
-        reserve_series = capacity_price_series_for_product(window_anc, reserve_product)
-        triple = _reserve_triple_totals(
-            primary_df, intraday_df, reserve_series,
-            valid_dates=valid_dates, tz=zone_tz, power_mw=power_mw,
-            duration_hours=duration_hours, efficiency=efficiency, bucket=bucket,
-        )
-        if int(triple.get("solver_failed_days", 0)) > 0:
-            _render_solver_failure_notice(
-                {
-                    "excluded_days_due_to_solver_failure": triple["solver_failed_days"],
-                    "model_available": triple.get("model_available", False),
-                    "valid_days": triple.get("triple_valid_days") or 0,
-                },
-                label="DA+IDA1+reserve model",
-            )
-        triple_label = (
+    bundle = {
+        "fingerprint": fingerprint,
+        "per_day": per_day,
+        "summary": summary,
+        "power_mw": float(power_mw),
+        "derived": None,
+    }
+    if _batch_model_unavailable(summary) or per_day.empty:
+        return bundle
+
+    valid_dates = set(per_day["date"])
+    reserve_notices: list[str] = []
+    reserve_total, reserve_label, reserve_price = _reserve_coopt_total(
+        primary_df,
+        reserve_product,
+        capacity_df,
+        valid_dates=valid_dates,
+        tz=zone_tz,
+        power_mw=power_mw,
+        duration_hours=duration_hours,
+        efficiency=efficiency,
+        warn=reserve_notices.append,
+    )
+    # Rows 5 & 6: 9.2a perfect-foresight ceiling and 9.2b forecast-driven
+    # realistic triple, BOTH priced off the SAME per-interval reserve series
+    # (windowed to the DA+ID valid dates so an out-of-window print can't
+    # leak), scored over the 9.2b walk-forward window. capacity_df is
+    # cache-first (imported unified capacity), else the session ancillary.
+    window_anc = _slice_to_local_dates(capacity_df, valid_dates, zone_tz)
+    reserve_series = capacity_price_series_for_product(window_anc, reserve_product)
+    triple = _reserve_triple_totals(
+        primary_df, intraday_df, reserve_series,
+        valid_dates=valid_dates, tz=zone_tz, power_mw=power_mw,
+        duration_hours=duration_hours, efficiency=efficiency, bucket=bucket,
+    )
+    stochastic = _compute_stochastic_policy(
+        primary_df, intraday_df, capacity_df, reserve_product,
+        include_stochastic=include_stochastic,
+        stochastic_cap_pct=stochastic_cap_pct,
+        valid_dates=valid_dates, tz=zone_tz, power_mw=power_mw,
+        duration_hours=duration_hours, efficiency=efficiency, bucket=bucket,
+        forecast_mode=forecast_mode, min_rebid_uplift_eur=min_rebid_uplift_eur,
+    )
+    comparison = build_strategy_comparison(
+        summary,
+        power_mw=power_mw,
+        reserve_coopt_total=reserve_total,
+        reserve_label=reserve_label,
+        triple_joint_total=triple["triple_total"],
+        triple_joint_label=(
             f"DA + IDA1 + {reserve_product} (co-opt ceiling)"
             if triple["triple_total"] is not None else None
-        )
-        realistic_label = (
+        ),
+        realistic_triple_total=triple["realistic_total"],
+        realistic_triple_label=(
             f"DA + IDA1 + {reserve_product} (forecast-driven realistic)"
             if triple["realistic_total"] is not None else None
-        )
-        # Opt-in stochastic policy value: run the 3-policy batch (capped-myopic
-        # / co-opt / stochastic) over the SAME valid-day window at a common rebid
-        # cap, then thread its robust policy_value into the comparison as ONE
-        # delta row. DA+IDA1 only (no reserve) — reserve cancels in the delta and
-        # is the separate triple rows. NO custom label: the default
-        # STOCHASTIC_POLICY_VALUE_LABEL is what excludes the row from the bar
-        # chart (see _strategy_chart_rows; Increment D guardrail).
-        stoch_per_day = None
-        stoch_summary = None
-        stoch_reserve_mode = False
-        if include_stochastic:
-            with st.spinner(
-                f"Solving {len(valid_dates)} day(s) x 3 policies "
-                "(capped-myopic / co-opt / stochastic)..."
-            ):
-                stoch_per_day, stoch_summary, stoch_reserve_mode = (
-                    _run_stochastic_policy_batch(
-                        primary_df,
-                        intraday_df,
-                        capacity_df,
-                        reserve_product,
-                        valid_dates=valid_dates,
-                        tz=zone_tz,
-                        power_mw=power_mw,
-                        duration_hours=duration_hours,
-                        efficiency=efficiency,
-                        bucket=bucket,
-                        forecast_mode=forecast_mode,
-                        rebid_cap_mw=_stochastic_rebid_cap_mw(
-                            stochastic_cap_pct, power_mw,
-                        ),
-                        min_rebid_uplift_eur=min_rebid_uplift_eur,
-                    )
-                )
-            _render_solver_failure_notice(
-                stoch_summary,
-                label=(
-                    "Stochastic DA+IDA1+reserve comparison"
-                    if stoch_reserve_mode
-                    else "Stochastic DA+IDA1 comparison"
-                ),
-            )
-        policy_value_total = None
-        policy_value_valid_days = None
-        policy_value_label = None
-        if stoch_summary is not None and stoch_summary["valid_days"] > 0:
-            # One delta row, label switches with the routing (§5): the reserve-
-            # mode baseline is the capped 9.2b reserve-first policy — a
-            # DIFFERENT number from the v1 capped-myopic — and both labels are
-            # excluded from the bar chart by _strategy_chart_rows.
-            if stoch_reserve_mode:
-                policy_value_total = stoch_summary["total_policy_value_v2_eur"]
-                policy_value_label = STOCHASTIC_POLICY_VALUE_RESERVE_LABEL
-            else:
-                policy_value_total = stoch_summary["total_policy_value_eur"]
-            policy_value_valid_days = stoch_summary["valid_days"]
-        comparison = build_strategy_comparison(
-            summary,
-            power_mw=power_mw,
-            reserve_coopt_total=reserve_total,
-            reserve_label=reserve_label,
-            triple_joint_total=triple["triple_total"],
-            triple_joint_label=triple_label,
-            realistic_triple_total=triple["realistic_total"],
-            realistic_triple_label=realistic_label,
-            triple_valid_days=triple["triple_valid_days"],
-            triple_da_baseline=triple["triple_da_baseline"],
-            policy_value_total=policy_value_total,
-            policy_value_valid_days=policy_value_valid_days,
-            policy_value_label=policy_value_label,
-        )
-        _render_strategy_comparison(
-            comparison, chart_template,
-            has_reserve=reserve_total is not None,
-            has_triple=triple["triple_total"] is not None,
-            has_realistic=triple["realistic_total"] is not None,
-        )
-        if reserve_product and reserve_total is None:
-            st.caption(
-                f"Reserve row omitted: no {reserve_product} capacity price "
-                "overlaps this comparison window, so it cannot be priced "
-                "co-temporally with the DA+ID rows."
-            )
-        if stoch_summary is not None and stoch_summary["valid_days"] > 0:
-            _render_stochastic_attribution_panel(
-                stoch_summary, power_mw=power_mw,
-                reserve_mode=stoch_reserve_mode,
-            )
-        if triple["seq_summary"] is not None:
-            _render_reserve_gap_panel(
-                triple["seq_summary"], reserve_product, chart_template,
-            )
-        st.dataframe(per_day, width="stretch", hide_index=True)
-        # This panel reports raw solver values — no capture haircut applied.
-        export_assumptions = _cockpit_export_assumptions(
+        ),
+        triple_valid_days=triple["triple_valid_days"],
+        triple_da_baseline=triple["triple_da_baseline"],
+        policy_value_total=stochastic["policy_value_total"],
+        policy_value_valid_days=stochastic["policy_value_valid_days"],
+        policy_value_label=stochastic["policy_value_label"],
+    )
+    bundle["derived"] = {
+        "reserve_product": reserve_product,
+        "reserve_total": reserve_total,
+        "reserve_notices": reserve_notices,
+        "triple": triple,
+        "stochastic": stochastic,
+        "comparison": comparison,
+        "export_tables": _forecast_policy_export_tables(
+            comparison, per_day, triple, stochastic,
+        ),
+        # Snapshotted with the result so a later export can never pair these
+        # numbers with a newer assumptions table.
+        "export_assumptions": _forecast_policy_export_assumptions(
             assumptions,
-            capture_label="Capture haircut",
-            capture_value="not applied",
-            capture_affects=(
-                "The forecast-policy panel reports raw solver values; no "
-                "capture haircut is applied"
+            reserve_total=reserve_total,
+            reserve_product=reserve_product,
+            reserve_price=reserve_price,
+            triple=triple,
+            stochastic=stochastic,
+        ),
+    }
+    return bundle
+
+
+def _batch_model_unavailable(summary: dict) -> bool:
+    """True when every otherwise usable optimisation day failed to solve."""
+    failed = int(summary.get("excluded_days_due_to_solver_failure", 0))
+    if failed <= 0:
+        return False
+    return not bool(summary.get("model_available", summary.get("valid_days", 0) > 0))
+
+
+def _compute_stochastic_policy(
+    primary_df: pd.DataFrame,
+    intraday_df: pd.DataFrame,
+    capacity_df: pd.DataFrame | None,
+    reserve_product: str | None,
+    *,
+    include_stochastic: bool,
+    stochastic_cap_pct: float,
+    valid_dates: set,
+    tz: str,
+    power_mw: float,
+    duration_hours: int,
+    efficiency: float,
+    bucket: str,
+    forecast_mode: str,
+    min_rebid_uplift_eur: float,
+) -> dict:
+    """Opt-in stochastic policy value over the SAME valid-day window.
+
+    Runs the 3-policy batch (capped-myopic / co-opt / stochastic) at a common
+    rebid cap and reduces it to ONE delta row. DA+IDA1 only unless reserve mode
+    is active (routing owned by ``_run_stochastic_policy_batch``). NO custom
+    label on the v1 path: the default STOCHASTIC_POLICY_VALUE_LABEL is what
+    excludes the row from the bar chart (see _strategy_chart_rows; Increment D
+    guardrail).
+    """
+    out = {
+        "per_day": None, "summary": None, "reserve_mode": False,
+        "policy_value_total": None, "policy_value_valid_days": None,
+        "policy_value_label": None,
+    }
+    if not include_stochastic:
+        return out
+    with st.spinner(
+        f"Solving {len(valid_dates)} day(s) x 3 policies "
+        "(capped-myopic / co-opt / stochastic)..."
+    ):
+        per_day, summary, reserve_mode = _run_stochastic_policy_batch(
+            primary_df, intraday_df, capacity_df, reserve_product,
+            valid_dates=valid_dates, tz=tz, power_mw=power_mw,
+            duration_hours=duration_hours, efficiency=efficiency,
+            bucket=bucket, forecast_mode=forecast_mode,
+            rebid_cap_mw=_stochastic_rebid_cap_mw(stochastic_cap_pct, power_mw),
+            min_rebid_uplift_eur=min_rebid_uplift_eur,
+        )
+    out.update(per_day=per_day, summary=summary, reserve_mode=reserve_mode)
+    if summary["valid_days"] > 0:
+        # One delta row, label switches with the routing (§5): the reserve-
+        # mode baseline is the capped 9.2b reserve-first policy — a
+        # DIFFERENT number from the v1 capped-myopic — and both labels are
+        # excluded from the bar chart by _strategy_chart_rows.
+        if reserve_mode:
+            out["policy_value_total"] = summary["total_policy_value_v2_eur"]
+            out["policy_value_label"] = STOCHASTIC_POLICY_VALUE_RESERVE_LABEL
+        else:
+            out["policy_value_total"] = summary["total_policy_value_eur"]
+        out["policy_value_valid_days"] = summary["valid_days"]
+    return out
+
+
+def _forecast_policy_export_assumptions(
+    assumptions: pd.DataFrame | None,
+    *,
+    reserve_total: float | None,
+    reserve_product: str | None,
+    reserve_price: float | None,
+    triple: dict,
+    stochastic: dict,
+) -> pd.DataFrame | None:
+    """Assumptions sheet for the forecast-policy export, built at run time."""
+    # This panel reports raw solver values — no capture haircut applied.
+    out = _cockpit_export_assumptions(
+        assumptions,
+        capture_label="Capture haircut",
+        capture_value="not applied",
+        capture_affects=(
+            "The forecast-policy panel reports raw solver values; no "
+            "capture haircut is applied"
+        ),
+    )
+    if reserve_total is not None:
+        out = _append_reserve_assumptions(
+            out, product=reserve_product, capacity_price_eur_mw_h=reserve_price,
+        )
+    if triple["triple_total"] is not None:
+        out = _append_triple_assumptions(out)
+    if triple["realistic_total"] is not None:
+        out = _append_realistic_triple_assumptions(out)
+    stoch_summary = stochastic["summary"]
+    if stoch_summary is not None and stoch_summary["valid_days"] > 0:
+        out = _append_stochastic_assumptions(
+            out, summary=stoch_summary, reserve_mode=stochastic["reserve_mode"],
+        )
+    return out
+
+
+def _forecast_policy_export_tables(
+    comparison: pd.DataFrame,
+    per_day: pd.DataFrame,
+    triple: dict,
+    stochastic: dict,
+) -> dict[str, pd.DataFrame]:
+    """Result tables for the forecast-policy export, in sheet order."""
+    tables = {"Strategy comparison": comparison, "Sequential DA+ID": per_day}
+    if triple["seq_per_day"] is not None and not triple["seq_per_day"].empty:
+        tables["Sequential DA+ID+reserve"] = triple["seq_per_day"]
+    stoch_per_day = stochastic["per_day"]
+    if stoch_per_day is not None and not stoch_per_day.empty:
+        tables["Stochastic policy (per day)"] = stoch_per_day
+    return tables
+
+
+def _render_forecast_policy_bundle(bundle: dict, chart_template: str) -> None:
+    """Render a stored forecast-policy result; never re-solves."""
+    summary, per_day = bundle["summary"], bundle["per_day"]
+    if _render_solver_failure_notice(summary, label="Forecast-policy model"):
+        return
+    if per_day.empty:
+        st.warning(
+            f"No valid forecast-policy days in this sample. "
+            f"Excluded: {summary['excluded_days']}. A leave-one-day-out "
+            "forecast needs at least 2 loaded days; walk-forward needs at "
+            "least one day before the target."
+        )
+        return
+
+    _render_forecast_policy_kpis(summary)
+    _plot_forecast_policy(per_day, chart_template)
+    meta = summary["forecast_meta"]
+    mode_note = {
+        "loo": "LOO cross-validation (may use future days except target)",
+        "walk_forward": "walk-forward (prior days only)",
+        "in_sample": "in-sample (includes target day)",
+    }.get(meta["forecast_mode"], meta["forecast_mode"])
+    st.caption(
+        f"Forecast support: {meta['n_buckets_filled']}/"
+        f"{meta['n_buckets_requested']} buckets backed by history, "
+        f"{meta['fallback_points']} global-mean fallback points "
+        f"(coverage {meta['coverage']:.0%}, {mode_note}). Shape/order is "
+        "the primary signal, but level error still affects the cycling "
+        "decision via round-trip efficiency loss and VOM."
+    )
+    _render_forecast_skill(summary.get("forecast_skill", {}), chart_template)
+
+    derived = bundle["derived"]
+    for message in derived["reserve_notices"]:
+        st.warning(message)
+    triple = derived["triple"]
+    if int(triple.get("solver_failed_days", 0)) > 0:
+        _render_solver_failure_notice(
+            {
+                "excluded_days_due_to_solver_failure": triple["solver_failed_days"],
+                "model_available": triple.get("model_available", False),
+                "valid_days": triple.get("triple_valid_days") or 0,
+            },
+            label="DA+IDA1+reserve model",
+        )
+    stochastic = derived["stochastic"]
+    stoch_summary = stochastic["summary"]
+    if stoch_summary is not None:
+        _render_solver_failure_notice(
+            stoch_summary,
+            label=(
+                "Stochastic DA+IDA1+reserve comparison"
+                if stochastic["reserve_mode"]
+                else "Stochastic DA+IDA1 comparison"
             ),
         )
-        if reserve_total is not None:
-            export_assumptions = _append_reserve_assumptions(
-                export_assumptions,
-                product=reserve_product,
-                capacity_price_eur_mw_h=reserve_price,
-            )
-        if triple["triple_total"] is not None:
-            export_assumptions = _append_triple_assumptions(export_assumptions)
-        if triple["realistic_total"] is not None:
-            export_assumptions = _append_realistic_triple_assumptions(export_assumptions)
-        if stoch_summary is not None and stoch_summary["valid_days"] > 0:
-            export_assumptions = _append_stochastic_assumptions(
-                export_assumptions, summary=stoch_summary,
-                reserve_mode=stoch_reserve_mode,
-            )
-        export_tables = {"Strategy comparison": comparison, "Sequential DA+ID": per_day}
-        if triple["seq_per_day"] is not None and not triple["seq_per_day"].empty:
-            export_tables["Sequential DA+ID+reserve"] = triple["seq_per_day"]
-        if stoch_per_day is not None and not stoch_per_day.empty:
-            export_tables["Stochastic policy (per day)"] = stoch_per_day
-        _cockpit_download_button(
-            export_tables,
-            export_assumptions,
-            key="dl_forecast_policy",
-            label="\U0001f4e5 Download forecast policy + comparison (Excel)",
-            file_name="cockpit_forecast_policy.xlsx",
+    reserve_product = derived["reserve_product"]
+    _render_strategy_comparison(
+        derived["comparison"], chart_template,
+        has_reserve=derived["reserve_total"] is not None,
+        has_triple=triple["triple_total"] is not None,
+        has_realistic=triple["realistic_total"] is not None,
+    )
+    if reserve_product and derived["reserve_total"] is None:
+        st.caption(
+            f"Reserve row omitted: no {reserve_product} capacity price "
+            "overlaps this comparison window, so it cannot be priced "
+            "co-temporally with the DA+ID rows."
         )
+    if stoch_summary is not None and stoch_summary["valid_days"] > 0:
+        _render_stochastic_attribution_panel(
+            stoch_summary, power_mw=bundle["power_mw"],
+            reserve_mode=stochastic["reserve_mode"],
+        )
+    if triple["seq_summary"] is not None:
+        _render_reserve_gap_panel(
+            triple["seq_summary"], reserve_product, chart_template,
+        )
+    st.dataframe(per_day, width="stretch", hide_index=True)
+    _cockpit_download_button(
+        derived["export_tables"],
+        derived["export_assumptions"],
+        key="dl_forecast_policy",
+        label="\U0001f4e5 Download forecast policy + comparison (Excel)",
+        file_name="cockpit_forecast_policy.xlsx",
+    )
 
 
 def _render_forecast_skill(skill: dict, chart_template: str) -> None:
