@@ -16,7 +16,7 @@ from src.analytics import (
 )
 from src.config import is_elexon_zone
 from src.data_ingestion import summarize_price_data_quality
-from src.ui_theme import apply_cockpit_plot_theme
+from src.ui_theme import apply_cockpit_plot_theme, metric_columns
 
 
 def render(
@@ -36,7 +36,7 @@ def render(
     st.caption(f"Data source: {source}")
 
     avg_price = calculate_average_price(primary_df)
-    k1, k2, k3, k4 = st.columns(4)
+    k1, k2, k3, k4 = metric_columns(4)
     k1.metric(
         "Avg Price",
         UNAVAILABLE_DISPLAY if avg_price["avg_price_reason"]

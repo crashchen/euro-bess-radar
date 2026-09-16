@@ -929,9 +929,9 @@ def calculate_average_price(df: pd.DataFrame) -> dict[str, float | str | None]:
     comparison and the Excel/PDF summaries. A finite price counts for the
     physical hours it was delivered, so a quarter-hour price no longer weighs
     as much as an hourly one. Durations come from the whole window's delivery
-    grid: a uniform cadence or the registered SDAC hourly-to-quarter-hour
-    cutover. NaN and infinite prices contribute no covered hours; they are
-    excluded, never read as zero.
+    grid: a uniform native 1h, 30-minute or 15-minute cadence, or the registered
+    SDAC hourly-to-quarter-hour cutover. NaN and infinite prices contribute no
+    covered hours; they are excluded, never read as zero.
 
     The figure is unavailable rather than guessed when the index is defective,
     when a lone timestamp cannot show how long its price applied, when the grid
@@ -958,6 +958,10 @@ def calculate_average_price(df: pd.DataFrame) -> dict[str, float | str | None]:
 
     if "price_eur_mwh" not in df.columns or df.empty:
         return unavailable("no price observations are loaded")
+    if not isinstance(df.index, pd.DatetimeIndex):
+        # DatetimeIndex construction would silently interpret a numeric row
+        # index as nanoseconds since the epoch, inventing delivery instants.
+        return unavailable("the price index is not a timestamp index")
     issue = describe_price_index_issue(df.index)
     if issue is not None:
         return unavailable(issue.reason)
@@ -973,6 +977,14 @@ def calculate_average_price(df: pd.DataFrame) -> dict[str, float | str | None]:
         return unavailable(
             "the delivery grid has a gap or a cadence change other than the "
             "registered SDAC 15-minute cutover"
+        )
+    if not np.isin(durations, [1.0, 0.5, 0.25]).all():
+        # The shared inference helper deliberately preserves historical
+        # uniform-cadence inference. A regular 2h/24h sample is insufficient
+        # evidence for native DA delivery products in this average contract.
+        return unavailable(
+            "the delivery cadence is not a supported native 1-hour, "
+            "30-minute or 15-minute product"
         )
     prices = df["price_eur_mwh"].to_numpy(dtype=float)
     finite = np.isfinite(prices)

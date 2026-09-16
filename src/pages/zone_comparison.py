@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.analytics import (
+    UNAVAILABLE_DISPLAY,
     calculate_daily_spreads,
     compare_zones,
 )
@@ -158,7 +159,7 @@ def render(
         index=False,
     ):
         if isinstance(reason, str) and reason:
-            st.caption(f"Avg Price for {zone} is unavailable because {reason}.")
+            st.caption(f"Avg Price for {zone}: {UNAVAILABLE_DISPLAY} — {reason}.")
 
     # Download comparison
     comp_xlsx = export_comparison_to_bytes(comp)

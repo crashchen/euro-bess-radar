@@ -84,6 +84,7 @@ from src.project_case.imports import (
     parse_augmentation_csv,
     parse_explicit_multiplier_csv,
 )
+from src.ui_theme import metric_columns
 
 SCREENING_NPV_LABEL: Final = "No-lifecycle-cost screening NPV"
 LIFECYCLE_NPV_LABEL: Final = "Pre-tax unlevered lifecycle cash NPV"
@@ -258,12 +259,20 @@ def _render_outcome(label: str, outcome: NpvOutcome) -> None:
     if distribution is None:  # defensive; the typed schema forbids this state
         st.error("Unavailable: typed NPV distribution is absent; no EUR 0 fallback.")
         return
-    columns = st.columns(4)
-    columns[0].metric(f"{label} — {P10_LABEL}", f"€{distribution.p10:,.0f}")
-    columns[1].metric(f"{label} — {P50_LABEL}", f"€{distribution.p50:,.0f}")
-    columns[2].metric(f"{label} — {P90_LABEL}", f"€{distribution.p90:,.0f}")
+    columns = metric_columns(4)
+    columns[0].metric(
+        P10_LABEL, f"€{distribution.p10:,.0f}", help=f"{label} — {P10_LABEL}"
+    )
+    columns[1].metric(
+        P50_LABEL, f"€{distribution.p50:,.0f}", help=f"{label} — {P50_LABEL}"
+    )
+    columns[2].metric(
+        P90_LABEL, f"€{distribution.p90:,.0f}", help=f"{label} — {P90_LABEL}"
+    )
     columns[3].metric(
-        f"{label} — {PROBABILITY_LABEL}", f"{distribution.prob_positive:.0%}"
+        PROBABILITY_LABEL,
+        f"{distribution.prob_positive:.0%}",
+        help=f"{label} — {PROBABILITY_LABEL}",
     )
 
 

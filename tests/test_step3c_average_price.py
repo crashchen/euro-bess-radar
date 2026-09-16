@@ -111,6 +111,34 @@ def test_uniform_grids_keep_the_row_mean(freq: str) -> None:
     assert stats["delivery_hours"] == pytest.approx(960.0)
 
 
+@pytest.mark.parametrize("freq", ["2h", "24h"])
+def test_regular_sparse_timestamps_do_not_invent_long_delivery_products(freq: str) -> None:
+    from src.analytics import average_price_basis, calculate_average_price
+
+    frame = _frame(
+        pd.date_range("2026-01-01", periods=3, freq=freq, tz="UTC"),
+        [10.0, 100.0, 10.0],
+    )
+    stats = calculate_average_price(frame)
+    assert np.isnan(stats["avg_price_eur_mwh"])
+    assert np.isnan(stats["covered_hours"])
+    assert np.isnan(stats["delivery_hours"])
+    assert "not a supported native" in stats["avg_price_reason"]
+    assert average_price_basis(stats) is None
+
+
+def test_numeric_row_index_is_not_interpreted_as_delivery_nanoseconds() -> None:
+    from src.analytics import average_price_basis, calculate_average_price
+
+    frame = pd.DataFrame({"price_eur_mwh": [10.0, 100.0, 10.0]})
+    stats = calculate_average_price(frame)
+    assert np.isnan(stats["avg_price_eur_mwh"])
+    assert np.isnan(stats["covered_hours"])
+    assert np.isnan(stats["delivery_hours"])
+    assert stats["avg_price_reason"] == "the price index is not a timestamp index"
+    assert average_price_basis(stats) is None
+
+
 @pytest.mark.parametrize(
     "tz,hourly,quarter_hours,expected",
     [
@@ -403,6 +431,17 @@ def test_comparison_export_writes_na_beside_the_reason() -> None:
     assert rows["FR"][avg] == "n/a"
     assert rows["FR"][coverage] == "n/a"
     assert _GAP_REASON in rows["FR"][reason]
+    cells = {
+        row[header.index("Zone")].value: row
+        for row in ws.iter_rows(min_row=2)
+    }
+    reason_cell = cells["FR"][reason]
+    assert reason_cell.value == comp.set_index("zone").loc["FR", "avg_price_unavailable_reason"]
+    assert reason_cell.alignment.wrap_text is True
+    assert ws.row_dimensions[reason_cell.row].height > ws.sheet_format.defaultRowHeight
+    assert cells["DE_LU"][avg].data_type == "n"
+    assert cells["DE_LU"][coverage].data_type == "n"
+    assert cells["DE_LU"][coverage].number_format == "0.0%"
 
 
 def _zone_comparison_app() -> None:
@@ -422,7 +461,7 @@ def test_zone_comparison_page_names_the_unavailable_zone_and_reason() -> None:
     app = AppTest.from_function(_zone_comparison_app).run(timeout=120)
     assert not app.exception
     assert any(
-        c.value.startswith("Avg Price for FR is unavailable because") and _GAP_REASON in c.value
+        c.value.startswith("Avg Price for FR: n/a — ") and _GAP_REASON in c.value
         for c in app.caption
     )
     assert not any("Avg Price for DE_LU" in c.value for c in app.caption)

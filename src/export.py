@@ -2646,6 +2646,23 @@ def export_comparison_to_bytes(comparison_df: pd.DataFrame) -> bytes:
                 for row_idx, reason in enumerate(reasons, 2):
                     if isinstance(reason, str) and reason:
                         ws.cell(row=row_idx, column=col_idx, value=UNAVAILABLE_DISPLAY)
+            if col_name == "avg_price_unavailable_reason":
+                for row_idx, reason in enumerate(reasons, 2):
+                    if not isinstance(reason, str) or not reason:
+                        continue
+                    # This disclosure sits between populated numeric columns,
+                    # so it cannot overflow into adjacent cells as summary
+                    # notes can. Keep the entire reason visible in its row.
+                    for data_cell in ws[row_idx]:
+                        data_cell.alignment = Alignment(vertical="top")
+                    ws.cell(row=row_idx, column=col_idx).alignment = Alignment(
+                        wrap_text=True, vertical="top",
+                    )
+                    lines = max(1, len(textwrap.wrap(reason, _MAX_COLUMN_WIDTH)))
+                    ws.row_dimensions[row_idx].height = max(
+                        ws.row_dimensions[row_idx].height or _ROW_HEIGHT_PER_LINE,
+                        lines * _ROW_HEIGHT_PER_LINE,
+                    )
 
         _auto_column_width(ws)
 

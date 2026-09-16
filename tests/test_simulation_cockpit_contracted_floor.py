@@ -433,7 +433,7 @@ def test_render_places_floor_immediately_after_frontier() -> None:
     assert indices[2] == indices[1] + 1
 
 
-def test_contracted_floor_annual_metrics_use_two_by_two_layout() -> None:
+def test_contracted_floor_metrics_keep_annual_and_pv_groups() -> None:
     tree = ast.parse(inspect.getsource(cockpit._render_contracted_floor_result))
     column_calls = sorted(
         (
@@ -441,10 +441,8 @@ def test_contracted_floor_annual_metrics_use_two_by_two_layout() -> None:
             for call in ast.walk(tree)
             if (
                 isinstance(call, ast.Call)
-                and isinstance(call.func, ast.Attribute)
-                and isinstance(call.func.value, ast.Name)
-                and call.func.value.id == "st"
-                and call.func.attr == "columns"
+                and isinstance(call.func, ast.Name)
+                and call.func.id == "metric_columns"
                 and call.args
                 and isinstance(call.args[0], ast.Constant)
                 and isinstance(call.args[0].value, int)
