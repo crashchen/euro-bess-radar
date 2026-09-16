@@ -8,6 +8,8 @@ import streamlit as st
 
 from src.analytics import (
     UNAVAILABLE_DISPLAY,
+    average_price_basis,
+    calculate_average_price,
     describe_price_index_issue,
     negative_price_hours_reason,
     time_weighted_rolling_price_mean,
@@ -33,8 +35,13 @@ def render(
     source = "Elexon (GBP\u2192EUR)" if is_elexon_zone(primary_zone) else "ENTSO-E"
     st.caption(f"Data source: {source}")
 
+    avg_price = calculate_average_price(primary_df)
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Avg Price", f"\u20ac{primary_df['price_eur_mwh'].mean():.2f}/MWh")
+    k1.metric(
+        "Avg Price",
+        UNAVAILABLE_DISPLAY if avg_price["avg_price_reason"]
+        else f"\u20ac{avg_price['avg_price_eur_mwh']:.2f}/MWh",
+    )
     k2.metric("Avg Ordered Spread", f"\u20ac{percentiles['mean']:.2f}/MWh")
     k3.metric("90th-pct Ordered Spread", f"\u20ac{percentiles['p90']:.2f}/MWh")
     neg_hours_reason = negative_price_hours_reason(neg_stats)
@@ -48,6 +55,12 @@ def render(
         f"Spreads use chronology-aware {duration_hours}h charge/discharge windows "
         f"in {zone_tz}."
     )
+    if avg_price["avg_price_reason"]:
+        st.caption(
+            f"Avg Price is unavailable because {avg_price['avg_price_reason']}."
+        )
+    else:
+        st.caption(f"Avg Price: {average_price_basis(avg_price)}")
     if neg_hours_reason:
         st.caption(
             f"Negative-price hours are unavailable because {neg_hours_reason}. "

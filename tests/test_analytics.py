@@ -405,9 +405,10 @@ class TestCompareZones:
 
     def test_columns(self, seven_day_prices: pd.DataFrame) -> None:
         result = compare_zones({"DE_LU": seven_day_prices})
-        expected = {"zone", "avg_price", "std_price", "avg_spread", "p50_spread",
-                    "p90_spread", "negative_pct", "estimated_annual_revenue_per_mw",
-                    "dispatch_method"}
+        expected = {"zone", "avg_price", "avg_price_coverage_pct",
+                    "avg_price_unavailable_reason", "std_price", "avg_spread",
+                    "p50_spread", "p90_spread", "negative_pct",
+                    "estimated_annual_revenue_per_mw", "dispatch_method"}
         assert set(result.columns) == expected
 
     def test_capture_rate_flows_into_revenue(

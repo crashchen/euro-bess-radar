@@ -21,7 +21,9 @@ from openpyxl.utils import get_column_letter
 
 from src.analytics import (
     UNAVAILABLE_DISPLAY,
+    average_price_basis,
     build_price_heatmap,
+    calculate_average_price,
     calculate_negative_price_hours,
     filter_to_complete_local_days,
     negative_price_hours_reason,
@@ -361,7 +363,21 @@ def _build_summary_sheet(
         )
     row += 1
 
-    row = _write_kv_pair(ws, row, "Avg Price (EUR/MWh)", round(price_df["price_eur_mwh"].mean(), 2), _PRICE_FMT)
+    avg_price = calculate_average_price(price_df)
+    if avg_price["avg_price_reason"]:
+        row = _write_kv_pair(ws, row, "Avg Price (EUR/MWh)", UNAVAILABLE_DISPLAY)
+        row = _write_kv_pair(
+            ws, row, "Avg Price Unavailable Because", avg_price["avg_price_reason"],
+            wrap_key=True,
+        )
+    else:
+        row = _write_kv_pair(
+            ws, row, "Avg Price (EUR/MWh)",
+            round(avg_price["avg_price_eur_mwh"], 2), _PRICE_FMT,
+        )
+        row = _write_kv_pair(
+            ws, row, "Avg Price Basis", average_price_basis(avg_price),
+        )
     row = _write_kv_pair(ws, row, "Median Price (EUR/MWh)", round(price_df["price_eur_mwh"].median(), 2), _PRICE_FMT)
     row += 1
 
@@ -2360,9 +2376,19 @@ def _build_pdf_report(
             ("Unresolved Missing %", f"{quality['missing_ratio']:.1%}"),
             ("Max Source Gap (hours)", str(quality["max_source_gap_hours"])),
         ])
+    avg_price = calculate_average_price(price_df)
+    rows.append(("", ""))
+    if avg_price["avg_price_reason"]:
+        rows.extend([
+            ("Avg Price (EUR/MWh)", UNAVAILABLE_DISPLAY),
+            ("Avg Price Unavailable Because", avg_price["avg_price_reason"]),
+        ])
+    else:
+        rows.extend([
+            ("Avg Price (EUR/MWh)", f"{avg_price['avg_price_eur_mwh']:.2f}"),
+            ("Avg Price Basis", average_price_basis(avg_price)),
+        ])
     rows.extend([
-        ("", ""),
-        ("Avg Price (EUR/MWh)", f"{price_df['price_eur_mwh'].mean():.2f}"),
         ("Median Price (EUR/MWh)", f"{price_df['price_eur_mwh'].median():.2f}"),
         ("", ""),
         ("50th-percentile Spread", f"{percentiles['p50']:.2f}"),
@@ -2455,7 +2481,13 @@ def _build_pdf_report(
         pdf.set_font("Helvetica", "B", 10)
         pdf.cell(col_w, 7, label)
         pdf.set_font("Helvetica", "", 10)
-        pdf.cell(0, 7, value, new_x="LMARGIN", new_y="NEXT")
+        value_w = pdf.w - pdf.r_margin - pdf.get_x()
+        if pdf.get_string_width(value) > value_w:
+            # A disclosure sentence wraps inside the value column instead of
+            # running past the page margin; short values keep one plain cell.
+            pdf.multi_cell(value_w, 7, value, new_x="LMARGIN", new_y="NEXT")
+        else:
+            pdf.cell(0, 7, value, new_x="LMARGIN", new_y="NEXT")
 
     # ── Chart pages ─────────────────────────────────────────────────────
     if figures:
@@ -2545,6 +2577,8 @@ def export_to_pdf_bytes(
 _COMPARISON_COLUMNS = {
     "zone": ("Zone", None),
     "avg_price": ("Avg Price (EUR/MWh)", _PRICE_FMT),
+    "avg_price_coverage_pct": ("Avg Price Coverage %", _PCT_FMT),
+    "avg_price_unavailable_reason": ("Avg Price Unavailable Because", None),
     "std_price": ("Std Dev", _PRICE_FMT),
     "avg_spread": ("Avg Spread (EUR/MWh)", _PRICE_FMT),
     "p50_spread": ("50th-percentile Spread", _PRICE_FMT),
@@ -2583,8 +2617,14 @@ def export_comparison_to_bytes(comparison_df: pd.DataFrame) -> bytes:
         safe_df.to_excel(writer, sheet_name="Zone Comparison", index=False)
         ws = writer.sheets["Zone Comparison"]
 
-        # Apply styled headers and number formats. Analytics stores negative_pct
-        # as percentage points for UI readability; Excel percent cells need ratios.
+        # Apply styled headers and number formats. Analytics stores percentage
+        # columns as percentage points for UI readability; Excel percent cells
+        # need ratios.
+        reasons = (
+            safe_df["avg_price_unavailable_reason"].tolist()
+            if "avg_price_unavailable_reason" in safe_df.columns
+            else [None] * len(safe_df)
+        )
         for col_idx, col_name in enumerate(safe_df.columns, 1):
             label, fmt = _COMPARISON_COLUMNS.get(col_name, (col_name, None))
             cell = ws.cell(row=1, column=col_idx, value=_safe_cell_value(label))
@@ -2594,9 +2634,18 @@ def export_comparison_to_bytes(comparison_df: pd.DataFrame) -> bytes:
             if fmt:
                 for row_idx in range(2, len(safe_df) + 2):
                     data_cell = ws.cell(row=row_idx, column=col_idx)
-                    if col_name == "negative_pct" and data_cell.value is not None:
+                    if (
+                        col_name in {"negative_pct", "avg_price_coverage_pct"}
+                        and isinstance(data_cell.value, (int, float))
+                    ):
                         data_cell.value = data_cell.value / 100
                     data_cell.number_format = fmt
+            if col_name in {"avg_price", "avg_price_coverage_pct"}:
+                # An unavailable average reads n/a beside its reason, never
+                # as a blank cell that looks like a missing export.
+                for row_idx, reason in enumerate(reasons, 2):
+                    if isinstance(reason, str) and reason:
+                        ws.cell(row=row_idx, column=col_idx, value=UNAVAILABLE_DISPLAY)
 
         _auto_column_width(ws)
 
