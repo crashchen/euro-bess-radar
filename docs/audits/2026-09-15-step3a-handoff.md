@@ -119,7 +119,7 @@ PYTHONPATH=. .venv/bin/python docs/audits/2026-09-15-step3a-evidence/step3a-prob
 | `pytest tests/ -q --collect-only` | 1873 collected，其中 22 个 slow |
 | 针对性回归（6 个相关测试文件） | 329 passed / 2 skipped |
 | `ruff check src/ app.py tests/` | 通过 |
-| `git diff --check 95f6d09 HEAD` | 无输出 |
+| `git diff --check 95f6d09 HEAD` | 无输出（依赖证据目录的 `.gitattributes`，见上节） |
 | 兼容性 job 的本地等价选择 | 12 passed / 89 deselected |
 
 基线 `95f6d09` 的最近完整验收为 1844 passed / 2 skipped（1846 collected）；
@@ -130,8 +130,9 @@ PYTHONPATH=. .venv/bin/python docs/audits/2026-09-15-step3a-evidence/step3a-prob
 
 - 兼容性 job 的名字变化只影响该 check 的显示名；main 的分支保护只要求 `test`，
   已核对，不影响门禁。改名后的远端运行状态以本 PR 的 Checks 为准。
-- PDF 可读性断言是按 fpdf2 字体度量计算的行宽，不是渲染截图。Codex 首轮已用
-  Poppler 对本轮 summary 的原因行做了实际渲染核对；带图 PDF 未做渲染验收，
+- PDF 可读性断言是按 fpdf2 字体度量计算的行宽，不是渲染截图。Codex 首轮用
+  Poppler 实际渲染过**不可验证网格**那条原因行并确认可读；本轮新增的 NaT
+  原因行（157.2 mm）只有度量断言，尚未渲染核对。带图 PDF 未做渲染验收，
   两项 opt-in 图表渲染跳过仍未证明 PDF 图表渲染成功。
 - Excel 的换行断言读的是保存后文件的 `wrap_text` 与行高，不是在原生 Excel
   应用里的视觉验收。
