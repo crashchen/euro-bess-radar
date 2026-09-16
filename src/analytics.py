@@ -2,10 +2,52 @@
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 import numpy as np
 import pandas as pd
 
 from src.time_utils import infer_delivery_interval_hours, interval_hours_vector
+
+#: Display token for a metric whose physical basis could not be verified.
+#: Consumers must render this instead of a raw NaN or a substituted zero.
+UNAVAILABLE_DISPLAY = "n/a"
+
+
+class PriceIndexIssue(NamedTuple):
+    """Why a price index cannot support duration-weighted analytics.
+
+    ``plottable`` stays True when the observations are still in delivery
+    order, so the raw series may be drawn as-is; it is False when drawing
+    the rows in their given order would misrepresent the market.
+    """
+
+    reason: str
+    plottable: bool
+
+
+def describe_price_index_issue(index) -> PriceIndexIssue | None:
+    """Return the first blocking defect in a price index, or None if usable.
+
+    This is the single definition of "usable" shared by the trailing
+    physical-time mean and by the pages that must explain its absence, so a
+    page cannot claim a different reason than the calculation enforces.
+    """
+    try:
+        index = pd.DatetimeIndex(index)
+    except (TypeError, ValueError):
+        return PriceIndexIssue("the price index is not a timestamp index", False)
+    if index.hasnans:
+        return PriceIndexIssue("the price index contains unset (NaT) timestamps", False)
+    if not index.is_monotonic_increasing:
+        return PriceIndexIssue(
+            "the price index is not sorted into delivery order", False,
+        )
+    if index.has_duplicates:
+        return PriceIndexIssue(
+            "the price index repeats the same delivery timestamp", True,
+        )
+    return None
 
 
 def calculate_dispatch_price_vwaps(
@@ -98,9 +140,12 @@ def time_weighted_rolling_price_mean(
     """
     if prices.empty:
         return pd.Series(index=prices.index, dtype=float)
+    issue = describe_price_index_issue(prices.index)
+    if issue is not None:
+        raise ValueError(
+            f"Rolling prices require unique increasing finite timestamps: {issue.reason}"
+        )
     index = pd.DatetimeIndex(prices.index).as_unit("ns")
-    if index.has_duplicates or index.hasnans or not index.is_monotonic_increasing:
-        raise ValueError("Rolling prices require unique increasing finite timestamps")
     window_hours = pd.Timedelta(window).total_seconds() / 3600
     if not np.isfinite([window_hours, min_hours]).all() or min(window_hours, min_hours) <= 0:
         raise ValueError("Rolling window and minimum coverage hours must be positive and finite")
@@ -802,7 +847,8 @@ def calculate_negative_price_hours(df: pd.DataFrame) -> dict[str, float]:
 
     Returns:
         Dict with negative_hours, negative_intervals, pct_negative,
-        avg_negative_price, most_negative_price.
+        avg_negative_price, most_negative_price, and
+        negative_hours_reason (None when negative_hours is available).
     """
     prices = df["price_eur_mwh"]
     negative = prices[prices < 0]
@@ -813,11 +859,22 @@ def calculate_negative_price_hours(df: pd.DataFrame) -> dict[str, float]:
     # Accumulate physical hours per local-day segment so mixed-resolution
     # windows (e.g. DE_LU spanning the 2025-10 60min->15min boundary)
     # report real wall-clock hours instead of count * frame-mode dt.
+    reason: str | None = None
+    unset_instants = int(prices.index.isna().sum())
     if prices.empty:
         negative_hours = 0.0
+    elif unset_instants:
+        # ``groupby`` drops rows whose key is NaT, so a record with no delivery
+        # instant would never reach the verification below and would be
+        # reported as a confident zero contribution to the physical hours.
+        negative_hours = float("nan")
+        reason = (
+            f"{unset_instants} record(s) carry an unset (NaT) delivery "
+            "timestamp, so the delivery interval grid could not be verified"
+        )
     else:
         total_hours = 0.0
-        for _, day_group in prices.groupby(prices.index.date):
+        for day, day_group in prices.groupby(prices.index.date):
             if day_group.empty:
                 continue
             try:
@@ -826,6 +883,10 @@ def calculate_negative_price_hours(df: pd.DataFrame) -> dict[str, float]:
                 # Preserve the observed interval count, but do not turn an
                 # unknown duration into a fabricated number of physical hours.
                 total_hours = float("nan")
+                reason = (
+                    "the delivery interval grid could not be verified on "
+                    f"{day} (local date of the first unverified day)"
+                )
                 break
             total_hours += float(day_dt[(day_group < 0).to_numpy()].sum())
         negative_hours = round(total_hours, 2)
@@ -834,10 +895,31 @@ def calculate_negative_price_hours(df: pd.DataFrame) -> dict[str, float]:
         "negative_hours": negative_hours,
         "negative_intervals": int(neg_count),
         "total_negative_hours": negative_hours,
+        "negative_hours_reason": reason,
         "pct_negative": round(100.0 * neg_count / total, 2) if total > 0 else 0.0,
         "avg_negative_price": round(float(negative.mean()), 2) if neg_count > 0 else 0.0,
         "most_negative_price": round(float(negative.min()), 2) if neg_count > 0 else 0.0,
     }
+
+
+def negative_price_hours_reason(stats: dict) -> str | None:
+    """Return why negative-price hours are unavailable, or None when usable.
+
+    Every surface — page, Excel and PDF — must branch on this one answer, so
+    an unverifiable physical duration reads as ``UNAVAILABLE_DISPLAY`` plus a
+    reason instead of a raw NaN, a literal ``nan`` string, or a substituted
+    zero. Each surface keeps its own formatting of an available value.
+    """
+    hours = stats.get("negative_hours")
+    try:
+        if np.isfinite(float(hours)):
+            return None
+    except (TypeError, ValueError):
+        pass
+    return str(
+        stats.get("negative_hours_reason")
+        or "the delivery interval grid could not be verified"
+    )
 
 
 # ── Renewable correlation ─────────────────────────────────────────────────────

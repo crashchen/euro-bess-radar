@@ -6,7 +6,12 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from src.analytics import time_weighted_rolling_price_mean
+from src.analytics import (
+    UNAVAILABLE_DISPLAY,
+    describe_price_index_issue,
+    negative_price_hours_reason,
+    time_weighted_rolling_price_mean,
+)
 from src.config import is_elexon_zone
 from src.data_ingestion import summarize_price_data_quality
 from src.ui_theme import apply_cockpit_plot_theme
@@ -32,17 +37,23 @@ def render(
     k1.metric("Avg Price", f"\u20ac{primary_df['price_eur_mwh'].mean():.2f}/MWh")
     k2.metric("Avg Ordered Spread", f"\u20ac{percentiles['mean']:.2f}/MWh")
     k3.metric("90th-pct Ordered Spread", f"\u20ac{percentiles['p90']:.2f}/MWh")
+    neg_hours_reason = negative_price_hours_reason(neg_stats)
     k4.metric(
         "Neg Price Hours",
-        f"{neg_stats['negative_hours']:.1f}h" if pd.notna(neg_stats["negative_hours"]) else "n/a",
+        UNAVAILABLE_DISPLAY if neg_hours_reason
+        else f"{neg_stats['negative_hours']:.1f}h",
         delta=f"{neg_stats['pct_negative']:.1f}% of intervals",
     )
     st.caption(
         f"Spreads use chronology-aware {duration_hours}h charge/discharge windows "
         f"in {zone_tz}."
     )
-    if pd.isna(neg_stats["negative_hours"]):
-        st.caption("Negative-price hours are unavailable because the delivery interval grid cannot be verified.")
+    if neg_hours_reason:
+        st.caption(
+            f"Negative-price hours are unavailable because {neg_hours_reason}. "
+            f"The {neg_stats['negative_intervals']} observed negative interval(s) "
+            "and their share are still counted."
+        )
     quality = summarize_price_data_quality(primary_df)
     excluded_days = int(daily_spreads.attrs.get("excluded_days_due_to_missing", 0))
     solver_failed_days = int(
@@ -73,35 +84,56 @@ def render(
         else:
             st.warning(message)
 
-    price_plot_df = primary_df.reset_index()
-    fig_price = px.line(
-        price_plot_df,
-        x="timestamp", y="price_eur_mwh",
-        title="Day-Ahead Prices",
-        labels={"price_eur_mwh": "EUR/MWh", "timestamp": ""},
-        template=chart_template,
-    )
-    fig_price.update_traces(
-        opacity=0.72,
-        name="Day-Ahead",
-        showlegend=True,
-        line=dict(color="#ff2d95", width=1.7),
-    )
-    ma_series = time_weighted_rolling_price_mean(primary_df["price_eur_mwh"])
-    fig_price.add_scatter(
-        x=primary_df.index, y=ma_series,
-        mode="lines", name="30-Day MA",
-        line=dict(color="#d0d4dc", width=2.2),
-    )
-    fig_price.update_xaxes(rangeslider_visible=True)
-    apply_cockpit_plot_theme(fig_price)
-    report_figures["price_ts"] = fig_price
-    st.plotly_chart(fig_price, width="stretch")
-    st.caption(
-        "30-Day MA uses the trailing 720 physical hours, weighted by delivery "
-        "duration through each interval's end. It appears after 24 hours of finite "
-        "price coverage; missing prices and unverified intervals are excluded."
-    )
+    # The index defect is classified once, up front, instead of catching the
+    # rolling-mean ValueError: that keeps an unrelated programming error from
+    # being presented to the user as a data-availability message.
+    index_issue = describe_price_index_issue(primary_df.index)
+    if index_issue is not None and not index_issue.plottable:
+        # A stale figure from an earlier state must not reach the PDF export.
+        report_figures.pop("price_ts", None)
+        st.error(
+            "Day-Ahead price chart and 30-Day MA are unavailable because "
+            f"{index_issue.reason}. Every row remains in the Excel export's "
+            "Hourly Prices sheet exactly as loaded; nothing is reordered, "
+            "de-duplicated or gap-filled to make a chart drawable."
+        )
+    else:
+        price_plot_df = primary_df.reset_index()
+        fig_price = px.line(
+            price_plot_df,
+            x="timestamp", y="price_eur_mwh",
+            title="Day-Ahead Prices",
+            labels={"price_eur_mwh": "EUR/MWh", "timestamp": ""},
+            template=chart_template,
+        )
+        fig_price.update_traces(
+            opacity=0.72,
+            name="Day-Ahead",
+            showlegend=True,
+            line=dict(color="#ff2d95", width=1.7),
+        )
+        if index_issue is None:
+            ma_series = time_weighted_rolling_price_mean(primary_df["price_eur_mwh"])
+            fig_price.add_scatter(
+                x=primary_df.index, y=ma_series,
+                mode="lines", name="30-Day MA",
+                line=dict(color="#d0d4dc", width=2.2),
+            )
+        fig_price.update_xaxes(rangeslider_visible=True)
+        apply_cockpit_plot_theme(fig_price)
+        report_figures["price_ts"] = fig_price
+        st.plotly_chart(fig_price, width="stretch")
+        if index_issue is None:
+            st.caption(
+                "30-Day MA uses the trailing 720 physical hours, weighted by delivery "
+                "duration through each interval's end. It appears after 24 hours of finite "
+                "price coverage; missing prices and unverified intervals are excluded."
+            )
+        else:
+            st.warning(
+                f"30-Day MA is unavailable because {index_issue.reason}. "
+                "Prices are drawn as loaded, without de-duplication."
+            )
 
     spread_plot_df = daily_spreads.copy()
     spread_plot_df["date"] = pd.to_datetime(spread_plot_df["date"])
