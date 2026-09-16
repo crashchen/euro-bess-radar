@@ -1,0 +1,19 @@
+[multi-day replay]
+  initial render                                 exception=False tables=0 charts=0 downloads=0 stale=False solver_calls={}
+  click Run                                      exception=False tables=1 charts=2 downloads=1 stale=False solver_calls={'simulate_replay_batch': 1}
+  unrelated rerun (= download click rerun)       exception=False tables=1 charts=2 downloads=1 stale=False solver_calls={'simulate_replay_batch': 1}
+  chart theme change                             exception=False tables=1 charts=2 downloads=1 stale=False solver_calls={'simulate_replay_batch': 1}
+  same-length DA correction                      exception=False tables=0 charts=0 downloads=0 stale=True solver_calls={'simulate_replay_batch': 1}
+  click Run again                                exception=False tables=1 charts=2 downloads=1 stale=False solver_calls={'simulate_replay_batch': 2}
+[forecast policy: DA+IDA1 + FCR reserve + stochastic, S=2]
+  initial render (stochastic ticked)             exception=False tables=0 charts=0 downloads=0 stale=False solver_calls={}
+  click Run                                      exception=False tables=2 charts=4 downloads=1 stale=False solver_calls={'simulate_sequential_da_id_batch': 1, 'simulate_sequential_da_id_reserve_batch': 1, 'simulate_stochastic_triple_batch': 1, 'solve_joint_capacity_batch': 1}
+  unrelated rerun (= download click rerun)       exception=False tables=2 charts=4 downloads=1 stale=False solver_calls={'simulate_sequential_da_id_batch': 1, 'simulate_sequential_da_id_reserve_batch': 1, 'simulate_stochastic_triple_batch': 1, 'solve_joint_capacity_batch': 1}
+  chart theme change                             exception=False tables=2 charts=4 downloads=1 stale=False solver_calls={'simulate_sequential_da_id_batch': 1, 'simulate_sequential_da_id_reserve_batch': 1, 'simulate_stochastic_triple_batch': 1, 'solve_joint_capacity_batch': 1}
+  deadband 0 -> 1                                exception=False tables=0 charts=0 downloads=0 stale=True solver_calls={'simulate_sequential_da_id_batch': 1, 'simulate_sequential_da_id_reserve_batch': 1, 'simulate_stochastic_triple_batch': 1, 'solve_joint_capacity_batch': 1}
+  deadband back to 0                             exception=False tables=2 charts=4 downloads=1 stale=False solver_calls={'simulate_sequential_da_id_batch': 1, 'simulate_sequential_da_id_reserve_batch': 1, 'simulate_stochastic_triple_batch': 1, 'solve_joint_capacity_batch': 1}
+  same-length reserve price correction           exception=False tables=0 charts=0 downloads=0 stale=True solver_calls={'simulate_sequential_da_id_batch': 1, 'simulate_sequential_da_id_reserve_batch': 1, 'simulate_stochastic_triple_batch': 1, 'solve_joint_capacity_batch': 1}
+  click Run again                                exception=False tables=2 charts=4 downloads=1 stale=False solver_calls={'simulate_sequential_da_id_batch': 2, 'simulate_sequential_da_id_reserve_batch': 2, 'simulate_stochastic_triple_batch': 2, 'solve_joint_capacity_batch': 2}
+[forecast policy: 9 loaded days, 7 scored, IDA history correction]
+  click Run                                      exception=False tables=2 charts=3 downloads=1 stale=False solver_calls={'simulate_sequential_da_id_batch': 1}
+  IDA correction on unscored day 2025-06-01      exception=False tables=0 charts=0 downloads=0 stale=True solver_calls={'simulate_sequential_da_id_batch': 1}

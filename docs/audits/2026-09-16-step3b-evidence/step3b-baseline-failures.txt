@@ -1,0 +1,141 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <baseline-repo>
+configfile: pyproject.toml
+collected 67 items
+
+tests/test_step3b_batch_result_persistence.py FFFFFFFFFFFFFFFFFFFFFFFFFF [ 38%]
+FFFFFFFFFFFFFF..FFFFFFFF..FF.FFFFF..FF.F.                                [100%]
+
+=================================== FAILURES ===================================
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError: No module named 'src.content_fingerprint'
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError: No module named 'src.content_fingerprint'
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError: No module named 'src.content_fingerprint'
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError: No module named 'src.content_fingerprint'
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError: No module named 'src.content_fingerprint'
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError: No module named 'src.content_fingerprint'
+<frozen importlib._bootstrap>:1324: ModuleNotFoundError: No module named 'src.content_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:207: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:227: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:227: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:227: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:227: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:227: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:227: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:227: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:227: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:227: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:227: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:233: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:245: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_multi_day_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:269: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:292: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:303: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:303: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:303: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:312: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:320: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:328: AttributeError: module 'src.pages.simulation_cockpit' has no attribute '_forecast_policy_fingerprint'
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:409: AssertionError: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:437: AssertionError: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:117: AssertionError: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:473: AssertionError: 7 latest days
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:117: AssertionError: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:117: AssertionError: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:117: AssertionError: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:501: AssertionError: assert (False)
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:570: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:570: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:684: AssertionError: assert (False)
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:117: AssertionError: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:117: AssertionError: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:117: AssertionError: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:752: AssertionError: assert (False)
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:829: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:829: assert False
+<baseline-repo>/tests/test_step3b_batch_result_persistence.py:875: assert 0 == 1
+=============================== warnings summary ===============================
+tests/test_step3b_batch_result_persistence.py::TestForecastPolicyPanel::test_run_renders_every_strategy_row_and_the_export
+tests/test_step3b_batch_result_persistence.py::TestForecastPolicyPanel::test_unrelated_rerun_theme_change_and_download_do_not_resolve_any_solver
+tests/test_step3b_batch_result_persistence.py::TestForecastPolicyPanel::test_same_length_price_and_reserve_corrections_mark_stale[_t_da_bump-120.0]
+tests/test_step3b_batch_result_persistence.py::TestForecastPolicyPanel::test_same_length_price_and_reserve_corrections_mark_stale[_t_capacity_bump-30.0]
+tests/test_step3b_batch_result_persistence.py::TestForecastPolicyPanel::test_training_history_correction_outside_the_scored_window_marks_stale
+tests/test_step3b_batch_result_persistence.py::TestForecastPolicyPanel::test_parameter_switches_mark_stale_and_reverting_restores
+tests/test_step3b_batch_result_persistence.py::TestReserveSolverFailureNotice::test_notice_is_shown_on_run
+tests/test_step3b_batch_result_persistence.py::TestReserveSolverFailureNotice::test_notice_survives_a_rerun_without_resolving
+  <repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+    proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_step3b_batch_result_persistence.py::TestFrameContentHash::test_equal_content_gives_equal_digest
+FAILED tests/test_step3b_batch_result_persistence.py::TestFrameContentHash::test_same_length_value_correction_changes_digest
+FAILED tests/test_step3b_batch_result_persistence.py::TestFrameContentHash::test_index_timezone_is_part_of_identity
+FAILED tests/test_step3b_batch_result_persistence.py::TestFrameContentHash::test_shifted_index_with_same_values_changes_digest
+FAILED tests/test_step3b_batch_result_persistence.py::TestFrameContentHash::test_column_name_and_dtype_are_part_of_identity
+FAILED tests/test_step3b_batch_result_persistence.py::TestFrameContentHash::test_none_is_distinct_from_an_empty_frame
+FAILED tests/test_step3b_batch_result_persistence.py::TestFrameContentHash::test_payload_digest_ignores_key_order
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_chart_theme_is_not_an_identity_input
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_each_solver_input_changes_identity[override0]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_each_solver_input_changes_identity[override1]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_each_solver_input_changes_identity[override2]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_each_solver_input_changes_identity[override3]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_each_solver_input_changes_identity[override4]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_each_solver_input_changes_identity[override5]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_each_solver_input_changes_identity[override6]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_each_solver_input_changes_identity[override7]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_each_solver_input_changes_identity[override8]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_each_solver_input_changes_identity[override9]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_ida_content_counts_only_in_da_id_mode
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayFingerprint::test_model_constant_change_invalidates
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_chart_theme_is_not_an_identity_input
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override0]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override1]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override2]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override3]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override4]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override5]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override6]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override7]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override8]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override9]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override10]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override11]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_each_solver_input_changes_identity[override12]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_same_length_content_correction_changes_identity[primary_df]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_same_length_content_correction_changes_identity[intraday_df]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_same_length_content_correction_changes_identity[capacity_df]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_training_history_outside_scored_dates_is_identity
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_unused_reserve_and_cap_inputs_do_not_invalidate
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyFingerprint::test_stochastic_scenario_constants_invalidate
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayPanel::test_unrelated_rerun_theme_change_and_download_do_not_resolve
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayPanel::test_export_keeps_the_run_time_assumptions
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayPanel::test_same_length_price_correction_marks_stale_until_rerun
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayPanel::test_sample_change_that_resolves_to_the_same_dates_keeps_the_result
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayPanel::test_parameter_switch_marks_stale_and_revert_restores[checkbox-simulation_batch_carry_soc-False-True]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayPanel::test_parameter_switch_marks_stale_and_revert_restores[state-_t_power-2.0-1.0]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayPanel::test_parameter_switch_marks_stale_and_revert_restores[state-_t_mode-DA + IDA1 Replay-DA MILP Replay]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayPanel::test_ida_correction_is_ignored_by_da_only_but_not_by_da_id_replay
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayDisclosures::test_failure_and_missing_notices_survive_reruns_without_resolving[3-Replay model unavailable]
+FAILED tests/test_step3b_batch_result_persistence.py::TestMultiDayDisclosures::test_failure_and_missing_notices_survive_reruns_without_resolving[0-No valid replay days]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyPanel::test_unrelated_rerun_theme_change_and_download_do_not_resolve_any_solver
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyPanel::test_same_length_price_and_reserve_corrections_mark_stale[_t_da_bump-120.0]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyPanel::test_same_length_price_and_reserve_corrections_mark_stale[_t_capacity_bump-30.0]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyPanel::test_training_history_correction_outside_the_scored_window_marks_stale
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyPanel::test_parameter_switches_mark_stale_and_reverting_restores
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyDisclosures::test_failure_and_missing_notices_survive_reruns_without_resolving[4-Forecast-policy model unavailable]
+FAILED tests/test_step3b_batch_result_persistence.py::TestForecastPolicyDisclosures::test_failure_and_missing_notices_survive_reruns_without_resolving[0-No valid forecast-policy days]
+FAILED tests/test_step3b_batch_result_persistence.py::TestReserveSolverFailureNotice::test_notice_survives_a_rerun_without_resolving
+================== 58 failed, 9 passed, 8 warnings in 15.38s ===================
