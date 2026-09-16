@@ -1,0 +1,197 @@
+{
+  "mixed": {
+    "expected_average": 32.5,
+    "expected_finite_hours": 960.0,
+    "average_cell": {
+      "coordinate": "B9",
+      "value": 32.5,
+      "data_type": "n",
+      "number_format": "#,##0.00",
+      "wrap_text": null
+    },
+    "basis_or_reason_cell": {
+      "coordinate": "B10",
+      "value": "Duration-weighted: finite prices cover 960.00 of 960.00 delivery hours (100.0%).",
+      "data_type": "s",
+      "number_format": "General",
+      "wrap_text": null
+    },
+    "calculation": {
+      "avg_price_eur_mwh": 32.5,
+      "covered_hours": 960.0,
+      "delivery_hours": 960.0,
+      "avg_price_reason": null
+    },
+    "pdf": "outputs/step3c-2026-09-16/export-check/mixed.pdf",
+    "xlsx": "outputs/step3c-2026-09-16/export-check/mixed.xlsx",
+    "pdf_text": "outputs/step3c-2026-09-16/export-check/mixed.pdf.txt",
+    "rendered_pages": [
+      "outputs/step3c-2026-09-16/export-check/mixed-1.png"
+    ]
+  },
+  "partial-finite": {
+    "expected_average": 32.48826291079812,
+    "expected_finite_hours": 958.5,
+    "average_cell": {
+      "coordinate": "B14",
+      "value": 32.49,
+      "data_type": "n",
+      "number_format": "#,##0.00",
+      "wrap_text": null
+    },
+    "basis_or_reason_cell": {
+      "coordinate": "B15",
+      "value": "Duration-weighted: finite prices cover 958.50 of 960.00 delivery hours (99.8%); the rest is excluded, not counted as zero.",
+      "data_type": "s",
+      "number_format": "General",
+      "wrap_text": null
+    },
+    "calculation": {
+      "avg_price_eur_mwh": 32.48826291079812,
+      "covered_hours": 958.5,
+      "delivery_hours": 960.0,
+      "avg_price_reason": null
+    },
+    "pdf": "outputs/step3c-2026-09-16/export-check/partial-finite.pdf",
+    "xlsx": "outputs/step3c-2026-09-16/export-check/partial-finite.xlsx",
+    "pdf_text": "outputs/step3c-2026-09-16/export-check/partial-finite.pdf.txt",
+    "rendered_pages": [
+      "outputs/step3c-2026-09-16/export-check/partial-finite-1.png",
+      "outputs/step3c-2026-09-16/export-check/partial-finite-2.png"
+    ]
+  },
+  "gap": {
+    "expected_average": null,
+    "expected_finite_hours": null,
+    "average_cell": {
+      "coordinate": "B9",
+      "value": "n/a",
+      "data_type": "s",
+      "number_format": "General",
+      "wrap_text": null
+    },
+    "basis_or_reason_cell": {
+      "coordinate": "B10",
+      "value": "the delivery grid has a gap or a cadence change other than the registered SDAC 15-minute cutover",
+      "data_type": "s",
+      "number_format": "General",
+      "wrap_text": null
+    },
+    "calculation": {
+      "avg_price_eur_mwh": null,
+      "covered_hours": null,
+      "delivery_hours": null,
+      "avg_price_reason": "the delivery grid has a gap or a cadence change other than the registered SDAC 15-minute cutover"
+    },
+    "pdf": "outputs/step3c-2026-09-16/export-check/gap.pdf",
+    "xlsx": "outputs/step3c-2026-09-16/export-check/gap.xlsx",
+    "pdf_text": "outputs/step3c-2026-09-16/export-check/gap.pdf.txt",
+    "rendered_pages": [
+      "outputs/step3c-2026-09-16/export-check/gap-1.png"
+    ]
+  },
+  "unknown-cadence": {
+    "expected_average": null,
+    "expected_finite_hours": null,
+    "average_cell": {
+      "coordinate": "B9",
+      "value": "n/a",
+      "data_type": "s",
+      "number_format": "General",
+      "wrap_text": null
+    },
+    "basis_or_reason_cell": {
+      "coordinate": "B10",
+      "value": "the delivery cadence is not a supported native 1-hour, 30-minute or 15-minute product",
+      "data_type": "s",
+      "number_format": "General",
+      "wrap_text": null
+    },
+    "calculation": {
+      "avg_price_eur_mwh": null,
+      "covered_hours": null,
+      "delivery_hours": null,
+      "avg_price_reason": "the delivery cadence is not a supported native 1-hour, 30-minute or 15-minute product"
+    },
+    "pdf": "outputs/step3c-2026-09-16/export-check/unknown-cadence.pdf",
+    "xlsx": "outputs/step3c-2026-09-16/export-check/unknown-cadence.xlsx",
+    "pdf_text": "outputs/step3c-2026-09-16/export-check/unknown-cadence.pdf.txt",
+    "rendered_pages": [
+      "outputs/step3c-2026-09-16/export-check/unknown-cadence-1.png"
+    ]
+  },
+  "comparison": {
+    "path": "outputs/step3c-2026-09-16/export-check/comparison.xlsx",
+    "rows": {
+      "DE_LU": {
+        "average": {
+          "coordinate": "B2",
+          "value": 32.5,
+          "data_type": "n",
+          "number_format": "#,##0.00",
+          "wrap_text": null
+        },
+        "coverage": {
+          "coordinate": "C2",
+          "value": 1,
+          "data_type": "n",
+          "number_format": "0.0%",
+          "wrap_text": null
+        },
+        "reason": {
+          "coordinate": "D2",
+          "value": null,
+          "data_type": "inlineStr",
+          "number_format": "General",
+          "wrap_text": null
+        }
+      },
+      "FR": {
+        "average": {
+          "coordinate": "B3",
+          "value": 32.49,
+          "data_type": "n",
+          "number_format": "#,##0.00",
+          "wrap_text": null
+        },
+        "coverage": {
+          "coordinate": "C3",
+          "value": 0.9984000000000001,
+          "data_type": "n",
+          "number_format": "0.0%",
+          "wrap_text": null
+        },
+        "reason": {
+          "coordinate": "D3",
+          "value": null,
+          "data_type": "inlineStr",
+          "number_format": "General",
+          "wrap_text": null
+        }
+      },
+      "IT_NORD": {
+        "average": {
+          "coordinate": "B4",
+          "value": "n/a",
+          "data_type": "s",
+          "number_format": "#,##0.00",
+          "wrap_text": null
+        },
+        "coverage": {
+          "coordinate": "C4",
+          "value": "n/a",
+          "data_type": "s",
+          "number_format": "0.0%",
+          "wrap_text": null
+        },
+        "reason": {
+          "coordinate": "D4",
+          "value": "the delivery grid has a gap or a cadence change other than the registered SDAC 15-minute cutover",
+          "data_type": "s",
+          "number_format": "General",
+          "wrap_text": true
+        }
+      }
+    }
+  }
+}

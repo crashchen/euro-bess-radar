@@ -95,6 +95,32 @@ Setup: load a zone with several clean days (and IDA1 for items 30–31).
 | 30 | Forecast policy survives a download | **Run forecast policy** (tick the stochastic option if you have time), then click its Excel download | Strategy table, attribution and download stay; no "Solving…" spinner |
 | 31 | Forecast stale state | Change **Rebid deadband**, then click **Run forecast policy** | Stale warning and no download until Run; Run recomputes and shows the new result |
 
+## Checklist — average-price basis and metric readability (Step 3C)
+
+Use synthetic fixtures for reproducible price and layout checks. Keep the
+fixture and its reproduction command with the dated review evidence; do not
+overwrite a live market cache to create the fixture. Read actual workbook and
+PDF outputs as well as the page. A numeric assertion or a font-width estimate
+does not establish that an exported row is visibly readable.
+
+For layout checks use actual viewport widths of **1280, 1440 and 390 CSS px**
+at 100% browser zoom, beginning with the sidebar expanded. Record viewport,
+sidebar state and page/panel with every screenshot. At mobile width Streamlit
+may overlay the sidebar on the content: capture that state, then close the
+overlay to inspect the main content and label those captures accordingly.
+Do not report an obscured card as readable. AppTest remains the behavioral
+check; browser screenshots and overflow inspection supply layout evidence.
+
+| # | Entry | Action | Expect |
+|---|-------|--------|--------|
+| 32 | Shared overall Avg Price | Load 30 hourly days at EUR 10/MWh immediately before the registered SDAC cutover followed by 10 quarter-hour days at EUR 100/MWh; inspect Market Overview, Zone Comparison and the Excel/PDF summaries | Each overall average is EUR 32.50/MWh with 960 of 960 covered delivery hours. The chart's final trailing 720-hour mean is separately EUR 40/MWh. Available Excel average cells remain numeric |
+| 33 | Unknown duration stays unavailable | Use a fixture with an internal missing delivery timestamp, a singleton, or a regular unsupported 2-hour cadence; inspect the four consumers and the zone-comparison workbook | Avg Price shows `n/a` and the shared reason; no guessed one-hour duration, raw `nan` text or substituted zero. An unavailable overall average alone must not hide other valid statistics |
+| 34 | Finite coverage is explicit | Replace some prices on a verified grid with NaN or infinity, leaving timestamps intact, then repeat with every price non-finite | With finite prices remaining: duration-weighted average over only their hours, with covered/total hours and excluded coverage disclosed. With none: `n/a` and a no-finite-price reason. Missing values are never priced at zero |
+| 35 | Market KPI row | At each width inspect Avg Price, the two ordered spreads and negative-price hours | Full amounts and EUR/MWh or hour units are readable without ellipses or overlap; cards wrap according to the main content width, with the coverage/reason caption still visible |
+| 36 | Project Case quantiles | At each width inspect both NPV sections and the cockpit mirror, including long positive and negative amounts | Full economic section headings distinguish the two bases; cards visibly say P10 (Downside), P50 (Median), P90 (Upside) and P(NPV > 0). Full monetary values remain readable, rather than abbreviated or hidden behind a tooltip |
+| 37 | Cockpit KPI rows | At each width inspect single-day KPI/health cards, multi-day replay, the frontier, forecast skill/policy, reserve gap, stochastic attribution/risk and floor/NPV metrics when their inputs make them available | Labels, amounts, quantiles and their units remain readable; custom grids and Streamlit metric rows wrap within their actual containers, including expanders. No value is lost to clipping or overlap |
+| 38 | Layout reruns preserve stored results | With populated multi-day and forecast panels, resize the viewport, change theme, then repeat their download/stale-state checks in items 28–31 | Results still follow the stored run and its assumptions; presentation changes do not trigger a new solver run or expose a stale download |
+
 ## Downstream spot-checks (after 3/4/7/8)
 
 - **Data Trust coverage matrix**: the touched zone row shows the stream

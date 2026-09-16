@@ -1,0 +1,47 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: /private<cc-checkpoint-repo>
+configfile: pyproject.toml
+collected 37 items
+
+tests/test_step3c_average_price.py ....FFF............................FF [100%]
+
+=================================== FAILURES ===================================
+___ test_regular_sparse_timestamps_do_not_invent_long_delivery_products[2h] ____
+tests/test_step3c_average_price.py:123: in test_regular_sparse_timestamps_do_not_invent_long_delivery_products
+    assert np.isnan(stats["avg_price_eur_mwh"])
+E   AssertionError: assert np.False_
+E    +  where np.False_ = <ufunc 'isnan'>(40.0)
+E    +    where <ufunc 'isnan'> = np.isnan
+___ test_regular_sparse_timestamps_do_not_invent_long_delivery_products[24h] ___
+tests/test_step3c_average_price.py:123: in test_regular_sparse_timestamps_do_not_invent_long_delivery_products
+    assert np.isnan(stats["avg_price_eur_mwh"])
+E   AssertionError: assert np.False_
+E    +  where np.False_ = <ufunc 'isnan'>(40.0)
+E    +    where <ufunc 'isnan'> = np.isnan
+______ test_numeric_row_index_is_not_interpreted_as_delivery_nanoseconds _______
+tests/test_step3c_average_price.py:135: in test_numeric_row_index_is_not_interpreted_as_delivery_nanoseconds
+    assert np.isnan(stats["avg_price_eur_mwh"])
+E   AssertionError: assert np.False_
+E    +  where np.False_ = <ufunc 'isnan'>(40.0)
+E    +    where <ufunc 'isnan'> = np.isnan
+______________ test_comparison_export_writes_na_beside_the_reason ______________
+tests/test_step3c_average_price.py:440: in test_comparison_export_writes_na_beside_the_reason
+    assert reason_cell.alignment.wrap_text is True
+E   AssertionError: assert None is True
+E    +  where None = <openpyxl.styles.alignment.Alignment object>\nParameters:\nhorizontal=None, vertical=None, textRotation=0, wrapText=None, shrinkToFit=None, indent=0.0, relativeIndent=0.0, justifyLastLine=None, readingOrder=0.0.wrap_text
+E    +    where <openpyxl.styles.alignment.Alignment object>\nParameters:\nhorizontal=None, vertical=None, textRotation=0, wrapText=None, shrinkToFit=None, indent=0.0, relativeIndent=0.0, justifyLastLine=None, readingOrder=0.0 = <Cell 'Zone Comparison'.D3>.alignment
+_______ test_zone_comparison_page_names_the_unavailable_zone_and_reason ________
+tests/test_step3c_average_price.py:463: in test_zone_comparison_page_names_the_unavailable_zone_and_reason
+    assert any(
+E   assert False
+E    +  where False = any(<generator object test_zone_comparison_page_names_the_unavailable_zone_and_reason.<locals>.<genexpr> at 0x137459970>)
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:17:43.814 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+=========================== short test summary info ============================
+FAILED tests/test_step3c_average_price.py::test_regular_sparse_timestamps_do_not_invent_long_delivery_products[2h]
+FAILED tests/test_step3c_average_price.py::test_regular_sparse_timestamps_do_not_invent_long_delivery_products[24h]
+FAILED tests/test_step3c_average_price.py::test_numeric_row_index_is_not_interpreted_as_delivery_nanoseconds
+FAILED tests/test_step3c_average_price.py::test_comparison_export_writes_na_beside_the_reason
+FAILED tests/test_step3c_average_price.py::test_zone_comparison_page_names_the_unavailable_zone_and_reason
+========================= 5 failed, 32 passed in 1.33s =========================

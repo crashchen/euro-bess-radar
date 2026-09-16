@@ -1,0 +1,9 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 37 items
+
+tests/test_step3c_average_price.py ..................................... [100%]
+
+============================== 37 passed in 1.46s ==============================

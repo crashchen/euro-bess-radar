@@ -1,0 +1,1226 @@
+diff --git a/src/analytics.py b/src/analytics.py
+index 15fd3af983aefc81fd821ff8e6ba8a2f7f22e6f6..e4270b2e54dd32731a2509ac885e0bce8191b7e3 100644
+--- a/src/analytics.py
++++ b/src/analytics.py
+@@ -922,6 +922,108 @@ def negative_price_hours_reason(stats: dict) -> str | None:
+     )
+ 
+ 
++def calculate_average_price(df: pd.DataFrame) -> dict[str, float | str | None]:
++    """Average price weighted by each observation's verified delivery duration.
++
++    This is the one window-wide "Avg Price" shared by the market page, the zone
++    comparison and the Excel/PDF summaries. A finite price counts for the
++    physical hours it was delivered, so a quarter-hour price no longer weighs
++    as much as an hourly one. Durations come from the whole window's delivery
++    grid: a uniform native 1h, 30-minute or 15-minute cadence, or the registered
++    SDAC hourly-to-quarter-hour cutover. NaN and infinite prices contribute no
++    covered hours; they are excluded, never read as zero.
++
++    The figure is unavailable rather than guessed when the index is defective,
++    when a lone timestamp cannot show how long its price applied, when the grid
++    has a gap or an unregistered cadence change, or when no delivery interval
++    carries a finite price.
++
++    Args:
++        df: Price DataFrame with a ``price_eur_mwh`` column.
++
++    Returns:
++        Dict with ``avg_price_eur_mwh`` (NaN when unavailable),
++        ``covered_hours`` (delivery hours with a finite price),
++        ``delivery_hours`` (delivery hours of every observation) and
++        ``avg_price_reason`` (None when the average is available). Hours are
++        NaN when the delivery grid itself could not be verified.
++    """
++    def unavailable(reason: str, covered: float = np.nan, delivery: float = np.nan):
++        return {
++            "avg_price_eur_mwh": np.nan,
++            "covered_hours": covered,
++            "delivery_hours": delivery,
++            "avg_price_reason": reason,
++        }
++
++    if "price_eur_mwh" not in df.columns or df.empty:
++        return unavailable("no price observations are loaded")
++    if not isinstance(df.index, pd.DatetimeIndex):
++        # DatetimeIndex construction would silently interpret a numeric row
++        # index as nanoseconds since the epoch, inventing delivery instants.
++        return unavailable("the price index is not a timestamp index")
++    issue = describe_price_index_issue(df.index)
++    if issue is not None:
++        return unavailable(issue.reason)
++    if len(df) < 2:
++        return unavailable(
++            "a single delivery timestamp cannot show how long its price applied"
++        )
++    try:
++        durations = interval_hours_vector(
++            infer_delivery_interval_hours(df.index), len(df),
++        )
++    except ValueError:
++        return unavailable(
++            "the delivery grid has a gap or a cadence change other than the "
++            "registered SDAC 15-minute cutover"
++        )
++    if not np.isin(durations, [1.0, 0.5, 0.25]).all():
++        # The shared inference helper deliberately preserves historical
++        # uniform-cadence inference. A regular 2h/24h sample is insufficient
++        # evidence for native DA delivery products in this average contract.
++        return unavailable(
++            "the delivery cadence is not a supported native 1-hour, "
++            "30-minute or 15-minute product"
++        )
++    prices = df["price_eur_mwh"].to_numpy(dtype=float)
++    finite = np.isfinite(prices)
++    delivery_hours = float(durations.sum())
++    covered_hours = float(durations[finite].sum())
++    if covered_hours <= 0:
++        return unavailable(
++            "no delivery interval carries a finite price", 0.0, delivery_hours,
++        )
++    return {
++        "avg_price_eur_mwh": float(
++            np.sum(prices[finite] * durations[finite]) / covered_hours
++        ),
++        "covered_hours": covered_hours,
++        "delivery_hours": delivery_hours,
++        "avg_price_reason": None,
++    }
++
++
++def average_price_basis(stats: dict) -> str | None:
++    """One-line coverage disclosure for an available duration-weighted Avg Price.
++
++    Page, zone comparison and Excel/PDF summaries share this wording so every
++    surface states the same covered hours. Returns None when unavailable; the
++    caller shows ``UNAVAILABLE_DISPLAY`` and ``avg_price_reason`` instead.
++    """
++    if stats.get("avg_price_reason") is not None:
++        return None
++    covered = float(stats["covered_hours"])
++    delivery = float(stats["delivery_hours"])
++    text = (
++        f"Duration-weighted: finite prices cover {covered:,.2f} of "
++        f"{delivery:,.2f} delivery hours ({covered / delivery:.1%})"
++    )
++    if covered < delivery:
++        text += "; the rest is excluded, not counted as zero"
++    return text + "."
++
++
+ # ── Renewable correlation ─────────────────────────────────────────────────────
+ 
+ def analyze_price_renewable_correlation(
+@@ -1630,7 +1732,10 @@ def compare_zones(
+         capex_eur_kwh: CapEx in EUR/kWh; if >0, degradation metrics are added.
+ 
+     Returns:
+-        Summary DataFrame with one row per zone.
++        Summary DataFrame with one row per zone. ``avg_price`` is the
++        duration-weighted ``calculate_average_price``; when it is unavailable
++        the cell is NaN, ``avg_price_unavailable_reason`` says why and
++        ``avg_price_coverage_pct`` is NaN.
+     """
+     rows = []
+     for zone, df in zone_data.items():
+@@ -1657,9 +1762,17 @@ def compare_zones(
+             roundtrip_efficiency=roundtrip_efficiency,
+         )
+ 
++        avg_price = calculate_average_price(df)
+         row: dict[str, object] = {
+             "zone": zone,
+-            "avg_price": round(float(df["price_eur_mwh"].mean()), 2),
++            "avg_price": round(avg_price["avg_price_eur_mwh"], 2),
++            "avg_price_coverage_pct": (
++                np.nan if avg_price["avg_price_reason"] is not None
++                else round(
++                    100.0 * avg_price["covered_hours"] / avg_price["delivery_hours"], 2,
++                )
++            ),
++            "avg_price_unavailable_reason": avg_price["avg_price_reason"],
+             "std_price": round(float(df["price_eur_mwh"].std()), 2),
+             "avg_spread": round(pctls["mean"], 2),
+             "p50_spread": round(pctls["p50"], 2),
+diff --git a/src/export.py b/src/export.py
+index 493ef9544dfb5c950ed00bec6231796023739b44..10520745f2ea74b8821fab6572fd978d336c58c9 100644
+--- a/src/export.py
++++ b/src/export.py
+@@ -21,7 +21,9 @@ from openpyxl.utils import get_column_letter
+ 
+ from src.analytics import (
+     UNAVAILABLE_DISPLAY,
++    average_price_basis,
+     build_price_heatmap,
++    calculate_average_price,
+     calculate_negative_price_hours,
+     filter_to_complete_local_days,
+     negative_price_hours_reason,
+@@ -361,7 +363,21 @@ def _build_summary_sheet(
+         )
+     row += 1
+ 
+-    row = _write_kv_pair(ws, row, "Avg Price (EUR/MWh)", round(price_df["price_eur_mwh"].mean(), 2), _PRICE_FMT)
++    avg_price = calculate_average_price(price_df)
++    if avg_price["avg_price_reason"]:
++        row = _write_kv_pair(ws, row, "Avg Price (EUR/MWh)", UNAVAILABLE_DISPLAY)
++        row = _write_kv_pair(
++            ws, row, "Avg Price Unavailable Because", avg_price["avg_price_reason"],
++            wrap_key=True,
++        )
++    else:
++        row = _write_kv_pair(
++            ws, row, "Avg Price (EUR/MWh)",
++            round(avg_price["avg_price_eur_mwh"], 2), _PRICE_FMT,
++        )
++        row = _write_kv_pair(
++            ws, row, "Avg Price Basis", average_price_basis(avg_price),
++        )
+     row = _write_kv_pair(ws, row, "Median Price (EUR/MWh)", round(price_df["price_eur_mwh"].median(), 2), _PRICE_FMT)
+     row += 1
+ 
+@@ -2360,9 +2376,19 @@ def _build_pdf_report(
+             ("Unresolved Missing %", f"{quality['missing_ratio']:.1%}"),
+             ("Max Source Gap (hours)", str(quality["max_source_gap_hours"])),
+         ])
++    avg_price = calculate_average_price(price_df)
++    rows.append(("", ""))
++    if avg_price["avg_price_reason"]:
++        rows.extend([
++            ("Avg Price (EUR/MWh)", UNAVAILABLE_DISPLAY),
++            ("Avg Price Unavailable Because", avg_price["avg_price_reason"]),
++        ])
++    else:
++        rows.extend([
++            ("Avg Price (EUR/MWh)", f"{avg_price['avg_price_eur_mwh']:.2f}"),
++            ("Avg Price Basis", average_price_basis(avg_price)),
++        ])
+     rows.extend([
+-        ("", ""),
+-        ("Avg Price (EUR/MWh)", f"{price_df['price_eur_mwh'].mean():.2f}"),
+         ("Median Price (EUR/MWh)", f"{price_df['price_eur_mwh'].median():.2f}"),
+         ("", ""),
+         ("50th-percentile Spread", f"{percentiles['p50']:.2f}"),
+@@ -2455,7 +2481,13 @@ def _build_pdf_report(
+         pdf.set_font("Helvetica", "B", 10)
+         pdf.cell(col_w, 7, label)
+         pdf.set_font("Helvetica", "", 10)
+-        pdf.cell(0, 7, value, new_x="LMARGIN", new_y="NEXT")
++        value_w = pdf.w - pdf.r_margin - pdf.get_x()
++        if pdf.get_string_width(value) > value_w:
++            # A disclosure sentence wraps inside the value column instead of
++            # running past the page margin; short values keep one plain cell.
++            pdf.multi_cell(value_w, 7, value, new_x="LMARGIN", new_y="NEXT")
++        else:
++            pdf.cell(0, 7, value, new_x="LMARGIN", new_y="NEXT")
+ 
+     # ── Chart pages ─────────────────────────────────────────────────────
+     if figures:
+@@ -2545,6 +2577,8 @@ def export_to_pdf_bytes(
+ _COMPARISON_COLUMNS = {
+     "zone": ("Zone", None),
+     "avg_price": ("Avg Price (EUR/MWh)", _PRICE_FMT),
++    "avg_price_coverage_pct": ("Avg Price Coverage %", _PCT_FMT),
++    "avg_price_unavailable_reason": ("Avg Price Unavailable Because", None),
+     "std_price": ("Std Dev", _PRICE_FMT),
+     "avg_spread": ("Avg Spread (EUR/MWh)", _PRICE_FMT),
+     "p50_spread": ("50th-percentile Spread", _PRICE_FMT),
+@@ -2583,8 +2617,14 @@ def export_comparison_to_bytes(comparison_df: pd.DataFrame) -> bytes:
+         safe_df.to_excel(writer, sheet_name="Zone Comparison", index=False)
+         ws = writer.sheets["Zone Comparison"]
+ 
+-        # Apply styled headers and number formats. Analytics stores negative_pct
+-        # as percentage points for UI readability; Excel percent cells need ratios.
++        # Apply styled headers and number formats. Analytics stores percentage
++        # columns as percentage points for UI readability; Excel percent cells
++        # need ratios.
++        reasons = (
++            safe_df["avg_price_unavailable_reason"].tolist()
++            if "avg_price_unavailable_reason" in safe_df.columns
++            else [None] * len(safe_df)
++        )
+         for col_idx, col_name in enumerate(safe_df.columns, 1):
+             label, fmt = _COMPARISON_COLUMNS.get(col_name, (col_name, None))
+             cell = ws.cell(row=1, column=col_idx, value=_safe_cell_value(label))
+@@ -2594,9 +2634,35 @@ def export_comparison_to_bytes(comparison_df: pd.DataFrame) -> bytes:
+             if fmt:
+                 for row_idx in range(2, len(safe_df) + 2):
+                     data_cell = ws.cell(row=row_idx, column=col_idx)
+-                    if col_name == "negative_pct" and data_cell.value is not None:
++                    if (
++                        col_name in {"negative_pct", "avg_price_coverage_pct"}
++                        and isinstance(data_cell.value, (int, float))
++                    ):
+                         data_cell.value = data_cell.value / 100
+                     data_cell.number_format = fmt
++            if col_name in {"avg_price", "avg_price_coverage_pct"}:
++                # An unavailable average reads n/a beside its reason, never
++                # as a blank cell that looks like a missing export.
++                for row_idx, reason in enumerate(reasons, 2):
++                    if isinstance(reason, str) and reason:
++                        ws.cell(row=row_idx, column=col_idx, value=UNAVAILABLE_DISPLAY)
++            if col_name == "avg_price_unavailable_reason":
++                for row_idx, reason in enumerate(reasons, 2):
++                    if not isinstance(reason, str) or not reason:
++                        continue
++                    # This disclosure sits between populated numeric columns,
++                    # so it cannot overflow into adjacent cells as summary
++                    # notes can. Keep the entire reason visible in its row.
++                    for data_cell in ws[row_idx]:
++                        data_cell.alignment = Alignment(vertical="top")
++                    ws.cell(row=row_idx, column=col_idx).alignment = Alignment(
++                        wrap_text=True, vertical="top",
++                    )
++                    lines = max(1, len(textwrap.wrap(reason, _MAX_COLUMN_WIDTH)))
++                    ws.row_dimensions[row_idx].height = max(
++                        ws.row_dimensions[row_idx].height or _ROW_HEIGHT_PER_LINE,
++                        lines * _ROW_HEIGHT_PER_LINE,
++                    )
+ 
+         _auto_column_width(ws)
+ 
+diff --git a/src/pages/market_overview.py b/src/pages/market_overview.py
+index 975e570033a0fff74c120e3de41ecc5927d5331b..ef6a7c4248d0a44ec79165501ddc8aa884dc2130 100644
+--- a/src/pages/market_overview.py
++++ b/src/pages/market_overview.py
+@@ -8,13 +8,15 @@ import streamlit as st
+ 
+ from src.analytics import (
+     UNAVAILABLE_DISPLAY,
++    average_price_basis,
++    calculate_average_price,
+     describe_price_index_issue,
+     negative_price_hours_reason,
+     time_weighted_rolling_price_mean,
+ )
+ from src.config import is_elexon_zone
+ from src.data_ingestion import summarize_price_data_quality
+-from src.ui_theme import apply_cockpit_plot_theme
++from src.ui_theme import apply_cockpit_plot_theme, metric_columns
+ 
+ 
+ def render(
+@@ -33,8 +35,13 @@ def render(
+     source = "Elexon (GBP\u2192EUR)" if is_elexon_zone(primary_zone) else "ENTSO-E"
+     st.caption(f"Data source: {source}")
+ 
+-    k1, k2, k3, k4 = st.columns(4)
+-    k1.metric("Avg Price", f"\u20ac{primary_df['price_eur_mwh'].mean():.2f}/MWh")
++    avg_price = calculate_average_price(primary_df)
++    k1, k2, k3, k4 = metric_columns(4)
++    k1.metric(
++        "Avg Price",
++        UNAVAILABLE_DISPLAY if avg_price["avg_price_reason"]
++        else f"\u20ac{avg_price['avg_price_eur_mwh']:.2f}/MWh",
++    )
+     k2.metric("Avg Ordered Spread", f"\u20ac{percentiles['mean']:.2f}/MWh")
+     k3.metric("90th-pct Ordered Spread", f"\u20ac{percentiles['p90']:.2f}/MWh")
+     neg_hours_reason = negative_price_hours_reason(neg_stats)
+@@ -48,6 +55,12 @@ def render(
+         f"Spreads use chronology-aware {duration_hours}h charge/discharge windows "
+         f"in {zone_tz}."
+     )
++    if avg_price["avg_price_reason"]:
++        st.caption(
++            f"Avg Price is unavailable because {avg_price['avg_price_reason']}."
++        )
++    else:
++        st.caption(f"Avg Price: {average_price_basis(avg_price)}")
+     if neg_hours_reason:
+         st.caption(
+             f"Negative-price hours are unavailable because {neg_hours_reason}. "
+diff --git a/src/pages/project_case.py b/src/pages/project_case.py
+index f13cc1ac2627b03947063c266df52aee18fe9784..7c4ad9423657c563ee624ada26712d065189c5fc 100644
+--- a/src/pages/project_case.py
++++ b/src/pages/project_case.py
+@@ -84,6 +84,7 @@ from src.project_case.imports import (
+     parse_augmentation_csv,
+     parse_explicit_multiplier_csv,
+ )
++from src.ui_theme import metric_columns
+ 
+ SCREENING_NPV_LABEL: Final = "No-lifecycle-cost screening NPV"
+ LIFECYCLE_NPV_LABEL: Final = "Pre-tax unlevered lifecycle cash NPV"
+@@ -258,12 +259,20 @@ def _render_outcome(label: str, outcome: NpvOutcome) -> None:
+     if distribution is None:  # defensive; the typed schema forbids this state
+         st.error("Unavailable: typed NPV distribution is absent; no EUR 0 fallback.")
+         return
+-    columns = st.columns(4)
+-    columns[0].metric(f"{label} — {P10_LABEL}", f"€{distribution.p10:,.0f}")
+-    columns[1].metric(f"{label} — {P50_LABEL}", f"€{distribution.p50:,.0f}")
+-    columns[2].metric(f"{label} — {P90_LABEL}", f"€{distribution.p90:,.0f}")
++    columns = metric_columns(4)
++    columns[0].metric(
++        P10_LABEL, f"€{distribution.p10:,.0f}", help=f"{label} — {P10_LABEL}"
++    )
++    columns[1].metric(
++        P50_LABEL, f"€{distribution.p50:,.0f}", help=f"{label} — {P50_LABEL}"
++    )
++    columns[2].metric(
++        P90_LABEL, f"€{distribution.p90:,.0f}", help=f"{label} — {P90_LABEL}"
++    )
+     columns[3].metric(
+-        f"{label} — {PROBABILITY_LABEL}", f"{distribution.prob_positive:.0%}"
++        PROBABILITY_LABEL,
++        f"{distribution.prob_positive:.0%}",
++        help=f"{label} — {PROBABILITY_LABEL}",
+     )
+ 
+ 
+diff --git a/src/pages/simulation_cockpit.py b/src/pages/simulation_cockpit.py
+index 942a62e5cc4a25bcb484730792b8884334f775be..d41d896004724e4eaf1cda8ee3e42c9f139dd5c7 100644
+--- a/src/pages/simulation_cockpit.py
++++ b/src/pages/simulation_cockpit.py
+@@ -61,6 +61,7 @@ from src.strategy_compare import (
+     STOCHASTIC_POLICY_VALUE_RESERVE_LABEL,
+     build_strategy_comparison,
+ )
++from src.ui_theme import metric_columns
+ 
+ _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+ 
+@@ -383,7 +384,7 @@ def _inject_cockpit_css() -> None:
+         }
+         .cockpit-kpi-grid {
+             display: grid;
+-            grid-template-columns: repeat(8, minmax(0, 1fr));
++            grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+             gap: 10px;
+             margin: 8px 0 12px;
+         }
+@@ -396,7 +397,6 @@ def _inject_cockpit_css() -> None:
+             box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+         }
+         .cockpit-kpi-card.primary {
+-            grid-column: span 2;
+             min-height: 88px;
+         }
+         .cockpit-kpi-card.accent-magenta {
+@@ -430,7 +430,7 @@ def _inject_cockpit_css() -> None:
+         }
+         .cockpit-health-grid {
+             display: grid;
+-            grid-template-columns: repeat(6, minmax(0, 1fr));
++            grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+             gap: 10px;
+             margin-top: 8px;
+         }
+@@ -455,14 +455,6 @@ def _inject_cockpit_css() -> None:
+             letter-spacing: 0.065em;
+             margin-top: 4px;
+         }
+-        @media (max-width: 1100px) {
+-            .cockpit-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+-            .cockpit-health-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+-        }
+-        @media (max-width: 720px) {
+-            .cockpit-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+-            .cockpit-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+-        }
+         </style>
+         """,
+         unsafe_allow_html=True,
+@@ -1628,7 +1620,7 @@ def _render_frontier_result(
+     """Frontier KPIs + grouped gross-vs-net bar chart + flagged table."""
+     best_label = summary.get("best_cap_label")
+     excluded = int(summary.get("excluded_days", 0))
+-    m1, m2, m3, m4 = st.columns(4)
++    m1, m2, m3, m4 = metric_columns(4)
+     m1.metric("Best cap (net of wear)", best_label or "-")
+     m2.metric("Cost per cycle", f"EUR {summary['cost_per_cycle_eur']:,.2f}")
+     m3.metric(
+@@ -2138,7 +2130,7 @@ def _render_contracted_floor_result(
+     chart_template: str,
+ ) -> None:
+     """Render annual/PV KPIs, one grouped chart, and formula-input table."""
+-    annual_top = st.columns(2)
++    annual_top = metric_columns(2)
+     annual_top[0].metric(
+         "Annual merchant net", f"EUR {result['merchant_net_eur']:,.0f}",
+     )
+@@ -2146,7 +2138,7 @@ def _render_contracted_floor_result(
+         "Effective contracted floor",
+         f"EUR {result['effective_floor_eur']:,.0f}",
+     )
+-    annual_bottom = st.columns(2)
++    annual_bottom = metric_columns(2)
+     annual_bottom[0].metric(
+         "Floor-protected annual cash flow",
+         f"EUR {result['floor_protected_cashflow_eur']:,.0f}",
+@@ -2154,7 +2146,7 @@ def _render_contracted_floor_result(
+     annual_bottom[1].metric(
+         "Annual top-up", f"EUR {result['annual_top_up_eur']:,.0f}",
+     )
+-    pv = st.columns(3)
++    pv = metric_columns(3)
+     pv[0].metric(
+         "Merchant contract-window PV", f"EUR {result['merchant_pv_eur']:,.0f}",
+     )
+@@ -3720,7 +3712,7 @@ def _render_forecast_skill(skill: dict, chart_template: str) -> None:
+     if not skill or skill.get("n_points", 0) == 0:
+         return
+     st.markdown("**Forecast skill (price-space, vs realised IDA)**")
+-    cols = st.columns(4)
++    cols = metric_columns(4)
+     cols[0].metric("MAE", f"EUR {skill['mae']:.1f}/MWh")
+     cols[1].metric("Bias", f"EUR {skill['bias']:+.1f}/MWh")
+     cols[2].metric("RMSE", f"EUR {skill['rmse']:.1f}/MWh")
+@@ -3761,7 +3753,7 @@ def _render_forecast_skill(skill: dict, chart_template: str) -> None:
+ 
+ 
+ def _render_forecast_policy_kpis(summary: dict) -> None:
+-    cols = st.columns(4)
++    cols = metric_columns(4)
+     cols[0].metric("DA-only", f"EUR {summary['total_da_only_eur']:,.0f}")
+     cols[1].metric(
+         "Forecast realised",
+@@ -3926,7 +3918,7 @@ def _render_reserve_gap_panel(
+     timing_cost = summary["total_timing_cost_eur"]
+     full_gap = summary["total_full_gap_eur"]
+     st.markdown(f"**Forecast-driven reserve gap ({reserve_product}, Phase 9.2b)**")
+-    cols = st.columns(4)
++    cols = metric_columns(4)
+     cols[0].metric("Forecast-driven realistic", f"EUR {realistic:,.0f}")
+     cols[1].metric("Perfect-foresight ceiling", f"EUR {ceiling:,.0f}")
+     cols[2].metric("Full gap", f"EUR {full_gap:,.0f}")
+@@ -3983,7 +3975,7 @@ def _render_stochastic_attribution_panel(
+         if power_mw > 0 and days > 0 else float("nan")
+     )
+     st.markdown("**Stochastic policy value — attribution & risk**")
+-    cols = st.columns(3)
++    cols = metric_columns(3)
+     cols[0].metric("Policy value (window)", f"EUR {pv:,.0f}")
+     cols[1].metric("Annualised", f"EUR {per_mw_yr:,.0f}/MW/yr")
+     cols[2].metric("Rebid cap", cap_txt)
+@@ -4002,7 +3994,7 @@ def _render_stochastic_attribution_panel(
+     )
+     fallback_days = int(summary.get("n_tiebreak_fallback_days", 0) or 0)
+     stable_days = max(days - fallback_days, 0)
+-    split = st.columns(2)
++    split = metric_columns(2)
+     split[0].metric(
+         "Commitment value (co-opt - myopic)",
+         f"EUR {summary['total_commitment_value_eur']:,.0f}",
+@@ -4035,7 +4027,7 @@ def _render_stochastic_attribution_panel(
+             )
+     risk = summary.get("risk_block") or {}
+     if risk.get("n", 0) > 0:
+-        rcols = st.columns(4)
++        rcols = metric_columns(4)
+         rcols[0].metric("P10", f"EUR {risk['p10']:,.0f}")
+         rcols[1].metric("P50", f"EUR {risk['p50']:,.0f}")
+         rcols[2].metric("P90", f"EUR {risk['p90']:,.0f}")
+@@ -4102,7 +4094,7 @@ def _render_batch_kpis(
+     avg_annualized = float(batch["annualized_eur_per_mw"].mean())
+     best = batch.loc[batch["total_revenue_eur"].idxmax()]
+     stress = batch.loc[batch["daily_fce"].idxmax()]
+-    cols = st.columns(5)
++    cols = metric_columns(5)
+     cols[0].metric("Valid Days", f"{len(batch)} / {requested_days}")
+     cols[1].metric("Avg Day Revenue", f"EUR {avg_daily:,.0f}")
+     cols[2].metric("Avg Annualized", f"EUR {avg_annualized:,.0f}/MW/yr")
+diff --git a/src/pages/zone_comparison.py b/src/pages/zone_comparison.py
+index 5230c82269f969f378c2b88fe3b727e5e4003a9f..74e56972469c9c61b6c8a25873719cff3a3ee79f 100644
+--- a/src/pages/zone_comparison.py
++++ b/src/pages/zone_comparison.py
+@@ -8,6 +8,7 @@ import plotly.graph_objects as go
+ import streamlit as st
+ 
+ from src.analytics import (
++    UNAVAILABLE_DISPLAY,
+     calculate_daily_spreads,
+     compare_zones,
+ )
+@@ -99,7 +100,15 @@ def render(
+         "zone": "Zone",
+         "avg_price": st.column_config.NumberColumn(
+             "Avg Price", format="\u20ac%.2f",
++            help="Weighted by verified delivery duration over finite prices.",
+         ),
++        "avg_price_coverage_pct": st.column_config.NumberColumn(
++            "Avg Price Coverage", format="%.1f%%",
++            help="Share of delivery hours with a finite price.",
++        ),
++        # The reason is shown once per zone below the table and kept in the
++        # Excel export; a long sentence column would crowd the screening view.
++        "avg_price_unavailable_reason": None,
+         "std_price": st.column_config.NumberColumn(
+             "Std Dev", format="%.2f",
+         ),
+@@ -146,6 +155,11 @@ def render(
+         hide_index=True,
+         column_config=col_config,
+     )
++    for zone, reason in comp[["zone", "avg_price_unavailable_reason"]].itertuples(
++        index=False,
++    ):
++        if isinstance(reason, str) and reason:
++            st.caption(f"Avg Price for {zone}: {UNAVAILABLE_DISPLAY} — {reason}.")
+ 
+     # Download comparison
+     comp_xlsx = export_comparison_to_bytes(comp)
+diff --git a/src/ui_theme.py b/src/ui_theme.py
+index 798ab6178746bc926e98dbc4d2cbcbbb801ce679..c391b2e1d8fb82583b0e41d89a6cea99ed4c2d44 100644
+--- a/src/ui_theme.py
++++ b/src/ui_theme.py
+@@ -9,6 +9,17 @@ import streamlit as st
+ _COCKPIT_TEMPLATE_NAME = "bess_cockpit_dark"
+ 
+ 
++def metric_columns(count: int, *, width: int = 360) -> list:
++    """Give KPI cards readable widths and wrap within their actual container.
++
++    Streamlit's horizontal container wraps its children instead of squeezing
++    a fixed column count beside the sidebar. Each card is capped by its
++    parent's width, including on a narrow screen or inside an expander.
++    """
++    row = st.container(horizontal=True, gap="small")
++    return [row.container(width=width) for _ in range(count)]
++
++
+ def cockpit_chart_template() -> str:
+     """Return the chart template used by the cockpit visual system."""
+     _register_cockpit_plotly_template()
+diff --git a/tests/test_analytics.py b/tests/test_analytics.py
+index ff4160ba4fa438bf8cc38d3f924360f8ee278e6e..e6987638ce991076f253f08c456421ba12d94e2f 100644
+--- a/tests/test_analytics.py
++++ b/tests/test_analytics.py
+@@ -405,9 +405,10 @@ class TestCompareZones:
+ 
+     def test_columns(self, seven_day_prices: pd.DataFrame) -> None:
+         result = compare_zones({"DE_LU": seven_day_prices})
+-        expected = {"zone", "avg_price", "std_price", "avg_spread", "p50_spread",
+-                    "p90_spread", "negative_pct", "estimated_annual_revenue_per_mw",
+-                    "dispatch_method"}
++        expected = {"zone", "avg_price", "avg_price_coverage_pct",
++                    "avg_price_unavailable_reason", "std_price", "avg_spread",
++                    "p50_spread", "p90_spread", "negative_pct",
++                    "estimated_annual_revenue_per_mw", "dispatch_method"}
+         assert set(result.columns) == expected
+ 
+     def test_capture_rate_flows_into_revenue(
+diff --git a/tests/test_project_case_contract_ui.py b/tests/test_project_case_contract_ui.py
+index 81995d61c908a69d026000e6b224504c96c24d31..779ca878be9e3f569be8bb083c0a795b8985f416 100644
+--- a/tests/test_project_case_contract_ui.py
++++ b/tests/test_project_case_contract_ui.py
+@@ -563,8 +563,14 @@ def test_panel_builds_and_settles_a_contract_end_to_end(
+ 
+     app.button(key="pc_run").click().run(timeout=30)
+     assert not app.exception
+-    metrics = {metric.label: metric.value for metric in app.metric}
+-    assert any(project_page.SCREENING_NPV_LABEL in label for label in metrics)
++    assert any(
++        metric.label == project_page.P50_LABEL
++        and metric.proto.help.startswith(project_page.SCREENING_NPV_LABEL)
++        for metric in app.metric
++    )
++    assert f"**{project_page.SCREENING_NPV_LABEL}**" in [
++        item.value for item in app.markdown
++    ]
+     assert CONTRACT_PRODUCT_DISCLOSURE_V1 in _captions(app)
+ 
+ 
+@@ -575,14 +581,14 @@ def test_panel_contract_run_is_floor_protected_versus_merchant_only(
+     app = AppTest.from_function(_contract_panel_app).run(timeout=30)
+     app.button(key="pc_run").click().run(timeout=30)
+     assert not app.exception
+-    merchant_p50 = {metric.label: metric.value for metric in app.metric}[
++    merchant_p50 = {metric.proto.help: metric.value for metric in app.metric}[
+         f"{project_page.SCREENING_NPV_LABEL} — {project_page.P50_LABEL}"
+     ]
+ 
+     app = _run_contract_panel(monkeypatch)
+     app.button(key="pc_run").click().run(timeout=30)
+     assert not app.exception
+-    contracted_p50 = {metric.label: metric.value for metric in app.metric}[
++    contracted_p50 = {metric.proto.help: metric.value for metric in app.metric}[
+         f"{project_page.SCREENING_NPV_LABEL} — {project_page.P50_LABEL}"
+     ]
+ 
+diff --git a/tests/test_project_case_ui.py b/tests/test_project_case_ui.py
+index 4750a56fb8af4a1495fd9d5c66af812da7ca7549..4c57a77a8ff226ab301f2d29432205e1f96feffa 100644
+--- a/tests/test_project_case_ui.py
++++ b/tests/test_project_case_ui.py
+@@ -203,10 +203,6 @@ def _cached_reserve_panel_app() -> None:
+     )
+ 
+ 
+-def _metric_map(app: AppTest) -> dict[str, str]:
+-    return {metric.label: metric.value for metric in app.metric}
+-
+-
+ def test_locked_project_case_labels_are_literal() -> None:
+     assert project_page.SCREENING_NPV_LABEL == "No-lifecycle-cost screening NPV"
+     assert project_page.LIFECYCLE_NPV_LABEL == (
+@@ -221,31 +217,48 @@ def test_locked_project_case_labels_are_literal() -> None:
+ def test_available_result_maps_typed_distributions_to_exact_ui_slots() -> None:
+     app = AppTest.from_function(_available_result_app).run(timeout=30)
+     assert not app.exception
+-    metrics = _metric_map(app)
++    assert len(app.metric) == 8
++    sections = [item.value for item in app.markdown]
+     result = _available_result()
+-    for label, outcome in (
++    for group, (label, outcome) in enumerate((
+         (
+             project_page.SCREENING_NPV_LABEL,
+             result.no_lifecycle_cost_screening_npv,
+         ),
+         (project_page.LIFECYCLE_NPV_LABEL, result.lifecycle_cash_npv),
+-    ):
++    )):
++        assert f"**{label}**" in sections
+         distribution = outcome.distribution
+         assert distribution is not None
+-        assert metrics[f"{label} — P10 (Downside)"] == f"€{distribution.p10:,.0f}"
+-        assert metrics[f"{label} — P50 (Median)"] == f"€{distribution.p50:,.0f}"
+-        assert metrics[f"{label} — P90 (Upside)"] == f"€{distribution.p90:,.0f}"
+-        assert metrics[f"{label} — P(NPV > 0)"] == (
+-            f"{distribution.prob_positive:.0%}"
++        expected = (
++            (project_page.P10_LABEL, f"€{distribution.p10:,.0f}"),
++            (project_page.P50_LABEL, f"€{distribution.p50:,.0f}"),
++            (project_page.P90_LABEL, f"€{distribution.p90:,.0f}"),
++            (project_page.PROBABILITY_LABEL, f"{distribution.prob_positive:.0%}"),
+         )
++        for offset, (short_label, value) in enumerate(expected):
++            metric = app.metric[group * 4 + offset]
++            assert metric.label == short_label
++            assert metric.value == value
++            assert metric.proto.help == f"{label} — {short_label}"
+ 
+ 
+ def test_unknown_is_screening_only_and_never_rendered_as_zero() -> None:
+     app = AppTest.from_function(_unknown_result_app).run(timeout=30)
+     assert not app.exception
+-    labels = set(_metric_map(app))
+-    assert sum(label.startswith(project_page.SCREENING_NPV_LABEL) for label in labels) == 4
+-    assert not any(label.startswith(project_page.LIFECYCLE_NPV_LABEL) for label in labels)
++    assert [metric.label for metric in app.metric] == [
++        project_page.P10_LABEL,
++        project_page.P50_LABEL,
++        project_page.P90_LABEL,
++        project_page.PROBABILITY_LABEL,
++    ]
++    assert all(
++        metric.proto.help.startswith(project_page.SCREENING_NPV_LABEL)
++        for metric in app.metric
++    )
++    sections = [item.value for item in app.markdown]
++    assert f"**{project_page.SCREENING_NPV_LABEL}**" in sections
++    assert f"**{project_page.LIFECYCLE_NPV_LABEL}**" in sections
+     warnings = [warning.value for warning in app.warning]
+     assert any(LIFECYCLE_UNKNOWN_STATUS in value for value in warnings)
+     assert any(LIFECYCLE_UNKNOWN_MESSAGE in value for value in warnings)
+@@ -636,9 +649,9 @@ def test_real_public_adapter_reaches_project_case_ui() -> None:
+     assert not app.exception
+     app.button(key="pc_run").click().run(timeout=120)
+     assert not app.exception
+-    metrics = _metric_map(app)
+-    assert len(metrics) == 4
++    assert len(app.metric) == 4
+     assert all(
+-        label.startswith(project_page.SCREENING_NPV_LABEL) for label in metrics
++        metric.proto.help.startswith(project_page.SCREENING_NPV_LABEL)
++        for metric in app.metric
+     )
+     assert any("pre-tax unlevered, not bankable" in c.value for c in app.caption)
+diff --git a/tests/test_simulation_cockpit_contracted_floor.py b/tests/test_simulation_cockpit_contracted_floor.py
+index 10777e01e24f56306e7db803fb4e742dc8315e3e..a1f72bb6e5b1cc5cfa382ad04921496ab6795094 100644
+--- a/tests/test_simulation_cockpit_contracted_floor.py
++++ b/tests/test_simulation_cockpit_contracted_floor.py
+@@ -433,7 +433,7 @@ def test_render_places_floor_immediately_after_frontier() -> None:
+     assert indices[2] == indices[1] + 1
+ 
+ 
+-def test_contracted_floor_annual_metrics_use_two_by_two_layout() -> None:
++def test_contracted_floor_metrics_keep_annual_and_pv_groups() -> None:
+     tree = ast.parse(inspect.getsource(cockpit._render_contracted_floor_result))
+     column_calls = sorted(
+         (
+@@ -441,10 +441,8 @@ def test_contracted_floor_annual_metrics_use_two_by_two_layout() -> None:
+             for call in ast.walk(tree)
+             if (
+                 isinstance(call, ast.Call)
+-                and isinstance(call.func, ast.Attribute)
+-                and isinstance(call.func.value, ast.Name)
+-                and call.func.value.id == "st"
+-                and call.func.attr == "columns"
++                and isinstance(call.func, ast.Name)
++                and call.func.id == "metric_columns"
+                 and call.args
+                 and isinstance(call.args[0], ast.Constant)
+                 and isinstance(call.args[0].value, int)
+diff --git a/tests/test_step3c_average_price.py b/tests/test_step3c_average_price.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..2092146dbb8e8084df3be11634ccb43799793ea9
+--- /dev/null
++++ b/tests/test_step3c_average_price.py
+@@ -0,0 +1,467 @@
++"""Step 3C: the window-wide Avg Price is weighted by verified delivery duration.
++
++One shared calculation feeds the market page, the zone comparison and the
++Excel/PDF summaries. A quarter-hour price counts for a quarter hour, so a
++window that crosses the SDAC hourly-to-quarter-hour cutover no longer lets the
++denser half dominate. Where the delivery duration cannot be verified the
++average is ``n/a`` with a reason on every surface, never a guessed number.
++
++Symbols introduced by this step are imported inside the cases that use them,
++so the module still collects and fails on behaviour against the baseline.
++"""
++
++from __future__ import annotations
++
++from io import BytesIO
++
++import numpy as np
++import pandas as pd
++import pytest
++from openpyxl import load_workbook
++
++from src.analytics import compare_zones
++from src.export import export_comparison_to_bytes, export_to_bytes, export_to_pdf_bytes
++from tests.test_step3a_display_contract import _export_args, _pdf_chunks, _pdf_text
++
++_GAP_REASON = "gap or a cadence change"
++
++
++# ── Samples ──────────────────────────────────────────────────────────────────
++
++def _frame(index: pd.DatetimeIndex, values) -> pd.DataFrame:
++    return pd.DataFrame(
++        {"price_eur_mwh": np.asarray(values, dtype=float)},
++        index=pd.DatetimeIndex(index).rename("timestamp"),
++    )
++
++
++def _cutover_sample() -> pd.DataFrame:
++    """30 hourly days at 10, then 10 quarter-hour days at 100 (SDAC cutover)."""
++    before = pd.date_range(
++        "2025-09-01", "2025-10-01", inclusive="left", freq="h", tz="Europe/Berlin",
++    )
++    after = pd.date_range(
++        "2025-10-01", "2025-10-11", inclusive="left", freq="15min", tz="Europe/Berlin",
++    )
++    return _frame(
++        before.append(after).tz_convert("UTC"),
++        np.r_[np.full(len(before), 10.0), np.full(len(after), 100.0)],
++    )
++
++
++def _uniform_sample(freq: str) -> pd.DataFrame:
++    """40 days on one grid: the first 30 at 10 and the last 10 at 100."""
++    per_day = {"h": 24, "30min": 48, "15min": 96}[freq]
++    count = 40 * per_day
++    index = pd.date_range("2026-01-01", periods=count, freq=freq, tz="UTC")
++    return _frame(index, np.r_[np.full(count * 3 // 4, 10.0), np.full(count // 4, 100.0)])
++
++
++def _civil_cutover_sample(tz: str) -> pd.DataFrame:
++    """Two civil days before and one after the shared SDAC cutover instant."""
++    cutover = pd.Timestamp("2025-09-30T22:00:00Z")
++    before = pd.date_range(
++        pd.Timestamp("2025-09-29", tz=tz).tz_convert("UTC"), cutover,
++        inclusive="left", freq="h",
++    )
++    after = pd.date_range(
++        cutover, pd.Timestamp("2025-10-02", tz=tz).tz_convert("UTC"),
++        inclusive="left", freq="15min",
++    )
++    return _frame(
++        before.append(after), np.r_[np.full(len(before), 10.0), np.full(len(after), 100.0)],
++    )
++
++
++def _gap_sample() -> pd.DataFrame:
++    """Hourly prices with one delivery hour absent from the index entirely."""
++    index = pd.date_range("2026-01-01", periods=48, freq="h", tz="UTC").delete(30)
++    return _frame(index, np.full(47, 50.0))
++
++
++def _defective_sample(defect: str) -> pd.DataFrame:
++    from tests.test_step3a_display_contract import _defective
++
++    return _defective(defect)
++
++
++# ── Calculation contract ─────────────────────────────────────────────────────
++
++def test_cutover_window_is_weighted_by_delivery_hours_not_rows() -> None:
++    from src.analytics import calculate_average_price
++
++    frame = _cutover_sample()
++    stats = calculate_average_price(frame)
++    assert stats["avg_price_eur_mwh"] == pytest.approx(32.50)
++    assert stats["covered_hours"] == pytest.approx(30 * 24 + 10 * 24)
++    assert stats["delivery_hours"] == pytest.approx(960.0)
++    assert stats["avg_price_reason"] is None
++    # The row mean the page used to show is a different, denser-half-biased number.
++    assert round(float(frame["price_eur_mwh"].mean()), 2) == pytest.approx(61.43)
++
++
++@pytest.mark.parametrize("freq", ["h", "30min", "15min"])
++def test_uniform_grids_keep_the_row_mean(freq: str) -> None:
++    from src.analytics import calculate_average_price
++
++    frame = _uniform_sample(freq)
++    stats = calculate_average_price(frame)
++    assert stats["avg_price_eur_mwh"] == pytest.approx(float(frame["price_eur_mwh"].mean()))
++    assert stats["avg_price_eur_mwh"] == pytest.approx(32.50)
++    assert stats["delivery_hours"] == pytest.approx(960.0)
++
++
++@pytest.mark.parametrize("freq", ["2h", "24h"])
++def test_regular_sparse_timestamps_do_not_invent_long_delivery_products(freq: str) -> None:
++    from src.analytics import average_price_basis, calculate_average_price
++
++    frame = _frame(
++        pd.date_range("2026-01-01", periods=3, freq=freq, tz="UTC"),
++        [10.0, 100.0, 10.0],
++    )
++    stats = calculate_average_price(frame)
++    assert np.isnan(stats["avg_price_eur_mwh"])
++    assert np.isnan(stats["covered_hours"])
++    assert np.isnan(stats["delivery_hours"])
++    assert "not a supported native" in stats["avg_price_reason"]
++    assert average_price_basis(stats) is None
++
++
++def test_numeric_row_index_is_not_interpreted_as_delivery_nanoseconds() -> None:
++    from src.analytics import average_price_basis, calculate_average_price
++
++    frame = pd.DataFrame({"price_eur_mwh": [10.0, 100.0, 10.0]})
++    stats = calculate_average_price(frame)
++    assert np.isnan(stats["avg_price_eur_mwh"])
++    assert np.isnan(stats["covered_hours"])
++    assert np.isnan(stats["delivery_hours"])
++    assert stats["avg_price_reason"] == "the price index is not a timestamp index"
++    assert average_price_basis(stats) is None
++
++
++@pytest.mark.parametrize(
++    "tz,hourly,quarter_hours,expected",
++    [
++        # FI civil midnight is 21:00Z: 49 hourly products, then 23 quarter-hour hours.
++        ("Europe/Helsinki", 49, 23, (49 * 10 + 23 * 100) / 72),
++        # PT civil midnight is 23:00Z: 47 hourly products, then 25 quarter-hour hours.
++        ("Europe/Lisbon", 47, 25, (47 * 10 + 25 * 100) / 72),
++    ],
++)
++def test_cutover_is_the_shared_market_instant_not_the_civil_midnight(
++    tz: str, hourly: int, quarter_hours: int, expected: float,
++) -> None:
++    from src.analytics import calculate_average_price
++
++    frame = _civil_cutover_sample(tz)
++    assert int((frame["price_eur_mwh"] == 10.0).sum()) == hourly
++    assert int((frame["price_eur_mwh"] == 100.0).sum()) == quarter_hours * 4
++    stats = calculate_average_price(frame)
++    assert stats["avg_price_eur_mwh"] == pytest.approx(expected)
++    assert stats["delivery_hours"] == pytest.approx(72.0)
++
++
++@pytest.mark.parametrize("day,hours", [("2026-03-29", 23.0), ("2026-10-25", 25.0)])
++def test_dst_days_count_their_physical_hours(day: str, hours: float) -> None:
++    from src.analytics import calculate_average_price
++
++    start = pd.Timestamp(day, tz="Europe/Berlin")
++    end = pd.Timestamp(pd.Timestamp(day) + pd.Timedelta(days=1), tz="Europe/Berlin")
++    index = pd.date_range(
++        start.tz_convert("UTC"), end.tz_convert("UTC"), inclusive="left", freq="15min",
++    )
++    # First local hour at 100, the remaining physical hours at 10.
++    values = np.where(np.arange(len(index)) < 4, 100.0, 10.0)
++    stats = calculate_average_price(_frame(index, values))
++    assert len(index) == hours * 4
++    assert stats["delivery_hours"] == pytest.approx(hours)
++    assert stats["avg_price_eur_mwh"] == pytest.approx((100.0 + 10.0 * (hours - 1)) / hours)
++
++
++def test_non_finite_prices_are_excluded_and_disclosed_not_counted_as_zero() -> None:
++    from src.analytics import average_price_basis, calculate_average_price
++
++    index = pd.date_range("2026-01-01", periods=6, freq="h", tz="UTC")
++    stats = calculate_average_price(
++        _frame(index, [10.0, np.nan, np.inf, -np.inf, 20.0, 30.0]),
++    )
++    assert stats["avg_price_eur_mwh"] == pytest.approx(20.0)
++    assert stats["covered_hours"] == pytest.approx(3.0)
++    assert stats["delivery_hours"] == pytest.approx(6.0)
++    basis = average_price_basis(stats)
++    assert "3.00 of 6.00 delivery hours (50.0%)" in basis
++    assert "excluded, not counted as zero" in basis
++
++
++def test_full_coverage_basis_does_not_claim_an_exclusion() -> None:
++    from src.analytics import average_price_basis, calculate_average_price
++
++    basis = average_price_basis(calculate_average_price(_cutover_sample()))
++    assert basis == (
++        "Duration-weighted: finite prices cover 960.00 of 960.00 delivery hours (100.0%)."
++    )
++
++
++def test_no_finite_price_is_unavailable_with_known_delivery_hours() -> None:
++    from src.analytics import average_price_basis, calculate_average_price
++
++    index = pd.date_range("2026-01-01", periods=4, freq="15min", tz="UTC")
++    stats = calculate_average_price(_frame(index, [np.nan, np.inf, np.nan, -np.inf]))
++    assert np.isnan(stats["avg_price_eur_mwh"])
++    assert stats["covered_hours"] == 0.0
++    assert stats["delivery_hours"] == pytest.approx(1.0)
++    assert stats["avg_price_reason"] == "no delivery interval carries a finite price"
++    assert average_price_basis(stats) is None
++
++
++@pytest.mark.parametrize(
++    "sample,needle",
++    [
++        ("gap", _GAP_REASON),
++        ("unregistered_cadence_change", _GAP_REASON),
++        ("duplicate", "repeats the same delivery timestamp"),
++        ("unsorted", "not sorted into delivery order"),
++        ("nat", "unset (NaT) timestamps"),
++        ("single", "single delivery timestamp"),
++        ("empty", "no price observations"),
++    ],
++)
++def test_unverifiable_duration_is_unavailable_not_guessed(sample: str, needle: str) -> None:
++    from src.analytics import average_price_basis, calculate_average_price
++
++    if sample == "gap":
++        frame = _gap_sample()
++    elif sample == "unregistered_cadence_change":
++        # Hour-to-quarter change on a day that is not the registered cutover.
++        before = pd.date_range("2026-01-01", periods=24, freq="h", tz="UTC")
++        after = pd.date_range("2026-01-02", periods=96, freq="15min", tz="UTC")
++        frame = _frame(before.append(after), np.r_[np.full(24, 10.0), np.full(96, 100.0)])
++    elif sample == "single":
++        # One price alone cannot show whether it covered an hour or a quarter.
++        frame = _frame(pd.DatetimeIndex(["2026-01-01T00:00Z"]), [42.0])
++    elif sample == "empty":
++        frame = pd.DataFrame(
++            {"price_eur_mwh": pd.Series(dtype=float)},
++            index=pd.DatetimeIndex([], tz="UTC", name="timestamp"),
++        )
++    else:
++        frame = _defective_sample(sample)
++    stats = calculate_average_price(frame)
++    assert np.isnan(stats["avg_price_eur_mwh"])
++    assert np.isnan(stats["covered_hours"])
++    assert needle in stats["avg_price_reason"]
++    assert average_price_basis(stats) is None
++
++
++# ── Market page ──────────────────────────────────────────────────────────────
++
++def _market_app(sample: str) -> None:
++    from src.analytics import (
++        calculate_daily_spreads,
++        calculate_negative_price_hours,
++        calculate_spread_percentiles,
++    )
++    from src.pages.market_overview import render
++    from tests.test_step3c_average_price import _cutover_sample, _gap_sample, _uniform_sample
++
++    frame = {
++        "cutover": _cutover_sample,
++        "gap": _gap_sample,
++        "hourly": lambda: _uniform_sample("h"),
++    }[sample]()
++    daily = calculate_daily_spreads(frame)
++    render(
++        "DE_LU", frame, daily, calculate_spread_percentiles(daily),
++        calculate_negative_price_hours(frame), 1, "UTC", "plotly_dark", {},
++    )
++
++
++def _avg_price_metric(app):
++    return next(m for m in app.metric if m.label.startswith("Avg Price"))
++
++
++def _run_market(sample: str):
++    from streamlit.testing.v1 import AppTest
++
++    app = AppTest.from_function(_market_app, args=(sample,)).run(timeout=60)
++    assert not app.exception
++    return app
++
++
++def test_page_shows_the_duration_weighted_average_and_its_coverage() -> None:
++    app = _run_market("cutover")
++    assert "32.50" in _avg_price_metric(app).value
++    assert "61.43" not in _avg_price_metric(app).value
++    assert any(
++        "960.00 of 960.00 delivery hours (100.0%)" in c.value for c in app.caption
++    )
++
++
++def test_page_shows_na_and_the_reason_when_duration_is_unverifiable() -> None:
++    app = _run_market("gap")
++    assert _avg_price_metric(app).value == "n/a"
++    assert any(
++        "Avg Price is unavailable because" in c.value and _GAP_REASON in c.value
++        for c in app.caption
++    )
++
++
++def test_page_keeps_a_uniform_hourly_average() -> None:
++    """Compatibility control: a uniform grid shows the same value as before."""
++    app = _run_market("hourly")
++    assert "32.50" in _avg_price_metric(app).value
++
++
++# ── Excel / PDF summaries ────────────────────────────────────────────────────
++
++def _summary_pairs(data: bytes) -> dict[str, object]:
++    ws = load_workbook(BytesIO(data))["Summary"]
++    return {
++        row[0].value: row[1].value
++        for row in ws.iter_rows(min_col=1, max_col=2)
++        if row[0].value
++    }
++
++
++def test_excel_summary_uses_the_duration_weighted_average() -> None:
++    pairs = _summary_pairs(export_to_bytes(**_export_args(_cutover_sample())))
++    assert pairs["Avg Price (EUR/MWh)"] == pytest.approx(32.50)
++    assert "960.00 of 960.00 delivery hours" in pairs["Avg Price Basis"]
++    assert "Avg Price Unavailable Because" not in pairs
++
++
++def test_excel_summary_shows_na_and_reason_when_duration_is_unverifiable() -> None:
++    pairs = _summary_pairs(export_to_bytes(**_export_args(_gap_sample())))
++    assert pairs["Avg Price (EUR/MWh)"] == "n/a"
++    assert _GAP_REASON in pairs["Avg Price Unavailable Because"]
++    assert "Avg Price Basis" not in pairs
++    for value in pairs.values():
++        assert not (isinstance(value, float) and not np.isfinite(value))
++        assert str(value).strip().lower() != "nan"
++
++
++@pytest.mark.parametrize("freq", ["h", "30min", "15min"])
++def test_excel_summary_keeps_uniform_averages(freq: str) -> None:
++    """Compatibility control: the numeric cell and its value are unchanged."""
++    pairs = _summary_pairs(export_to_bytes(**_export_args(_uniform_sample(freq))))
++    assert pairs["Avg Price (EUR/MWh)"] == pytest.approx(32.50)
++    assert isinstance(pairs["Avg Price (EUR/MWh)"], float)
++
++
++def test_pdf_summary_uses_the_duration_weighted_average() -> None:
++    text = _pdf_text(export_to_pdf_bytes(**_export_args(_cutover_sample())))
++    assert "Avg Price (EUR/MWh) 32.50" in text
++    assert "61.43" not in text
++    assert "960.00 of 960.00 delivery hours (100.0%)" in text
++
++
++def test_pdf_summary_shows_na_and_reason_when_duration_is_unverifiable() -> None:
++    text = _pdf_text(export_to_pdf_bytes(**_export_args(_gap_sample())))
++    assert "Avg Price (EUR/MWh) n/a" in text
++    assert "Avg Price Unavailable Because" in text
++    assert "nan" not in text.lower()
++
++
++def test_pdf_summary_keeps_a_uniform_hourly_average() -> None:
++    """Compatibility control."""
++    text = _pdf_text(export_to_pdf_bytes(**_export_args(_uniform_sample("h"))))
++    assert "Avg Price (EUR/MWh) 32.50" in text
++
++
++def test_pdf_disclosure_rows_stay_inside_the_page() -> None:
++    """A long basis sentence wraps in its column instead of leaving the page."""
++    from fpdf import FPDF
++
++    from src.analytics import average_price_basis, calculate_average_price
++
++    frame = _cutover_sample()
++    frame.iloc[5, 0] = np.nan  # adds the longer "excluded, not counted as zero" clause
++    stats = calculate_average_price(frame)
++    sentence = stats["avg_price_reason"] or average_price_basis(stats)
++    chunks = _pdf_chunks(export_to_pdf_bytes(**_export_args(frame)))
++    ruler = FPDF(orientation="L", unit="mm", format="A4")
++    ruler.add_page()
++    available = ruler.w - ruler.r_margin - (ruler.l_margin + 100)
++    ruler.set_font("Helvetica", "", 10)
++    # The premise: the sentence is wider than its value column.
++    assert ruler.get_string_width(sentence) > available
++    start = next(i for i, chunk in enumerate(chunks) if chunk and sentence.startswith(chunk))
++    lines: list[str] = []
++    while len(" ".join(lines)) < len(sentence):
++        lines.append(chunks[start + len(lines)])
++    assert " ".join(lines) == sentence
++    assert len(lines) >= 2
++    for line in lines:
++        assert ruler.get_string_width(line) <= available, line
++
++
++# ── Zone comparison ──────────────────────────────────────────────────────────
++
++def test_zone_comparison_uses_the_shared_average_and_discloses_coverage() -> None:
++    comp = compare_zones({"DE_LU": _cutover_sample(), "FR": _gap_sample()})
++    rows = comp.set_index("zone")
++    assert rows.loc["DE_LU", "avg_price"] == pytest.approx(32.50)
++    assert rows.loc["DE_LU", "avg_price_coverage_pct"] == pytest.approx(100.0)
++    assert rows.loc["DE_LU", "avg_price_unavailable_reason"] is None
++    assert np.isnan(rows.loc["FR", "avg_price"])
++    assert np.isnan(rows.loc["FR", "avg_price_coverage_pct"])
++    assert _GAP_REASON in rows.loc["FR", "avg_price_unavailable_reason"]
++
++
++def test_zone_comparison_keeps_a_uniform_hourly_average() -> None:
++    """Compatibility control."""
++    comp = compare_zones({"DE_LU": _uniform_sample("h")})
++    assert comp["avg_price"].iloc[0] == pytest.approx(32.50)
++
++
++def test_comparison_export_writes_na_beside_the_reason() -> None:
++    comp = compare_zones({"DE_LU": _cutover_sample(), "FR": _gap_sample()})
++    ws = load_workbook(BytesIO(export_comparison_to_bytes(comp)))["Zone Comparison"]
++    header = [cell.value for cell in ws[1]]
++    rows = {
++        row[header.index("Zone")]: row
++        for row in ws.iter_rows(min_row=2, values_only=True)
++    }
++    avg = header.index("Avg Price (EUR/MWh)")
++    coverage = header.index("Avg Price Coverage %")
++    reason = header.index("Avg Price Unavailable Because")
++    assert rows["DE_LU"][avg] == pytest.approx(32.50)
++    assert rows["DE_LU"][coverage] == pytest.approx(1.0)
++    assert rows["DE_LU"][reason] is None
++    assert rows["FR"][avg] == "n/a"
++    assert rows["FR"][coverage] == "n/a"
++    assert _GAP_REASON in rows["FR"][reason]
++    cells = {
++        row[header.index("Zone")].value: row
++        for row in ws.iter_rows(min_row=2)
++    }
++    reason_cell = cells["FR"][reason]
++    assert reason_cell.value == comp.set_index("zone").loc["FR", "avg_price_unavailable_reason"]
++    assert reason_cell.alignment.wrap_text is True
++    assert ws.row_dimensions[reason_cell.row].height > ws.sheet_format.defaultRowHeight
++    assert cells["DE_LU"][avg].data_type == "n"
++    assert cells["DE_LU"][coverage].data_type == "n"
++    assert cells["DE_LU"][coverage].number_format == "0.0%"
++
++
++def _zone_comparison_app() -> None:
++    from src.pages.zone_comparison import render
++    from tests.test_step3c_average_price import _cutover_sample, _gap_sample
++
++    render(
++        {"DE_LU": _cutover_sample(), "FR": _gap_sample()},
++        duration_hours=1, capture_rate=0.7, efficiency=0.88, power_mw=1.0,
++        use_lp_dispatch=False, capex_eur_kwh=0.0, chart_template="plotly_dark",
++    )
++
++
++def test_zone_comparison_page_names_the_unavailable_zone_and_reason() -> None:
++    from streamlit.testing.v1 import AppTest
++
++    app = AppTest.from_function(_zone_comparison_app).run(timeout=120)
++    assert not app.exception
++    assert any(
++        c.value.startswith("Avg Price for FR: n/a — ") and _GAP_REASON in c.value
++        for c in app.caption
++    )
++    assert not any("Avg Price for DE_LU" in c.value for c in app.caption)

@@ -1,0 +1,1159 @@
+[
+  {
+    "name": "baseline-market-1280",
+    "metrics": [
+      {
+        "overflows": [
+          {
+            "scroll": 185,
+            "text": "€75.08/MWh",
+            "width": 159
+          }
+        ],
+        "text": "AVG PRICE\n\n€75.08/MWh",
+        "width": 188
+      },
+      {
+        "overflows": [
+          {
+            "scroll": 203,
+            "text": "€126.94/MWh",
+            "width": 159
+          }
+        ],
+        "text": "AVG ORDERED SPREAD\n\n€126.94/MWh",
+        "width": 188
+      },
+      {
+        "overflows": [
+          {
+            "scroll": 203,
+            "text": "€140.07/MWh",
+            "width": 159
+          }
+        ],
+        "text": "90TH-PCT ORDERED SPREAD\n\n€140.07/MWh",
+        "width": 188
+      },
+      {
+        "overflows": [],
+        "text": "NEG PRICE HOURS\n\n47.5h\n\n9.9% of intervals",
+        "width": 188
+      }
+    ],
+    "viewport": 1280
+  },
+  {
+    "name": "gallery-1280",
+    "cockpit": [],
+    "metrics": [
+      {
+        "overflow": [],
+        "text": "VALID DAYS\n\n2 / 3",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "AVG DAY REVENUE\n\nEUR 195,990",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "AVG ANNUALIZED\n\nEUR 286,341/MW/yr",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "AVG FCE/DAY\n\n1.65",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "EXCLUDED DAYS\n\n1",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "DA-ONLY\n\nEUR 195,990",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FORECAST REALISED\n\nEUR 286,341\n\n90,351 vs DA-only",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "PERFECT-FORESIGHT CEILING\n\nEUR 345,678",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FORECAST ERROR COST\n\nEUR 59,337",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "MAE\n\nEUR 123.4/MWh",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "BIAS\n\nEUR -123.4/MWh",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "RMSE\n\nEUR 234.5/MWh",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "SKILL VS DA-AS-IDA\n\n-25%",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FORECAST-DRIVEN REALISTIC\n\nEUR 195,990",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "PERFECT-FORESIGHT CEILING\n\nEUR 345,678",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FULL GAP\n\nEUR 149,688",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FORECAST EFFECT\n\nEUR -23,456",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "POLICY VALUE (WINDOW)\n\nEUR 23,519",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "ANNUALISED\n\nEUR 286,341/MW/yr",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "REBID CAP\n\n123.4 MW",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "COMMITMENT VALUE (CO-OPT - MYOPIC)\n\nEUR -123,456",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "DISTRIBUTION VALUE (STOCHASTIC - CO-OPT)\n\nEUR 146,975",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P10\n\nEUR -195,990",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P50\n\nEUR 286,341",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P90\n\nEUR 345,678",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "CVAR@90\n\nEUR -234,567",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "BEST CAP (NET OF WEAR)\n\n1.5 FEC/day",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "COST PER CYCLE\n\nEUR 12,345.67",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "WEAR PER MWH DISCHARGED\n\nEUR 123.45",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "VALID DAYS\n\n30\n\n-2 excluded",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "ANNUAL MERCHANT NET\n\nEUR 286,341",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "EFFECTIVE CONTRACTED FLOOR\n\nEUR 380,000",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FLOOR-PROTECTED ANNUAL CASH FLOW\n\nEUR 380,000",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "ANNUAL TOP-UP\n\nEUR 93,659",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "MERCHANT CONTRACT-WINDOW PV\n\nEUR 1,921,924",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "PROTECTED CONTRACT-WINDOW PV\n\nEUR 2,550,230",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FLOOR PV UPLIFT\n\nEUR 628,306",
+        "width": 358
+      }
+    ],
+    "sidebar": [
+      {
+        "expanded": "true",
+        "width": 300,
+        "x": 0
+      }
+    ],
+    "viewport": 1280
+  },
+  {
+    "name": "gallery-390",
+    "cockpit": [],
+    "metrics": [
+      {
+        "overflow": [],
+        "text": "VALID DAYS\n\n2 / 3",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "AVG DAY REVENUE\n\nEUR 195,990",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "AVG ANNUALIZED\n\nEUR 286,341/MW/yr",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "AVG FCE/DAY\n\n1.65",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "EXCLUDED DAYS\n\n1",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "DA-ONLY\n\nEUR 195,990",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "FORECAST REALISED\n\nEUR 286,341\n\n90,351 vs DA-only",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "PERFECT-FORESIGHT CEILING\n\nEUR 345,678",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "FORECAST ERROR COST\n\nEUR 59,337",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "MAE\n\nEUR 123.4/MWh",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "BIAS\n\nEUR -123.4/MWh",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "RMSE\n\nEUR 234.5/MWh",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "SKILL VS DA-AS-IDA\n\n-25%",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "FORECAST-DRIVEN REALISTIC\n\nEUR 195,990",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "PERFECT-FORESIGHT CEILING\n\nEUR 345,678",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "FULL GAP\n\nEUR 149,688",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "FORECAST EFFECT\n\nEUR -23,456",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "POLICY VALUE (WINDOW)\n\nEUR 23,519",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "ANNUALISED\n\nEUR 286,341/MW/yr",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "REBID CAP\n\n123.4 MW",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "COMMITMENT VALUE (CO-OPT - MYOPIC)\n\nEUR -123,456",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "DISTRIBUTION VALUE (STOCHASTIC - CO-OPT)\n\nEUR 146,975",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P10\n\nEUR -195,990",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P50\n\nEUR 286,341",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P90\n\nEUR 345,678",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "CVAR@90\n\nEUR -234,567",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "BEST CAP (NET OF WEAR)\n\n1.5 FEC/day",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "COST PER CYCLE\n\nEUR 12,345.67",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "WEAR PER MWH DISCHARGED\n\nEUR 123.45",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "VALID DAYS\n\n30\n\n-2 excluded",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "ANNUAL MERCHANT NET\n\nEUR 286,341",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "EFFECTIVE CONTRACTED FLOOR\n\nEUR 380,000",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "FLOOR-PROTECTED ANNUAL CASH FLOW\n\nEUR 380,000",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "ANNUAL TOP-UP\n\nEUR 93,659",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "MERCHANT CONTRACT-WINDOW PV\n\nEUR 1,921,924",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "PROTECTED CONTRACT-WINDOW PV\n\nEUR 2,550,230",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "FLOOR PV UPLIFT\n\nEUR 628,306",
+        "width": 345
+      }
+    ],
+    "sidebar": [
+      {
+        "expanded": "false",
+        "width": 1,
+        "x": -300
+      }
+    ],
+    "viewport": 390
+  },
+  {
+    "name": "project-case-1440",
+    "cockpit": [],
+    "metrics": [
+      {
+        "overflow": [],
+        "text": "P10 (DOWNSIDE)\n\n€-12,345,678",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P50 (MEDIAN)\n\n€2,560,914",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P90 (UPSIDE)\n\n€123,456,789",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P(NPV > 0)\n\n57%",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P10 (DOWNSIDE)\n\n€-12,345,678",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P50 (MEDIAN)\n\n€2,560,914",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P90 (UPSIDE)\n\n€123,456,789",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P(NPV > 0)\n\n57%",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P10 (DOWNSIDE)\n\n€-4,856,884",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P50 (MEDIAN)\n\n€-4,844,410",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P90 (UPSIDE)\n\n€-4,830,896",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P(NPV > 0)\n\n0%",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P10 (DOWNSIDE)\n\n€-6,289,669",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P50 (MEDIAN)\n\n€-6,277,195",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P90 (UPSIDE)\n\n€-6,263,681",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P(NPV > 0)\n\n0%",
+        "width": 358
+      }
+    ],
+    "sidebar": [
+      {
+        "expanded": "true",
+        "width": 300,
+        "x": 0
+      }
+    ],
+    "viewport": 1440
+  },
+  {
+    "name": "gallery-1440",
+    "cockpit": [],
+    "metrics": [
+      {
+        "overflow": [],
+        "text": "VALID DAYS\n\n2 / 3",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "AVG DAY REVENUE\n\nEUR 195,990",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "AVG ANNUALIZED\n\nEUR 286,341/MW/yr",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "AVG FCE/DAY\n\n1.65",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "EXCLUDED DAYS\n\n1",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "DA-ONLY\n\nEUR 195,990",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FORECAST REALISED\n\nEUR 286,341\n\n90,351 vs DA-only",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "PERFECT-FORESIGHT CEILING\n\nEUR 345,678",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FORECAST ERROR COST\n\nEUR 59,337",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "MAE\n\nEUR 123.4/MWh",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "BIAS\n\nEUR -123.4/MWh",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "RMSE\n\nEUR 234.5/MWh",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "SKILL VS DA-AS-IDA\n\n-25%",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FORECAST-DRIVEN REALISTIC\n\nEUR 195,990",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "PERFECT-FORESIGHT CEILING\n\nEUR 345,678",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FULL GAP\n\nEUR 149,688",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FORECAST EFFECT\n\nEUR -23,456",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "POLICY VALUE (WINDOW)\n\nEUR 23,519",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "ANNUALISED\n\nEUR 286,341/MW/yr",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "REBID CAP\n\n123.4 MW",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "COMMITMENT VALUE (CO-OPT - MYOPIC)\n\nEUR -123,456",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "DISTRIBUTION VALUE (STOCHASTIC - CO-OPT)\n\nEUR 146,975",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P10\n\nEUR -195,990",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P50\n\nEUR 286,341",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P90\n\nEUR 345,678",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "CVAR@90\n\nEUR -234,567",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "BEST CAP (NET OF WEAR)\n\n1.5 FEC/day",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "COST PER CYCLE\n\nEUR 12,345.67",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "WEAR PER MWH DISCHARGED\n\nEUR 123.45",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "VALID DAYS\n\n30\n\n-2 excluded",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "ANNUAL MERCHANT NET\n\nEUR 286,341",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "EFFECTIVE CONTRACTED FLOOR\n\nEUR 380,000",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FLOOR-PROTECTED ANNUAL CASH FLOW\n\nEUR 380,000",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "ANNUAL TOP-UP\n\nEUR 93,659",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "MERCHANT CONTRACT-WINDOW PV\n\nEUR 1,921,924",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "PROTECTED CONTRACT-WINDOW PV\n\nEUR 2,550,230",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "FLOOR PV UPLIFT\n\nEUR 628,306",
+        "width": 358
+      }
+    ],
+    "sidebar": [
+      {
+        "expanded": "true",
+        "width": 300,
+        "x": 0
+      }
+    ],
+    "viewport": 1440
+  },
+  {
+    "name": "market-1440",
+    "cockpit": [],
+    "metrics": [
+      {
+        "overflow": [],
+        "text": "AVG PRICE\n\n€75.08/MWh",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "AVG ORDERED SPREAD\n\n€126.94/MWh",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "90TH-PCT ORDERED SPREAD\n\n€140.07/MWh",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "NEG PRICE HOURS\n\n47.5h\n\n9.9% of intervals",
+        "width": 358
+      }
+    ],
+    "sidebar": [
+      {
+        "expanded": "true",
+        "width": 300,
+        "x": 0
+      }
+    ],
+    "viewport": 1440
+  },
+  {
+    "name": "cockpit-1440",
+    "cockpit": [
+      {
+        "overflow": false,
+        "text": "DAY REVENUE\nEUR 205,862\nSelected local day",
+        "width": 314
+      },
+      {
+        "overflow": false,
+        "text": "EUR/MW/YEAR\nEUR 300,764\nSingle-day annualised",
+        "width": 314
+      },
+      {
+        "overflow": false,
+        "text": "TRADED VOLUME\n4,481.0 MWh\nDA + ID financial volume",
+        "width": 314
+      },
+      {
+        "overflow": false,
+        "text": "PHYSICAL THROUGHPUT\n4,481.0 MWh\nBattery charge + discharge",
+        "width": 314
+      },
+      {
+        "overflow": false,
+        "text": "TRADES\n42\nContiguous dispatch blocks",
+        "width": 314
+      },
+      {
+        "overflow": false,
+        "text": "POWER BASIS\n250.0 MW\nAnnualised denominator",
+        "width": 314
+      }
+    ],
+    "metrics": [],
+    "sidebar": [
+      {
+        "expanded": "true",
+        "width": 300,
+        "x": 0
+      }
+    ],
+    "viewport": 1440
+  },
+  {
+    "name": "market-1280",
+    "cockpit": [],
+    "metrics": [
+      {
+        "overflow": [],
+        "text": "AVG PRICE\n\n€75.08/MWh",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "AVG ORDERED SPREAD\n\n€126.94/MWh",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "90TH-PCT ORDERED SPREAD\n\n€140.07/MWh",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "NEG PRICE HOURS\n\n47.5h\n\n9.9% of intervals",
+        "width": 358
+      }
+    ],
+    "sidebar": [
+      {
+        "expanded": "true",
+        "width": 300,
+        "x": 0
+      }
+    ],
+    "viewport": 1280
+  },
+  {
+    "name": "project-case-1280",
+    "cockpit": [],
+    "metrics": [
+      {
+        "overflow": [],
+        "text": "P10 (DOWNSIDE)\n\n€-12,345,678",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P50 (MEDIAN)\n\n€2,560,914",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P90 (UPSIDE)\n\n€123,456,789",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P(NPV > 0)\n\n57%",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P10 (DOWNSIDE)\n\n€-12,345,678",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P50 (MEDIAN)\n\n€2,560,914",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P90 (UPSIDE)\n\n€123,456,789",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P(NPV > 0)\n\n57%",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P10 (DOWNSIDE)\n\n€-4,856,884",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P50 (MEDIAN)\n\n€-4,844,410",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P90 (UPSIDE)\n\n€-4,830,896",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P(NPV > 0)\n\n0%",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P10 (DOWNSIDE)\n\n€-6,289,669",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P50 (MEDIAN)\n\n€-6,277,195",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P90 (UPSIDE)\n\n€-6,263,681",
+        "width": 358
+      },
+      {
+        "overflow": [],
+        "text": "P(NPV > 0)\n\n0%",
+        "width": 358
+      }
+    ],
+    "sidebar": [
+      {
+        "expanded": "true",
+        "width": 300,
+        "x": 0
+      }
+    ],
+    "viewport": 1280
+  },
+  {
+    "name": "market-390",
+    "cockpit": [],
+    "metrics": [
+      {
+        "overflow": [],
+        "text": "AVG PRICE\n\n€75.08/MWh",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "AVG ORDERED SPREAD\n\n€126.94/MWh",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "90TH-PCT ORDERED SPREAD\n\n€140.07/MWh",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "NEG PRICE HOURS\n\n47.5h\n\n9.9% of intervals",
+        "width": 345
+      }
+    ],
+    "sidebar": [
+      {
+        "expanded": "false",
+        "width": 1,
+        "x": -300
+      }
+    ],
+    "viewport": 390
+  },
+  {
+    "name": "project-case-390",
+    "cockpit": [],
+    "metrics": [
+      {
+        "overflow": [],
+        "text": "P10 (DOWNSIDE)\n\n€-12,345,678",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P50 (MEDIAN)\n\n€2,560,914",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P90 (UPSIDE)\n\n€123,456,789",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P(NPV > 0)\n\n57%",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P10 (DOWNSIDE)\n\n€-12,345,678",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P50 (MEDIAN)\n\n€2,560,914",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P90 (UPSIDE)\n\n€123,456,789",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P(NPV > 0)\n\n57%",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P10 (DOWNSIDE)\n\n€-4,856,884",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P50 (MEDIAN)\n\n€-4,844,410",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P90 (UPSIDE)\n\n€-4,830,896",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P(NPV > 0)\n\n0%",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P10 (DOWNSIDE)\n\n€-6,289,669",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P50 (MEDIAN)\n\n€-6,277,195",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P90 (UPSIDE)\n\n€-6,263,681",
+        "width": 345
+      },
+      {
+        "overflow": [],
+        "text": "P(NPV > 0)\n\n0%",
+        "width": 345
+      }
+    ],
+    "sidebar": [
+      {
+        "expanded": "false",
+        "width": 1,
+        "x": -300
+      }
+    ],
+    "viewport": 390
+  },
+  {
+    "name": "cockpit-390",
+    "cockpit": [
+      {
+        "overflow": false,
+        "text": "DAY REVENUE\nEUR 205,862\nSelected local day",
+        "width": 345
+      },
+      {
+        "overflow": false,
+        "text": "EUR/MW/YEAR\nEUR 300,764\nSingle-day annualised",
+        "width": 345
+      },
+      {
+        "overflow": false,
+        "text": "TRADED VOLUME\n4,481.0 MWh\nDA + ID financial volume",
+        "width": 345
+      },
+      {
+        "overflow": false,
+        "text": "PHYSICAL THROUGHPUT\n4,481.0 MWh\nBattery charge + discharge",
+        "width": 345
+      },
+      {
+        "overflow": false,
+        "text": "TRADES\n42\nContiguous dispatch blocks",
+        "width": 345
+      },
+      {
+        "overflow": false,
+        "text": "POWER BASIS\n250.0 MW\nAnnualised denominator",
+        "width": 345
+      }
+    ],
+    "metrics": [],
+    "sidebar": [
+      {
+        "expanded": "false",
+        "width": 1,
+        "x": -300
+      }
+    ],
+    "viewport": 390
+  },
+  {
+    "name": "cockpit-1280",
+    "cockpit": [
+      {
+        "overflow": false,
+        "text": "DAY REVENUE\nEUR 205,862\nSelected local day",
+        "width": 261
+      },
+      {
+        "overflow": false,
+        "text": "EUR/MW/YEAR\nEUR 300,764\nSingle-day annualised",
+        "width": 261
+      },
+      {
+        "overflow": false,
+        "text": "TRADED VOLUME\n4,481.0 MWh\nDA + ID financial volume",
+        "width": 261
+      },
+      {
+        "overflow": false,
+        "text": "PHYSICAL THROUGHPUT\n4,481.0 MWh\nBattery charge + discharge",
+        "width": 261
+      },
+      {
+        "overflow": false,
+        "text": "TRADES\n42\nContiguous dispatch blocks",
+        "width": 261
+      },
+      {
+        "overflow": false,
+        "text": "POWER BASIS\n250.0 MW\nAnnualised denominator",
+        "width": 261
+      }
+    ],
+    "metrics": [],
+    "sidebar": [
+      {
+        "expanded": "true",
+        "width": 300,
+        "x": 0
+      }
+    ],
+    "viewport": 1280
+  }
+]
