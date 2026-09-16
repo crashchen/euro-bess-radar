@@ -1,0 +1,54 @@
+{
+  "random_native_vs_uniform_trials": 100,
+  "worst_average_error": 1.0658141036401503e-14,
+  "cutover_gap_rejection": {
+    "2": "the delivery grid has a gap or a cadence change other than the registered SDAC 15-minute cutover",
+    "5": "the delivery grid has a gap or a cadence change other than the registered SDAC 15-minute cutover",
+    "6": "the delivery grid has a gap or a cadence change other than the registered SDAC 15-minute cutover",
+    "9": "the delivery grid has a gap or a cadence change other than the registered SDAC 15-minute cutover"
+  },
+  "defects": {
+    "2h_uniform": {
+      "avg_price_eur_mwh": NaN,
+      "covered_hours": NaN,
+      "delivery_hours": NaN,
+      "avg_price_reason": "the delivery cadence is not a supported native 1-hour, 30-minute or 15-minute product"
+    },
+    "daily_uniform": {
+      "avg_price_eur_mwh": NaN,
+      "covered_hours": NaN,
+      "delivery_hours": NaN,
+      "avg_price_reason": "the delivery cadence is not a supported native 1-hour, 30-minute or 15-minute product"
+    },
+    "range_index": {
+      "avg_price_eur_mwh": NaN,
+      "covered_hours": NaN,
+      "delivery_hours": NaN,
+      "avg_price_reason": "the price index is not a timestamp index"
+    },
+    "nat_only": {
+      "avg_price_eur_mwh": NaN,
+      "covered_hours": NaN,
+      "delivery_hours": NaN,
+      "avg_price_reason": "the price index contains unset (NaT) timestamps"
+    },
+    "duplicate": {
+      "avg_price_eur_mwh": NaN,
+      "covered_hours": NaN,
+      "delivery_hours": NaN,
+      "avg_price_reason": "the price index repeats the same delivery timestamp"
+    },
+    "all_nonfinite": {
+      "avg_price_eur_mwh": NaN,
+      "covered_hours": 0.0,
+      "delivery_hours": 3.0,
+      "avg_price_reason": "no delivery interval carries a finite price"
+    },
+    "missing_price_column": {
+      "avg_price_eur_mwh": NaN,
+      "covered_hours": NaN,
+      "delivery_hours": NaN,
+      "avg_price_reason": "no price observations are loaded"
+    }
+  }
+}

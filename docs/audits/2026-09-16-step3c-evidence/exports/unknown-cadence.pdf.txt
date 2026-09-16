@@ -1,0 +1,24 @@
+BESS Pulse - Market Report
+Zone                            DE_LU
+Timezone                        UTC
+Date Range                      2026-01-01 to 2026-01-01
+Total Days                      1
+
+Avg Price (EUR/MWh)             n/a
+Avg Price Unavailable Because   the delivery cadence is not a supported native 1-hour, 30-minute or 15-minute product
+Median Price (EUR/MWh)          10.00
+
+50th-percentile Spread          90.00
+75th-percentile Spread          90.00
+90th-percentile Spread          90.00
+Mean Spread                     90.00
+
+Est. Annual Revenue (EUR/MW)    20,249
+
+Modeled Cycles per Day          1.0
+Capture Rate Assumption         0.7
+
+Negative Price Hours            0.0
+Negative Price Intervals        0
+Negative Price % of Intervals   0.0%
+

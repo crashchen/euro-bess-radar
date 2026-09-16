@@ -1,0 +1,187 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: /private<baseline-repo>
+configfile: pyproject.toml
+collected 37 items
+
+tests/test_step3c_average_price.py FFFFFFFFFFFFFFFFFFFFFFF.FF...FF.FF.FF [100%]
+
+=================================== FAILURES ===================================
+__________ test_cutover_window_is_weighted_by_delivery_hours_not_rows __________
+tests/test_step3c_average_price.py:91: in test_cutover_window_is_weighted_by_delivery_hours_not_rows
+    from src.analytics import calculate_average_price
+E   ImportError: cannot import name 'calculate_average_price' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+___________________ test_uniform_grids_keep_the_row_mean[h] ____________________
+tests/test_step3c_average_price.py:105: in test_uniform_grids_keep_the_row_mean
+    from src.analytics import calculate_average_price
+E   ImportError: cannot import name 'calculate_average_price' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_________________ test_uniform_grids_keep_the_row_mean[30min] __________________
+tests/test_step3c_average_price.py:105: in test_uniform_grids_keep_the_row_mean
+    from src.analytics import calculate_average_price
+E   ImportError: cannot import name 'calculate_average_price' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_________________ test_uniform_grids_keep_the_row_mean[15min] __________________
+tests/test_step3c_average_price.py:105: in test_uniform_grids_keep_the_row_mean
+    from src.analytics import calculate_average_price
+E   ImportError: cannot import name 'calculate_average_price' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+___ test_regular_sparse_timestamps_do_not_invent_long_delivery_products[2h] ____
+tests/test_step3c_average_price.py:116: in test_regular_sparse_timestamps_do_not_invent_long_delivery_products
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+___ test_regular_sparse_timestamps_do_not_invent_long_delivery_products[24h] ___
+tests/test_step3c_average_price.py:116: in test_regular_sparse_timestamps_do_not_invent_long_delivery_products
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+______ test_numeric_row_index_is_not_interpreted_as_delivery_nanoseconds _______
+tests/test_step3c_average_price.py:131: in test_numeric_row_index_is_not_interpreted_as_delivery_nanoseconds
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_ test_cutover_is_the_shared_market_instant_not_the_civil_midnight[Europe/Helsinki-49-23-38.75] _
+tests/test_step3c_average_price.py:154: in test_cutover_is_the_shared_market_instant_not_the_civil_midnight
+    from src.analytics import calculate_average_price
+E   ImportError: cannot import name 'calculate_average_price' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_ test_cutover_is_the_shared_market_instant_not_the_civil_midnight[Europe/Lisbon-47-25-41.25] _
+tests/test_step3c_average_price.py:154: in test_cutover_is_the_shared_market_instant_not_the_civil_midnight
+    from src.analytics import calculate_average_price
+E   ImportError: cannot import name 'calculate_average_price' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+__________ test_dst_days_count_their_physical_hours[2026-03-29-23.0] ___________
+tests/test_step3c_average_price.py:166: in test_dst_days_count_their_physical_hours
+    from src.analytics import calculate_average_price
+E   ImportError: cannot import name 'calculate_average_price' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+__________ test_dst_days_count_their_physical_hours[2026-10-25-25.0] ___________
+tests/test_step3c_average_price.py:166: in test_dst_days_count_their_physical_hours
+    from src.analytics import calculate_average_price
+E   ImportError: cannot import name 'calculate_average_price' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+____ test_non_finite_prices_are_excluded_and_disclosed_not_counted_as_zero _____
+tests/test_step3c_average_price.py:182: in test_non_finite_prices_are_excluded_and_disclosed_not_counted_as_zero
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_____________ test_full_coverage_basis_does_not_claim_an_exclusion _____________
+tests/test_step3c_average_price.py:197: in test_full_coverage_basis_does_not_claim_an_exclusion
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+________ test_no_finite_price_is_unavailable_with_known_delivery_hours _________
+tests/test_step3c_average_price.py:206: in test_no_finite_price_is_unavailable_with_known_delivery_hours
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_ test_unverifiable_duration_is_unavailable_not_guessed[gap-gap or a cadence change] _
+tests/test_step3c_average_price.py:230: in test_unverifiable_duration_is_unavailable_not_guessed
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_ test_unverifiable_duration_is_unavailable_not_guessed[unregistered_cadence_change-gap or a cadence change] _
+tests/test_step3c_average_price.py:230: in test_unverifiable_duration_is_unavailable_not_guessed
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_ test_unverifiable_duration_is_unavailable_not_guessed[duplicate-repeats the same delivery timestamp] _
+tests/test_step3c_average_price.py:230: in test_unverifiable_duration_is_unavailable_not_guessed
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_ test_unverifiable_duration_is_unavailable_not_guessed[unsorted-not sorted into delivery order] _
+tests/test_step3c_average_price.py:230: in test_unverifiable_duration_is_unavailable_not_guessed
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_ test_unverifiable_duration_is_unavailable_not_guessed[nat-unset (NaT) timestamps] _
+tests/test_step3c_average_price.py:230: in test_unverifiable_duration_is_unavailable_not_guessed
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_ test_unverifiable_duration_is_unavailable_not_guessed[single-single delivery timestamp] _
+tests/test_step3c_average_price.py:230: in test_unverifiable_duration_is_unavailable_not_guessed
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_ test_unverifiable_duration_is_unavailable_not_guessed[empty-no price observations] _
+tests/test_step3c_average_price.py:230: in test_unverifiable_duration_is_unavailable_not_guessed
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+________ test_page_shows_the_duration_weighted_average_and_its_coverage ________
+tests/test_step3c_average_price.py:293: in test_page_shows_the_duration_weighted_average_and_its_coverage
+    assert "32.50" in _avg_price_metric(app).value
+E   assert '32.50' in '€61.43/MWh'
+E    +  where '€61.43/MWh' = Metric(proto=label: "Avg Price"\nbody: "€61.43/MWh"\ndirection: NONE\ncolor: GRAY\nlabel_visibility {\n}\n, label='Avg Price', color=2).value
+E    +    where Metric(proto=label: "Avg Price"\nbody: "€61.43/MWh"\ndirection: NONE\ncolor: GRAY\nlabel_visibility {\n}\n, label='Avg Price', color=2) = _avg_price_metric(AppTest(\n    _script_path='/var/folders/n3/73xp6cd17c32jfxhc5y814cc0000gn/T/tmpaealfson/8c30f9c0154ce5be96f21cc3bd4c93...SpecialBlock(\n            type='sidebar'\n        ),\n        2: SpecialBlock(\n            type='event'\n        )\n    }\n))
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:16:39.592 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_______ test_page_shows_na_and_the_reason_when_duration_is_unverifiable ________
+tests/test_step3c_average_price.py:302: in test_page_shows_na_and_the_reason_when_duration_is_unverifiable
+    assert _avg_price_metric(app).value == "n/a"
+E   AssertionError: assert '€50.00/MWh' == 'n/a'
+E
+E     - n/a
+E     + €50.00/MWh
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:16:39.780 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+____________ test_excel_summary_uses_the_duration_weighted_average _____________
+tests/test_step3c_average_price.py:328: in test_excel_summary_uses_the_duration_weighted_average
+    assert pairs["Avg Price (EUR/MWh)"] == pytest.approx(32.50)
+E   assert 61.43 == 32.5 ± 3.2e-05
+E
+E     comparison failed
+E     Obtained: 61.43
+E     Expected: 32.5 ± 3.2e-05
+_____ test_excel_summary_shows_na_and_reason_when_duration_is_unverifiable _____
+tests/test_step3c_average_price.py:335: in test_excel_summary_shows_na_and_reason_when_duration_is_unverifiable
+    assert pairs["Avg Price (EUR/MWh)"] == "n/a"
+E   AssertionError: assert 50 == 'n/a'
+_____________ test_pdf_summary_uses_the_duration_weighted_average ______________
+tests/test_step3c_average_price.py:353: in test_pdf_summary_uses_the_duration_weighted_average
+    assert "Avg Price (EUR/MWh) 32.50" in text
+E   AssertionError: assert 'Avg Price (EUR/MWh) 32.50' in 'BESS Pulse - Market Report Zone DE_LU Timezone UTC Date Range 2025-08-31  to  2025-10-10 Total Days 41 Avg Price (EUR...1.0 Capture Rate Assumption 0.7 Negative Price Hours 0.0 Negative Price Intervals 0 Negative Price % of Intervals 0.0%'
+______ test_pdf_summary_shows_na_and_reason_when_duration_is_unverifiable ______
+tests/test_step3c_average_price.py:360: in test_pdf_summary_shows_na_and_reason_when_duration_is_unverifiable
+    assert "Avg Price (EUR/MWh) n/a" in text
+E   AssertionError: assert 'Avg Price (EUR/MWh) n/a' in 'BESS Pulse - Market Report Zone DE_LU Timezone UTC Date Range 2026-01-01  to  2026-01-02 Total Days 2 Avg Price (EUR/...d on 2026-01-02 (local date of the first unverified day) Negative Price Intervals 0 Negative Price % of Intervals 0.0%'
+________________ test_pdf_disclosure_rows_stay_inside_the_page _________________
+tests/test_step3c_average_price.py:375: in test_pdf_disclosure_rows_stay_inside_the_page
+    from src.analytics import average_price_basis, calculate_average_price
+E   ImportError: cannot import name 'average_price_basis' from 'src.analytics' (/private<baseline-repo>/src/analytics.py)
+_____ test_zone_comparison_uses_the_shared_average_and_discloses_coverage ______
+tests/test_step3c_average_price.py:403: in test_zone_comparison_uses_the_shared_average_and_discloses_coverage
+    assert rows.loc["DE_LU", "avg_price"] == pytest.approx(32.50)
+E   assert np.float64(61.43) == 32.5 ± 3.2e-05
+E
+E     comparison failed
+E     Obtained: 61.43
+E     Expected: 32.5 ± 3.2e-05
+______________ test_comparison_export_writes_na_beside_the_reason ______________
+tests/test_step3c_average_price.py:426: in test_comparison_export_writes_na_beside_the_reason
+    coverage = header.index("Avg Price Coverage %")
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ValueError: 'Avg Price Coverage %' is not in list
+_______ test_zone_comparison_page_names_the_unavailable_zone_and_reason ________
+tests/test_step3c_average_price.py:463: in test_zone_comparison_page_names_the_unavailable_zone_and_reason
+    assert any(
+E   assert False
+E    +  where False = any(<generator object test_zone_comparison_page_names_the_unavailable_zone_and_reason.<locals>.<genexpr> at 0x109bc9cb0>)
+----------------------------- Captured stderr call -----------------------------
+2026-09-16 23:16:40.405 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+=========================== short test summary info ============================
+FAILED tests/test_step3c_average_price.py::test_cutover_window_is_weighted_by_delivery_hours_not_rows
+FAILED tests/test_step3c_average_price.py::test_uniform_grids_keep_the_row_mean[h]
+FAILED tests/test_step3c_average_price.py::test_uniform_grids_keep_the_row_mean[30min]
+FAILED tests/test_step3c_average_price.py::test_uniform_grids_keep_the_row_mean[15min]
+FAILED tests/test_step3c_average_price.py::test_regular_sparse_timestamps_do_not_invent_long_delivery_products[2h]
+FAILED tests/test_step3c_average_price.py::test_regular_sparse_timestamps_do_not_invent_long_delivery_products[24h]
+FAILED tests/test_step3c_average_price.py::test_numeric_row_index_is_not_interpreted_as_delivery_nanoseconds
+FAILED tests/test_step3c_average_price.py::test_cutover_is_the_shared_market_instant_not_the_civil_midnight[Europe/Helsinki-49-23-38.75]
+FAILED tests/test_step3c_average_price.py::test_cutover_is_the_shared_market_instant_not_the_civil_midnight[Europe/Lisbon-47-25-41.25]
+FAILED tests/test_step3c_average_price.py::test_dst_days_count_their_physical_hours[2026-03-29-23.0]
+FAILED tests/test_step3c_average_price.py::test_dst_days_count_their_physical_hours[2026-10-25-25.0]
+FAILED tests/test_step3c_average_price.py::test_non_finite_prices_are_excluded_and_disclosed_not_counted_as_zero
+FAILED tests/test_step3c_average_price.py::test_full_coverage_basis_does_not_claim_an_exclusion
+FAILED tests/test_step3c_average_price.py::test_no_finite_price_is_unavailable_with_known_delivery_hours
+FAILED tests/test_step3c_average_price.py::test_unverifiable_duration_is_unavailable_not_guessed[gap-gap or a cadence change]
+FAILED tests/test_step3c_average_price.py::test_unverifiable_duration_is_unavailable_not_guessed[unregistered_cadence_change-gap or a cadence change]
+FAILED tests/test_step3c_average_price.py::test_unverifiable_duration_is_unavailable_not_guessed[duplicate-repeats the same delivery timestamp]
+FAILED tests/test_step3c_average_price.py::test_unverifiable_duration_is_unavailable_not_guessed[unsorted-not sorted into delivery order]
+FAILED tests/test_step3c_average_price.py::test_unverifiable_duration_is_unavailable_not_guessed[nat-unset (NaT) timestamps]
+FAILED tests/test_step3c_average_price.py::test_unverifiable_duration_is_unavailable_not_guessed[single-single delivery timestamp]
+FAILED tests/test_step3c_average_price.py::test_unverifiable_duration_is_unavailable_not_guessed[empty-no price observations]
+FAILED tests/test_step3c_average_price.py::test_page_shows_the_duration_weighted_average_and_its_coverage
+FAILED tests/test_step3c_average_price.py::test_page_shows_na_and_the_reason_when_duration_is_unverifiable
+FAILED tests/test_step3c_average_price.py::test_excel_summary_uses_the_duration_weighted_average
+FAILED tests/test_step3c_average_price.py::test_excel_summary_shows_na_and_reason_when_duration_is_unverifiable
+FAILED tests/test_step3c_average_price.py::test_pdf_summary_uses_the_duration_weighted_average
+FAILED tests/test_step3c_average_price.py::test_pdf_summary_shows_na_and_reason_when_duration_is_unverifiable
+FAILED tests/test_step3c_average_price.py::test_pdf_disclosure_rows_stay_inside_the_page
+FAILED tests/test_step3c_average_price.py::test_zone_comparison_uses_the_shared_average_and_discloses_coverage
+FAILED tests/test_step3c_average_price.py::test_comparison_export_writes_na_beside_the_reason
+FAILED tests/test_step3c_average_price.py::test_zone_comparison_page_names_the_unavailable_zone_and_reason
+========================= 31 failed, 6 passed in 1.34s =========================

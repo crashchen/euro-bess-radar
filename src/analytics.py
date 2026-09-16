@@ -922,6 +922,108 @@ def negative_price_hours_reason(stats: dict) -> str | None:
     )
 
 
+def calculate_average_price(df: pd.DataFrame) -> dict[str, float | str | None]:
+    """Average price weighted by each observation's verified delivery duration.
+
+    This is the one window-wide "Avg Price" shared by the market page, the zone
+    comparison and the Excel/PDF summaries. A finite price counts for the
+    physical hours it was delivered, so a quarter-hour price no longer weighs
+    as much as an hourly one. Durations come from the whole window's delivery
+    grid: a uniform native 1h, 30-minute or 15-minute cadence, or the registered
+    SDAC hourly-to-quarter-hour cutover. NaN and infinite prices contribute no
+    covered hours; they are excluded, never read as zero.
+
+    The figure is unavailable rather than guessed when the index is defective,
+    when a lone timestamp cannot show how long its price applied, when the grid
+    has a gap or an unregistered cadence change, or when no delivery interval
+    carries a finite price.
+
+    Args:
+        df: Price DataFrame with a ``price_eur_mwh`` column.
+
+    Returns:
+        Dict with ``avg_price_eur_mwh`` (NaN when unavailable),
+        ``covered_hours`` (delivery hours with a finite price),
+        ``delivery_hours`` (delivery hours of every observation) and
+        ``avg_price_reason`` (None when the average is available). Hours are
+        NaN when the delivery grid itself could not be verified.
+    """
+    def unavailable(reason: str, covered: float = np.nan, delivery: float = np.nan):
+        return {
+            "avg_price_eur_mwh": np.nan,
+            "covered_hours": covered,
+            "delivery_hours": delivery,
+            "avg_price_reason": reason,
+        }
+
+    if "price_eur_mwh" not in df.columns or df.empty:
+        return unavailable("no price observations are loaded")
+    if not isinstance(df.index, pd.DatetimeIndex):
+        # DatetimeIndex construction would silently interpret a numeric row
+        # index as nanoseconds since the epoch, inventing delivery instants.
+        return unavailable("the price index is not a timestamp index")
+    issue = describe_price_index_issue(df.index)
+    if issue is not None:
+        return unavailable(issue.reason)
+    if len(df) < 2:
+        return unavailable(
+            "a single delivery timestamp cannot show how long its price applied"
+        )
+    try:
+        durations = interval_hours_vector(
+            infer_delivery_interval_hours(df.index), len(df),
+        )
+    except ValueError:
+        return unavailable(
+            "the delivery grid has a gap or a cadence change other than the "
+            "registered SDAC 15-minute cutover"
+        )
+    if not np.isin(durations, [1.0, 0.5, 0.25]).all():
+        # The shared inference helper deliberately preserves historical
+        # uniform-cadence inference. A regular 2h/24h sample is insufficient
+        # evidence for native DA delivery products in this average contract.
+        return unavailable(
+            "the delivery cadence is not a supported native 1-hour, "
+            "30-minute or 15-minute product"
+        )
+    prices = df["price_eur_mwh"].to_numpy(dtype=float)
+    finite = np.isfinite(prices)
+    delivery_hours = float(durations.sum())
+    covered_hours = float(durations[finite].sum())
+    if covered_hours <= 0:
+        return unavailable(
+            "no delivery interval carries a finite price", 0.0, delivery_hours,
+        )
+    return {
+        "avg_price_eur_mwh": float(
+            np.sum(prices[finite] * durations[finite]) / covered_hours
+        ),
+        "covered_hours": covered_hours,
+        "delivery_hours": delivery_hours,
+        "avg_price_reason": None,
+    }
+
+
+def average_price_basis(stats: dict) -> str | None:
+    """One-line coverage disclosure for an available duration-weighted Avg Price.
+
+    Page, zone comparison and Excel/PDF summaries share this wording so every
+    surface states the same covered hours. Returns None when unavailable; the
+    caller shows ``UNAVAILABLE_DISPLAY`` and ``avg_price_reason`` instead.
+    """
+    if stats.get("avg_price_reason") is not None:
+        return None
+    covered = float(stats["covered_hours"])
+    delivery = float(stats["delivery_hours"])
+    text = (
+        f"Duration-weighted: finite prices cover {covered:,.2f} of "
+        f"{delivery:,.2f} delivery hours ({covered / delivery:.1%})"
+    )
+    if covered < delivery:
+        text += "; the rest is excluded, not counted as zero"
+    return text + "."
+
+
 # ── Renewable correlation ─────────────────────────────────────────────────────
 
 def analyze_price_renewable_correlation(
@@ -1630,7 +1732,10 @@ def compare_zones(
         capex_eur_kwh: CapEx in EUR/kWh; if >0, degradation metrics are added.
 
     Returns:
-        Summary DataFrame with one row per zone.
+        Summary DataFrame with one row per zone. ``avg_price`` is the
+        duration-weighted ``calculate_average_price``; when it is unavailable
+        the cell is NaN, ``avg_price_unavailable_reason`` says why and
+        ``avg_price_coverage_pct`` is NaN.
     """
     rows = []
     for zone, df in zone_data.items():
@@ -1657,9 +1762,17 @@ def compare_zones(
             roundtrip_efficiency=roundtrip_efficiency,
         )
 
+        avg_price = calculate_average_price(df)
         row: dict[str, object] = {
             "zone": zone,
-            "avg_price": round(float(df["price_eur_mwh"].mean()), 2),
+            "avg_price": round(avg_price["avg_price_eur_mwh"], 2),
+            "avg_price_coverage_pct": (
+                np.nan if avg_price["avg_price_reason"] is not None
+                else round(
+                    100.0 * avg_price["covered_hours"] / avg_price["delivery_hours"], 2,
+                )
+            ),
+            "avg_price_unavailable_reason": avg_price["avg_price_reason"],
             "std_price": round(float(df["price_eur_mwh"].std()), 2),
             "avg_spread": round(pctls["mean"], 2),
             "p50_spread": round(pctls["p50"], 2),

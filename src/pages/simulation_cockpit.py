@@ -61,6 +61,7 @@ from src.strategy_compare import (
     STOCHASTIC_POLICY_VALUE_RESERVE_LABEL,
     build_strategy_comparison,
 )
+from src.ui_theme import metric_columns
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -383,7 +384,7 @@ def _inject_cockpit_css() -> None:
         }
         .cockpit-kpi-grid {
             display: grid;
-            grid-template-columns: repeat(8, minmax(0, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
             gap: 10px;
             margin: 8px 0 12px;
         }
@@ -396,7 +397,6 @@ def _inject_cockpit_css() -> None:
             box-shadow: 0 10px 28px rgba(0,0,0,0.22);
         }
         .cockpit-kpi-card.primary {
-            grid-column: span 2;
             min-height: 88px;
         }
         .cockpit-kpi-card.accent-magenta {
@@ -430,7 +430,7 @@ def _inject_cockpit_css() -> None:
         }
         .cockpit-health-grid {
             display: grid;
-            grid-template-columns: repeat(6, minmax(0, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
             gap: 10px;
             margin-top: 8px;
         }
@@ -454,14 +454,6 @@ def _inject_cockpit_css() -> None:
             text-transform: uppercase;
             letter-spacing: 0.065em;
             margin-top: 4px;
-        }
-        @media (max-width: 1100px) {
-            .cockpit-kpi-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-            .cockpit-health-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-        }
-        @media (max-width: 720px) {
-            .cockpit-kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-            .cockpit-health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
         </style>
         """,
@@ -1628,7 +1620,7 @@ def _render_frontier_result(
     """Frontier KPIs + grouped gross-vs-net bar chart + flagged table."""
     best_label = summary.get("best_cap_label")
     excluded = int(summary.get("excluded_days", 0))
-    m1, m2, m3, m4 = st.columns(4)
+    m1, m2, m3, m4 = metric_columns(4)
     m1.metric("Best cap (net of wear)", best_label or "-")
     m2.metric("Cost per cycle", f"EUR {summary['cost_per_cycle_eur']:,.2f}")
     m3.metric(
@@ -2138,7 +2130,7 @@ def _render_contracted_floor_result(
     chart_template: str,
 ) -> None:
     """Render annual/PV KPIs, one grouped chart, and formula-input table."""
-    annual_top = st.columns(2)
+    annual_top = metric_columns(2)
     annual_top[0].metric(
         "Annual merchant net", f"EUR {result['merchant_net_eur']:,.0f}",
     )
@@ -2146,7 +2138,7 @@ def _render_contracted_floor_result(
         "Effective contracted floor",
         f"EUR {result['effective_floor_eur']:,.0f}",
     )
-    annual_bottom = st.columns(2)
+    annual_bottom = metric_columns(2)
     annual_bottom[0].metric(
         "Floor-protected annual cash flow",
         f"EUR {result['floor_protected_cashflow_eur']:,.0f}",
@@ -2154,7 +2146,7 @@ def _render_contracted_floor_result(
     annual_bottom[1].metric(
         "Annual top-up", f"EUR {result['annual_top_up_eur']:,.0f}",
     )
-    pv = st.columns(3)
+    pv = metric_columns(3)
     pv[0].metric(
         "Merchant contract-window PV", f"EUR {result['merchant_pv_eur']:,.0f}",
     )
@@ -3720,7 +3712,7 @@ def _render_forecast_skill(skill: dict, chart_template: str) -> None:
     if not skill or skill.get("n_points", 0) == 0:
         return
     st.markdown("**Forecast skill (price-space, vs realised IDA)**")
-    cols = st.columns(4)
+    cols = metric_columns(4)
     cols[0].metric("MAE", f"EUR {skill['mae']:.1f}/MWh")
     cols[1].metric("Bias", f"EUR {skill['bias']:+.1f}/MWh")
     cols[2].metric("RMSE", f"EUR {skill['rmse']:.1f}/MWh")
@@ -3761,7 +3753,7 @@ def _render_forecast_skill(skill: dict, chart_template: str) -> None:
 
 
 def _render_forecast_policy_kpis(summary: dict) -> None:
-    cols = st.columns(4)
+    cols = metric_columns(4)
     cols[0].metric("DA-only", f"EUR {summary['total_da_only_eur']:,.0f}")
     cols[1].metric(
         "Forecast realised",
@@ -3926,7 +3918,7 @@ def _render_reserve_gap_panel(
     timing_cost = summary["total_timing_cost_eur"]
     full_gap = summary["total_full_gap_eur"]
     st.markdown(f"**Forecast-driven reserve gap ({reserve_product}, Phase 9.2b)**")
-    cols = st.columns(4)
+    cols = metric_columns(4)
     cols[0].metric("Forecast-driven realistic", f"EUR {realistic:,.0f}")
     cols[1].metric("Perfect-foresight ceiling", f"EUR {ceiling:,.0f}")
     cols[2].metric("Full gap", f"EUR {full_gap:,.0f}")
@@ -3983,7 +3975,7 @@ def _render_stochastic_attribution_panel(
         if power_mw > 0 and days > 0 else float("nan")
     )
     st.markdown("**Stochastic policy value — attribution & risk**")
-    cols = st.columns(3)
+    cols = metric_columns(3)
     cols[0].metric("Policy value (window)", f"EUR {pv:,.0f}")
     cols[1].metric("Annualised", f"EUR {per_mw_yr:,.0f}/MW/yr")
     cols[2].metric("Rebid cap", cap_txt)
@@ -4002,7 +3994,7 @@ def _render_stochastic_attribution_panel(
     )
     fallback_days = int(summary.get("n_tiebreak_fallback_days", 0) or 0)
     stable_days = max(days - fallback_days, 0)
-    split = st.columns(2)
+    split = metric_columns(2)
     split[0].metric(
         "Commitment value (co-opt - myopic)",
         f"EUR {summary['total_commitment_value_eur']:,.0f}",
@@ -4035,7 +4027,7 @@ def _render_stochastic_attribution_panel(
             )
     risk = summary.get("risk_block") or {}
     if risk.get("n", 0) > 0:
-        rcols = st.columns(4)
+        rcols = metric_columns(4)
         rcols[0].metric("P10", f"EUR {risk['p10']:,.0f}")
         rcols[1].metric("P50", f"EUR {risk['p50']:,.0f}")
         rcols[2].metric("P90", f"EUR {risk['p90']:,.0f}")
@@ -4102,7 +4094,7 @@ def _render_batch_kpis(
     avg_annualized = float(batch["annualized_eur_per_mw"].mean())
     best = batch.loc[batch["total_revenue_eur"].idxmax()]
     stress = batch.loc[batch["daily_fce"].idxmax()]
-    cols = st.columns(5)
+    cols = metric_columns(5)
     cols[0].metric("Valid Days", f"{len(batch)} / {requested_days}")
     cols[1].metric("Avg Day Revenue", f"EUR {avg_daily:,.0f}")
     cols[2].metric("Avg Annualized", f"EUR {avg_annualized:,.0f}/MW/yr")

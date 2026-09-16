@@ -9,6 +9,17 @@ import streamlit as st
 _COCKPIT_TEMPLATE_NAME = "bess_cockpit_dark"
 
 
+def metric_columns(count: int, *, width: int = 360) -> list:
+    """Give KPI cards readable widths and wrap within their actual container.
+
+    Streamlit's horizontal container wraps its children instead of squeezing
+    a fixed column count beside the sidebar. Each card is capped by its
+    parent's width, including on a narrow screen or inside an expander.
+    """
+    row = st.container(horizontal=True, gap="small")
+    return [row.container(width=width) for _ in range(count)]
+
+
 def cockpit_chart_template() -> str:
     """Return the chart template used by the cockpit visual system."""
     _register_cockpit_plotly_template()
