@@ -67,13 +67,18 @@ still choose fractional power within a native product.
 
 Negative-price hours sum delivery durations. Unknown irregular grids retain
 the observed negative-interval count but report hours as unavailable.
-`calculate_negative_price_hours` carries `negative_hours_reason`, naming the
-first local date whose grid could not be verified, and
-`negative_price_hours_display` is the one rendering shared by the page, the
-Excel summary and the PDF summary. All three show `n/a` plus that reason,
-never a raw NaN, a literal `nan` string or a substituted zero. The observed
-interval count, its share of intervals and the average/most negative prices
-remain real numbers, because they are counts rather than durations.
+A record whose delivery instant is unset (NaT) is recognised before the
+local-day grouping, because grouping silently drops such a key and the record
+would otherwise contribute a confident zero to the total.
+`calculate_negative_price_hours` carries `negative_hours_reason`, naming either
+the first local date whose grid could not be verified or the number of unset
+delivery timestamps. `negative_price_hours_reason` is the one shared answer to
+whether the figure is available and why it is not; the page, the Excel summary
+and the PDF summary all branch on it and show `n/a` plus that reason, never a
+raw NaN, a literal `nan` string or a substituted zero. Each surface keeps its
+own formatting of an available value, so the Excel cell stays numeric. The
+observed interval count, its share of intervals and the average/most negative
+prices remain real numbers, because they are counts rather than durations.
 
 `describe_price_index_issue` is the single definition of a usable price index
 shared by the trailing mean and the pages that explain its absence.

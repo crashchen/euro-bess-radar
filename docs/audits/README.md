@@ -6,7 +6,9 @@ after installing its requirements. No live market data or workstation project
 notes are included. Local absolute paths in logs are replaced by `<repo>` or
 `<baseline-repo>` and presentation-only trailing whitespace is removed;
 assertions and test results are retained. Frozen patches retain their exact
-bytes, including the space prefix on blank context lines.
+bytes, including the space prefix on blank context lines; each evidence
+directory carries a `.gitattributes` so `git diff --check` does not report
+those preserved bytes as whitespace errors.
 
 ## Review stages
 

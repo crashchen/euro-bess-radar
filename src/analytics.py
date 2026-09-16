@@ -860,8 +860,18 @@ def calculate_negative_price_hours(df: pd.DataFrame) -> dict[str, float]:
     # windows (e.g. DE_LU spanning the 2025-10 60min->15min boundary)
     # report real wall-clock hours instead of count * frame-mode dt.
     reason: str | None = None
+    unset_instants = int(prices.index.isna().sum())
     if prices.empty:
         negative_hours = 0.0
+    elif unset_instants:
+        # ``groupby`` drops rows whose key is NaT, so a record with no delivery
+        # instant would never reach the verification below and would be
+        # reported as a confident zero contribution to the physical hours.
+        negative_hours = float("nan")
+        reason = (
+            f"{unset_instants} record(s) carry an unset (NaT) delivery "
+            "timestamp, so the delivery interval grid could not be verified"
+        )
     else:
         total_hours = 0.0
         for day, day_group in prices.groupby(prices.index.date):

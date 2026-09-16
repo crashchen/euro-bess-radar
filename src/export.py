@@ -7,6 +7,7 @@ import datetime as _dt
 import logging
 import math
 import tempfile
+import textwrap
 from collections.abc import Mapping
 from io import BytesIO
 from pathlib import Path
@@ -78,6 +79,9 @@ _HEADER_FONT = Font(bold=True, color="FFFFFF", size=11)
 _HEADER_FILL = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
 _PRICE_FMT = "#,##0.00"
 _PCT_FMT = "0.0%"
+#: Auto-fit width cap, in characters, and the point height of one wrapped line.
+_MAX_COLUMN_WIDTH = 30
+_ROW_HEIGHT_PER_LINE = 15.0
 _PROJECT_CASE_NPV_SHEET = "Project Case NPVs"
 _SCREENING_CASHFLOW_SHEET = "Screening Cash Flow"
 _LIFECYCLE_CASHFLOW_SHEET = "Lifecycle Cash Flow"
@@ -290,12 +294,24 @@ def _auto_column_width(ws) -> None:
         for cell in col_cells:
             if cell.value is not None:
                 max_len = max(max_len, len(str(cell.value)))
-        ws.column_dimensions[col_letter].width = min(max_len + 3, 30)
+        ws.column_dimensions[col_letter].width = min(max_len + 3, _MAX_COLUMN_WIDTH)
 
 
-def _write_kv_pair(ws, row: int, key: str, value, fmt: str | None = None) -> int:
-    """Write a key-value pair to the summary sheet."""
-    ws.cell(row=row, column=1, value=_safe_cell_value(key)).font = Font(bold=True)
+def _write_kv_pair(
+    ws, row: int, key: str, value, fmt: str | None = None, wrap_key: bool = False,
+) -> int:
+    """Write a key-value pair to the summary sheet.
+
+    ``wrap_key`` wraps a label that is wider than the auto-fit cap and raises
+    the row so every wrapped line is visible; without it a long label is
+    clipped by the neighbouring value cell.
+    """
+    key_cell = ws.cell(row=row, column=1, value=_safe_cell_value(key))
+    key_cell.font = Font(bold=True)
+    if wrap_key:
+        key_cell.alignment = Alignment(wrap_text=True, vertical="top")
+        lines = max(1, len(textwrap.wrap(str(key), _MAX_COLUMN_WIDTH)))
+        ws.row_dimensions[row].height = lines * _ROW_HEIGHT_PER_LINE
     cell = ws.cell(row=row, column=2, value=_safe_cell_value(value))
     if fmt:
         cell.number_format = fmt
@@ -471,6 +487,7 @@ def _build_summary_sheet(
     if neg_hours_reason:
         row = _write_kv_pair(
             ws, row, "Negative Price Hours Unavailable Because", neg_hours_reason,
+            wrap_key=True,
         )
     row = _write_kv_pair(
         ws, row, "Negative Price Intervals", negative_stats["negative_intervals"],

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import re
+import textwrap
 import zlib
 from io import BytesIO
 
@@ -46,6 +47,19 @@ def _unverifiable_frame() -> pd.DataFrame:
 def _verifiable_frame(price: float = -50.0) -> pd.DataFrame:
     index = pd.date_range("2026-01-01", periods=48, freq="h", tz="UTC").rename("timestamp")
     return pd.DataFrame({"price_eur_mwh": np.full(48, price)}, index=index)
+
+
+def _unset_instant_frame() -> pd.DataFrame:
+    """47 ordinary positive hours plus one negative price with no delivery instant.
+
+    ``groupby`` drops a NaT key, so this row never reaches the grid check and
+    its physical duration is unknowable — it must not be counted as zero.
+    """
+    index = pd.DatetimeIndex(
+        [*pd.date_range("2026-01-01", periods=47, freq="h", tz="UTC"), pd.NaT],
+        name="timestamp",
+    )
+    return pd.DataFrame({"price_eur_mwh": [60.0] * 47 + [-50.0]}, index=index)
 
 
 def _export_args(frame: pd.DataFrame) -> dict:
@@ -99,6 +113,22 @@ def test_unverifiable_grid_reports_a_reason_and_keeps_interval_counts() -> None:
     assert negative_price_hours_reason(stats) == stats["negative_hours_reason"]
 
 
+def test_unset_delivery_instant_is_not_counted_as_zero_hours() -> None:
+    from src.analytics import negative_price_hours_reason
+
+    stats = calculate_negative_price_hours(_unset_instant_frame())
+    assert np.isnan(stats["negative_hours"])
+    assert np.isnan(stats["total_negative_hours"])
+    assert "unset (NaT)" in stats["negative_hours_reason"]
+    assert _UNVERIFIED in stats["negative_hours_reason"]
+    assert negative_price_hours_reason(stats) == stats["negative_hours_reason"]
+    # The observation survives: one negative interval out of 48, at -50.
+    assert stats["negative_intervals"] == 1
+    assert stats["pct_negative"] == pytest.approx(2.08)
+    assert stats["avg_negative_price"] == -50.0
+    assert stats["most_negative_price"] == -50.0
+
+
 @pytest.mark.parametrize("price,hours", [(-50.0, 48.0), (50.0, 0.0)])
 def test_verifiable_grid_has_no_reason(price: float, hours: float) -> None:
     from src.analytics import negative_price_hours_reason
@@ -132,6 +162,19 @@ def test_excel_summary_shows_na_and_reason_for_unverifiable_hours() -> None:
         assert str(value).strip().lower() != "nan"
 
 
+def test_excel_summary_discloses_an_unset_delivery_instant() -> None:
+    pairs = _summary_pairs(export_to_bytes(**_export_args(_unset_instant_frame())))
+    assert pairs["Negative Price Hours"] == "n/a"
+    reason = pairs["Negative Price Hours Unavailable Because"]
+    assert "unset (NaT) delivery" in reason and _UNVERIFIED in reason
+    assert pairs["Negative Price Intervals"] == 1
+    assert pairs["Negative Price % of Intervals"] == pytest.approx(0.0208)
+    assert pairs["Avg Negative Price"] == -50.0
+    for value in pairs.values():
+        assert not (isinstance(value, float) and not np.isfinite(value))
+        assert str(value).strip().lower() != "nan"
+
+
 @pytest.mark.parametrize("price,shown", [(-50.0, 48.0), (50.0, 0.0)])
 def test_excel_summary_keeps_verifiable_hours_and_omits_the_reason(
     price: float, shown: float,
@@ -139,6 +182,22 @@ def test_excel_summary_keeps_verifiable_hours_and_omits_the_reason(
     pairs = _summary_pairs(export_to_bytes(**_export_args(_verifiable_frame(price))))
     assert pairs["Negative Price Hours"] == shown
     assert "Negative Price Hours Unavailable Because" not in pairs
+
+
+def test_excel_reason_label_wraps_instead_of_being_clipped() -> None:
+    """A label wider than its column is unreadable when the value cell is filled."""
+    from src.export import _MAX_COLUMN_WIDTH, _ROW_HEIGHT_PER_LINE
+
+    label = "Negative Price Hours Unavailable Because"
+    ws = load_workbook(BytesIO(export_to_bytes(**_export_args(_unverifiable_frame()))))["Summary"]
+    cell = next(c for c in ws["A"] if c.value == label)
+    # The premise of the case: the label does not fit and B is occupied.
+    assert len(label) > ws.column_dimensions["A"].width
+    assert ws.cell(row=cell.row, column=2).value
+    lines = len(textwrap.wrap(label, _MAX_COLUMN_WIDTH))
+    assert lines >= 2
+    assert cell.alignment.wrap_text is True
+    assert ws.row_dimensions[cell.row].height >= lines * _ROW_HEIGHT_PER_LINE
 
 
 # ── PDF surface ──────────────────────────────────────────────────────────────
@@ -153,17 +212,27 @@ def test_pdf_summary_shows_na_and_reason_instead_of_a_literal_nan() -> None:
     assert "Negative Price Intervals 24" in text
 
 
-def test_pdf_reason_row_fits_inside_the_page_margins() -> None:
+def test_pdf_summary_discloses_an_unset_delivery_instant() -> None:
+    text = _pdf_text(export_to_pdf_bytes(**_export_args(_unset_instant_frame())))
+    assert "Negative Price Hours n/a" in text
+    assert "unset (NaT) delivery timestamp" in text
+    assert _UNVERIFIED in text
+    assert "nan" not in text.lower()
+    assert "Negative Price Intervals 1" in text
+
+
+@pytest.mark.parametrize("builder", [_unverifiable_frame, _unset_instant_frame])
+def test_pdf_reason_row_fits_inside_the_page_margins(builder) -> None:
     """The explanation is only useful if it is actually readable on the page."""
     from fpdf import FPDF
 
-    data = export_to_pdf_bytes(**_export_args(_unverifiable_frame()))
+    data = export_to_pdf_bytes(**_export_args(builder()))
     ruler = FPDF(orientation="L", unit="mm", format="A4")
     ruler.add_page()
     # The summary's value column starts after a 100 mm bold label column.
     available = ruler.w - ruler.r_margin - (ruler.l_margin + 100)
     ruler.set_font("Helvetica", "", 10)
-    reason = calculate_negative_price_hours(_unverifiable_frame())["negative_hours_reason"]
+    reason = calculate_negative_price_hours(builder())["negative_hours_reason"]
     assert ruler.get_string_width(reason) <= available
     # Every rendered run must fit the widest column it can occupy.
     ruler.set_font("Helvetica", "B", 10)
@@ -301,16 +370,16 @@ def test_defective_rows_still_reach_the_excel_export_unchanged(defect: str) -> N
     assert exported == list(frame["price_eur_mwh"])
 
 
-def _unverifiable_market_app() -> None:
+def _negative_hours_market_app(sample: str) -> None:
     from src.analytics import (
         calculate_daily_spreads,
         calculate_negative_price_hours,
         calculate_spread_percentiles,
     )
     from src.pages.market_overview import render
-    from tests.test_step3a_display_contract import _unverifiable_frame
+    from tests.test_step3a_display_contract import _unset_instant_frame, _unverifiable_frame
 
-    frame = _unverifiable_frame()
+    frame = _unverifiable_frame() if sample == "unverifiable" else _unset_instant_frame()
     daily = calculate_daily_spreads(frame)
     render(
         "DE_LU", frame, daily, calculate_spread_percentiles(daily),
@@ -318,15 +387,25 @@ def _unverifiable_market_app() -> None:
     )
 
 
-def test_page_discloses_unverifiable_negative_hours_without_dropping_counts() -> None:
+@pytest.mark.parametrize(
+    "sample,needle,intervals",
+    [
+        ("unverifiable", "2026-01-02", 24),
+        ("unset_instant", "unset (NaT) delivery", 1),
+    ],
+)
+def test_page_discloses_unverifiable_negative_hours_without_dropping_counts(
+    sample: str, needle: str, intervals: int,
+) -> None:
     from streamlit.testing.v1 import AppTest
 
-    app = AppTest.from_function(_unverifiable_market_app).run(timeout=60)
+    app = AppTest.from_function(_negative_hours_market_app, args=(sample,)).run(timeout=60)
     assert not app.exception
-    assert any(m.value == "n/a" for m in app.metric)
+    assert any(m.label == "Neg Price Hours" and m.value == "n/a" for m in app.metric)
     assert any(
         "Negative-price hours are unavailable because" in c.value
         and _UNVERIFIED in c.value
-        and "24 observed negative interval(s)" in c.value
+        and needle in c.value
+        and f"{intervals} observed negative interval(s)" in c.value
         for c in app.caption
     )
