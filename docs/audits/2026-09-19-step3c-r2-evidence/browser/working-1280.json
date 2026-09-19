@@ -1,0 +1,103 @@
+{
+  "height": 900,
+  "metrics": [
+    {
+      "client": 329,
+      "expanded": true,
+      "label": "MAE",
+      "labelClient": 329,
+      "labelScroll": 329,
+      "scroll": 329,
+      "value": "EUR 123.45/MW/h",
+      "width": 329.203125,
+      "x": 413.3984375,
+      "y": -362.1171875
+    },
+    {
+      "client": 329,
+      "expanded": true,
+      "label": "Bias",
+      "labelClient": 329,
+      "labelScroll": 329,
+      "scroll": 329,
+      "value": "EUR +0.00/MW/h",
+      "width": 329.203125,
+      "x": 789.3984375,
+      "y": -362.1171875
+    },
+    {
+      "client": 329,
+      "expanded": true,
+      "label": "RMSE",
+      "labelClient": 329,
+      "labelScroll": 329,
+      "scroll": 329,
+      "value": "EUR 123.45/MW/h",
+      "width": 329.203125,
+      "x": 413.3984375,
+      "y": -244.6171875
+    },
+    {
+      "client": 329,
+      "expanded": true,
+      "label": "Skill vs flat mean",
+      "labelClient": 329,
+      "labelScroll": 329,
+      "scroll": 329,
+      "value": "+15%",
+      "width": 329.203125,
+      "x": 789.3984375,
+      "y": -244.6171875
+    },
+    {
+      "client": 329,
+      "expanded": true,
+      "label": "Activation-energy overlay",
+      "labelClient": 329,
+      "labelScroll": 329,
+      "scroll": 329,
+      "value": "EUR 123,456,789",
+      "width": 329.203125,
+      "x": 413.3984375,
+      "y": 465.0703125
+    },
+    {
+      "client": 329,
+      "expanded": true,
+      "label": "Capture share",
+      "labelClient": 329,
+      "labelScroll": 329,
+      "scroll": 329,
+      "value": "1.0%",
+      "width": 329.203125,
+      "x": 789.3984375,
+      "y": 465.0703125
+    },
+    {
+      "client": 329,
+      "expanded": true,
+      "label": "Imbalance settlement overlay",
+      "labelClient": 329,
+      "labelScroll": 329,
+      "scroll": 329,
+      "value": "EUR -98,765,432",
+      "width": 329.203125,
+      "x": 413.3984375,
+      "y": 1016.3515625
+    },
+    {
+      "client": 329,
+      "expanded": true,
+      "label": "Capture share",
+      "labelClient": 329,
+      "labelScroll": 329,
+      "scroll": 329,
+      "value": "1.0%",
+      "width": 329.203125,
+      "x": 789.3984375,
+      "y": 1016.3515625
+    }
+  ],
+  "sidebar": "true",
+  "width": 1280
+}

@@ -20,7 +20,7 @@ those preserved bytes as whitespace errors.
 | Step 2 | Increment relative to `c46aaf9`, stacked on #87; merged in [#88](https://github.com/crashchen/euro-bess-radar/pull/88) as `95f6d09` | [Duration contract](../design/delivery-duration-v1.md), [handoff and evidence](2026-09-08-step2-handoff.md) |
 | Step 3A | Increment relative to `95f6d09`; merged in [#89](https://github.com/crashchen/euro-bess-radar/pull/89) as `e60a74f` | [Handoff and evidence](2026-09-15-step3a-handoff.md) |
 | Step 3B | Increment relative to `e60a74f`; merged in [#90](https://github.com/crashchen/euro-bess-radar/pull/90) as `cf91374` | [Handoff and evidence](2026-09-16-step3b-handoff.md) |
-| Step 3C | Increment relative to `cf91374`; average-price and metric-layout implementation under review | [Handoff and evidence](2026-09-16-step3c-handoff.md), [duration contract](../design/delivery-duration-v1.md) |
+| Step 3C | Increment relative to `cf91374`; `242843e` passed the user's independent review; follow-up for its two non-blocking suggestions awaits review in draft #91 | [Original frozen handoff](2026-09-16-step3c-handoff.md), [current increment and evidence](2026-09-19-step3c-r2-handoff.md), [duration contract](../design/delivery-duration-v1.md) |
 
 The original Step 1b patch is unchanged: its SHA-256 remains
 `a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12`.

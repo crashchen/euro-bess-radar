@@ -1,0 +1,9 @@
+{
+  "base": "cf913747d4f27e490545f96b35f1f23e7b956cf4",
+  "reviewed_head": "242843e7ab0b5991e9b750ab2de6b429a21373c7",
+  "code_head": "559f33a3938f0868960da0a4c6f9227cf990b1a6",
+  "patches": {
+    "step3c-r2-code.patch": "e0dcce755ec46f1eac3b21e9495326316bc55ce4b6c5aaf731ada3a1e6804dce",
+    "step3c-r2-aggregate-code.patch": "984818209aacbcacc47d7fb0b5c6acfd945108101aeaf0e6714dca4df1534d23"
+  }
+}

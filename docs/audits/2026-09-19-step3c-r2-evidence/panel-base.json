@@ -1,0 +1,43 @@
+{
+  "source": "<reviewed-baseline>/src/pages/simulation_cockpit.py",
+  "exceptions": [],
+  "metrics": [
+    {
+      "label": "MAE",
+      "value": "EUR 123.45/MW/h"
+    },
+    {
+      "label": "Bias",
+      "value": "EUR +0.00/MW/h"
+    },
+    {
+      "label": "RMSE",
+      "value": "EUR 123.45/MW/h"
+    },
+    {
+      "label": "Skill vs flat mean",
+      "value": "+15%"
+    },
+    {
+      "label": "Activation-energy overlay",
+      "value": "EUR 123,456,789"
+    },
+    {
+      "label": "Capture share",
+      "value": "1.0%"
+    },
+    {
+      "label": "Imbalance settlement overlay",
+      "value": "EUR -98,765,432"
+    },
+    {
+      "label": "Capture share",
+      "value": "1.0%"
+    }
+  ],
+  "expanders": [
+    "Reserve price forecast skill (Phase 9.2b prep)",
+    "Activation-energy overlay (historical replay)",
+    "reBAP / imbalance overlay (historical replay)"
+  ]
+}
