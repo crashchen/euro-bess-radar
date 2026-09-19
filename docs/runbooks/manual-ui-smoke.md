@@ -118,8 +118,13 @@ check; browser screenshots and overflow inspection supply layout evidence.
 | 34 | Finite coverage is explicit | Replace some prices on a verified grid with NaN or infinity, leaving timestamps intact, then repeat with every price non-finite | With finite prices remaining: duration-weighted average over only their hours, with covered/total hours and excluded coverage disclosed. With none: `n/a` and a no-finite-price reason. Missing values are never priced at zero |
 | 35 | Market KPI row | At each width inspect Avg Price, the two ordered spreads and negative-price hours | Full amounts and EUR/MWh or hour units are readable without ellipses or overlap; cards wrap according to the main content width, with the coverage/reason caption still visible |
 | 36 | Project Case quantiles | At each width inspect both NPV sections and the cockpit mirror, including long positive and negative amounts | Full economic section headings distinguish the two bases; cards visibly say P10 (Downside), P50 (Median), P90 (Upside) and P(NPV > 0). Full monetary values remain readable, rather than abbreviated or hidden behind a tooltip |
-| 37 | Cockpit KPI rows | At each width inspect single-day KPI/health cards, multi-day replay, the frontier, forecast skill/policy, reserve gap, stochastic attribution/risk and floor/NPV metrics when their inputs make them available | Labels, amounts, quantiles and their units remain readable; custom grids and Streamlit metric rows wrap within their actual containers, including expanders. No value is lost to clipping or overlap |
+| 37 | Cockpit KPI rows | At each width inspect single-day KPI/health cards, multi-day replay, the frontier, price and reserve forecast skill, forecast policy, reserve gap, stochastic attribution/risk, activation/imbalance overlays and floor/NPV metrics when their inputs make them available | Labels, amounts, quantiles and their units remain readable; custom grids and Streamlit metric rows wrap within their actual containers, including expanders. No value is lost to clipping or overlap |
 | 38 | Layout reruns preserve stored results | With populated multi-day and forecast panels, resize the viewport, change theme, then repeat their download/stale-state checks in items 28–31 | Results still follow the stored run and its assumptions; presentation changes do not trigger a new solver run or expose a stale download |
+
+The Step 3C layout acceptance covers Market Overview, Project Case and Simulation
+Cockpit only. Revenue Estimation, Forward Scenarios, Renewable Correlation and
+Data Trust metrics retain their previous layouts; their layout inventory and
+prioritization are Step 4 work, not a completed acceptance claim.
 
 ## Downstream spot-checks (after 3/4/7/8)
 

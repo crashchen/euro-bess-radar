@@ -95,6 +95,12 @@ For 30 hourly days priced at EUR 10/MWh followed at the registered cutover by
 the old equal-row average was EUR 61.43/MWh. The final trailing 720-hour average
 is separately EUR 40/MWh, since it covers only the last 30 physical days.
 Uniform 1-hour, 30-minute and 15-minute windows retain their previous averages.
+The adjacent **Std Dev (row-based)** in Zone Comparison and its workbook, and
+**Median Price (row-based, EUR/MWh)** in the Excel/PDF summaries, retain their
+existing equal-row statistics: sample standard deviation and median,
+respectively. They are not weighted by delivery duration, so a quarter-hour
+price row has the same weight as an hourly row. Their labels distinguish this
+basis from Avg Price; this step does not change either calculation.
 Renewable-conditioned averages, heatmap groups and forward-contract averages
 are separate statistics and are not changed by this contract.
 

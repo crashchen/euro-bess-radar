@@ -60,7 +60,7 @@ def render(
             f"Avg Price is unavailable because {avg_price['avg_price_reason']}."
         )
     else:
-        st.caption(f"Avg Price: {average_price_basis(avg_price)}")
+        st.caption(f"Avg Price — {average_price_basis(avg_price)}")
     if neg_hours_reason:
         st.caption(
             f"Negative-price hours are unavailable because {neg_hours_reason}. "

@@ -2962,7 +2962,7 @@ def _render_reserve_forecast_skill_section(
                 "forecast (need at least two local days for leave-one-out)."
             )
             return
-        cols = st.columns(4)
+        cols = metric_columns(4)
         cols[0].metric("MAE", f"EUR {skill['mae']:.2f}/MW/h")
         cols[1].metric("Bias", f"EUR {skill['bias']:+.2f}/MW/h")
         cols[2].metric("RMSE", f"EUR {skill['rmse']:.2f}/MW/h")
@@ -3042,7 +3042,7 @@ def _render_activation_overlay_section(
         result = compute_activation_overlay(
             windowed, reserve_mw=power_mw, capture_share=capture_share,
         )
-        c1, c2 = st.columns([1.0, 1.0])
+        c1, c2 = metric_columns(2)
         c1.metric(
             "Activation-energy overlay",
             f"EUR {result['activation_energy_overlay_eur']:,.0f}",
@@ -3118,7 +3118,7 @@ def _render_imbalance_overlay_section(
         result = compute_imbalance_overlay(
             windowed, power_mw=power_mw, capture_share=capture_share,
         )
-        c1, c2 = st.columns([1.0, 1.0])
+        c1, c2 = metric_columns(2)
         c1.metric(
             "Imbalance settlement overlay",
             f"EUR {result['imbalance_settlement_overlay_eur']:,.0f}",

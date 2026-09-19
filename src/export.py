@@ -378,7 +378,10 @@ def _build_summary_sheet(
         row = _write_kv_pair(
             ws, row, "Avg Price Basis", average_price_basis(avg_price),
         )
-    row = _write_kv_pair(ws, row, "Median Price (EUR/MWh)", round(price_df["price_eur_mwh"].median(), 2), _PRICE_FMT)
+    row = _write_kv_pair(
+        ws, row, "Median Price (row-based, EUR/MWh)",
+        round(price_df["price_eur_mwh"].median(), 2), _PRICE_FMT, wrap_key=True,
+    )
     row += 1
 
     row = _write_kv_pair(ws, row, "50th-percentile Spread", round(percentiles["p50"], 2), _PRICE_FMT)
@@ -2389,7 +2392,7 @@ def _build_pdf_report(
             ("Avg Price Basis", average_price_basis(avg_price)),
         ])
     rows.extend([
-        ("Median Price (EUR/MWh)", f"{price_df['price_eur_mwh'].median():.2f}"),
+        ("Median Price (row-based, EUR/MWh)", f"{price_df['price_eur_mwh'].median():.2f}"),
         ("", ""),
         ("50th-percentile Spread", f"{percentiles['p50']:.2f}"),
         ("75th-percentile Spread", f"{percentiles['p75']:.2f}"),
@@ -2579,7 +2582,7 @@ _COMPARISON_COLUMNS = {
     "avg_price": ("Avg Price (EUR/MWh)", _PRICE_FMT),
     "avg_price_coverage_pct": ("Avg Price Coverage %", _PCT_FMT),
     "avg_price_unavailable_reason": ("Avg Price Unavailable Because", None),
-    "std_price": ("Std Dev", _PRICE_FMT),
+    "std_price": ("Std Dev (row-based)", _PRICE_FMT),
     "avg_spread": ("Avg Spread (EUR/MWh)", _PRICE_FMT),
     "p50_spread": ("50th-percentile Spread", _PRICE_FMT),
     "p90_spread": ("90th-percentile Spread", _PRICE_FMT),

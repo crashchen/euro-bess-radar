@@ -110,7 +110,11 @@ def render(
         # Excel export; a long sentence column would crowd the screening view.
         "avg_price_unavailable_reason": None,
         "std_price": st.column_config.NumberColumn(
-            "Std Dev", format="%.2f",
+            "Std Dev (row-based)", format="%.2f",
+            help=(
+                "Sample standard deviation of price rows (EUR/MWh). "
+                "Each row has equal weight, irrespective of delivery duration."
+            ),
         ),
         "avg_spread": st.column_config.NumberColumn(
             "Avg Spread", format="\u20ac%.2f",

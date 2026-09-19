@@ -12,6 +12,7 @@ so the module still collects and fails on behaviour against the baseline.
 
 from __future__ import annotations
 
+import json
 from io import BytesIO
 
 import numpy as np
@@ -324,10 +325,22 @@ def _summary_pairs(data: bytes) -> dict[str, object]:
 
 
 def test_excel_summary_uses_the_duration_weighted_average() -> None:
-    pairs = _summary_pairs(export_to_bytes(**_export_args(_cutover_sample())))
+    data = export_to_bytes(**_export_args(_cutover_sample()))
+    pairs = _summary_pairs(data)
     assert pairs["Avg Price (EUR/MWh)"] == pytest.approx(32.50)
     assert "960.00 of 960.00 delivery hours" in pairs["Avg Price Basis"]
     assert "Avg Price Unavailable Because" not in pairs
+    # The companion median remains an equal-row statistic, with a visible basis.
+    assert pairs["Median Price (row-based, EUR/MWh)"] == 100.0
+    assert isinstance(pairs["Median Price (row-based, EUR/MWh)"], (int, float))
+    ws = load_workbook(BytesIO(data))["Summary"]
+    median_label = next(
+        row[0] for row in ws.iter_rows(min_col=1, max_col=2)
+        if row[0].value == "Median Price (row-based, EUR/MWh)"
+    )
+    median_cell = ws.cell(row=median_label.row, column=2)
+    assert median_cell.data_type == "n"
+    assert median_cell.number_format == "#,##0.00"
 
 
 def test_excel_summary_shows_na_and_reason_when_duration_is_unverifiable() -> None:
@@ -353,6 +366,7 @@ def test_pdf_summary_uses_the_duration_weighted_average() -> None:
     assert "Avg Price (EUR/MWh) 32.50" in text
     assert "61.43" not in text
     assert "960.00 of 960.00 delivery hours (100.0%)" in text
+    assert "Median Price (row-based, EUR/MWh) 100.00" in text
 
 
 def test_pdf_summary_shows_na_and_reason_when_duration_is_unverifiable() -> None:
@@ -442,6 +456,10 @@ def test_comparison_export_writes_na_beside_the_reason() -> None:
     assert cells["DE_LU"][avg].data_type == "n"
     assert cells["DE_LU"][coverage].data_type == "n"
     assert cells["DE_LU"][coverage].number_format == "0.0%"
+    std = header.index("Std Dev (row-based)")
+    assert cells["DE_LU"][std].data_type == "n"
+    assert cells["DE_LU"][std].number_format == "#,##0.00"
+    assert rows["DE_LU"][std] == pytest.approx(44.55)
 
 
 def _zone_comparison_app() -> None:
@@ -465,3 +483,6 @@ def test_zone_comparison_page_names_the_unavailable_zone_and_reason() -> None:
         for c in app.caption
     )
     assert not any("Avg Price for DE_LU" in c.value for c in app.caption)
+    columns = json.loads(app.dataframe[0].proto.columns)
+    assert columns["std_price"]["label"] == "Std Dev (row-based)"
+    assert "Each row has equal weight" in columns["std_price"]["help"]
