@@ -1,0 +1,56 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 2059 items / 2024 deselected / 35 selected
+
+<Dir euro-bess-radar>
+  <Package tests>
+    <Module test_project_case_adapters.py>
+      <Function test_da_only_real_solver_integration>
+      <Function test_reserve_coopt_real_solver_integration>
+      <Function test_regelleistung_xlsx_to_public_adapter_conserves_nominal_block_cash[target0]>
+      <Function test_regelleistung_xlsx_to_public_adapter_conserves_nominal_block_cash[target1]>
+      <Function test_regelleistung_xlsx_to_public_adapter_conserves_nominal_block_cash[target2]>
+      <Function test_regelleistung_xlsx_to_public_adapter_conserves_nominal_block_cash[target3]>
+      <Function test_da_id_real_solver_integration_non_utc_zone[DE_LU-Europe/Berlin]>
+      <Function test_da_id_real_solver_integration_non_utc_zone[FR-Europe/Paris]>
+    <Module test_project_case_ui.py>
+      <Function test_real_public_adapter_reaches_project_case_ui>
+    <Module test_step3b_batch_result_persistence.py>
+      <Class TestForecastPolicyPanel>
+        <Function test_run_renders_every_strategy_row_and_the_export>
+        <Function test_unrelated_rerun_theme_change_and_download_do_not_resolve_any_solver>
+        <Function test_same_length_price_and_reserve_corrections_mark_stale[_t_da_bump-120.0]>
+        <Function test_same_length_price_and_reserve_corrections_mark_stale[_t_capacity_bump-30.0]>
+        <Function test_training_history_correction_outside_the_scored_window_marks_stale>
+        <Function test_parameter_switches_mark_stale_and_reverting_restores>
+    <Module test_step3d_settlement_basis.py>
+      <Function test_existing_same_source_coopt_cash_contract_is_preserved[target0-24-456.0]>
+      <Function test_existing_same_source_coopt_cash_contract_is_preserved[target1-23-437.0]>
+      <Function test_existing_same_source_coopt_cash_contract_is_preserved[target2-25-475.0]>
+      <Function test_existing_same_source_sequential_and_ceiling_cash_contract_is_preserved[target0-456.0]>
+      <Function test_existing_same_source_sequential_and_ceiling_cash_contract_is_preserved[target1-437.0]>
+      <Function test_existing_same_source_sequential_and_ceiling_cash_contract_is_preserved[target2-475.0]>
+      <Function test_pre_cutover_spring_triple_retains_mismatched_grid_rejection>
+    <Module test_stochastic_batch.py>
+      <Class TestStochasticBatch>
+        <Function test_batch_aggregates_and_deltas>
+        <Function test_stochastic_realised_at_most_coopt_ceiling>
+        <Function test_risk_block_structure>
+        <Function test_reserve_capacity_flows_into_totals>
+        <Function test_local_timezone_does_not_exclude_all_days>
+        <Function test_window_reserve_series_is_aligned_per_day>
+        <Function test_seed_reproducible>
+      <Class TestStochasticTripleBatch>
+        <Function test_batch_aggregates_and_headline>
+        <Function test_constrained_collapse_matches_v1_batch>
+        <Function test_stage0_fallback_days_counted>
+        <Function test_seed_reproducible>
+    <Module test_stochastic_dispatch.py>
+      <Class TestStochasticCommitment>
+        <Function test_worst_case_15min_day_solves_within_budget>
+      <Class TestStochasticReserveCommitment>
+        <Function test_worst_case_15min_day_solves_within_budget>
+
+============== 35/2059 tests collected (2024 deselected) in 0.35s ==============

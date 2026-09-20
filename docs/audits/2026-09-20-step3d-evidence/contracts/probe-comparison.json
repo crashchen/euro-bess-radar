@@ -1,0 +1,34 @@
+{
+  "base": "2e4ed73d7357e4d556373f6019198045f8fc8d04",
+  "code_commit": "252a9ab9405f3b5fc2bde357d6f3cbf66a94ff26",
+  "verified_at": "2026-09-20T10:39:24.668836+00:00",
+  "command_from_repo_root": "PYTHONPATH=. .venv/bin/python docs/audits/2026-09-20-step3d-evidence/contracts/probe.py",
+  "baseline_method": "Ran this same evidence script with PYTHONPATH=. and cwd set to a clean git archive of the base. The baseline lacks the new settlement_disclosure module; imports were verified to resolve inside the archive.",
+  "probe_sha256": "edee7dc3755143369a77c0e5784de258b8c85dbdfc28bf69b730b1acfa6b4a72",
+  "base_output": "probe-base.json",
+  "head_output": "probe.json",
+  "parsed_json_identical": true,
+  "coopt_pc_cash": [
+    456.0,
+    456.0,
+    456.0,
+    456.0
+  ],
+  "coopt_screening_cash": [
+    456.0,
+    437.0,
+    475.0,
+    437.0
+  ],
+  "scope_snapshot_still_matches_all_55_files": true,
+  "baseline_import_context": {
+    "baseline_imports_confirmed": true,
+    "module_relative_paths": {
+      "src.dispatch": "src/dispatch.py",
+      "src.simulation": "src/simulation.py",
+      "src.pages.simulation_cockpit": "src/pages/simulation_cockpit.py"
+    },
+    "step3d_disclosure_module_present": false
+  },
+  "conclusion": "No cash, grid-availability, or profile-output difference across the complete probe. Coopt retains 456/456 on a normal day, 456/437 on spring DST, and 456/475 on autumn DST. The pre-cutover spring triple remains unavailable; synthetic stochastic DST cases remain unavailable on both versions and are not asserted as a 456/437/475 known-answer acceptance."
+}

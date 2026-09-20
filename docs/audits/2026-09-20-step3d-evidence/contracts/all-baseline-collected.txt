@@ -1,0 +1,96 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <baseline-repo>
+configfile: pyproject.toml
+collected 82 items
+
+<Dir all-base>
+  <Package tests>
+    <Module test_step3d_cockpit_disclosure.py>
+      <Function test_capacity_rows_bind_actual_run_zone_product[DE_LU-FCR]>
+      <Function test_capacity_rows_bind_actual_run_zone_product[FI-FCR-N]>
+      <Function test_capacity_rows_bind_actual_run_zone_product[NL-aFRR]>
+      <Function test_only_real_finite_capacity_paths_receive_basis[437.0-None-None-None-False-1]>
+      <Function test_only_real_finite_capacity_paths_receive_basis[None-450.0-None-None-False-1]>
+      <Function test_only_real_finite_capacity_paths_receive_basis[None-None-430.0-None-False-1]>
+      <Function test_only_real_finite_capacity_paths_receive_basis[None-None-None--3.0-True-1]>
+      <Function test_only_real_finite_capacity_paths_receive_basis[None-None-None--3.0-False-0]>
+      <Function test_only_real_finite_capacity_paths_receive_basis[None-None-None-None-False-0]>
+      <Function test_only_real_finite_capacity_paths_receive_basis[0.0-0.0-0.0-0.0-True-4]>
+      <Function test_only_real_finite_capacity_paths_receive_basis[nan-inf-None-None-False-0]>
+      <Function test_numeric_comparison_unchanged_including_negative_delta>
+      <Function test_text_containing_reserve_does_not_classify_a_row>
+      <Function test_export_without_caller_assumptions_still_has_bound_basis[None]>
+      <Function test_export_without_caller_assumptions_still_has_bound_basis[assumptions1]>
+      <Function test_missing_product_is_unavailable_not_a_no_capacity_claim>
+      <Function test_unregistered_zone_is_explicitly_unverified>
+      <Function test_no_product_no_capacity_paths_remain_not_applicable>
+      <Function test_all_solver_failed_preserves_guard_and_never_builds_disclosure>
+      <Function test_renderer_and_export_use_frozen_basis_without_resolving>
+      <Function test_pre_disclosure_session_bundle_is_stale>
+    <Module test_step3d_export_disclosure.py>
+      <Function test_joint_summary_and_pdf_share_the_bound_basis[DE_LU-FCR]>
+      <Function test_joint_summary_and_pdf_share_the_bound_basis[FI-FCR-N]>
+      <Function test_legacy_joint_export_explicitly_discloses_missing_product_identity>
+      <Function test_da_only_exports_do_not_claim_capacity_settlement>
+      <Function test_project_case_excel_names_basis_but_keeps_fingerprinted_payload_exact>
+      <Function test_appended_project_case_workbook_gets_same_run_bound_disclosure>
+      <Function test_revenue_page_binds_actual_capacity_products_to_ui_and_exports>
+      <Function test_revenue_joint_cash_is_unchanged_on_spring_dst>
+      <Function test_no_joint_result_has_no_settlement_disclosure[False-False]>
+      <Function test_no_joint_result_has_no_settlement_disclosure[True-True]>
+    <Module test_step3d_project_case_disclosure.py>
+      <Function test_result_discloses_its_stored_nominal_capacity_basis[FCR [symmetric]-False]>
+      <Function test_result_discloses_its_stored_nominal_capacity_basis[FCR [symmetric]-True]>
+      <Function test_result_discloses_its_stored_nominal_capacity_basis[aFRR [up]-False]>
+      <Function test_result_discloses_its_stored_nominal_capacity_basis[aFRR [up]-True]>
+      <Function test_da_only_result_has_no_reserve_capacity_disclosure[False]>
+      <Function test_da_only_result_has_no_reserve_capacity_disclosure[True]>
+      <Function test_real_dst_fixture_keeps_nominal_cash_and_provenance>
+      <Function test_real_cockpit_mirror_uses_only_the_cached_result[False]>
+      <Function test_real_cockpit_mirror_uses_only_the_cached_result[True]>
+      <Function test_stale_project_case_hides_basis_and_mirror_without_recomputation>
+    <Module test_step3d_settlement_basis.py>
+      <Function test_compact_table_label_preserves_full_disclosure_scope[DE_LU-FCR-Physical delivery hours]>
+      <Function test_compact_table_label_preserves_full_disclosure_scope[FI-FCR-N-Physical delivery hours]>
+      <Function test_compact_table_label_preserves_full_disclosure_scope[GB-custom capacity-Physical delivery hours]>
+      <Function test_compact_table_label_preserves_full_disclosure_scope[UNREGISTERED-FCR-Unverified]>
+      <Function test_compact_table_label_preserves_full_disclosure_scope[None-FCR-Unverified]>
+      <Function test_compact_table_label_preserves_full_disclosure_scope[DE_LU-None-None]>
+      <Function test_compact_table_label_preserves_full_disclosure_scope[DE_LU--None]>
+      <Function test_compact_table_label_preserves_full_disclosure_scope[DE_LU-   -None]>
+      <Function test_screening_without_capacity_product_has_no_capacity_disclosure[None]>
+      <Function test_screening_without_capacity_product_has_no_capacity_disclosure[]>
+      <Function test_screening_without_capacity_product_has_no_capacity_disclosure[   ]>
+      <Function test_screening_describes_actual_selected_product_without_product_whitelist[FCR]>
+      <Function test_screening_describes_actual_selected_product_without_product_whitelist[aFRR Up]>
+      <Function test_screening_describes_actual_selected_product_without_product_whitelist[mFRR Down]>
+      <Function test_screening_describes_actual_selected_product_without_product_whitelist[custom product]>
+      <Function test_other_screening_zones_do_not_inherit_german_product_calendar[FI]>
+      <Function test_other_screening_zones_do_not_inherit_german_product_calendar[FR]>
+      <Function test_other_screening_zones_do_not_inherit_german_product_calendar[GB]>
+      <Function test_unknown_screening_zone_is_explicitly_unverified[None]>
+      <Function test_unknown_screening_zone_is_explicitly_unverified[]>
+      <Function test_unknown_screening_zone_is_explicitly_unverified[UNREGISTERED]>
+      <Function test_project_case_uses_frozen_run_scope_and_preserves_payload_and_fingerprint>
+      <Function test_da_only_project_case_has_no_reserve_settlement_disclosure>
+      <Function test_recorded_reserve_profile_controls_disclosure_not_product_spelling[FCR [symmetric]-PC_ADP_RESERVE_COOPT]>
+      <Function test_recorded_reserve_profile_controls_disclosure_not_product_spelling[FCR [symmetric]-PC_ADP_DA_ID_RESERVE]>
+      <Function test_recorded_reserve_profile_controls_disclosure_not_product_spelling[mFRR [down]-PC_ADP_RESERVE_COOPT]>
+      <Function test_recorded_reserve_profile_controls_disclosure_not_product_spelling[mFRR [down]-PC_ADP_DA_ID_RESERVE]>
+      <Function test_unknown_recorded_reserve_contract_remains_visible_without_false_claim[zone-FI]>
+      <Function test_unknown_recorded_reserve_contract_remains_visible_without_false_claim[reserve_product-None]>
+      <Function test_unknown_recorded_reserve_contract_remains_visible_without_false_claim[producer_adapter_id-PC_ADP_FUTURE_RESERVE]>
+      <Function test_unknown_recorded_reserve_contract_remains_visible_without_false_claim[expected_grid_registry_version-pc-market-grid-v2]>
+      <Function test_unknown_recorded_reserve_contract_remains_visible_without_false_claim[reserve_profile-pc-reserve-hourly-v2]>
+      <Function test_unknown_recorded_reserve_contract_remains_visible_without_false_claim[reserve_profile-None]>
+      <Function test_existing_same_source_coopt_cash_contract_is_preserved[target0-24-456.0]>
+      <Function test_existing_same_source_coopt_cash_contract_is_preserved[target1-23-437.0]>
+      <Function test_existing_same_source_coopt_cash_contract_is_preserved[target2-25-475.0]>
+      <Function test_existing_same_source_sequential_and_ceiling_cash_contract_is_preserved[target0-456.0]>
+      <Function test_existing_same_source_sequential_and_ceiling_cash_contract_is_preserved[target1-437.0]>
+      <Function test_existing_same_source_sequential_and_ceiling_cash_contract_is_preserved[target2-475.0]>
+      <Function test_finnish_project_case_does_not_gain_a_reserve_profile>
+      <Function test_pre_cutover_spring_triple_retains_mismatched_grid_rejection>
+
+========================= 82 tests collected in 0.33s ==========================

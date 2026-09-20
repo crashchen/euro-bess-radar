@@ -1,0 +1,86 @@
+[
+  {
+    "captions": [
+      {
+        "height": 45,
+        "scroll": 809,
+        "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+        "width": 809
+      },
+      {
+        "height": 67,
+        "scroll": 773,
+        "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+        "width": 773
+      }
+    ],
+    "surface": "PC and mirror",
+    "viewport": 1280
+  },
+  {
+    "captions": [
+      {
+        "height": 134,
+        "scroll": 347,
+        "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+        "width": 347
+      },
+      {
+        "height": 134,
+        "scroll": 311,
+        "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+        "width": 311
+      }
+    ],
+    "surface": "PC and mirror; sidebar closed",
+    "viewport": 390
+  },
+  {
+    "captions": [
+      {
+        "height": 67,
+        "scroll": 773,
+        "text": "Capacity settlement basis: DE_LU / FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+        "width": 773
+      }
+    ],
+    "surface": "Cockpit",
+    "viewport": 1280
+  },
+  {
+    "captions": [
+      {
+        "height": 134,
+        "scroll": 311,
+        "text": "Capacity settlement basis: DE_LU / FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+        "width": 311
+      }
+    ],
+    "surface": "Cockpit; sidebar closed",
+    "viewport": 390
+  },
+  {
+    "captions": [
+      {
+        "height": 67,
+        "scroll": 773,
+        "text": "DE_LU / aggregate capacity: FCR, aFRR Up: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+        "width": 773
+      }
+    ],
+    "surface": "Revenue joint MILP",
+    "viewport": 1280
+  },
+  {
+    "captions": [
+      {
+        "height": 134,
+        "scroll": 311,
+        "text": "DE_LU / aggregate capacity: FCR, aFRR Up: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+        "width": 311
+      }
+    ],
+    "surface": "Revenue joint MILP; sidebar closed",
+    "viewport": 390
+  }
+]

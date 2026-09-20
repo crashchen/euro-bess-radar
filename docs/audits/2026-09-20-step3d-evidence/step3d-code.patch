@@ -1,0 +1,1500 @@
+diff --git a/src/export.py b/src/export.py
+index 36b3c86b533d1fdb3e051f44bd979c02087c86b1..c64d8fad256a80c6d5607a2b328350ff11d6a40b 100644
+--- a/src/export.py
++++ b/src/export.py
+@@ -71,6 +71,10 @@ from src.project_case.schema import (
+     _replay_typed_strategy_payload,
+     _validate_strategy_wire_payload,
+ )
++from src.settlement_disclosure import (
++    project_case_capacity_settlement_basis,
++    screening_capacity_settlement_basis,
++)
+ 
+ logger = logging.getLogger(__name__)
+ 
+@@ -322,6 +326,26 @@ def _write_kv_pair(
+ 
+ # ── Sheet builders ───────────────────────────────────────────────────────────
+ 
++
++def _write_settlement_disclosure(ws, row: int, label: str, value: str) -> int:
++    """Wrap a presentation-only basis without changing adjacent numeric cells."""
++    next_row = _write_kv_pair(ws, row, label, value, wrap_key=True)
++    ws.cell(row=row, column=2).alignment = Alignment(wrap_text=True, vertical="top")
++    # The general auto-width pass caps columns at _MAX_COLUMN_WIDTH. Leave
++    # room for glyph variation and a spare line in the saved workbook.
++    lines = len(textwrap.wrap(value, _MAX_COLUMN_WIDTH - 4)) + 1
++    ws.row_dimensions[row].height = max(
++        ws.row_dimensions[row].height or 0, lines * _ROW_HEIGHT_PER_LINE,
++    )
++    return next_row
++
++
++def _joint_capacity_basis(zone: str, revenue_estimate: dict) -> str:
++    """Use producer-bound disclosure; older callers explicitly lack product ID."""
++    return revenue_estimate.get("joint_capacity_settlement_basis") or (
++        screening_capacity_settlement_basis(zone, "capacity product identity unavailable")
++    )
++
+ def _build_summary_sheet(
+     ws, zone: str, price_df: pd.DataFrame,
+     percentiles: dict[str, float],
+@@ -409,6 +433,10 @@ def _build_summary_sheet(
+             revenue_estimate["capacity_stack_warning"],
+         )
+     if "joint_cooptimized_total_eur" in revenue_estimate:
++        row = _write_settlement_disclosure(
++            ws, row, "Joint MILP Capacity Settlement Basis",
++            _joint_capacity_basis(zone, revenue_estimate),
++        )
+         row = _write_kv_pair(
+             ws, row,
+             "Joint MILP Co-optimized Total (EUR)",
+@@ -1734,6 +1762,11 @@ def _build_project_case_npv_sheet(ws, result: RunResult) -> None:
+     row = len(rows) + 3
+     row = _write_kv_pair(ws, row, "Schema Version", result.schema_version)
+     row = _write_kv_pair(ws, row, "Project Case Input Fingerprint", result.input_fingerprint)
++    capacity_basis = project_case_capacity_settlement_basis(result)
++    if capacity_basis is not None:
++        row = _write_settlement_disclosure(
++            ws, row, "Reserve Capacity Settlement Basis", capacity_basis,
++        )
+     row = _write_kv_pair(
+         ws,
+         row,
+@@ -2415,6 +2448,8 @@ def _build_pdf_report(
+     if revenue_estimate.get("capacity_stack_warning"):
+         rows.append(("Note", str(revenue_estimate["capacity_stack_warning"])))
+     if "joint_cooptimized_total_eur" in revenue_estimate:
++        rows.append(("Joint MILP Capacity Settlement Basis",
++                     _joint_capacity_basis(zone, revenue_estimate)))
+         rows.append(("Joint MILP Co-optimized Total (EUR)",
+                      f"{revenue_estimate['joint_cooptimized_total_eur']:,.0f}"))
+         rows.append(("Joint MILP Avg Reserve Commitment",
+@@ -2706,6 +2741,48 @@ def cockpit_tables_to_excel(
+         ws = wb.active if i == 0 else wb.create_sheet()
+         # Excel caps sheet names at 31 chars.
+         _build_table_sheet(ws, name[:31], df)
++        _format_capacity_disclosures(ws, df)
+     buf = BytesIO()
+     wb.save(buf)
+     return buf.getvalue()
++
++
++def _format_capacity_disclosures(ws, frame: pd.DataFrame) -> None:
++    """Keep the added capacity basis readable without altering table values."""
++    display_columns = {
++        "capacity_settlement_basis": "Capacity basis",
++        "capacity_settlement_scope": "Capacity scope",
++    }
++    for field, title in display_columns.items():
++        if field not in frame.columns:
++            continue
++        column = frame.columns.get_loc(field) + 1
++        ws.cell(row=1, column=column, value=title)
++        ws.column_dimensions[get_column_letter(column)].width = 30
++        for row in range(2, len(frame) + 2):
++            cell = ws.cell(row=row, column=column)
++            cell.alignment = Alignment(wrap_text=True, vertical="top")
++            lines = len(textwrap.wrap(str(cell.value), 26)) + 1
++            ws.row_dimensions[row].height = max(
++                ws.row_dimensions[row].height or 0, lines * _ROW_HEIGHT_PER_LINE,
++            )
++    if not {"parameter", "value"}.issubset(frame.columns):
++        return
++    mask = frame["parameter"].astype(str).str.startswith("Capacity settlement ")
++    if not mask.any():
++        return
++    widths = {"parameter": 32, "value": 70, "source": 35, "affects": 55}
++    for field, width in widths.items():
++        if field not in frame.columns:
++            continue
++        column = frame.columns.get_loc(field) + 1
++        ws.column_dimensions[get_column_letter(column)].width = width
++        for position, applies in enumerate(mask, start=2):
++            if not applies:
++                continue
++            cell = ws.cell(row=position, column=column)
++            cell.alignment = Alignment(wrap_text=True, vertical="top")
++            lines = len(textwrap.wrap(str(cell.value), width - 4)) + 1
++            ws.row_dimensions[position].height = max(
++                ws.row_dimensions[position].height or 0, lines * _ROW_HEIGHT_PER_LINE,
++            )
+diff --git a/src/pages/project_case.py b/src/pages/project_case.py
+index 7c4ad9423657c563ee624ada26712d065189c5fc..7c9e15f28c776e82de479620121ac0ca7d39825e 100644
+--- a/src/pages/project_case.py
++++ b/src/pages/project_case.py
+@@ -84,6 +84,7 @@ from src.project_case.imports import (
+     parse_augmentation_csv,
+     parse_explicit_multiplier_csv,
+ )
++from src.settlement_disclosure import project_case_capacity_settlement_basis
+ from src.ui_theme import metric_columns
+ 
+ SCREENING_NPV_LABEL: Final = "No-lifecycle-cost screening NPV"
+@@ -452,6 +453,9 @@ def render_project_case_result(
+         return
+     _render_outcome(SCREENING_NPV_LABEL, result.no_lifecycle_cost_screening_npv)
+     _render_outcome(LIFECYCLE_NPV_LABEL, result.lifecycle_cash_npv)
++    capacity_basis = project_case_capacity_settlement_basis(result)
++    if capacity_basis is not None:
++        st.caption(f"Reserve capacity settlement basis — {capacity_basis}")
+     if _contract_case_payload(result) is None:
+         st.caption(
+             "Lifecycle output is pre-tax unlevered, not bankable: tax, debt, DSCR, "
+diff --git a/src/pages/revenue_estimation.py b/src/pages/revenue_estimation.py
+index 446990a3d660fa822994aeae95f3d22e762efdd0..a8153ad6fe81be21052a31fd903796a15e9d392c 100644
+--- a/src/pages/revenue_estimation.py
++++ b/src/pages/revenue_estimation.py
+@@ -53,6 +53,7 @@ from src.scenario import (
+     calculate_npv_distribution,
+     sensitivity_table,
+ )
++from src.settlement_disclosure import screening_capacity_settlement_basis
+ from src.ui_theme import apply_cockpit_plot_theme
+ 
+ _REVENUE_DECAY_HARD_CAPTION = (
+@@ -315,6 +316,22 @@ def render(
+                             avg_reserve_fraction, 4,
+                         ),
+                     })
++                    # This screening solve uses an aggregate capacity price.
++                    # Bind the disclosure to its actual contributing products,
++                    # rather than suggesting a single product was dispatched.
++                    capacity_products = sorted(
++                        product for product, kind in
++                        anc_rev.get("product_revenue_types", {}).items()
++                        if kind in {"capacity", "mixed"}
++                    )
++                    product_scope = (
++                        "aggregate capacity: " + ", ".join(capacity_products)
++                        if capacity_products else
++                        "aggregate capacity (product identity unavailable)"
++                    )
++                    export_revenue["joint_capacity_settlement_basis"] = (
++                        screening_capacity_settlement_basis(primary_zone, product_scope)
++                    )
+ 
+                 with st.expander("Joint MILP co-optimization estimate", expanded=False):
+                     if not joint_available:
+@@ -323,6 +340,7 @@ def render(
+                             "successfully. No €0 estimate has been generated."
+                         )
+                     else:
++                        st.caption(export_revenue["joint_capacity_settlement_basis"])
+                         co1, co2, co3 = st.columns(3)
+                         co1.metric(
+                             "Avg Reserve Commitment",
+diff --git a/src/pages/simulation_cockpit.py b/src/pages/simulation_cockpit.py
+index 9a1b92276503388b78dc35affac1a181ddf5aa5b..420e987ec599cd4df8cce761c03cf6454fb2598b 100644
+--- a/src/pages/simulation_cockpit.py
++++ b/src/pages/simulation_cockpit.py
+@@ -16,7 +16,7 @@ from src.ancillary import (
+     capacity_price_series_for_product,
+     list_capacity_products,
+ )
+-from src.assumptions import CAPTURE_PARAM_LABEL
++from src.assumptions import ASSUMPTION_COLUMNS, CAPTURE_PARAM_LABEL
+ from src.config import (
+     ANCILLARY_CAPACITY_AVAILABILITY,
+     MAX_CONTINUOUS_REPLAY_INTERVALS,
+@@ -43,6 +43,10 @@ from src.imbalance_overlay import compute_imbalance_overlay
+ from src.liquidity import compute_liquidity_cap
+ from src.pages.project_case import render_project_case_cockpit_mirror
+ from src.reserve_forecast import RESERVE_VALUE_COL, compute_reserve_forecast_skill
++from src.settlement_disclosure import (
++    screening_capacity_settlement_basis,
++    screening_capacity_settlement_label,
++)
+ from src.simulation import (
+     DAYS_PER_YEAR,
+     available_local_dates,
+@@ -84,7 +88,7 @@ _STOCHASTIC_SEED = 0
+ _MULTI_DAY_RESULT_KEY = "simulation_batch_result"
+ _MULTI_DAY_PANEL_ID = "cockpit-multi-day-replay/v1"
+ _FORECAST_POLICY_RESULT_KEY = "forecast_policy_result"
+-_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v1"
++_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v2-settlement-disclosure"
+ 
+ 
+ def _solver_constants() -> dict[str, object]:
+@@ -3307,7 +3311,8 @@ def _render_forecast_policy_section(
+             st.session_state.pop(_FORECAST_POLICY_RESULT_KEY, None)
+             st.session_state[_FORECAST_POLICY_RESULT_KEY] = (
+                 _compute_forecast_policy_bundle(
+-                    fingerprint=fingerprint, assumptions=assumptions, **inputs,
++                    fingerprint=fingerprint, primary_zone=primary_zone,
++                    assumptions=assumptions, **inputs,
+                 )
+             )
+         bundle = st.session_state[_FORECAST_POLICY_RESULT_KEY]
+@@ -3373,6 +3378,7 @@ def _forecast_policy_fingerprint(
+ def _compute_forecast_policy_bundle(
+     *,
+     fingerprint: str,
++    primary_zone: str,
+     primary_df: pd.DataFrame,
+     intraday_df: pd.DataFrame,
+     capacity_df: pd.DataFrame | None,
+@@ -3454,27 +3460,41 @@ def _compute_forecast_policy_bundle(
+         duration_hours=duration_hours, efficiency=efficiency, bucket=bucket,
+         forecast_mode=forecast_mode, min_rebid_uplift_eur=min_rebid_uplift_eur,
+     )
++    triple_label = f"DA + IDA1 + {reserve_product} (co-opt ceiling)"
++    realistic_label = f"DA + IDA1 + {reserve_product} (forecast-driven realistic)"
+     comparison = build_strategy_comparison(
+         summary,
+         power_mw=power_mw,
+         reserve_coopt_total=reserve_total,
+         reserve_label=reserve_label,
+         triple_joint_total=triple["triple_total"],
+-        triple_joint_label=(
+-            f"DA + IDA1 + {reserve_product} (co-opt ceiling)"
+-            if triple["triple_total"] is not None else None
+-        ),
++        triple_joint_label=triple_label,
+         realistic_triple_total=triple["realistic_total"],
+-        realistic_triple_label=(
+-            f"DA + IDA1 + {reserve_product} (forecast-driven realistic)"
+-            if triple["realistic_total"] is not None else None
+-        ),
++        realistic_triple_label=realistic_label,
+         triple_valid_days=triple["triple_valid_days"],
+         triple_da_baseline=triple["triple_da_baseline"],
+         policy_value_total=stochastic["policy_value_total"],
+         policy_value_valid_days=stochastic["policy_value_valid_days"],
+         policy_value_label=stochastic["policy_value_label"],
+     )
++    # Identify capacity-bearing rows from the actual solver routes and the exact
++    # labels supplied to the comparison builder, never by searching label text.
++    reserve_labels = []
++    for total, label in (
++        (reserve_total, reserve_label),
++        (triple["triple_total"], triple_label),
++        (triple["realistic_total"], realistic_label),
++        (
++            stochastic["policy_value_total"] if stochastic["reserve_mode"] else None,
++            stochastic["policy_value_label"],
++        ),
++    ):
++        if total is not None and math.isfinite(float(total)) and label is not None:
++            reserve_labels.append(label)
++    comparison, settlement = _comparison_capacity_disclosure(
++        comparison, zone=primary_zone, product=reserve_product,
++        reserve_labels=reserve_labels,
++    )
+     bundle["derived"] = {
+         "reserve_product": reserve_product,
+         "reserve_total": reserve_total,
+@@ -3482,6 +3502,7 @@ def _compute_forecast_policy_bundle(
+         "triple": triple,
+         "stochastic": stochastic,
+         "comparison": comparison,
++        "capacity_settlement": settlement,
+         "export_tables": _forecast_policy_export_tables(
+             comparison, per_day, triple, stochastic,
+         ),
+@@ -3494,6 +3515,7 @@ def _compute_forecast_policy_bundle(
+             reserve_price=reserve_price,
+             triple=triple,
+             stochastic=stochastic,
++            settlement=settlement,
+         ),
+     }
+     return bundle
+@@ -3567,6 +3589,44 @@ def _compute_stochastic_policy(
+     return out
+ 
+ 
++def _comparison_capacity_disclosure(
++    comparison: pd.DataFrame,
++    *,
++    zone: str,
++    product: str | None,
++    reserve_labels: list[str],
++) -> tuple[pd.DataFrame, dict | None]:
++    """Attach presentation-only settlement context to the computed rows.
++
++    The numeric comparison and annualisation contract is unchanged. Explicit
++    solver-route labels identify capacity-bearing totals/deltas; DA/IDA-only
++    rows cannot inherit a capacity convention merely because a product was
++    selected. The returned context is snapshotted alongside the result.
++    """
++    out = comparison.copy()
++    out["capacity_settlement_basis"] = "Not applicable"
++    out["capacity_settlement_scope"] = "Not applicable"
++    capacity_rows = out["strategy"].isin(reserve_labels)
++    if not capacity_rows.any():
++        return out, None
++    basis = screening_capacity_settlement_basis(zone, product)
++    label = screening_capacity_settlement_label(zone, product)
++    if basis is None:
++        # A capacity-bearing row without a product is incomplete metadata, not
++        # a DA-only row. Keep that distinction visible instead of guessing.
++        basis = "Unavailable: the reserve product was not recorded for this run."
++        label = "Unverified"
++    out.loc[capacity_rows, "capacity_settlement_basis"] = label
++    out.loc[capacity_rows, "capacity_settlement_scope"] = f"{zone} / {product or 'Not recorded'}"
++    return out, {
++        "zone": zone,
++        "product": product or "Not recorded",
++        "basis": basis,
++        "label": label,
++        "strategies": tuple(out.loc[capacity_rows, "strategy"]),
++    }
++
++
+ def _forecast_policy_export_assumptions(
+     assumptions: pd.DataFrame | None,
+     *,
+@@ -3575,6 +3635,7 @@ def _forecast_policy_export_assumptions(
+     reserve_price: float | None,
+     triple: dict,
+     stochastic: dict,
++    settlement: dict | None = None,
+ ) -> pd.DataFrame | None:
+     """Assumptions sheet for the forecast-policy export, built at run time."""
+     # This panel reports raw solver values — no capture haircut applied.
+@@ -3600,6 +3661,26 @@ def _forecast_policy_export_assumptions(
+         out = _append_stochastic_assumptions(
+             out, summary=stoch_summary, reserve_mode=stochastic["reserve_mode"],
+         )
++    if settlement is not None:
++        # This disclosure is required even when no caller assumptions were
++        # supplied. Its context is captured with the result, not read on rerun.
++        affects = "Reserve capacity components of: " + "; ".join(
++            settlement["strategies"]
++        )
++        rows = pd.DataFrame([
++            {
++                "parameter": parameter, "value": value, "unit": "",
++                "source": "Run-time screening capacity model", "affects": affects,
++            }
++            for parameter, value in (
++                ("Capacity settlement zone", settlement["zone"]),
++                ("Capacity settlement product", settlement["product"]),
++                ("Capacity settlement basis", settlement["basis"]),
++            )
++        ], columns=ASSUMPTION_COLUMNS)
++        out = rows if out is None or out.empty else pd.concat(
++            [out, rows], ignore_index=True,
++        )
+     return out
+ 
+ 
+@@ -3676,6 +3757,9 @@ def _render_forecast_policy_bundle(bundle: dict, chart_template: str) -> None:
+             ),
+         )
+     reserve_product = derived["reserve_product"]
++    settlement = derived["capacity_settlement"]
++    if settlement is not None:
++        st.caption(f"Capacity settlement basis: {settlement['basis']}")
+     _render_strategy_comparison(
+         derived["comparison"], chart_template,
+         has_reserve=derived["reserve_total"] is not None,
+@@ -3896,6 +3980,19 @@ def _render_strategy_comparison(
+             "uplift_vs_da_pct": st.column_config.NumberColumn(
+                 "Uplift vs DA", format="%.1f%%",
+             ),
++            "capacity_settlement_basis": st.column_config.TextColumn(
++                "Capacity basis",
++                width="medium",
++                help=(
++                    "Applies only to the reserve capacity component of each "
++                    "strategy total or policy-value delta; not to DA/IDA energy."
++                ),
++            ),
++            "capacity_settlement_scope": st.column_config.TextColumn(
++                "Capacity scope",
++                width="medium",
++                help="The zone and reserve product captured when this result was run.",
++            ),
+         },
+     )
+ 
+diff --git a/src/settlement_disclosure.py b/src/settlement_disclosure.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..54566ac2dee2a27a904797b14d9f4a73bfff4349
+--- /dev/null
++++ b/src/settlement_disclosure.py
+@@ -0,0 +1,115 @@
++"""Display the capacity-settlement convention of an existing model result.
++
++This module describes implemented model contracts, not market billing rules.
++It neither changes cash nor adds fields to the fingerprinted Project Case
++payload. The pinned profile below must be reviewed when that contract changes.
++"""
++
++from __future__ import annotations
++
++from collections.abc import Mapping
++from typing import TYPE_CHECKING, Any, Literal
++
++from src.config import ZONE_TIMEZONES
++
++if TYPE_CHECKING:
++    from src.project_case import RunResult
++
++_NOMINAL_REGISTRY = "pc-market-grid-v1"
++_NOMINAL_PROFILE = "pc-reserve-block-of-day-4h-v1"
++_RESERVE_ADAPTERS = frozenset({"PC_ADP_RESERVE_COOPT", "PC_ADP_DA_ID_RESERVE"})
++_ENERGY_ADAPTERS = frozenset({"PC_ADP_DA_ONLY", "PC_ADP_DA_ID"})
++
++
++def _screening_capacity_basis_kind(
++    zone: str | None, product: str | None,
++) -> Literal["physical", "unverified"] | None:
++    """One classification shared by compact table labels and full disclosure."""
++    if not product or not str(product).strip():
++        return None
++    return "physical" if zone in ZONE_TIMEZONES else "unverified"
++
++
++def screening_capacity_settlement_label(
++    zone: str | None, product: str | None,
++) -> str | None:
++    """Compact strategy-table label for the same scope as the full text."""
++    kind = _screening_capacity_basis_kind(zone, product)
++    if kind is None:
++        return None
++    return "Physical delivery hours" if kind == "physical" else "Unverified"
++
++
++def screening_capacity_settlement_basis(
++    zone: str | None, product: str | None,
++) -> str | None:
++    """Describe a selected product's existing physical-hour screening path.
++
++    Call only for a capacity-bearing result, not activation/imbalance overlays
++    or an annual standalone fee estimate. A product name does not establish a
++    market settlement profile; the disclosure intentionally makes no such claim.
++    """
++    kind = _screening_capacity_basis_kind(zone, product)
++    if kind is None:
++        return None
++    scope = f"{zone or 'Unspecified zone'} / {product}"
++    if kind == "unverified":
++        return (
++            f"{scope}: capacity settlement basis unverified; the zone is not "
++            "registered. No product-specific settlement convention is asserted."
++        )
++    text = (
++        f"{scope}: physical-hour screening; capacity cash uses elapsed delivery "
++        "hours and availability, with no nominal-block DST adjustment. "
++        "Energy/SoC use physical time."
++    )
++    if zone == "DE_LU":
++        text += (
++            " The registered DE_LU Project Case profile uses six nominal 4h blocks/day."
++        )
++    return text
++
++
++def project_case_strategy_capacity_settlement_basis(
++    strategy: Mapping[str, Any],
++) -> str | None:
++    """Read settlement scope from the recorded StrategyRunResult payload.
++
++    Unknown reserve profiles remain visible as unverified. Do not infer a new
++    profile from the current sidebar zone or from a familiar product label.
++    """
++    adapter = strategy.get("adapter_provenance", {})
++    adapter_id = adapter.get("producer_adapter_id")
++    if adapter_id in _ENERGY_ADAPTERS:
++        return None
++    zone = strategy.get("zone")
++    product = strategy.get("reserve_product")
++    profile = adapter.get("expected_grid_profiles", {}).get("reserve")
++    registry = adapter.get("expected_grid_registry_version")
++    scope = f"{zone or 'Unspecified zone'} / {product or 'Unspecified reserve product'}"
++    if (
++        adapter_id in _RESERVE_ADAPTERS
++        and zone == "DE_LU"
++        and product
++        and registry == _NOMINAL_REGISTRY
++        and profile == _NOMINAL_PROFILE
++    ):
++        return (
++            f"{scope}: Project Case uses six nominal 4h capacity blocks per local "
++            "day, including DST, with availability applied. Energy and SoC use "
++            "physical delivery time; screening capacity uses elapsed hours "
++            "without this adjustment."
++        )
++    return (
++        f"{scope}: capacity settlement basis unverified for recorded adapter "
++        f"{adapter_id or 'unspecified'}, registry {registry or 'unspecified'}, "
++        f"reserve profile {profile or 'unspecified'}. No nominal 4h convention "
++        "is asserted."
++    )
++
++
++def project_case_capacity_settlement_basis(result: RunResult) -> str | None:
++    """Describe a displayed RunResult using its immutable run provenance."""
++    return project_case_strategy_capacity_settlement_basis(
++        result.provenance["strategy_run_result"]
++    )
+diff --git a/tests/test_step3d_cockpit_disclosure.py b/tests/test_step3d_cockpit_disclosure.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..6b5deb859e9d0e993811e7793e41f0407820ae0d
+--- /dev/null
++++ b/tests/test_step3d_cockpit_disclosure.py
+@@ -0,0 +1,267 @@
++"""Capacity settlement is attached to actual, frozen cockpit result paths."""
++
++from __future__ import annotations
++
++import inspect
++from io import BytesIO
++
++import pandas as pd
++import pytest
++from openpyxl import load_workbook
++from streamlit.testing.v1 import AppTest
++
++
++def _compute_bundle(
++    monkeypatch, *, product="FCR", zone="DE_LU", reserve=437.0,
++    triple=450.0, realistic=430.0, policy=-3.0, reserve_mode=True,
++    assumptions=None, unavailable=False,
++):
++    from src.pages import simulation_cockpit as cockpit
++    from src.strategy_compare import (
++        STOCHASTIC_POLICY_VALUE_LABEL,
++        STOCHASTIC_POLICY_VALUE_RESERVE_LABEL,
++    )
++
++    day = pd.Timestamp("2026-03-29").date()
++    per_day = pd.DataFrame({"date": [day], "realised_eur": [400.0]})
++    summary = {
++        "valid_days": 1, "excluded_days": 0, "total_da_only_eur": 300.0,
++        "total_realised_eur": 400.0, "total_ceiling_eur": 460.0,
++        "forecast_meta": {
++            "forecast_mode": "walk_forward", "n_buckets_filled": 24,
++            "n_buckets_requested": 24, "fallback_points": 0, "coverage": 1.0,
++        },
++    }
++    if unavailable:
++        per_day = per_day.iloc[:0]
++        summary.update(
++            valid_days=0, excluded_days=1, model_available=False,
++            excluded_days_due_to_solver_failure=1,
++        )
++    monkeypatch.setattr(
++        cockpit, "simulate_sequential_da_id_batch",
++        lambda *args, **kwargs: (per_day, summary),
++    )
++    monkeypatch.setattr(
++        cockpit, "_reserve_coopt_total",
++        lambda *args, **kwargs: (reserve, f"DA + {product} co-opt (headroom)", 20.0),
++    )
++    monkeypatch.setattr(cockpit, "capacity_price_series_for_product", lambda *a: None)
++    monkeypatch.setattr(cockpit, "_reserve_triple_totals", lambda *a, **kw: {
++        "triple_total": triple, "realistic_total": realistic,
++        "triple_valid_days": 1, "triple_da_baseline": 300.0,
++        "seq_per_day": None, "seq_summary": None,
++        "solver_failed_days": 0, "model_available": True,
++    })
++    monkeypatch.setattr(cockpit, "_compute_stochastic_policy", lambda *a, **kw: {
++        "per_day": None, "summary": {"valid_days": 1} if policy is not None else None,
++        "reserve_mode": reserve_mode, "policy_value_total": policy,
++        "policy_value_valid_days": 1,
++        "policy_value_label": (
++            STOCHASTIC_POLICY_VALUE_RESERVE_LABEL if reserve_mode
++            else STOCHASTIC_POLICY_VALUE_LABEL
++        ),
++    })
++    prices = pd.DataFrame(
++        {"price_eur_mwh": [50.0] * 23},
++        index=pd.date_range("2026-03-28 23:00", periods=23, freq="h", tz="UTC"),
++    )
++    context = (
++        {"primary_zone": zone}
++        if "primary_zone" in inspect.signature(
++            cockpit._compute_forecast_policy_bundle
++        ).parameters else {}
++    )
++    return cockpit._compute_forecast_policy_bundle(
++        fingerprint="frozen-input", primary_df=prices,
++        intraday_df=prices.rename(columns={"price_eur_mwh": "intraday_price_eur_mwh"}),
++        capacity_df=None, reserve_product=product, batch_dates=[day],
++        zone_tz="Europe/Berlin", power_mw=1.0, duration_hours=2, efficiency=0.88,
++        bucket="hour_of_day", forecast_mode="walk_forward", deadband_eur_per_mw=0.0,
++        include_stochastic=policy is not None, stochastic_cap_pct=50.0,
++        assumptions=assumptions, **context,
++    )
++
++
++def _capacity_rows(bundle):
++    table = bundle["derived"]["comparison"]
++    return table.loc[~table["capacity_settlement_basis"].str.startswith("Not applicable")]
++
++
++@pytest.mark.parametrize("zone,product", [("DE_LU", "FCR"), ("FI", "FCR-N"), ("NL", "aFRR")])
++def test_capacity_rows_bind_actual_run_zone_product(monkeypatch, zone, product):
++    bundle = _compute_bundle(monkeypatch, zone=zone, product=product)
++    settlement = bundle["derived"]["capacity_settlement"]
++    assert settlement["zone"] == zone
++    assert settlement["product"] == product
++    assert "physical" in settlement["basis"].lower()
++    assert _capacity_rows(bundle)["capacity_settlement_basis"].tolist() == [
++        "Physical delivery hours"
++    ] * 4
++    assert _capacity_rows(bundle)["capacity_settlement_scope"].tolist() == [
++        f"{zone} / {product}"
++    ] * 4
++    assert bundle["derived"]["comparison"].iloc[:3][
++        "capacity_settlement_basis"
++    ].str.startswith("Not applicable").all()
++
++
++@pytest.mark.parametrize(
++    "reserve,triple,realistic,policy,reserve_mode,expected",
++    [
++        (437.0, None, None, None, False, 1),
++        (None, 450.0, None, None, False, 1),
++        (None, None, 430.0, None, False, 1),
++        (None, None, None, -3.0, True, 1),
++        (None, None, None, -3.0, False, 0),
++        (None, None, None, None, False, 0),
++        (0.0, 0.0, 0.0, 0.0, True, 4),
++        (float("nan"), float("inf"), None, None, False, 0),
++    ],
++)
++def test_only_real_finite_capacity_paths_receive_basis(
++    monkeypatch, reserve, triple, realistic, policy, reserve_mode, expected,
++):
++    bundle = _compute_bundle(
++        monkeypatch, reserve=reserve, triple=triple, realistic=realistic,
++        policy=policy, reserve_mode=reserve_mode,
++    )
++    assert len(_capacity_rows(bundle)) == expected
++    assert (bundle["derived"]["capacity_settlement"] is None) is (expected == 0)
++
++
++def test_numeric_comparison_unchanged_including_negative_delta(monkeypatch):
++    from src.strategy_compare import STRATEGY_COMPARE_COLUMNS, build_strategy_comparison
++
++    bundle = _compute_bundle(monkeypatch)
++    table = bundle["derived"]["comparison"]
++    expected = build_strategy_comparison(
++        bundle["summary"], power_mw=1.0, reserve_coopt_total=437.0,
++        reserve_label=table.iloc[3]["strategy"], triple_joint_total=450.0,
++        triple_joint_label=table.iloc[4]["strategy"], realistic_triple_total=430.0,
++        realistic_triple_label=table.iloc[5]["strategy"], triple_valid_days=1,
++        triple_da_baseline=300.0, policy_value_total=-3.0,
++        policy_value_valid_days=1, policy_value_label=table.iloc[6]["strategy"],
++    )
++    pd.testing.assert_frame_equal(table[STRATEGY_COMPARE_COLUMNS], expected)
++    assert table.iloc[-1]["window_revenue_eur"] == -3.0
++    assert pd.isna(table.iloc[-1]["uplift_vs_da_pct"])
++
++
++def test_text_containing_reserve_does_not_classify_a_row():
++    from src.pages.simulation_cockpit import _comparison_capacity_disclosure
++
++    table = pd.DataFrame({"strategy": ["DA-only reserve wording", "Actual capacity"]})
++    rendered, settlement = _comparison_capacity_disclosure(
++        table, zone="DE_LU", product="FCR", reserve_labels=["Actual capacity"],
++    )
++    assert rendered.iloc[0]["capacity_settlement_basis"].startswith("Not applicable")
++    assert settlement["strategies"] == ("Actual capacity",)
++    assert list(table.columns) == ["strategy"]  # input remains untouched
++
++
++@pytest.mark.parametrize("assumptions", [None, pd.DataFrame()])
++def test_export_without_caller_assumptions_still_has_bound_basis(monkeypatch, assumptions):
++    from src.export import cockpit_tables_to_excel
++
++    bundle = _compute_bundle(monkeypatch, assumptions=assumptions)
++    derived = bundle["derived"]
++    wb = load_workbook(BytesIO(cockpit_tables_to_excel(
++        derived["export_tables"], assumptions=derived["export_assumptions"],
++    )))
++    rows = list(wb["Assumptions"].values)
++    labels = {row[0]: row[1] for row in rows[1:]}
++    assert labels["Capacity settlement zone"] == "DE_LU"
++    assert labels["Capacity settlement product"] == "FCR"
++    assert labels["Capacity settlement basis"] == derived["capacity_settlement"]["basis"]
++    exported = list(wb["Strategy comparison"].values)
++    assert exported[0][-2:] == ("Capacity basis", "Capacity scope")
++    assert exported[4][-2:] == ("Physical delivery hours", "DE_LU / FCR")
++    assert wb["Strategy comparison"]["B5"].data_type == "n"
++    assert wb["Strategy comparison"]["B5"].value == 437.0
++
++
++def test_missing_product_is_unavailable_not_a_no_capacity_claim(monkeypatch):
++    bundle = _compute_bundle(monkeypatch, product=None)
++    assert "not recorded" in bundle["derived"]["capacity_settlement"]["basis"]
++    assert len(_capacity_rows(bundle)) == 4
++
++
++def test_unregistered_zone_is_explicitly_unverified(monkeypatch):
++    bundle = _compute_bundle(monkeypatch, zone="UNREGISTERED")
++    settlement = bundle["derived"]["capacity_settlement"]
++    assert "unverified" in settlement["basis"].lower()
++    assert _capacity_rows(bundle)["capacity_settlement_basis"].tolist() == ["Unverified"] * 4
++    assert _capacity_rows(bundle)["capacity_settlement_scope"].tolist() == [
++        "UNREGISTERED / FCR"
++    ] * 4
++
++
++def test_no_product_no_capacity_paths_remain_not_applicable(monkeypatch):
++    bundle = _compute_bundle(
++        monkeypatch, product=None, reserve=None, triple=None, realistic=None,
++        policy=None, reserve_mode=False,
++    )
++    derived = bundle["derived"]
++    assert derived["capacity_settlement"] is None
++    assert derived["export_assumptions"] is None
++    for column in ("capacity_settlement_basis", "capacity_settlement_scope"):
++        assert derived["comparison"][column].tolist() == ["Not applicable"] * 3
++
++
++def test_all_solver_failed_preserves_guard_and_never_builds_disclosure(monkeypatch):
++    from src.pages import simulation_cockpit as cockpit
++
++    def forbidden(*args, **kwargs):
++        raise AssertionError("Disclosure must not run for unavailable model")
++
++    monkeypatch.setattr(cockpit, "screening_capacity_settlement_basis", forbidden, raising=False)
++    monkeypatch.setattr(cockpit, "screening_capacity_settlement_label", forbidden, raising=False)
++    bundle = _compute_bundle(monkeypatch, unavailable=True)
++    assert bundle["derived"] is None
++    assert not bundle["summary"]["model_available"]
++
++
++def _stored_result_app():
++    import streamlit as st
++
++    from src.pages.simulation_cockpit import _render_forecast_policy_bundle
++
++    _render_forecast_policy_bundle(st.session_state["stored_bundle"], "plotly_dark")
++
++
++def test_renderer_and_export_use_frozen_basis_without_resolving(monkeypatch):
++    from src.pages import simulation_cockpit as cockpit
++
++    bundle = _compute_bundle(monkeypatch)
++    original = bundle["derived"]["capacity_settlement"]["basis"]
++    for name in (
++        "_render_forecast_policy_kpis", "_plot_forecast_policy",
++        "_render_forecast_skill", "_render_stochastic_attribution_panel",
++    ):
++        monkeypatch.setattr(cockpit, name, lambda *a, **kw: None)
++
++    def forbidden(*args, **kwargs):
++        raise AssertionError("Rerender must not resolve settlement context or solve")
++
++    monkeypatch.setattr(cockpit, "screening_capacity_settlement_basis", forbidden)
++    monkeypatch.setattr(cockpit, "simulate_sequential_da_id_batch", forbidden)
++    monkeypatch.setattr(cockpit, "screening_capacity_settlement_label", forbidden)
++    app = AppTest.from_function(_stored_result_app)
++    app.session_state["stored_bundle"] = bundle
++    app.run(timeout=30)
++    app.run(timeout=30)
++    assert not app.exception
++    assert any(f"Capacity settlement basis: {original}" in item.value for item in app.caption)
++    assert len(app.dataframe) == 2
++    assert app.dataframe[0].value.iloc[3]["capacity_settlement_basis"] == "Physical delivery hours"
++    assert app.dataframe[0].value.iloc[3]["capacity_settlement_scope"] == "DE_LU / FCR"
++
++
++def test_pre_disclosure_session_bundle_is_stale(monkeypatch):
++    from src.pages import simulation_cockpit as cockpit
++    from tests.test_step3b_batch_result_persistence import _forecast_kwargs
++
++    current = cockpit._forecast_policy_fingerprint(**_forecast_kwargs())
++    monkeypatch.setattr(cockpit, "_FORECAST_POLICY_PANEL_ID", "cockpit-forecast-policy/v1")
++    assert current != cockpit._forecast_policy_fingerprint(**_forecast_kwargs())
+diff --git a/tests/test_step3d_export_disclosure.py b/tests/test_step3d_export_disclosure.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..e60a5cfc1907686d201c3838be542642758d58be
+--- /dev/null
++++ b/tests/test_step3d_export_disclosure.py
+@@ -0,0 +1,175 @@
++"""Production page/export disclosure; prior economic values remain controls."""
++from __future__ import annotations
++
++from io import BytesIO
++
++import pytest
++from openpyxl import load_workbook
++from streamlit.testing.v1 import AppTest
++
++from src.export import export_to_bytes, export_to_pdf_bytes, project_case_to_excel
++from tests.test_step3a_display_contract import _export_args, _pdf_text, _verifiable_frame
++from tests.test_step3d_project_case_disclosure import synthetic_reserve_result
++
++
++def _pairs(sheet):
++    return {r[0].value: r[1] for r in sheet.iter_rows(min_col=1, max_col=2) if r[0].value}
++
++
++def _joint_args():
++    args = _export_args(_verifiable_frame(40.0))
++    args['revenue_estimate'].update({
++        'joint_cooptimized_total_eur': 159614.25,
++        'joint_cooptimized_avg_reserve_fraction': .95,
++    })
++    return args
++
++
++@pytest.mark.parametrize('zone,product', [('DE_LU', 'FCR'), ('FI', 'FCR-N')])
++def test_joint_summary_and_pdf_share_the_bound_basis(zone, product):
++    from src.settlement_disclosure import screening_capacity_settlement_basis
++
++    args = _joint_args()
++    args['zone'] = zone
++    basis = screening_capacity_settlement_basis(zone, product)
++    args['revenue_estimate']['joint_capacity_settlement_basis'] = basis
++    summary = load_workbook(BytesIO(export_to_bytes(**args)))['Summary']
++    pairs = _pairs(summary)
++    cell = pairs['Joint MILP Capacity Settlement Basis']
++    assert cell.value == basis
++    assert cell.alignment.wrap_text
++    text = _pdf_text(export_to_pdf_bytes(**args))
++    assert ' '.join(basis.split()) in text
++    assert f'{zone} / {product}' in text
++    assert pairs['Joint MILP Co-optimized Total (EUR)'].value == 159614.25
++    assert pairs['Joint MILP Co-optimized Total (EUR)'].data_type == 'n'
++    assert '159,614' in text
++    if zone == 'FI':
++        assert 'nominal 4h capacity blocks' not in text
++
++
++def test_legacy_joint_export_explicitly_discloses_missing_product_identity():
++    args = _joint_args()
++    pairs = _pairs(load_workbook(BytesIO(export_to_bytes(**args)))['Summary'])
++    basis = pairs['Joint MILP Capacity Settlement Basis'].value
++    assert 'product identity unavailable' in basis
++    assert 'physical' in basis.lower()
++    assert ' '.join(basis.split()) in _pdf_text(export_to_pdf_bytes(**args))
++
++
++def test_da_only_exports_do_not_claim_capacity_settlement():
++    args = _export_args(_verifiable_frame(40.0))
++    pairs = _pairs(load_workbook(BytesIO(export_to_bytes(**args)))['Summary'])
++    assert 'Joint MILP Capacity Settlement Basis' not in pairs
++    assert 'capacity settlement' not in _pdf_text(export_to_pdf_bytes(**args)).lower()
++
++
++def test_project_case_excel_names_basis_but_keeps_fingerprinted_payload_exact():
++    from src.settlement_disclosure import project_case_capacity_settlement_basis
++
++    result = synthetic_reserve_result()
++    before = result.to_payload()
++    book = load_workbook(BytesIO(project_case_to_excel(result)))
++    pairs = _pairs(book['Project Case NPVs'])
++    cell = pairs['Reserve Capacity Settlement Basis']
++    assert cell.value == project_case_capacity_settlement_basis(result)
++    assert 'DE_LU / FCR [symmetric]' in cell.value
++    assert 'nominal 4h' in cell.value
++    assert cell.alignment.wrap_text
++    assert pairs['Project Case Input Fingerprint'].value == result.input_fingerprint
++    assert result.to_payload() == before
++    # The original assumptions/provenance wire tree is not extended by display text.
++    paths = [r[0].value for r in book['Assumptions & Provenance'].iter_rows(min_row=2)]
++    assert not any('disclosure' in str(p) or 'capacity_settlement_basis' in str(p) for p in paths)
++    assert book['Project Case NPVs']['B6'].data_type == 'n'
++
++
++def test_appended_project_case_workbook_gets_same_run_bound_disclosure():
++    from src.settlement_disclosure import project_case_capacity_settlement_basis
++
++    result = synthetic_reserve_result()
++    args = _export_args(_verifiable_frame(40.0))
++    args['zone'] = 'FI'  # Ambient Market Report cannot re-label the recorded DE case.
++    book = load_workbook(BytesIO(export_to_bytes(**args, project_case_result=result)))
++    pairs = _pairs(book['Project Case NPVs'])
++    assert pairs['Reserve Capacity Settlement Basis'].value == project_case_capacity_settlement_basis(result)
++    assert 'Joint MILP Capacity Settlement Basis' not in _pairs(book['Summary'])
++
++
++def _revenue_app(with_capacity=True, unavailable=False):
++    import datetime as dt
++    from unittest.mock import patch
++
++    import pandas as pd
++    import streamlit as st
++
++    from src.ancillary import _build_standard_frame
++    from src.pages import revenue_estimation as page
++    from tests.test_step3a_display_contract import _export_args
++
++    day = dt.date(2026, 3, 29)
++    lo = pd.Timestamp(day, tz='Europe/Berlin')
++    hi = lo + pd.DateOffset(days=1)
++    index = pd.date_range(lo, hi, freq='15min', inclusive='left').tz_convert('UTC')
++    frame = pd.DataFrame({'price_eur_mwh': 40.0}, index=index)
++    args = _export_args(frame)
++    if with_capacity:
++        # A real aggregate input: two capacity products and an energy-only product.
++        st.session_state['ancillary_df'] = pd.concat([
++            _build_standard_frame(index, 'FCR', 'DE_LU', capacity=20.),
++            _build_standard_frame(index, 'aFRR Up', 'DE_LU', capacity=10.),
++            _build_standard_frame(index, 'mFRR Up', 'DE_LU', energy=1.),
++        ])
++        st.session_state['ancillary_zone'] = 'DE_LU'
++        st.session_state['ancillary_dates'] = (str(day), str(day))
++    export = args['revenue_estimate'].copy()
++    # Skip unrelated sub-panels, preserving the real ancillary aggregation,
++    # joint solver and surrounding production page/export integration.
++    with patch.object(page, '_render_intraday_uplift_section'), \
++         patch.object(page, '_render_sensitivity_table'), \
++         patch.object(page, '_render_revenue_risk_analysis'), \
++         patch.object(page, 'render_project_case_panel'):
++        if unavailable:
++            failed = pd.DataFrame()
++            failed.attrs.update(model_available=False, excluded_days_due_to_solver_failure=1)
++            solver_context = patch.object(page, 'solve_joint_capacity_batch', return_value=failed)
++        else:
++            from contextlib import nullcontext
++            solver_context = nullcontext()
++        with solver_context:
++            page.render(
++                primary_zone='DE_LU', primary_df=frame,
++                daily_spreads=args['daily_spreads'], monthly_spreads=args['monthly_spreads'],
++                percentiles=args['percentiles'], revenue=args['revenue_estimate'],
++                start_date=day, end_date=day, power_mw=1., duration_hours=1,
++                efficiency=1., capture_rate=1., capex_eur_kwh=0., use_lp_dispatch=False,
++                zone_tz='Europe/Berlin', chart_template='plotly_dark', report_figures={},
++                export_revenue=export,
++            )
++    st.session_state['test_export'] = export
++
++
++def test_revenue_page_binds_actual_capacity_products_to_ui_and_exports():
++    app = AppTest.from_function(_revenue_app).run(timeout=30)
++    assert not app.exception
++    export = app.session_state['test_export']
++    basis = export['joint_capacity_settlement_basis']
++    assert 'DE_LU' in basis and 'aggregate capacity: FCR, aFRR Up' in basis
++    assert 'mFRR Up' not in basis  # Energy-only contribution is not a capacity product.
++    assert basis in [c.value for c in app.caption]
++
++
++def test_revenue_joint_cash_is_unchanged_on_spring_dst():
++    app = AppTest.from_function(_revenue_app).run(timeout=30)
++    assert not app.exception
++    export = app.session_state['test_export']
++    assert export['joint_cooptimized_capacity_eur'] == pytest.approx(30 * .95 * 23 * 365.25)
++    assert export['joint_cooptimized_da_eur'] == 0.0
++
++
++@pytest.mark.parametrize('capacity,failed', [(False, False), (True, True)])
++def test_no_joint_result_has_no_settlement_disclosure(capacity, failed):
++    app = AppTest.from_function(_revenue_app, args=(capacity, failed)).run(timeout=30)
++    assert not app.exception
++    assert 'joint_capacity_settlement_basis' not in app.session_state['test_export']
++    assert not any('physical-hour screening' in c.value for c in app.caption)
+diff --git a/tests/test_step3d_project_case_disclosure.py b/tests/test_step3d_project_case_disclosure.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..2c846b09dfe75d1a32b2f58d26fcdaf7f1acd7e8
+--- /dev/null
++++ b/tests/test_step3d_project_case_disclosure.py
+@@ -0,0 +1,241 @@
++"""Stored reserve settlement basis follows the displayed Project Case result.
++
++The synthetic reserve result is producer-issued by the real public co-optimising
++adapter on a spring DST day. Nothing reads or writes a production price cache.
++"""
++
++from __future__ import annotations
++
++import datetime as dt
++from functools import lru_cache
++
++import pandas as pd
++import pytest
++from streamlit.testing.v1 import AppTest
++
++from src.project_case import (
++    AssetCase,
++    BootstrapCase,
++    CapacityMaintenanceBasis,
++    CurrencyBasis,
++    CurrencyBasisMode,
++    LifecycleCase,
++    MarketCase,
++    ProjectCase,
++    Projection,
++    ProjectionKind,
++    RunResult,
++    ValuationCase,
++    compute_project_case,
++    emit_reserve_coopt,
++    grid,
++)
++from src.project_case.enums import BOOTSTRAP_ALGORITHM_V1
++
++DAY = dt.date(2026, 3, 29)
++
++
++def synthetic_reserve_inputs() -> tuple[pd.DataFrame, pd.DataFrame]:
++    """Zero DA prices and six EUR 20/MW/h German capacity product blocks."""
++    da = pd.DataFrame(
++        {"price_eur_mwh": 0.0},
++        index=pd.DatetimeIndex(grid.expected_da_timestamps("DE_LU", DAY)),
++    )
++    capacity = pd.DataFrame(
++        {
++            "capacity_price_eur_mw": 20.0,
++            "product_type": "FCR",
++            "direction": "symmetric",
++            "zone": "DE_LU",
++        },
++        index=pd.DatetimeIndex(
++            [pd.Timestamp(block) for block, _ in grid.reserve_blocks("DE_LU", DAY)]
++        ),
++    )
++    return da, capacity
++
++
++@lru_cache(maxsize=4)
++def synthetic_reserve_result(product: str = "FCR [symmetric]") -> RunResult:
++    """A real solver-backed RunResult also used by the local review harness."""
++    da, capacity = synthetic_reserve_inputs()
++    strategy = emit_reserve_coopt(
++        da,
++        capacity["capacity_price_eur_mw"],
++        zone="DE_LU",
++        first_delivery_date=DAY,
++        last_delivery_date=DAY,
++        power_mw=1.0,
++        duration_hours=1.0,
++        efficiency=0.88,
++        currency_basis=CurrencyBasis(
++            CurrencyBasisMode.SOURCE_EUR_TREATED_AS_BASE_YEAR_REAL, 2026
++        ),
++        reserve_product=product,
++        reserve_source="Synthetic local Regelleistung-shaped capacity blocks",
++        availability=0.95,
++    )
++    case = ProjectCase(
++        AssetCase(1.0, 1.0, 0.88, 100_000.0, 1_000.0),
++        LifecycleCase(
++            3,
++            CapacityMaintenanceBasis.NO_AUGMENTATION_REQUIRED_ASSERTED,
++            "Synthetic review fixture",
++            "2026-09-20",
++            (),
++            0.0,
++            0.0,
++        ),
++        MarketCase(strategy, Projection(ProjectionKind.FlatRealProjection)),
++        ValuationCase(0.08, 2026),
++        BootstrapCase(0, 1000, BOOTSTRAP_ALGORITHM_V1),
++    )
++    return compute_project_case(case)
++
++
++def _result_app(product: str, compact: bool) -> None:
++    import streamlit as st
++
++    from src.pages.project_case import render_project_case_result
++    from tests.test_step3d_project_case_disclosure import synthetic_reserve_result
++
++    # Ambient controls are intentionally unrelated to the stored result.
++    st.selectbox("Current zone", ["FI", "DE_LU"])
++    st.selectbox("Current reserve product", ["FCR-N", "aFRR down"])
++    render_project_case_result(synthetic_reserve_result(product), compact=compact)
++
++
++def _da_only_app(compact: bool) -> None:
++    from src.pages.project_case import render_project_case_result
++    from tests.test_project_case_ui import _available_result
++
++    render_project_case_result(_available_result(), compact=compact)
++
++
++def _mirror_app(populated: bool) -> None:
++    import streamlit as st
++
++    from src.pages.project_case import (
++        _CACHE_KEY,
++        ProjectCaseRunCache,
++        render_project_case_cockpit_mirror,
++    )
++    from tests.test_step3d_project_case_disclosure import synthetic_reserve_result
++
++    if populated:
++        result = synthetic_reserve_result()
++        st.session_state[_CACHE_KEY] = ProjectCaseRunCache(
++            "synthetic request", result.input_fingerprint, result
++        )
++    render_project_case_cockpit_mirror()
++
++
++def _panel_and_mirror_app() -> None:
++    from src.pages.project_case import (
++        render_project_case_cockpit_mirror,
++        render_project_case_panel,
++    )
++    from tests.test_step3d_project_case_disclosure import DAY, synthetic_reserve_inputs
++
++    da, capacity = synthetic_reserve_inputs()
++    render_project_case_panel(
++        primary_zone="DE_LU",
++        primary_df=da,
++        start_date=DAY,
++        end_date=DAY,
++        power_mw=1.0,
++        duration_hours=1.0,
++        efficiency=0.88,
++        capture_rate=0.9,
++        capex_eur_kwh=100.0,
++        capacity_df=capacity,
++    )
++    render_project_case_cockpit_mirror()
++
++
++def _capacity_captions(app: AppTest) -> list[str]:
++    return [
++        caption.value
++        for caption in app.caption
++        if "capacity settlement" in caption.value.lower()
++    ]
++
++
++@pytest.mark.parametrize("compact", [False, True])
++@pytest.mark.parametrize("product", ["FCR [symmetric]", "aFRR [up]"])
++def test_result_discloses_its_stored_nominal_capacity_basis(product, compact):
++    app = AppTest.from_function(_result_app, args=(product, compact)).run(timeout=60)
++    assert not app.exception
++    captions = _capacity_captions(app)
++    assert len(captions) == 1
++    text = captions[0]
++    assert "DE_LU" in text and product in text
++    assert "nominal" in text and "4" in text
++    assert "DST" in text and "physical" in text
++    assert "FCR-N" not in text and "FI" not in text
++    before = text
++    app.selectbox[0].set_value("DE_LU").run(timeout=60)
++    app.selectbox[1].set_value("aFRR down").run(timeout=60)
++    assert not app.exception
++    assert _capacity_captions(app) == [before]
++
++
++@pytest.mark.parametrize("compact", [False, True])
++def test_da_only_result_has_no_reserve_capacity_disclosure(compact):
++    app = AppTest.from_function(_da_only_app, args=(compact,)).run(timeout=60)
++    assert not app.exception
++    assert not _capacity_captions(app)
++    assert len(app.metric) == 8
++
++
++def test_real_dst_fixture_keeps_nominal_cash_and_provenance():
++    result = synthetic_reserve_result()
++    strategy = result.provenance["strategy_run_result"]
++    assert len(synthetic_reserve_inputs()[0]) == 92  # 23 physical hours
++    assert strategy["daily_realised_cash_series"][0][1] == pytest.approx(456.0)
++    assert strategy["reserve_product"] == "FCR [symmetric]"
++    assert strategy["adapter_provenance"]["expected_grid_profiles"]["reserve"] == (
++        "pc-reserve-block-of-day-4h-v1"
++    )
++
++
++@pytest.mark.parametrize("populated", [False, True])
++def test_real_cockpit_mirror_uses_only_the_cached_result(populated):
++    app = AppTest.from_function(_mirror_app, args=(populated,)).run(timeout=60)
++    assert not app.exception
++    assert len(_capacity_captions(app)) == int(populated)
++    assert len(app.metric) == (8 if populated else 0)
++    if not populated:
++        assert any("Run Project Case" in item.value for item in app.info)
++
++
++def test_stale_project_case_hides_basis_and_mirror_without_recomputation(monkeypatch):
++    import src.pages.project_case as page
++
++    calls = 0
++    real_emit = page.emit_reserve_coopt
++
++    def counted_emit(*args, **kwargs):
++        nonlocal calls
++        calls += 1
++        return real_emit(*args, **kwargs)
++
++    monkeypatch.setattr(page, "emit_reserve_coopt", counted_emit)
++    app = AppTest.from_function(_panel_and_mirror_app).run(timeout=60)
++    app.selectbox(key="pc_strategy").set_value("DA + reserve co-optimised").run(timeout=60)
++    assert not app.exception
++    assert not _capacity_captions(app)
++    app.button(key="pc_run").click().run(timeout=60)
++    assert not app.exception
++    assert calls == 1
++    assert len(_capacity_captions(app)) == 2  # Panel and its read-only mirror.
++    app.run(timeout=60)
++    assert calls == 1
++    assert len(_capacity_captions(app)) == 2
++    app.text_input(key="pc_bootstrap_seed").set_value("1").run(timeout=60)
++    assert not app.exception
++    assert calls == 1
++    assert not _capacity_captions(app)
++    assert not app.metric
++    assert any("stale result is hidden" in item.value for item in app.warning)
++    assert any("Run Project Case" in item.value for item in app.info)
+diff --git a/tests/test_step3d_settlement_basis.py b/tests/test_step3d_settlement_basis.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..0a355d7872b5d34d3ac85b9a1133230d8a811ea8
+--- /dev/null
++++ b/tests/test_step3d_settlement_basis.py
+@@ -0,0 +1,257 @@
++"""Display-only settlement scope plus unchanged DST cash known answers.
++
++New helper imports stay inside cases so the same file collects on the baseline.
++The real-solver controls establish the pre-existing 456/437/475 difference; they
++must pass on both versions. All inputs are synthetic and no cache is read.
++"""
++
++from __future__ import annotations
++
++from copy import deepcopy
++from dataclasses import replace
++from datetime import date, timedelta
++
++import pandas as pd
++import pytest
++
++from src.project_case import (
++    AdapterUnavailableError,
++    MarketCase,
++    Projection,
++    ProjectionKind,
++    compute_project_case,
++    emit_da_id_reserve,
++    emit_reserve_coopt,
++    grid,
++)
++from tests import pc_case_fixtures as fx
++from tests.test_project_case_adapters import _regelleistung_block_series
++
++
++@pytest.mark.parametrize(
++    "zone, product, expected",
++    [("DE_LU", "FCR", "Physical delivery hours"),
++     ("FI", "FCR-N", "Physical delivery hours"),
++     ("GB", "custom capacity", "Physical delivery hours"),
++     ("UNREGISTERED", "FCR", "Unverified"),
++     (None, "FCR", "Unverified"),
++     ("DE_LU", None, None), ("DE_LU", "", None), ("DE_LU", "   ", None)],
++)
++def test_compact_table_label_preserves_full_disclosure_scope(zone, product, expected):
++    from src.settlement_disclosure import (
++        screening_capacity_settlement_basis,
++        screening_capacity_settlement_label,
++    )
++
++    assert screening_capacity_settlement_label(zone, product) == expected
++    full_text = screening_capacity_settlement_basis(zone, product)
++    if expected == "Physical delivery hours":
++        assert "physical-hour screening" in full_text
++    elif expected == "Unverified":
++        assert "basis unverified" in full_text
++    else:
++        assert full_text is None
++
++
++@pytest.mark.parametrize("product", [None, "", "   "])
++def test_screening_without_capacity_product_has_no_capacity_disclosure(product):
++    from src.settlement_disclosure import screening_capacity_settlement_basis
++
++    assert screening_capacity_settlement_basis("DE_LU", product) is None
++
++
++@pytest.mark.parametrize("product", ["FCR", "aFRR Up", "mFRR Down", "custom product"])
++def test_screening_describes_actual_selected_product_without_product_whitelist(product):
++    from src.settlement_disclosure import screening_capacity_settlement_basis
++
++    text = screening_capacity_settlement_basis("DE_LU", product)
++    assert f"DE_LU / {product}" in text
++    assert "physical-hour screening" in text
++    assert "hours and availability" in text
++    assert "no nominal-block DST adjustment" in text
++    assert "registered DE_LU Project Case profile" in text
++    assert "Energy/SoC use physical time" in text
++
++
++@pytest.mark.parametrize("zone", ["FI", "FR", "GB"])
++def test_other_screening_zones_do_not_inherit_german_product_calendar(zone):
++    from src.settlement_disclosure import screening_capacity_settlement_basis
++
++    text = screening_capacity_settlement_basis(zone, "FCR")
++    assert f"{zone} / FCR" in text
++    assert "physical-hour screening" in text
++    assert "six nominal 4h" not in text
++    assert "Project Case" not in text
++
++
++@pytest.mark.parametrize("zone", [None, "", "UNREGISTERED"])
++def test_unknown_screening_zone_is_explicitly_unverified(zone):
++    from src.settlement_disclosure import screening_capacity_settlement_basis
++
++    text = screening_capacity_settlement_basis(zone, "FCR")
++    assert "basis unverified" in text
++    assert "physical-hour screening" not in text
++
++
++def test_project_case_uses_frozen_run_scope_and_preserves_payload_and_fingerprint():
++    from src.settlement_disclosure import project_case_capacity_settlement_basis
++
++    case = replace(fx.project_case(), market_case=MarketCase(
++        fx.da_id_reserve_srr(), Projection(ProjectionKind.FlatRealProjection)
++    ))
++    result = compute_project_case(case)
++    before = result.to_payload()
++    fingerprint = result.input_fingerprint
++    text = project_case_capacity_settlement_basis(result)
++    assert "DE_LU / aFRR" in text
++    assert "nominal 4h capacity blocks" in text
++    assert "six nominal 4h capacity blocks per local day, including DST" in text
++    assert "Energy and SoC use physical delivery time" in text
++    assert result.to_payload() == before
++    assert result.input_fingerprint == fingerprint
++
++
++def test_da_only_project_case_has_no_reserve_settlement_disclosure():
++    from src.settlement_disclosure import project_case_capacity_settlement_basis
++
++    assert project_case_capacity_settlement_basis(
++        compute_project_case(fx.project_case())
++    ) is None
++
++
++@pytest.mark.parametrize("adapter", ["PC_ADP_RESERVE_COOPT", "PC_ADP_DA_ID_RESERVE"])
++@pytest.mark.parametrize("product", ["FCR [symmetric]", "mFRR [down]"])
++def test_recorded_reserve_profile_controls_disclosure_not_product_spelling(adapter, product):
++    from src.settlement_disclosure import project_case_strategy_capacity_settlement_basis
++
++    strategy = fx.da_id_reserve_srr().to_payload()
++    strategy["adapter_provenance"]["producer_adapter_id"] = adapter
++    strategy["reserve_product"] = product
++    text = project_case_strategy_capacity_settlement_basis(strategy)
++    assert f"DE_LU / {product}" in text
++    assert "nominal 4h capacity blocks" in text
++
++
++@pytest.mark.parametrize(
++    "changed_field, value",
++    [
++        ("zone", "FI"),
++        ("reserve_product", None),
++        ("producer_adapter_id", "PC_ADP_FUTURE_RESERVE"),
++        ("expected_grid_registry_version", "pc-market-grid-v2"),
++        ("reserve_profile", "pc-reserve-hourly-v2"),
++        ("reserve_profile", None),
++    ],
++)
++def test_unknown_recorded_reserve_contract_remains_visible_without_false_claim(changed_field, value):
++    from src.settlement_disclosure import project_case_strategy_capacity_settlement_basis
++
++    # A payload projection represents a future presentation input; it does not
++    # forge a valid RunResult or bypass the separate schema/export validation.
++    strategy = deepcopy(fx.da_id_reserve_srr().to_payload())
++    if changed_field in {"zone", "reserve_product"}:
++        strategy[changed_field] = value
++    elif changed_field == "reserve_profile":
++        strategy["adapter_provenance"]["expected_grid_profiles"]["reserve"] = value
++    else:
++        strategy["adapter_provenance"][changed_field] = value
++    text = project_case_strategy_capacity_settlement_basis(strategy)
++    assert "basis unverified" in text
++    assert "nominal 4h capacity blocks" not in text
++
++
++@pytest.mark.slow
++@pytest.mark.parametrize(
++    "target, physical_hours, screening_cash",
++    [(date(2025, 3, 29), 24, 456.0), (date(2025, 3, 30), 23, 437.0),
++     (date(2025, 10, 26), 25, 475.0)],
++)
++def test_existing_same_source_coopt_cash_contract_is_preserved(target, physical_hours, screening_cash):
++    from src.dispatch import solve_joint_capacity_batch
++    from src.pages.simulation_cockpit import _reserve_coopt_total
++    from src.time_utils import infer_delivery_interval_hours, interval_hours_vector
++
++    index = pd.DatetimeIndex(grid.expected_da_timestamps("DE_LU", target))
++    da = pd.DataFrame({"price_eur_mwh": 0.0}, index=index)
++    reserve = _regelleistung_block_series(target)
++    assert reserve.tolist() == [20.0] * 6  # Six EUR 80/MW / nominal 4h blocks.
++    ancillary = pd.DataFrame({"capacity_price_eur_mw": reserve, "product_type": "FCR"})
++    common = dict(power_mw=1.0, duration_hours=1.0, efficiency=0.88)
++    project = emit_reserve_coopt(
++        da, reserve, zone="DE_LU", first_delivery_date=target,
++        last_delivery_date=target, currency_basis=fx.CURRENCY_SOURCE,
++        reserve_product="FCR", reserve_source="synthetic Regelleistung",
++        availability=0.95, **common,
++    )
++    cockpit, _, price = _reserve_coopt_total(
++        da, "FCR", ancillary, valid_dates={target}, tz="Europe/Berlin", **common,
++    )
++    # Revenue Estimation calls this same non-overlay batch. Keep its physical
++    # capacity component separate from DA cash rather than testing just totals.
++    joint = solve_joint_capacity_batch(da, price, tz="Europe/Berlin", **common)
++    durations = interval_hours_vector(infer_delivery_interval_hours(index), len(index))
++    assert float(durations.sum()) == physical_hours
++    assert sum(h for _, h in grid.reserve_blocks("DE_LU", target)) == 24
++    assert dict(project.daily_realised_cash_series)[target] == pytest.approx(456.0)
++    assert cockpit == pytest.approx(screening_cash)
++    assert joint.iloc[0]["joint_capacity_revenue"] == pytest.approx(screening_cash)
++    assert joint.iloc[0]["joint_da_revenue"] == pytest.approx(0.0)
++
++
++@pytest.mark.slow
++@pytest.mark.parametrize(
++    "target, screening_cash",
++    [(date(2026, 3, 28), 456.0), (date(2026, 3, 29), 437.0),
++     (date(2025, 10, 26), 475.0)],
++)
++def test_existing_same_source_sequential_and_ceiling_cash_contract_is_preserved(target, screening_cash):
++    from src.simulation import (
++        simulate_da_id_reserve_ceiling_batch,
++        simulate_sequential_da_id_reserve_batch,
++    )
++
++    days = [target - timedelta(days=2), target - timedelta(days=1), target]
++    da = pd.DataFrame({"price_eur_mwh": 0.0}, index=pd.DatetimeIndex([
++        ts for day in days for ts in grid.expected_da_timestamps("DE_LU", day)
++    ]))
++    ida = pd.DataFrame({"intraday_price_eur_mwh": 0.0}, index=pd.DatetimeIndex([
++        ts for day in days for ts in grid.expected_ida_timestamps("DE_LU", day)
++    ]))
++    reserve = pd.concat([_regelleistung_block_series(day) for day in days])
++    common = dict(power_mw=1.0, duration_hours=1.0, efficiency=0.88, availability=0.95)
++    project = emit_da_id_reserve(
++        da, ida, reserve, zone="DE_LU", first_delivery_date=target,
++        last_delivery_date=target, currency_basis=fx.CURRENCY_SOURCE,
++        reserve_product="FCR", reserve_source="synthetic Regelleistung",
++        bucket="hour_of_day", **common,
++    )
++    sequential, _ = simulate_sequential_da_id_reserve_batch(
++        da, ida, reserve, dates=[target], tz="Europe/Berlin", bucket="hour_of_day", **common,
++    )
++    ceiling = simulate_da_id_reserve_ceiling_batch(
++        da, ida, reserve, dates=[target], tz="Europe/Berlin", **common,
++    )
++    assert dict(project.daily_realised_cash_series)[target] == pytest.approx(456.0)
++    assert sequential.iloc[0]["realised_eur"] == pytest.approx(screening_cash)
++    assert ceiling["total_eur"] == pytest.approx(screening_cash)
++
++
++def test_finnish_project_case_does_not_gain_a_reserve_profile():
++    assert grid.reserve_profile_id("FI") is None
++    assert grid.reserve_blocks("FI", date(2026, 3, 29)) is None
++
++
++@pytest.mark.slow
++def test_pre_cutover_spring_triple_retains_mismatched_grid_rejection():
++    target = date(2025, 3, 30)
++    days = [target - timedelta(days=2), target - timedelta(days=1), target]
++    da = fx.da_frame("DE_LU", days)
++    ida = fx.ida_frame("DE_LU", days)
++    reserve = pd.concat([_regelleistung_block_series(day) for day in days])
++    with pytest.raises(AdapterUnavailableError, match="no valid dates"):
++        emit_da_id_reserve(
++            da, ida, reserve, zone="DE_LU", first_delivery_date=target,
++            last_delivery_date=target, currency_basis=fx.CURRENCY_SOURCE,
++            reserve_product="FCR", reserve_source="synthetic Regelleistung",
++            bucket="hour_of_day", power_mw=1.0, duration_hours=1.0, efficiency=0.88,
++        )

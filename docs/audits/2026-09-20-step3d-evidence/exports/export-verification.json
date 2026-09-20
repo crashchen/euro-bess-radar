@@ -1,0 +1,152 @@
+{
+  "artifacts": {
+    "project-case-dst.xlsx": {
+      "sha256": "0afef7e55ac64ffcea5a0564e8baecd0a08100c9738edbe1337eff946a89daef",
+      "sheets": [
+        "Project Case NPVs",
+        "Screening Cash Flow",
+        "Lifecycle Cash Flow",
+        "Assumptions & Provenance"
+      ]
+    },
+    "fi-report-with-de-project-case.xlsx": {
+      "sha256": "31d5afe3fcbaea3bbad5e5397faa12753fd7ed72c7ac3f20842e90995389e406",
+      "sheets": [
+        "Summary",
+        "Daily Spreads",
+        "Monthly Summary",
+        "Hourly Prices",
+        "Price Heatmap",
+        "Project Case NPVs",
+        "Screening Cash Flow",
+        "Lifecycle Cash Flow",
+        "Assumptions & Provenance"
+      ]
+    },
+    "de_lu-screening-spring.xlsx": {
+      "sha256": "f335a98553113051702730a42501e1bb5d00c2b7ff4867d6410a073eaf0fa582",
+      "sheets": [
+        "Summary",
+        "Daily Spreads",
+        "Monthly Summary",
+        "Hourly Prices",
+        "Price Heatmap"
+      ]
+    },
+    "de_lu-screening-spring.pdf": {
+      "sha256": "00e2c2dc10b2232e2027ae61c724ee74c365fc5bb96f1d71da13d6b7c284263e"
+    },
+    "fi-screening-spring.xlsx": {
+      "sha256": "2131756c357e92f4ba6a2648c84314cf9f85211f6ba87c7d6afb12173938f8b1",
+      "sheets": [
+        "Summary",
+        "Daily Spreads",
+        "Monthly Summary",
+        "Hourly Prices",
+        "Price Heatmap"
+      ]
+    },
+    "fi-screening-spring.pdf": {
+      "sha256": "2501bfa6acc0bb76271e189edb9d49edb2879b4df6ba6bc4b1399ff8c671f15a"
+    },
+    "cockpit-forecast-stub-no-input-assumptions.xlsx": {
+      "sha256": "0871a7d731dce2ccf9e76c6fb79fdd2e32d89774fb47ae57103daccae66aa517",
+      "sheets": [
+        "Strategy comparison",
+        "Sequential DA+ID",
+        "Assumptions"
+      ]
+    }
+  },
+  "renders": [
+    {
+      "file": "project-case-dst.xlsx",
+      "sheet": "Project Case NPVs",
+      "range": "A10:C15",
+      "png": "project-case-dst-project-case-npvs.png"
+    },
+    {
+      "file": "fi-report-with-de-project-case.xlsx",
+      "sheet": "Project Case NPVs",
+      "range": "A10:C15",
+      "png": "fi-report-with-de-project-case-project-case-npvs.png"
+    },
+    {
+      "file": "de_lu-screening-spring.xlsx",
+      "sheet": "Summary",
+      "range": "A21:B26",
+      "png": "de_lu-screening-spring-summary.png"
+    },
+    {
+      "file": "fi-screening-spring.xlsx",
+      "sheet": "Summary",
+      "range": "A21:B26",
+      "png": "fi-screening-spring-summary.png"
+    },
+    {
+      "file": "cockpit-forecast-stub-no-input-assumptions.xlsx",
+      "sheet": "Strategy comparison",
+      "range": "A1:F8",
+      "png": "cockpit-forecast-stub-no-input-assumptions-strategy-comparison.png"
+    },
+    {
+      "file": "cockpit-forecast-stub-no-input-assumptions.xlsx",
+      "sheet": "Assumptions",
+      "range": "A1:E4",
+      "png": "cockpit-forecast-stub-no-input-assumptions-assumptions.png"
+    }
+  ],
+  "known_answers": {
+    "project_case": {
+      "real_solver": true,
+      "zone": "DE_LU",
+      "product": "FCR [symmetric]",
+      "physical_hours": 23,
+      "nominal_hours": 24,
+      "availability": 0.95,
+      "daily_realised_cash_eur": 456.0,
+      "input_fingerprint": "5604b72bbda6415b4dd42f542183d29e6394dfb55e3fc9c0b4761cacaf5da251"
+    },
+    "DE_LU": {
+      "real_solver": true,
+      "physical_hours": 23,
+      "availability": 0.95,
+      "daily_capacity_eur": 655.5,
+      "annual_capacity_eur": 239421.38,
+      "joint_da_eur": 0.0,
+      "basis": "DE_LU / aggregate capacity: FCR, aFRR Up: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day."
+    },
+    "FI": {
+      "real_solver": true,
+      "physical_hours": 23,
+      "availability": 0.95,
+      "daily_capacity_eur": 437.0,
+      "annual_capacity_eur": 159614.25,
+      "joint_da_eur": 0.0,
+      "basis": "FI / aggregate capacity: FCR-N: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time."
+    },
+    "cockpit_stub": {
+      "real_solver": false,
+      "caller_assumptions": null,
+      "reserve_window_eur": 437.0,
+      "policy_value_delta_eur": -3.0,
+      "basis": {
+        "zone": "DE_LU",
+        "product": "FCR",
+        "basis": "DE_LU / FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+        "label": "Physical delivery hours",
+        "strategies": [
+          "DA + FCR co-opt (headroom)",
+          "DA + IDA1 + FCR (co-opt ceiling)",
+          "DA + IDA1 + FCR (forecast-driven realistic)",
+          "Stochastic policy value (vs capped 9.2b reserve-first)"
+        ]
+      }
+    }
+  },
+  "limits": [
+    "Excel images are ArtifactTool read-only import renders, not Microsoft Excel screenshots.",
+    "PDF images are Poppler renders of production exporter bytes; no charts requested in these focused summary fixtures.",
+    "Cockpit fixture uses the explicit solver stubs in test_step3d_cockpit_disclosure._compute_bundle; it proves display/export preservation, not economics."
+  ]
+}
