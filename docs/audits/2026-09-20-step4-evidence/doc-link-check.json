@@ -1,0 +1,363 @@
+{
+  "files": [
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "README.md",
+    "docs/audits/2026-09-20-step4-evidence/README.md",
+    "docs/audits/README.md",
+    "docs/design/delivery-duration-v1.md",
+    "docs/design/project-revenue-handoff-v1.md",
+    "docs/design/replay-input-guards.md",
+    "docs/runbooks/manual-ui-smoke.md",
+    "docs/validation/current.md",
+    "docs/validation/follow-ups.md"
+  ],
+  "checked": [
+    {
+      "file": "CLAUDE.md",
+      "target": "docs/validation/current.md"
+    },
+    {
+      "file": "CLAUDE.md",
+      "target": "docs/audits/README.md"
+    },
+    {
+      "file": "CONTRIBUTING.md",
+      "target": "docs/validation/current.md"
+    },
+    {
+      "file": "CONTRIBUTING.md",
+      "target": "docs/design/delivery-duration-v1.md"
+    },
+    {
+      "file": "CONTRIBUTING.md",
+      "target": ".github/workflows/ci.yml"
+    },
+    {
+      "file": "CONTRIBUTING.md",
+      "target": "docs/runbooks/manual-ui-smoke.md"
+    },
+    {
+      "file": "README.md",
+      "target": "docs/validation/current.md"
+    },
+    {
+      "file": "README.md",
+      "target": "docs/audits/README.md"
+    },
+    {
+      "file": "README.md",
+      "target": "docs/validation/current.md"
+    },
+    {
+      "file": "README.md",
+      "target": "docs/design/delivery-duration-v1.md"
+    },
+    {
+      "file": "README.md",
+      "target": "docs/design/replay-input-guards.md"
+    },
+    {
+      "file": "README.md",
+      "target": "docs/runbooks/manual-ui-smoke.md"
+    },
+    {
+      "file": "README.md",
+      "target": "docs/design/project-revenue-handoff-v1.md"
+    },
+    {
+      "file": "README.md",
+      "target": "LICENSE"
+    },
+    {
+      "file": "README.md",
+      "target": "SECURITY.md"
+    },
+    {
+      "file": "README.md",
+      "target": "CONTRIBUTING.md"
+    },
+    {
+      "file": "docs/audits/2026-09-20-step4-evidence/README.md",
+      "target": "../../validation/current.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "../validation/current.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "2026-09-08-step1-spec.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "2026-09-08-step1-handoff.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "2026-09-08-step1b-handoff.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "2026-09-08-step1b-r2-handoff.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "2026-09-08-step1b-pr.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "../design/delivery-duration-v1.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "2026-09-08-step2-handoff.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "2026-09-15-step3a-handoff.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "2026-09-16-step3b-handoff.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "2026-09-16-step3c-handoff.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "2026-09-19-step3c-r2-handoff.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "../design/delivery-duration-v1.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "2026-09-20-step3d-handoff.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "../design/delivery-duration-v1.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "../design/replay-input-guards.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "../design/delivery-duration-v1.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "../validation/current.md"
+    },
+    {
+      "file": "docs/audits/README.md",
+      "target": "../validation/follow-ups.md"
+    },
+    {
+      "file": "docs/design/delivery-duration-v1.md",
+      "target": "replay-input-guards.md"
+    },
+    {
+      "file": "docs/design/delivery-duration-v1.md",
+      "target": "../runbooks/manual-ui-smoke.md"
+    },
+    {
+      "file": "docs/design/delivery-duration-v1.md",
+      "target": "../audits/2026-09-08-step2-handoff.md"
+    },
+    {
+      "file": "docs/design/delivery-duration-v1.md",
+      "target": "../validation/current.md"
+    },
+    {
+      "file": "docs/design/delivery-duration-v1.md",
+      "target": "../audits/README.md"
+    },
+    {
+      "file": "docs/design/project-revenue-handoff-v1.md",
+      "target": "../validation/current.md"
+    },
+    {
+      "file": "docs/design/project-revenue-handoff-v1.md",
+      "target": "../runbooks/manual-ui-smoke.md#checklist--radar--ess-annual-revenue-json-handoff"
+    },
+    {
+      "file": "docs/design/replay-input-guards.md",
+      "target": "delivery-duration-v1.md"
+    },
+    {
+      "file": "docs/design/replay-input-guards.md",
+      "target": "../audits/README.md"
+    },
+    {
+      "file": "docs/design/replay-input-guards.md",
+      "target": "delivery-duration-v1.md"
+    },
+    {
+      "file": "docs/design/replay-input-guards.md",
+      "target": "../audits/2026-09-08-step2-handoff.md"
+    },
+    {
+      "file": "docs/design/replay-input-guards.md",
+      "target": "../validation/current.md"
+    },
+    {
+      "file": "docs/design/replay-input-guards.md",
+      "target": "../validation/follow-ups.md"
+    },
+    {
+      "file": "docs/runbooks/manual-ui-smoke.md",
+      "target": "../validation/current.md"
+    },
+    {
+      "file": "docs/runbooks/manual-ui-smoke.md",
+      "target": "../validation/follow-ups.md"
+    },
+    {
+      "file": "docs/runbooks/manual-ui-smoke.md",
+      "target": "../design/project-revenue-handoff-v1.md"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "2026-09-20.json"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step4-evidence/full-suite.txt"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step4-evidence/full-suite.xml"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step4-evidence/test-inventory.json"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step4-evidence/run-results.json"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step4-evidence/focused-command.txt"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step4-evidence/ruff.txt"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step4-evidence/main-ci.json"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step4-evidence/runtime.json"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step4-evidence/warning-summary.json"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-16-step3b-handoff.md"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-16-step3c-handoff.md"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-19-step3c-r2-handoff.md"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step3d-handoff.md"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../runbooks/manual-ui-smoke.md"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "follow-ups.md"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step4-evidence/snapshot_plugin.py"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step4-evidence/runtime-scope.json"
+    },
+    {
+      "file": "docs/validation/current.md",
+      "target": "../audits/2026-09-20-step4-evidence/historical-patches.json"
+    },
+    {
+      "file": "docs/validation/follow-ups.md",
+      "target": "current.md"
+    },
+    {
+      "file": "docs/validation/follow-ups.md",
+      "target": "../audits/2026-09-20-step4-evidence/layout-inventory.json"
+    },
+    {
+      "file": "docs/validation/follow-ups.md",
+      "target": "../audits/2026-09-20-step3d-evidence/browser/revenue-1280.png"
+    }
+  ],
+  "errors": [],
+  "smoke_numbers": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37,
+    38,
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46,
+    47
+  ]
+}

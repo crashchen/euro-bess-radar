@@ -248,7 +248,8 @@ base branch trigger CI, including stacked review branches.
 
 The [Step 2 handoff](../audits/2026-09-08-step2-handoff.md) freezes its change,
 baseline failures and validation results. Step 3B is merged in #90 as
-`cf91374`; Step 3C is merged in #91 as `2e4ed73`. Step 3D adds the capacity
-settlement disclosure above and remains under review. Full documentation/Vault
-housekeeping remains Step 4. See the [audit index](../audits/README.md) for
-revision-specific evidence rather than treating this contract as a test log.
+`cf91374`; Step 3C is merged in #91 as `2e4ed73`; Step 3D is merged in #92
+as `fb72dbf`. Step 4 reconciles documentation against the
+[current verification snapshot](../validation/current.md). See the
+[audit index](../audits/README.md) for historical revision-specific evidence
+rather than treating this contract as a test log.

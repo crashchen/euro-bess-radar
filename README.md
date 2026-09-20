@@ -4,7 +4,7 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 
 ## Features
 
-- **Day-ahead price analysis** across 37+ European bidding zones (ENTSO-E + Elexon)
+- **Day-ahead price analysis** across the configured European bidding zones (ENTSO-E + Elexon; see `src/config.py`)
 - **Revenue estimation** for 1h, 2h, and 4h BESS using chronology-aware charge/discharge windows
 - **Inline revenue guidance** with sample-window annualisation notes and ancillary methodology help in the dashboard
 - **Renewables and BESS signal analysis** — quantify how renewable share affects prices and ordered spreads
@@ -13,16 +13,16 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 - **Joint MILP co-optimization estimate** for DA arbitrage vs reserve-capacity power headroom
 - **Auditable dispatch failures end-to-end** — ordinary/joint, composite DA+ID/reserve, replay, sequential, and stochastic paths propagate typed stage diagnostics; failed days are excluded from revenue, annualisation, risk pools, and common-policy windows instead of becoming zero revenue
 - **Separated economic semantics** — gross revenue, non-cash shadow-wear-adjusted economic margin, and cash NPV are reported as distinct layers; cash NPV does not double-count the installed CapEx as linear wear
-- **Project Case lifecycle valuation** — compose one producer-issued realised strategy into a no-lifecycle-cost screening NPV and a pre-tax unlevered lifecycle cash NPV, with typed/fingerprinted inputs, an explicit run/cache boundary, a read-only Cockpit mirror, a self-validating Excel workbook, and a compact fingerprinted annual-revenue JSON handoff to the ESS financial platform. An optional annual whole-project strategy-cash floor can be entered interactively: the quote resolves to an explicit real rate curve, is previewed against the calculator's own floor resolution before the run, settles as `max(merchant, floor)` per bootstrap draw and project year, and is disclosed from the result itself. It is not MACSE, not a complete legal-contract model, and not a bankable valuation, and it stays a different product from the cockpit's wear-net floor comparator
+- **Project Case lifecycle valuation** — compose one producer-issued realised strategy into a no-lifecycle-cost screening NPV and a pre-tax unlevered lifecycle cash NPV, with typed/fingerprinted inputs, an explicit run/cache boundary, a read-only Cockpit mirror, a self-validating Excel workbook, and a compact fingerprinted annual-revenue JSON export for the ESS financial platform (producer contract tested here; downstream execution is not certified by this repository). An optional annual whole-project strategy-cash floor can be entered interactively: the quote resolves to an explicit real rate curve, is previewed against the calculator's own floor resolution before the run, settles as `max(merchant, floor)` per bootstrap draw and project year, and is disclosed from the result itself. It is not MACSE, not a complete legal-contract model, and not a bankable valuation, and it stays a different product from the cockpit's wear-net floor comparator
 - **Bounded data freshness and network behavior** — Streamlit market-data caches share the persistent 24-hour TTL, and ENTSO-E calls use an explicit 30-second timeout with repository-level retry as the single retry owner
 - **Market-calendar mixed-resolution handling** — SDAC Day-Ahead windows crossing delivery day 2025-10-01 preserve the 60-minute pre-cutover and 15-minute post-cutover grids at the shared CET/CEST market boundary; cache checks and gap metrics use the same segmented physical-time basis
 - **Simulation Cockpit** for interval-level BESS dispatch replay, event tables, multi-day summaries with continuous-horizon SoC carry-over, a forecast-driven sequential DA+ID policy (vs perfect-foresight ceiling) with rebid deadband + forecast-skill report, an annualised strategy comparison (with optional DA + reserve-capacity co-optimisation, a cumulative DA + IDA1 + reserve perfect-foresight ceiling, and a Phase 9.2b forecast-driven realistic reserve-first row with a forecast-effect gap panel when ancillary capacity prices are loaded), a DA-only cycle-cap/degradation frontier with an optional user-asserted DA liquidity participation cap followed by a contracted-floor overlay that can project decaying merchant revenue against an escalating floor year by year, activation-energy and reBAP/imbalance historical replay overlays (separate, non-additive screening estimates when those streams are imported), and Excel export — plus SoC, revenue, throughput, and battery-health diagnostics
 - **Multi-zone comparison** for market screening
 - **Forward-scenario and external benchmark reconciliation** — apply a user-supplied baseload forward curve to the zone's historical DA shape, then optionally compare the resulting annual DA-only screening curve with a user-uploaded trader revenue benchmark; asset type, market scope, revenue basis, duration, cycle assumption, source, and as-of metadata stay attached so co-located/all-in/net curves cannot silently acquire a like-for-like label
 - **Data Trust diagnostics** showing source, timezone, coverage, source gaps, and imputation per fetched zone, plus a zone × data-stream **coverage matrix** (DA / IDA1–3 / reserve capacity / activation energy / imbalance settlement), per-(zone, product, direction) provenance tables for imported reserve-capacity and activation-energy prices (the activation table also surfaces the live fetch's dropped-unpriced-interval accounting), and per-zone provenance for imported reBAP/imbalance prices
-- **Excel export** with full analytics and sub-hourly negative-price normalization
+- **Excel/PDF export** with shared average-price and negative-hour availability disclosures; available numeric cells retain their numeric types
 - **GBP to EUR normalization** for GB history using yearly FX mappings
-- **GitHub Actions CI** for syntax validation and mocked unit tests on pushes and PRs
+- **GitHub Actions CI** for lint, syntax, the full automated suite, and a separate Python 3.11 / Streamlit 1.55.0 panel compatibility subset
 
 ## Data Sources
 
@@ -38,11 +38,11 @@ European BESS Market Screening Dashboard — evaluate battery energy storage mer
 
 Requires Python 3.11+ and Streamlit >=1.55,<2.0. CI covers the complete suite
 on Python 3.13 and real-panel smoke checks on Python 3.11 / Streamlit 1.55.0.
-Revision-specific results and replay contracts are in the [audit index](docs/audits/README.md).
+The [current validation snapshot](docs/validation/current.md) binds commands, results, CI and manual coverage to an exact code revision. The [audit index](docs/audits/README.md) preserves the historical review evidence.
 
 ```bash
 # Clone and setup
-git clone <your-repo-url>
+git clone https://github.com/crashchen/euro-bess-radar.git
 cd euro-bess-radar
 python3 -m venv .venv
 source .venv/bin/activate
@@ -63,6 +63,23 @@ python -m pytest tests/ -v
 streamlit run app.py
 ```
 
+## Current behavior and review status
+
+The September corrections are merged: Step 1 / 1b / 2 in #86–#88 and Step 3A / 3B / 3C / 3D in #89–#92. The reviewed code baseline is `fb72dbf` (2026-09-20). Use the [current snapshot](docs/validation/current.md) for verification results and open follow-ups; historical test counts are not current acceptance results.
+
+- **Price statistics:** the overall Avg Price is weighted by verified native delivery durations. The chart's 30-Day MA covers 720 physical hours. Adjacent median and standard deviation retain their explicitly labelled row-based calculations. If delivery duration cannot be verified, duration-based figures show `n/a` with a reason; observed negative-price counts and prices are preserved. See the [delivery-duration contract](docs/design/delivery-duration-v1.md).
+- **Replay and intraday coverage:** continuous replay cuts at changes in dominant daily cadence, invalid or missing days, and the 576-interval limit while carrying SoC between segments, with terminal-neutral equality at every segment end. DA-only replay accepts verified native mixed-duration days. DA/IDA strategies retain two-sided grid guards before solving. The separate simplified intraday uplift estimate skips days with fewer than two observations in either source while retaining the original rows in its coverage denominators; incompatible verifiable grids make the estimate unavailable. No model guard resamples data to manufacture compatibility. See the [replay guards](docs/design/replay-input-guards.md).
+- **Saved results:** multi-day and forecast-policy panels retain complete result and export-assumption snapshots across reruns and downloads. Content changes to inputs consumed by that panel, including same-row-count price corrections and forecast training-history edits, hide stale outputs until Run; restoring the original inputs restores the saved result. This guarantee does not extend to the frontier's older first/last/selected-day-count data key, which can miss same-length corrections, or to the single-day panel, which still solves on rerun.
+- **DST capacity cash:** the registered DE_LU Project Case reserve profile uses six nominal 4-hour blocks per local day. Cockpit capacity strategies and Revenue joint MILP use physical delivery hours. For 1 MW at EUR 20/MW/h and 0.95 availability, the spring-day comparison is EUR 456 versus EUR 437, and autumn is EUR 456 versus EUR 475. These are disclosed model conventions, not a claim of universal market settlement rules. Energy/SoC time and both cash algorithms are unchanged; unknown reserve profiles remain unverified.
+
+The [manual UI smoke checklist](docs/runbooks/manual-ui-smoke.md) is a procedure, not a record that every item has passed. Revision-specific browser and rendered-export evidence has narrower scope than the full application. The separate CI compatibility job pins Python and Streamlit only; other dependencies resolve from manifest ranges, so it does not test the minimum version of every dependency. CI uses synthetic/mocked inputs and real local solvers, not live-provider acceptance.
+
+## Radar → ESS annual revenue boundary
+
+The Project Case JSON exports `screening_cashflow_table.revenue_eur`: signed, whole-modelled-project annual settled revenue after the applicable dispatch, capture, VOM, RTE, availability and floor-settlement assumptions. It carries input/source fingerprints and a canonical JSON digest. ESS owns lifecycle costs, tax and financing; a consumer must not scale that revenue by MW/RTE/availability or apply the floor a second time. See the [wire contract](docs/design/project-revenue-handoff-v1.md).
+
+Radar's producer tests and committed golden fixture validate its side of the boundary. Step 4 does not run or change the ESS consumer, so successful downstream import and valuation are **not verified in this round**.
+
 ## Project Structure
 
 ```
@@ -77,11 +94,12 @@ euro-bess-radar/
 │   ├── ida_forecast.py       # Hourly climatology IDA forecast for the sequential DA+ID policy
 │   ├── ida_scenarios.py      # error_resample IDA scenario generator (stochastic MILP Increment A)
 │   ├── stochastic_dispatch.py # Extensive-form stochastic DA-commitment MILP + execution (stochastic MILP Increment B1+B2)
-│   ├── reserve_forecast.py   # Block-of-day capacity-price forecast skill (Phase 9.2b prep)
-│   ├── da_forecast.py        # Screening DA-price climatology forecast (Phase 9.2b Stage-0 prep)
+│   ├── reserve_forecast.py   # Block-of-day capacity-price forecasts and skill
+│   ├── da_forecast.py        # Screening DA-price climatology forecast
 │   ├── degradation.py        # Throughput-based degradation and lifetime metrics
 │   ├── scenario.py           # Bootstrap NPV, sensitivity, and merchant-revenue decay factors
 │   ├── project_case/         # Typed case/adapters, lifecycle valuation, contract settlement + ESS revenue handoff
+│   ├── settlement_disclosure.py # Result-bound model capacity-settlement descriptions
 │   ├── pages/project_case.py # RunResult-driven UI, strategy gate, cache and contract entry (PC-C/PC-D3)
 │   ├── contracted_floor.py   # Wear-net screening floor comparator (separate product from Project Case settlement)
 │   ├── liquidity.py          # DA executable-power participation-cap calculation
@@ -97,6 +115,8 @@ euro-bess-radar/
 ├── samples/                  # Generated demo CSVs from seed_demo_9_2b.py (git-ignored)
 ├── docs/runbooks/            # Operator runbooks (9.2b + imbalance validation, manual UI smoke)
 ├── docs/design/              # Locked model contracts + canonical fingerprint vectors
+├── docs/validation/          # Current revision-bound validation snapshot
+├── docs/audits/              # Historical reviews, frozen patches and reproduction evidence
 ├── data/
 │   ├── cache/                # SQLite + CSV (git-ignored)
 │   └── manual/               # Manual CSV uploads
@@ -106,6 +126,7 @@ euro-bess-radar/
 ## Key Markets
 
 Optimized for BESS investment screening in:
+
 - Germany (DE_LU) — 15min Day-Ahead resolution since SDAC market delivery day 2025-10-01, FCR/aFRR auto-fetch via Regelleistung REST API, plus reBAP/NRV imbalance fetch via Netztransparenz
 - Finland (FI) — FCR-N/D + aFRR auto-fetch via Fingrid
 - Great Britain (GB) — Elexon MID + system prices

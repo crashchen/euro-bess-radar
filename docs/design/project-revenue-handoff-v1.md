@@ -41,3 +41,12 @@ Any intentional wire change must update both fixture copies and both hardcoded
 digests in one atomic cross-repo round. A one-sided edit makes that repository's
 test fail and leaves the sibling fixture digest visibly out of sync during
 review.
+
+## Verification boundary
+
+The [current Radar snapshot](../validation/current.md) records producer-side
+validation. The [manual walkthrough](../runbooks/manual-ui-smoke.md#checklist--radar--ess-annual-revenue-json-handoff)
+includes export, stale-state handling, consumer preview and economic
+reconciliation. Step 4 did not execute the ESS UI/import/calculation workflow
+or rerun the sibling test suite; the cross-repo fixture contract above is not
+a claim of a fresh end-to-end run. No ESS file or wire/digest changed here.
