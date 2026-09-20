@@ -203,10 +203,6 @@ def _cached_reserve_panel_app() -> None:
     )
 
 
-def _metric_map(app: AppTest) -> dict[str, str]:
-    return {metric.label: metric.value for metric in app.metric}
-
-
 def test_locked_project_case_labels_are_literal() -> None:
     assert project_page.SCREENING_NPV_LABEL == "No-lifecycle-cost screening NPV"
     assert project_page.LIFECYCLE_NPV_LABEL == (
@@ -221,31 +217,48 @@ def test_locked_project_case_labels_are_literal() -> None:
 def test_available_result_maps_typed_distributions_to_exact_ui_slots() -> None:
     app = AppTest.from_function(_available_result_app).run(timeout=30)
     assert not app.exception
-    metrics = _metric_map(app)
+    assert len(app.metric) == 8
+    sections = [item.value for item in app.markdown]
     result = _available_result()
-    for label, outcome in (
+    for group, (label, outcome) in enumerate((
         (
             project_page.SCREENING_NPV_LABEL,
             result.no_lifecycle_cost_screening_npv,
         ),
         (project_page.LIFECYCLE_NPV_LABEL, result.lifecycle_cash_npv),
-    ):
+    )):
+        assert f"**{label}**" in sections
         distribution = outcome.distribution
         assert distribution is not None
-        assert metrics[f"{label} — P10 (Downside)"] == f"€{distribution.p10:,.0f}"
-        assert metrics[f"{label} — P50 (Median)"] == f"€{distribution.p50:,.0f}"
-        assert metrics[f"{label} — P90 (Upside)"] == f"€{distribution.p90:,.0f}"
-        assert metrics[f"{label} — P(NPV > 0)"] == (
-            f"{distribution.prob_positive:.0%}"
+        expected = (
+            (project_page.P10_LABEL, f"€{distribution.p10:,.0f}"),
+            (project_page.P50_LABEL, f"€{distribution.p50:,.0f}"),
+            (project_page.P90_LABEL, f"€{distribution.p90:,.0f}"),
+            (project_page.PROBABILITY_LABEL, f"{distribution.prob_positive:.0%}"),
         )
+        for offset, (short_label, value) in enumerate(expected):
+            metric = app.metric[group * 4 + offset]
+            assert metric.label == short_label
+            assert metric.value == value
+            assert metric.proto.help == f"{label} — {short_label}"
 
 
 def test_unknown_is_screening_only_and_never_rendered_as_zero() -> None:
     app = AppTest.from_function(_unknown_result_app).run(timeout=30)
     assert not app.exception
-    labels = set(_metric_map(app))
-    assert sum(label.startswith(project_page.SCREENING_NPV_LABEL) for label in labels) == 4
-    assert not any(label.startswith(project_page.LIFECYCLE_NPV_LABEL) for label in labels)
+    assert [metric.label for metric in app.metric] == [
+        project_page.P10_LABEL,
+        project_page.P50_LABEL,
+        project_page.P90_LABEL,
+        project_page.PROBABILITY_LABEL,
+    ]
+    assert all(
+        metric.proto.help.startswith(project_page.SCREENING_NPV_LABEL)
+        for metric in app.metric
+    )
+    sections = [item.value for item in app.markdown]
+    assert f"**{project_page.SCREENING_NPV_LABEL}**" in sections
+    assert f"**{project_page.LIFECYCLE_NPV_LABEL}**" in sections
     warnings = [warning.value for warning in app.warning]
     assert any(LIFECYCLE_UNKNOWN_STATUS in value for value in warnings)
     assert any(LIFECYCLE_UNKNOWN_MESSAGE in value for value in warnings)
@@ -636,9 +649,9 @@ def test_real_public_adapter_reaches_project_case_ui() -> None:
     assert not app.exception
     app.button(key="pc_run").click().run(timeout=120)
     assert not app.exception
-    metrics = _metric_map(app)
-    assert len(metrics) == 4
+    assert len(app.metric) == 4
     assert all(
-        label.startswith(project_page.SCREENING_NPV_LABEL) for label in metrics
+        metric.proto.help.startswith(project_page.SCREENING_NPV_LABEL)
+        for metric in app.metric
     )
     assert any("pre-tax unlevered, not bankable" in c.value for c in app.caption)

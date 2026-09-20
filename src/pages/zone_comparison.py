@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.analytics import (
+    UNAVAILABLE_DISPLAY,
     calculate_daily_spreads,
     compare_zones,
 )
@@ -99,9 +100,21 @@ def render(
         "zone": "Zone",
         "avg_price": st.column_config.NumberColumn(
             "Avg Price", format="\u20ac%.2f",
+            help="Weighted by verified delivery duration over finite prices.",
         ),
+        "avg_price_coverage_pct": st.column_config.NumberColumn(
+            "Avg Price Coverage", format="%.1f%%",
+            help="Share of delivery hours with a finite price.",
+        ),
+        # The reason is shown once per zone below the table and kept in the
+        # Excel export; a long sentence column would crowd the screening view.
+        "avg_price_unavailable_reason": None,
         "std_price": st.column_config.NumberColumn(
-            "Std Dev", format="%.2f",
+            "Std Dev (row-based)", format="%.2f",
+            help=(
+                "Sample standard deviation of price rows (EUR/MWh). "
+                "Each row has equal weight, irrespective of delivery duration."
+            ),
         ),
         "avg_spread": st.column_config.NumberColumn(
             "Avg Spread", format="\u20ac%.2f",
@@ -146,6 +159,11 @@ def render(
         hide_index=True,
         column_config=col_config,
     )
+    for zone, reason in comp[["zone", "avg_price_unavailable_reason"]].itertuples(
+        index=False,
+    ):
+        if isinstance(reason, str) and reason:
+            st.caption(f"Avg Price for {zone}: {UNAVAILABLE_DISPLAY} — {reason}.")
 
     # Download comparison
     comp_xlsx = export_comparison_to_bytes(comp)

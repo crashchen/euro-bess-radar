@@ -1,0 +1,38 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: /private<reviewed-baseline>
+configfile: pyproject.toml
+collected 37 items
+
+tests/test_step3c_average_price.py ........................F....F.....FF [100%]
+
+=================================== FAILURES ===================================
+____________ test_excel_summary_uses_the_duration_weighted_average _____________
+tests/test_step3c_average_price.py:334: in test_excel_summary_uses_the_duration_weighted_average
+    assert pairs["Median Price (row-based, EUR/MWh)"] == 100.0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'Median Price (row-based, EUR/MWh)'
+_____________ test_pdf_summary_uses_the_duration_weighted_average ______________
+tests/test_step3c_average_price.py:369: in test_pdf_summary_uses_the_duration_weighted_average
+    assert "Median Price (row-based, EUR/MWh) 100.00" in text
+E   AssertionError: assert 'Median Price (row-based, EUR/MWh) 100.00' in 'BESS Pulse - Market Report Zone DE_LU Timezone UTC Date Range 2025-08-31  to  2025-10-10 Total Days 41 Avg Price (EUR...1.0 Capture Rate Assumption 0.7 Negative Price Hours 0.0 Negative Price Intervals 0 Negative Price % of Intervals 0.0%'
+______________ test_comparison_export_writes_na_beside_the_reason ______________
+tests/test_step3c_average_price.py:459: in test_comparison_export_writes_na_beside_the_reason
+    std = header.index("Std Dev (row-based)")
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   ValueError: 'Std Dev (row-based)' is not in list
+_______ test_zone_comparison_page_names_the_unavailable_zone_and_reason ________
+tests/test_step3c_average_price.py:487: in test_zone_comparison_page_names_the_unavailable_zone_and_reason
+    assert columns["std_price"]["label"] == "Std Dev (row-based)"
+E   AssertionError: assert 'Std Dev' == 'Std Dev (row-based)'
+E
+E     - Std Dev (row-based)
+E     + Std Dev
+----------------------------- Captured stderr call -----------------------------
+2026-09-19 22:21:57.237 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+=========================== short test summary info ============================
+FAILED tests/test_step3c_average_price.py::test_excel_summary_uses_the_duration_weighted_average
+FAILED tests/test_step3c_average_price.py::test_pdf_summary_uses_the_duration_weighted_average
+FAILED tests/test_step3c_average_price.py::test_comparison_export_writes_na_beside_the_reason
+FAILED tests/test_step3c_average_price.py::test_zone_comparison_page_names_the_unavailable_zone_and_reason
+========================= 4 failed, 33 passed in 1.23s =========================

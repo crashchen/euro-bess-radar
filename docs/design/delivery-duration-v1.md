@@ -1,8 +1,9 @@
-# Native DA delivery durations — Step 2
+# Native DA delivery durations
 
 This contract extends the [Step 1 replay guards](replay-input-guards.md).
-It covers physical duration within a DA day; it does not introduce a new
-market calendar or allow mismatched DA/IDA products to be joined.
+It covers physical duration within a DA day and duration-based price analytics;
+it does not introduce a new market calendar or allow mismatched DA/IDA products
+to be joined.
 
 ## Accepted inputs
 
@@ -58,6 +59,53 @@ capacity cash to EUR 114 does not register a new reserve settlement profile.
 
 ## Analytics and presentation
 
+### Overall average price
+
+`calculate_average_price` supplies the one window-wide **Avg Price** used by
+Market Overview, Zone Comparison (including its workbook), and the Excel/PDF
+report summaries. It validates the delivery grid over the entire input window,
+then calculates `sum(finite_price * interval_hours) / sum(finite_interval_hours)`.
+The accepted native durations are 1 hour, 30 minutes and 15 minutes, including
+the registered SDAC hourly-to-quarter-hour transition. A regular 2-hour or daily
+sample is not evidence of a supported delivery product. This restriction is
+local to this average; it does not narrow the lower-level inference helper's
+historical uniform-cadence behavior or change a solver's input contract.
+
+The input must have a real `DatetimeIndex`; a numeric row index is never
+silently converted into delivery timestamps. Empty inputs, a lone timestamp,
+duplicates, unsorted or unset timestamps, an internal gap, an unknown cadence
+change, or no finite price coverage make the average unavailable. Every
+consumer shows `n/a` with the shared `avg_price_reason`. Zone Comparison keeps
+its table's average-price column numeric for numerical sorting; an unavailable
+entry is a missing numeric cell, with the zone's explicit `n/a` and reason in
+a caption below the table. Its workbook uses literal `n/a` beside the reason.
+There is no one-hour fallback, reordering, de-duplication, resampling or gap filling.
+
+NaN and infinite prices on an otherwise verified grid contribute neither price
+value nor covered hours. `average_price_basis` discloses finite covered hours
+out of all verified delivery hours represented by the observations, including
+the last observed product's duration. That denominator describes this input
+window; it is not a claim that the requested market history is complete. A
+verified grid with no finite prices has zero covered hours and an unavailable
+average. An unverifiable grid has unavailable durations as well. Available
+Excel averages remain numeric cells with their existing precision.
+
+For 30 hourly days priced at EUR 10/MWh followed at the registered cutover by
+10 quarter-hour days at EUR 100/MWh, the overall average is **EUR 32.50/MWh**;
+the old equal-row average was EUR 61.43/MWh. The final trailing 720-hour average
+is separately EUR 40/MWh, since it covers only the last 30 physical days.
+Uniform 1-hour, 30-minute and 15-minute windows retain their previous averages.
+The adjacent **Std Dev (row-based)** in Zone Comparison and its workbook, and
+**Median Price (row-based, EUR/MWh)** in the Excel/PDF summaries, retain their
+existing equal-row statistics: sample standard deviation and median,
+respectively. They are not weighted by delivery duration, so a quarter-hour
+price row has the same weight as an hourly row. Their labels distinguish this
+basis from Avg Price; this step does not change either calculation.
+Renewable-conditioned averages, heatmap groups and forward-contract averages
+are separate statistics and are not changed by this contract.
+
+### Other duration-based analytics
+
 On a mixed DA day, the ordered spread calculation compares duration-weighted
 buy-before-sell windows containing whole native products and exactly the
 requested physical duration. It does not split an hourly order into four
@@ -107,6 +155,23 @@ Duplicate DA timestamps make only the DA comparator unavailable; they cannot
 multiply the main forecast population. Timestamp overlap is a price-space
 diagnostic and is explicitly not proof of matching delivery products.
 
+### Metric layout
+
+Market Overview, Project Case and the cockpit's KPI rows use
+`ui_theme.metric_columns`, a horizontal Streamlit container whose cards wrap
+according to their actual available width, including beside the sidebar or
+inside an expander. The cockpit's custom KPI and health grids likewise choose
+their column count from a minimum card width rather than a viewport breakpoint.
+These presentation changes do not alter the values or units being reported.
+
+Project Case retains each full economic section heading and uses the short
+card labels `P10 (Downside)`, `P50 (Median)`, `P90 (Upside)` and `P(NPV > 0)`.
+Readers must be able to distinguish the quantiles and read the full monetary
+amount without relying on a tooltip. Browser acceptance covers 1280, 1440 and
+390 CSS-pixel widths and records the sidebar state; AppTest string assertions
+alone do not prove that a label, amount or unit is readable. See the
+[manual smoke checklist](../runbooks/manual-ui-smoke.md).
+
 ## Reserve average power
 
 `solve_daily_joint_capacity_lp` reports `avg_reserve_mw` as a duration-weighted
@@ -137,5 +202,9 @@ base branch trigger CI, including stacked review branches.
 The [Step 2 handoff](../audits/2026-09-08-step2-handoff.md) freezes the change,
 baseline failures and validation results. German DST reserve cash still
 differs between Project Case's wall-clock settlement and the cockpit's
-physical-hour screening convention. Clarifying that distinction, result
-persistence, other visual work and Vault housekeeping remain subsequent steps.
+physical-hour screening convention. Step 3B result persistence is merged in
+[#90](https://github.com/crashchen/euro-bess-radar/pull/90) as `cf91374`; the
+Step 3C average-price and metric-layout changes are under review. Clarifying
+the DST settlement distinction remains Step 3D, and full documentation/Vault
+housekeeping remains Step 4. See the [audit index](../audits/README.md) for
+revision-specific evidence rather than treating this contract as a test log.

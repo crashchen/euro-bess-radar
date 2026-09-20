@@ -1,0 +1,18 @@
+{
+  "avg_price": 32.5,
+  "median": {
+    "label": "Median Price (row-based, EUR/MWh)",
+    "value": 100,
+    "data_type": "n",
+    "format": "#,##0.00",
+    "wrap_text": true,
+    "row_height": 30.0
+  },
+  "std": {
+    "label": "Std Dev (row-based)",
+    "value": 44.55,
+    "data_type": "n",
+    "format": "#,##0.00"
+  },
+  "pdf_text_verified": true
+}

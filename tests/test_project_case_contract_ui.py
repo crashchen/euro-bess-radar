@@ -563,8 +563,14 @@ def test_panel_builds_and_settles_a_contract_end_to_end(
 
     app.button(key="pc_run").click().run(timeout=30)
     assert not app.exception
-    metrics = {metric.label: metric.value for metric in app.metric}
-    assert any(project_page.SCREENING_NPV_LABEL in label for label in metrics)
+    assert any(
+        metric.label == project_page.P50_LABEL
+        and metric.proto.help.startswith(project_page.SCREENING_NPV_LABEL)
+        for metric in app.metric
+    )
+    assert f"**{project_page.SCREENING_NPV_LABEL}**" in [
+        item.value for item in app.markdown
+    ]
     assert CONTRACT_PRODUCT_DISCLOSURE_V1 in _captions(app)
 
 
@@ -575,14 +581,14 @@ def test_panel_contract_run_is_floor_protected_versus_merchant_only(
     app = AppTest.from_function(_contract_panel_app).run(timeout=30)
     app.button(key="pc_run").click().run(timeout=30)
     assert not app.exception
-    merchant_p50 = {metric.label: metric.value for metric in app.metric}[
+    merchant_p50 = {metric.proto.help: metric.value for metric in app.metric}[
         f"{project_page.SCREENING_NPV_LABEL} — {project_page.P50_LABEL}"
     ]
 
     app = _run_contract_panel(monkeypatch)
     app.button(key="pc_run").click().run(timeout=30)
     assert not app.exception
-    contracted_p50 = {metric.label: metric.value for metric in app.metric}[
+    contracted_p50 = {metric.proto.help: metric.value for metric in app.metric}[
         f"{project_page.SCREENING_NPV_LABEL} — {project_page.P50_LABEL}"
     ]
 

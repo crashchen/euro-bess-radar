@@ -1,0 +1,30 @@
+BESS Pulse - Market Report
+Zone                           DE_LU
+Timezone                       UTC
+Date Range                     2025-08-31 to 2025-10-10
+Total Days                     41
+Source Gap Intervals           1
+Short-Gap Imputed Intervals    0
+Unresolved Missing Intervals   1
+Unresolved Missing %           0.1%
+Max Source Gap (hours)         1.0
+
+Avg Price (EUR/MWh)            32.49
+Avg Price Basis                Duration-weighted: finite prices cover 958.50 of 960.00 delivery hours (99.8%); the rest is excluded, not counted
+                               as zero.
+Median Price (EUR/MWh)         100.00
+
+50th-percentile Spread         0.00
+75th-percentile Spread         0.00
+90th-percentile Spread         0.00
+Mean Spread                    2.25
+
+Est. Annual Revenue (EUR/MW)   506
+
+Modeled Cycles per Day         1.0
+Capture Rate Assumption        0.7
+
+Negative Price Hours           0.25
+Negative Price Intervals        1
+Negative Price % of Intervals   0.1%
+

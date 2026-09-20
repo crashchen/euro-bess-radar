@@ -1,0 +1,24 @@
+BESS Pulse - Market Report
+Zone                            DE_LU
+Timezone                        UTC
+Date Range                      2025-08-31 to 2025-10-10
+Total Days                      41
+
+Avg Price (EUR/MWh)             32.50
+Avg Price Basis                 Duration-weighted: finite prices cover 960.00 of 960.00 delivery hours (100.0%).
+Median Price (EUR/MWh)          100.00
+
+50th-percentile Spread          0.00
+75th-percentile Spread          0.00
+90th-percentile Spread          0.00
+Mean Spread                     2.20
+
+Est. Annual Revenue (EUR/MW)    494
+
+Modeled Cycles per Day          1.0
+Capture Rate Assumption         0.7
+
+Negative Price Hours            0.0
+Negative Price Intervals        0
+Negative Price % of Intervals   0.0%
+
