@@ -1,0 +1,80 @@
+{
+  "verified_at": "2026-09-20T10:37:24.376584+00:00",
+  "patch_count": 9,
+  "all_match": true,
+  "mismatches": [],
+  "patches": [
+    {
+      "path": "docs/audits/2026-09-08-evidence/step1-source.patch",
+      "expected_sha256": "c2e70d354cf86e01029fe77c93570063af3e477759b7aa48fdf7667a2b89c681",
+      "actual_sha256": "c2e70d354cf86e01029fe77c93570063af3e477759b7aa48fdf7667a2b89c681",
+      "matches": true,
+      "expected_source": "docs/audits/2026-09-08-step1-handoff.md",
+      "expected_source_line": 33
+    },
+    {
+      "path": "docs/audits/2026-09-08-evidence/step1b-source.patch",
+      "expected_sha256": "a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12",
+      "actual_sha256": "a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12",
+      "matches": true,
+      "expected_source": "docs/audits/2026-09-08-step1b-handoff.md",
+      "expected_source_line": 14
+    },
+    {
+      "path": "docs/audits/2026-09-08-evidence/step1b-r2-source.patch",
+      "expected_sha256": "022f22efb435078e1e37f7cabbababf13030c25f588409f5b94b1c2e8e47f788",
+      "actual_sha256": "022f22efb435078e1e37f7cabbababf13030c25f588409f5b94b1c2e8e47f788",
+      "matches": true,
+      "expected_source": "docs/audits/2026-09-08-step1b-r2-handoff.md",
+      "expected_source_line": 30
+    },
+    {
+      "path": "docs/audits/2026-09-08-step2-evidence/step2-code.patch",
+      "expected_sha256": "fda57842530b8cfd0f84b9666d1fa6dd7e290e4f40e1c64538ea8002c42b7ba1",
+      "actual_sha256": "fda57842530b8cfd0f84b9666d1fa6dd7e290e4f40e1c64538ea8002c42b7ba1",
+      "matches": true,
+      "expected_source": "docs/audits/2026-09-08-step2-handoff.md",
+      "expected_source_line": 32
+    },
+    {
+      "path": "docs/audits/2026-09-15-step3a-evidence/step3a-code.patch",
+      "expected_sha256": "64989c7c1c5ac116a6d799b82310c169fb9b557a6ea7dcc24ef267090183c560",
+      "actual_sha256": "64989c7c1c5ac116a6d799b82310c169fb9b557a6ea7dcc24ef267090183c560",
+      "matches": true,
+      "expected_source": "docs/audits/2026-09-15-step3a-handoff.md",
+      "expected_source_line": 72
+    },
+    {
+      "path": "docs/audits/2026-09-16-step3b-evidence/step3b-code.patch",
+      "expected_sha256": "034b0b88c3011715d4bc650fbcbfe35555c41dd648461cb2da4065af29b3ef53",
+      "actual_sha256": "034b0b88c3011715d4bc650fbcbfe35555c41dd648461cb2da4065af29b3ef53",
+      "matches": true,
+      "expected_source": "docs/audits/2026-09-16-step3b-handoff.md",
+      "expected_source_line": 79
+    },
+    {
+      "path": "docs/audits/2026-09-16-step3c-evidence/step3c-code.patch",
+      "expected_sha256": "82f63e0113352765fd3ad031c2f2e1cffe8fe0bc820252e583b139849fdd9bfa",
+      "actual_sha256": "82f63e0113352765fd3ad031c2f2e1cffe8fe0bc820252e583b139849fdd9bfa",
+      "matches": true,
+      "expected_source": "docs/audits/2026-09-16-step3c-handoff.md",
+      "expected_source_line": 50
+    },
+    {
+      "path": "docs/audits/2026-09-19-step3c-r2-evidence/step3c-r2-code.patch",
+      "expected_sha256": "e0dcce755ec46f1eac3b21e9495326316bc55ce4b6c5aaf731ada3a1e6804dce",
+      "actual_sha256": "e0dcce755ec46f1eac3b21e9495326316bc55ce4b6c5aaf731ada3a1e6804dce",
+      "matches": true,
+      "expected_source": "docs/audits/2026-09-19-step3c-r2-handoff.md",
+      "expected_source_line": 45
+    },
+    {
+      "path": "docs/audits/2026-09-19-step3c-r2-evidence/step3c-r2-aggregate-code.patch",
+      "expected_sha256": "984818209aacbcacc47d7fb0b5c6acfd945108101aeaf0e6714dca4df1534d23",
+      "actual_sha256": "984818209aacbcacc47d7fb0b5c6acfd945108101aeaf0e6714dca4df1534d23",
+      "matches": true,
+      "expected_source": "docs/audits/2026-09-19-step3c-r2-handoff.md",
+      "expected_source_line": 47
+    }
+  ]
+}

@@ -126,6 +126,19 @@ Cockpit only. Revenue Estimation, Forward Scenarios, Renewable Correlation and
 Data Trust metrics retain their previous layouts; their layout inventory and
 prioritization are Step 4 work, not a completed acceptance claim.
 
+## Step 3D — reserve capacity settlement disclosure
+
+Use synthetic inputs or an isolated cache. Keep the two existing capacity
+cash conventions; this is a disclosure check, not a settlement migration.
+
+| # | Check | Action | Expected |
+|---|---|---|---|
+| 39 | Recorded Project Case basis | Run a DE_LU reserve case and inspect its full result, cockpit mirror and standalone/appended Excel NPV sheet | All use the recorded zone/product and six nominal 4h blocks per local day, including DST; the input fingerprint and raw provenance remain unchanged. DA-only cases have no reserve-capacity caption |
+| 40 | Actual Cockpit capacity rows | Run forecast comparison with capacity co-opt, triple ceiling, realistic reserve and reserve-mode stochastic results available | Capacity basis/scope columns identify physical hours and the selected zone/product; DA/IDA and non-reserve stochastic rows say Not applicable. Full basis appears nearby and in Excel Assumptions, including when no global assumptions were supplied |
+| 41 | Snapshot and unavailable results | Refresh a populated panel, then change zone/product or an input and inspect/download; restore original inputs | Refresh retains the original basis without re-solving; changed inputs hide stale results/downloads under the existing guard; reverting restores the original run. Unavailable models do not acquire a capacity-payment claim |
+| 42 | Joint Revenue report | Inspect Revenue joint MILP with two capacity products and an energy-only product; export XLSX/PDF | Disclosure names the actual aggregate capacity products, excludes the energy-only product, and agrees on physical-hour screening. Do not apply it to standalone annual ancillary fees or the Project Case cash model |
+| 43 | DST and readability | Use the same 1 MW / EUR 20/MW/h / 0.95 availability fixture on ordinary and spring/autumn DST days; inspect captions at 1280/390 px and render actual exports | PC/screening cash is 456/456, 456/437, 456/475. Text explains the difference without changing energy/SoC. Basis labels and long product strings remain readable in the tested fixtures; table horizontal scrolling is acceptable |
+
 ## Downstream spot-checks (after 3/4/7/8)
 
 - **Data Trust coverage matrix**: the touched zone row shows the stream

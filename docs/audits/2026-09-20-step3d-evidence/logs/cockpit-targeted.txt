@@ -1,0 +1,20 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 153 items
+
+tests/test_step3d_cockpit_disclosure.py .....................            [ 13%]
+tests/test_step3b_batch_result_persistence.py .......................... [ 30%]
+.........................................                                [ 57%]
+tests/test_assumptions.py .............                                  [ 66%]
+tests/test_strategy_compare.py ......................................... [ 92%]
+...........                                                              [100%]
+
+=============================== warnings summary ===============================
+tests/test_step3b_batch_result_persistence.py: 23 warnings
+  <repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+    proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+====================== 153 passed, 23 warnings in 23.88s =======================

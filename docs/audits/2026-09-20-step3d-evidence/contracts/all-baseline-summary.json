@@ -1,0 +1,41 @@
+{
+  "base": "2e4ed73d7357e4d556373f6019198045f8fc8d04",
+  "collected": 82,
+  "failed": 64,
+  "passed": 18,
+  "errors": 0,
+  "skipped": 0,
+  "modules": {
+    "test_step3d_cockpit_disclosure": {
+      "passed": 2,
+      "failed": 19,
+      "errors": 0,
+      "skipped": 0
+    },
+    "test_step3d_export_disclosure": {
+      "passed": 4,
+      "failed": 6,
+      "errors": 0,
+      "skipped": 0
+    },
+    "test_step3d_project_case_disclosure": {
+      "passed": 4,
+      "failed": 6,
+      "errors": 0,
+      "skipped": 0
+    },
+    "test_step3d_settlement_basis": {
+      "passed": 8,
+      "failed": 33,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "test_sha256": {
+    "tests/test_step3d_cockpit_disclosure.py": "e118c42418fbcd65cf8ee0cba0bd8f5fc8ddd080277abf9eaabb7620ca0f7c3d",
+    "tests/test_step3d_export_disclosure.py": "5563bf845ff48750c9c6be4e3f82fa5f2a73c8fbcfdfd79bc5f88a3100abdf32",
+    "tests/test_step3d_project_case_disclosure.py": "ffb2318a6051e3e78d0b7888e07cfd98f3acd85808558144e8328aae5ec311c9",
+    "tests/test_step3d_settlement_basis.py": "46fb86a80f1384159c6c1f028dec68e8b6854467dacacdd18d7213b866f509f1"
+  },
+  "review": "All failures arise from absent new helper/disclosure output or old panel identity; no fixture error or signature TypeError. Cockpit factory conditionally passes new primary_zone parameter on supported versions."
+}

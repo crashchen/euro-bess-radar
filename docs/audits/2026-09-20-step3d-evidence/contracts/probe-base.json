@@ -1,0 +1,143 @@
+{
+  "source": "6 synthetic Regelleistung XLSX blocks at EUR 80/MW each, parsed to EUR 20/MW/h",
+  "common": {
+    "power_mw": 1,
+    "availability": 0.95,
+    "da": 0,
+    "ida": 0
+  },
+  "coopt": [
+    {
+      "date": "2025-03-29",
+      "rows": 24,
+      "physical_hours": 24.0,
+      "nominal_hours": 24.0,
+      "factors": [
+        1.0
+      ],
+      "pc_cash": 456.0,
+      "cockpit_cash": 456.0,
+      "joint_da_revenue": 0.0,
+      "joint_capacity_revenue": 456.0,
+      "profile": "{'da': 'pc-da-sdac-60to15-v1', 'ida': None, 'reserve': 'pc-reserve-block-of-day-4h-v1'}"
+    },
+    {
+      "date": "2025-03-30",
+      "rows": 23,
+      "physical_hours": 23.0,
+      "nominal_hours": 24.0,
+      "factors": [
+        1.0,
+        1.3333333333333333
+      ],
+      "pc_cash": 456.0,
+      "cockpit_cash": 437.0,
+      "joint_da_revenue": 0.0,
+      "joint_capacity_revenue": 437.0,
+      "profile": "{'da': 'pc-da-sdac-60to15-v1', 'ida': None, 'reserve': 'pc-reserve-block-of-day-4h-v1'}"
+    },
+    {
+      "date": "2025-10-26",
+      "rows": 100,
+      "physical_hours": 25.0,
+      "nominal_hours": 24.0,
+      "factors": [
+        0.8,
+        1.0
+      ],
+      "pc_cash": 456.0,
+      "cockpit_cash": 475.0,
+      "joint_da_revenue": 0.0,
+      "joint_capacity_revenue": 475.0,
+      "profile": "{'da': 'pc-da-sdac-60to15-v1', 'ida': None, 'reserve': 'pc-reserve-block-of-day-4h-v1'}"
+    },
+    {
+      "date": "2026-03-29",
+      "rows": 92,
+      "physical_hours": 23.0,
+      "nominal_hours": 24.0,
+      "factors": [
+        1.0,
+        1.3333333333333333
+      ],
+      "pc_cash": 456.0,
+      "cockpit_cash": 437.0,
+      "joint_da_revenue": 0.0,
+      "joint_capacity_revenue": 437.0,
+      "profile": "{'da': 'pc-da-sdac-60to15-v1', 'ida': None, 'reserve': 'pc-reserve-block-of-day-4h-v1'}"
+    }
+  ],
+  "triple": [
+    {
+      "date": "2025-03-30",
+      "pc_unavailable": "PC_ADP_DA_ID_RESERVE: no valid dates (result unavailable)",
+      "cockpit_sequential_cash": null,
+      "cockpit_sequential_available": false,
+      "cockpit_ceiling": {
+        "total_eur": 0.0,
+        "solved_days": 0,
+        "observed_days": 1,
+        "valid_days": 0,
+        "excluded_days": 1,
+        "excluded_days_due_to_missing": 1,
+        "excluded_days_due_to_solver_failure": 0,
+        "solver_failure_details": [],
+        "model_available": false
+      }
+    },
+    {
+      "date": "2025-10-26",
+      "pc_cash": 456.0,
+      "cockpit_sequential_cash": 475.0,
+      "cockpit_sequential_available": true,
+      "cockpit_ceiling": {
+        "total_eur": 475.0,
+        "solved_days": 1,
+        "observed_days": 1,
+        "valid_days": 1,
+        "excluded_days": 0,
+        "excluded_days_due_to_missing": 0,
+        "excluded_days_due_to_solver_failure": 0,
+        "solver_failure_details": [],
+        "model_available": true
+      },
+      "cockpit_stochastic_cash": null
+    },
+    {
+      "date": "2026-03-28",
+      "pc_cash": 456.0,
+      "cockpit_sequential_cash": 456.0,
+      "cockpit_sequential_available": true,
+      "cockpit_ceiling": {
+        "total_eur": 456.0,
+        "solved_days": 1,
+        "observed_days": 1,
+        "valid_days": 1,
+        "excluded_days": 0,
+        "excluded_days_due_to_missing": 0,
+        "excluded_days_due_to_solver_failure": 0,
+        "solver_failure_details": [],
+        "model_available": true
+      },
+      "cockpit_stochastic_cash": 456.0
+    },
+    {
+      "date": "2026-03-29",
+      "pc_cash": 456.0,
+      "cockpit_sequential_cash": 437.0,
+      "cockpit_sequential_available": true,
+      "cockpit_ceiling": {
+        "total_eur": 437.0,
+        "solved_days": 1,
+        "observed_days": 1,
+        "valid_days": 1,
+        "excluded_days": 0,
+        "excluded_days_due_to_missing": 0,
+        "excluded_days_due_to_solver_failure": 0,
+        "solver_failure_details": [],
+        "model_available": true
+      },
+      "cockpit_stochastic_cash": null
+    }
+  ]
+}

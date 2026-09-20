@@ -1,0 +1,44 @@
+[
+  {
+    "file": "project-case-dst.xlsx",
+    "sheet": "Project Case NPVs",
+    "range": "A10:C15",
+    "png": "project-case-dst-project-case-npvs.png",
+    "inspection": "{\"kind\":\"region\",\"sheet\":\"Project Case NPVs\",\"address\":\"A10:B15\",\"rows\":6,\"cols\":2,\"nonEmpty\":11,\"blank\":1,\"text\":11,\"maxTextLength\":236,\"preview\":[[\"Schema Version\",\"project-case-v1.1\"],[\"Project Case Input Fingerprint\",\"5604b72bbda6415b4dd42f542183d29e6394dfb55e3fc9c0b4761cacaf5da251\"],[\"Reserve Capacity Settlement Basis\",\"DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per...\"],[\"Cash-flow Table Statistic\",\"p50_annual_bootstrap_draw_linear\"],[\"Typed Contract Settlement Included\",\"0\"],[\"Contract Settlement Basis\",null]],\"previewAddress\":\"A10:B15\",\"previewRows\":6,\"previewCols\":2}"
+  },
+  {
+    "file": "fi-report-with-de-project-case.xlsx",
+    "sheet": "Project Case NPVs",
+    "range": "A10:C15",
+    "png": "fi-report-with-de-project-case-project-case-npvs.png",
+    "inspection": "{\"kind\":\"region\",\"sheet\":\"Project Case NPVs\",\"address\":\"A10:B15\",\"rows\":6,\"cols\":2,\"nonEmpty\":11,\"blank\":1,\"text\":11,\"maxTextLength\":236,\"preview\":[[\"Schema Version\",\"project-case-v1.1\"],[\"Project Case Input Fingerprint\",\"5604b72bbda6415b4dd42f542183d29e6394dfb55e3fc9c0b4761cacaf5da251\"],[\"Reserve Capacity Settlement Basis\",\"DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per...\"],[\"Cash-flow Table Statistic\",\"p50_annual_bootstrap_draw_linear\"],[\"Typed Contract Settlement Included\",\"0\"],[\"Contract Settlement Basis\",null]],\"previewAddress\":\"A10:B15\",\"previewRows\":6,\"previewCols\":2}"
+  },
+  {
+    "file": "de_lu-screening-spring.xlsx",
+    "sheet": "Summary",
+    "range": "A21:B26",
+    "png": "de_lu-screening-spring-summary.png",
+    "inspection": "{\"kind\":\"region\",\"sheet\":\"Summary\",\"address\":\"A21:B26\",\"rows\":6,\"cols\":2,\"nonEmpty\":12,\"text\":12,\"maxTextLength\":268,\"preview\":[[\"Gross Additive Total (Reference, EUR)\",\"250536\"],[\"Capacity Stack Warning\",\"Capacity reserve revenue is not added to the headline total because it cannot...\"],[\"Joint MILP Capacity Settlement Basis\",\"DE_LU / aggregate capacity: FCR, aFRR Up: physical-hour screening; capacity c...\"],[\"Joint MILP Co-optimized Total (EUR)\",\"239421.38\"],[\"Joint MILP Avg Reserve Commitment\",\"1\"],[\"DA Arbitrage Revenue (EUR)\",\"0\"]],\"previewAddress\":\"A21:B26\",\"previewRows\":6,\"previewCols\":2}"
+  },
+  {
+    "file": "fi-screening-spring.xlsx",
+    "sheet": "Summary",
+    "range": "A21:B26",
+    "png": "fi-screening-spring-summary.png",
+    "inspection": "{\"kind\":\"region\",\"sheet\":\"Summary\",\"address\":\"A21:B26\",\"rows\":6,\"cols\":2,\"nonEmpty\":12,\"text\":12,\"maxTextLength\":189,\"preview\":[[\"Gross Additive Total (Reference, EUR)\",\"166440\"],[\"Capacity Stack Warning\",\"Capacity reserve revenue is not added to the headline total because it cannot...\"],[\"Joint MILP Capacity Settlement Basis\",\"FI / aggregate capacity: FCR-N: physical-hour screening; capacity cash uses e...\"],[\"Joint MILP Co-optimized Total (EUR)\",\"159614.25\"],[\"Joint MILP Avg Reserve Commitment\",\"1\"],[\"DA Arbitrage Revenue (EUR)\",\"0\"]],\"previewAddress\":\"A21:B26\",\"previewRows\":6,\"previewCols\":2}"
+  },
+  {
+    "file": "cockpit-forecast-stub-no-input-assumptions.xlsx",
+    "sheet": "Strategy comparison",
+    "range": "A1:F8",
+    "png": "cockpit-forecast-stub-no-input-assumptions-strategy-comparison.png",
+    "inspection": "{\"kind\":\"region\",\"sheet\":\"Strategy comparison\",\"address\":\"A1:F8\",\"rows\":8,\"cols\":6,\"nonEmpty\":47,\"blank\":1,\"text\":47,\"maxTextLength\":54,\"preview\":[[\"strategy\",\"window_revenue_eur\",\"annualized_eur_per_mw\",\"uplift_vs_da_pct\",\"Capacity basis\",\"Capacity scope\"],[\"DA-only\",\"300\",\"109575\",\"0\",\"Not applicable\",\"Not applicable\"],[\"DA + IDA1 (forecast-driven)\",\"400\",\"146100\",\"33.33\",\"Not applicable\",\"Not applicable\"],[\"DA + IDA1 (perfect-foresight ceiling)\",\"460\",\"168015\",\"53.33\",\"Not applicable\",\"Not applicable\"],[\"DA + FCR co-opt (headroom)\",\"437\",\"159614.25\",\"45.67\",\"Physical delivery hours\",\"DE_LU / FCR\"],[\"DA + IDA1 + FCR (co-opt ceiling)\",\"450\",\"164362.5\",\"50\",\"Physical delivery hours\",\"DE_LU / FCR\"],[\"DA + IDA1 + FCR (forecast-driven realistic)\",\"430\",\"157057.5\",\"43.33\",\"Physical delivery hours\",\"DE_LU / FCR\"],[\"Stochastic policy value (vs capped 9.2b reserve-first)\",\"-3\",\"-1095.75\",null,\"Physical delivery hours\",\"DE_LU / FCR\"]],\"previewAddress\":\"A1:F8\",\"previewRows\":8,\"previewCols\":6}"
+  },
+  {
+    "file": "cockpit-forecast-stub-no-input-assumptions.xlsx",
+    "sheet": "Assumptions",
+    "range": "A1:E4",
+    "png": "cockpit-forecast-stub-no-input-assumptions-assumptions.png",
+    "inspection": "{\"kind\":\"region\",\"sheet\":\"Assumptions\",\"address\":\"A1:E4\",\"rows\":4,\"cols\":5,\"nonEmpty\":17,\"blank\":3,\"text\":17,\"maxTextLength\":239,\"preview\":[[\"parameter\",\"value\",\"unit\",\"source\",\"affects\"],[\"Capacity settlement zone\",\"DE_LU\",null,\"Run-time screening capacity model\",\"Reserve capacity components of: DA + FCR co-opt (headroom); DA + IDA1 + FCR (...\"],[\"Capacity settlement product\",\"FCR\",null,\"Run-time screening capacity model\",\"Reserve capacity components of: DA + FCR co-opt (headroom); DA + IDA1 + FCR (...\"],[\"Capacity settlement basis\",\"DE_LU / FCR: physical-hour screening; capacity cash uses elapsed delivery hou...\",null,\"Run-time screening capacity model\",\"Reserve capacity components of: DA + FCR co-opt (headroom); DA + IDA1 + FCR (...\"]],\"previewAddress\":\"A1:E4\",\"previewRows\":4,\"previewCols\":5}"
+  }
+]

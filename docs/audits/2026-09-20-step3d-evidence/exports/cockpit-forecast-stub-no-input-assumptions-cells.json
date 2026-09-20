@@ -1,0 +1,580 @@
+[
+  {
+    "sheet": "Strategy comparison",
+    "cells": [
+      {
+        "cell": "A1",
+        "value": "strategy",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "B1",
+        "value": "window_revenue_eur",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "C1",
+        "value": "annualized_eur_per_mw",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "D1",
+        "value": "uplift_vs_da_pct",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "E1",
+        "value": "Capacity basis",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "F1",
+        "value": "Capacity scope",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "A2",
+        "value": "DA-only",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "B2",
+        "value": 300,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "C2",
+        "value": 109575,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "D2",
+        "value": 0,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "E2",
+        "value": "Not applicable",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "F2",
+        "value": "Not applicable",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "A3",
+        "value": "DA + IDA1 (forecast-driven)",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "B3",
+        "value": 400,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "C3",
+        "value": 146100,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "D3",
+        "value": 33.33,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "E3",
+        "value": "Not applicable",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "F3",
+        "value": "Not applicable",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "A4",
+        "value": "DA + IDA1 (perfect-foresight ceiling)",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "B4",
+        "value": 460,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "C4",
+        "value": 168015,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "D4",
+        "value": 53.33,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "E4",
+        "value": "Not applicable",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "F4",
+        "value": "Not applicable",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "A5",
+        "value": "DA + FCR co-opt (headroom)",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "B5",
+        "value": 437,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "C5",
+        "value": 159614.25,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "D5",
+        "value": 45.67,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "E5",
+        "value": "Physical delivery hours",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "F5",
+        "value": "DE_LU / FCR",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "A6",
+        "value": "DA + IDA1 + FCR (co-opt ceiling)",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "B6",
+        "value": 450,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "C6",
+        "value": 164362.5,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "D6",
+        "value": 50,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "E6",
+        "value": "Physical delivery hours",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "F6",
+        "value": "DE_LU / FCR",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "A7",
+        "value": "DA + IDA1 + FCR (forecast-driven realistic)",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "B7",
+        "value": 430,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "C7",
+        "value": 157057.5,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "D7",
+        "value": 43.33,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "E7",
+        "value": "Physical delivery hours",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "F7",
+        "value": "DE_LU / FCR",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "A8",
+        "value": "Stochastic policy value (vs capped 9.2b reserve-first)",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "B8",
+        "value": -3,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "C8",
+        "value": -1095.75,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": 30.0
+      },
+      {
+        "cell": "E8",
+        "value": "Physical delivery hours",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      },
+      {
+        "cell": "F8",
+        "value": "DE_LU / FCR",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 30.0
+      }
+    ],
+    "column_widths": {
+      "A": 30.0,
+      "B": 21.0,
+      "C": 24.0,
+      "D": 19.0,
+      "E": 30.0,
+      "F": 30.0
+    }
+  },
+  {
+    "sheet": "Sequential DA+ID",
+    "cells": [
+      {
+        "cell": "A1",
+        "value": "date",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "B1",
+        "value": "realised_eur",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "A2",
+        "value": "2026-03-29 00:00:00",
+        "type": "d",
+        "number_format": "yyyy-mm-dd",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "B2",
+        "value": 400,
+        "type": "n",
+        "number_format": "#,##0.00",
+        "wrap": null,
+        "row_height": null
+      }
+    ],
+    "column_widths": {
+      "A": 13.0,
+      "B": 15.0
+    }
+  },
+  {
+    "sheet": "Assumptions",
+    "cells": [
+      {
+        "cell": "A1",
+        "value": "parameter",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "B1",
+        "value": "value",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "C1",
+        "value": "unit",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "D1",
+        "value": "source",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "E1",
+        "value": "affects",
+        "type": "s",
+        "number_format": "General",
+        "wrap": null,
+        "row_height": null
+      },
+      {
+        "cell": "A2",
+        "value": "Capacity settlement zone",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 75.0
+      },
+      {
+        "cell": "B2",
+        "value": "DE_LU",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 75.0
+      },
+      {
+        "cell": "D2",
+        "value": "Run-time screening capacity model",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 75.0
+      },
+      {
+        "cell": "E2",
+        "value": "Reserve capacity components of: DA + FCR co-opt (headroom); DA + IDA1 + FCR (co-opt ceiling); DA + IDA1 + FCR (forecast-driven realistic); Stochastic policy value (vs capped 9.2b reserve-first)",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 75.0
+      },
+      {
+        "cell": "A3",
+        "value": "Capacity settlement product",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 75.0
+      },
+      {
+        "cell": "B3",
+        "value": "FCR",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 75.0
+      },
+      {
+        "cell": "D3",
+        "value": "Run-time screening capacity model",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 75.0
+      },
+      {
+        "cell": "E3",
+        "value": "Reserve capacity components of: DA + FCR co-opt (headroom); DA + IDA1 + FCR (co-opt ceiling); DA + IDA1 + FCR (forecast-driven realistic); Stochastic policy value (vs capped 9.2b reserve-first)",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 75.0
+      },
+      {
+        "cell": "A4",
+        "value": "Capacity settlement basis",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 75.0
+      },
+      {
+        "cell": "B4",
+        "value": "DE_LU / FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 75.0
+      },
+      {
+        "cell": "D4",
+        "value": "Run-time screening capacity model",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 75.0
+      },
+      {
+        "cell": "E4",
+        "value": "Reserve capacity components of: DA + FCR co-opt (headroom); DA + IDA1 + FCR (co-opt ceiling); DA + IDA1 + FCR (forecast-driven realistic); Stochastic policy value (vs capped 9.2b reserve-first)",
+        "type": "s",
+        "number_format": "General",
+        "wrap": true,
+        "row_height": 75.0
+      }
+    ],
+    "column_widths": {
+      "A": 32.0,
+      "B": 70.0,
+      "C": 7.0,
+      "D": 35.0,
+      "E": 55.0
+    }
+  }
+]

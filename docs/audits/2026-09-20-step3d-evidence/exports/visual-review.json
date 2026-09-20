@@ -1,0 +1,279 @@
+{
+  "inspected_cells": [
+    {
+      "file": "project-case-dst.xlsx",
+      "sheet": "Project Case NPVs",
+      "cell": "B6",
+      "value": 328932.0225575369,
+      "type": "n",
+      "format": "#,##0.00",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    },
+    {
+      "file": "project-case-dst.xlsx",
+      "sheet": "Project Case NPVs",
+      "cell": "C6",
+      "value": 326354.925570289,
+      "type": "n",
+      "format": "#,##0.00",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    },
+    {
+      "file": "project-case-dst.xlsx",
+      "sheet": "Project Case NPVs",
+      "cell": "B7",
+      "value": 328932.0225575369,
+      "type": "n",
+      "format": "#,##0.00",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    },
+    {
+      "file": "project-case-dst.xlsx",
+      "sheet": "Project Case NPVs",
+      "cell": "C7",
+      "value": 326354.925570289,
+      "type": "n",
+      "format": "#,##0.00",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    },
+    {
+      "file": "project-case-dst.xlsx",
+      "sheet": "Project Case NPVs",
+      "cell": "B12",
+      "value": "DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+      "type": "s",
+      "format": "General",
+      "wrap": true,
+      "row_height": 165.0,
+      "column_width": 30.0
+    },
+    {
+      "file": "fi-report-with-de-project-case.xlsx",
+      "sheet": "Project Case NPVs",
+      "cell": "B6",
+      "value": 328932.0225575369,
+      "type": "n",
+      "format": "#,##0.00",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    },
+    {
+      "file": "fi-report-with-de-project-case.xlsx",
+      "sheet": "Project Case NPVs",
+      "cell": "B12",
+      "value": "DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+      "type": "s",
+      "format": "General",
+      "wrap": true,
+      "row_height": 165.0,
+      "column_width": 30.0
+    },
+    {
+      "file": "de_lu-screening-spring.xlsx",
+      "sheet": "Summary",
+      "cell": "B23",
+      "value": "DE_LU / aggregate capacity: FCR, aFRR Up: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+      "type": "s",
+      "format": "General",
+      "wrap": true,
+      "row_height": 195.0,
+      "column_width": 30.0
+    },
+    {
+      "file": "de_lu-screening-spring.xlsx",
+      "sheet": "Summary",
+      "cell": "B24",
+      "value": 239421.38,
+      "type": "n",
+      "format": "#,##0.00",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    },
+    {
+      "file": "de_lu-screening-spring.xlsx",
+      "sheet": "Summary",
+      "cell": "B25",
+      "value": 1,
+      "type": "n",
+      "format": "0.0%",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    },
+    {
+      "file": "fi-screening-spring.xlsx",
+      "sheet": "Summary",
+      "cell": "B23",
+      "value": "FI / aggregate capacity: FCR-N: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time.",
+      "type": "s",
+      "format": "General",
+      "wrap": true,
+      "row_height": 135.0,
+      "column_width": 30.0
+    },
+    {
+      "file": "fi-screening-spring.xlsx",
+      "sheet": "Summary",
+      "cell": "B24",
+      "value": 159614.25,
+      "type": "n",
+      "format": "#,##0.00",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    },
+    {
+      "file": "fi-screening-spring.xlsx",
+      "sheet": "Summary",
+      "cell": "B25",
+      "value": 1,
+      "type": "n",
+      "format": "0.0%",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    },
+    {
+      "file": "cockpit-forecast-stub-no-input-assumptions.xlsx",
+      "sheet": "Strategy comparison",
+      "cell": "A7",
+      "value": "DA + IDA1 + FCR (forecast-driven realistic)",
+      "type": "s",
+      "format": "General",
+      "wrap": null,
+      "row_height": 30.0,
+      "column_width": 30.0
+    },
+    {
+      "file": "cockpit-forecast-stub-no-input-assumptions.xlsx",
+      "sheet": "Strategy comparison",
+      "cell": "A8",
+      "value": "Stochastic policy value (vs capped 9.2b reserve-first)",
+      "type": "s",
+      "format": "General",
+      "wrap": null,
+      "row_height": 30.0,
+      "column_width": 30.0
+    },
+    {
+      "file": "cockpit-forecast-stub-no-input-assumptions.xlsx",
+      "sheet": "Strategy comparison",
+      "cell": "B5",
+      "value": 437,
+      "type": "n",
+      "format": "#,##0.00",
+      "wrap": null,
+      "row_height": 30.0,
+      "column_width": 21.0
+    },
+    {
+      "file": "cockpit-forecast-stub-no-input-assumptions.xlsx",
+      "sheet": "Strategy comparison",
+      "cell": "B8",
+      "value": -3,
+      "type": "n",
+      "format": "#,##0.00",
+      "wrap": null,
+      "row_height": 30.0,
+      "column_width": 21.0
+    },
+    {
+      "file": "cockpit-forecast-stub-no-input-assumptions.xlsx",
+      "sheet": "Strategy comparison",
+      "cell": "C5",
+      "value": 159614.25,
+      "type": "n",
+      "format": "#,##0.00",
+      "wrap": null,
+      "row_height": 30.0,
+      "column_width": 24.0
+    },
+    {
+      "file": "cockpit-forecast-stub-no-input-assumptions.xlsx",
+      "sheet": "Strategy comparison",
+      "cell": "E5",
+      "value": "Physical delivery hours",
+      "type": "s",
+      "format": "General",
+      "wrap": true,
+      "row_height": 30.0,
+      "column_width": 30.0
+    },
+    {
+      "file": "cockpit-forecast-stub-no-input-assumptions.xlsx",
+      "sheet": "Strategy comparison",
+      "cell": "F5",
+      "value": "DE_LU / FCR",
+      "type": "s",
+      "format": "General",
+      "wrap": true,
+      "row_height": 30.0,
+      "column_width": 30.0
+    },
+    {
+      "file": "project-case-dst.xlsx",
+      "sheet": "Project Case NPVs",
+      "cell": "B5",
+      "value": 328932.0225575369,
+      "type": "n",
+      "format": "#,##0.00",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    },
+    {
+      "file": "project-case-dst.xlsx",
+      "sheet": "Project Case NPVs",
+      "cell": "C5",
+      "value": 326354.925570289,
+      "type": "n",
+      "format": "#,##0.00",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    },
+    {
+      "file": "project-case-dst.xlsx",
+      "sheet": "Project Case NPVs",
+      "cell": "B8",
+      "value": 1,
+      "type": "n",
+      "format": "0.0%",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    },
+    {
+      "file": "project-case-dst.xlsx",
+      "sheet": "Project Case NPVs",
+      "cell": "C8",
+      "value": 1,
+      "type": "n",
+      "format": "0.0%",
+      "wrap": null,
+      "row_height": null,
+      "column_width": 30.0
+    }
+  ],
+  "unchanged_table_formatter": true,
+  "unchanged_auto_width": true,
+  "visual_review": {
+    "pdf": "Both full 2-page DE and FI reports inspected after Poppler rasterization. Added settlement labels and complete text fit; no overlap/clipping. Existing source-revenue section continues on page 2.",
+    "xlsx": "All 6 requested ranges inspected after read-only ArtifactTool import. Added capacity settlement text, basis/scope columns and complete Assumptions including affects fit. PC caption remains DE when appended to ambient FI report.",
+    "existing_out_of_scope": [
+      "Cockpit Strategy comparison A7/A8 long strategy names remain clipped at the existing 30-character column width and no-wrap style; complete strategy identities are visible in the new Assumptions affects field.",
+      "Summary Capacity Stack Warning is an existing unwrapped note; a bounded A:B screenshot crops its spill into empty columns.",
+      "ArtifactTool renders the existing false Boolean as 0 in PC row 14; the XLSX retains type b / False. These previews do not certify native Microsoft Excel layout."
+    ]
+  }
+}

@@ -84,6 +84,7 @@ from src.project_case.imports import (
     parse_augmentation_csv,
     parse_explicit_multiplier_csv,
 )
+from src.settlement_disclosure import project_case_capacity_settlement_basis
 from src.ui_theme import metric_columns
 
 SCREENING_NPV_LABEL: Final = "No-lifecycle-cost screening NPV"
@@ -452,6 +453,9 @@ def render_project_case_result(
         return
     _render_outcome(SCREENING_NPV_LABEL, result.no_lifecycle_cost_screening_npv)
     _render_outcome(LIFECYCLE_NPV_LABEL, result.lifecycle_cash_npv)
+    capacity_basis = project_case_capacity_settlement_basis(result)
+    if capacity_basis is not None:
+        st.caption(f"Reserve capacity settlement basis — {capacity_basis}")
     if _contract_case_payload(result) is None:
         st.caption(
             "Lifecycle output is pre-tax unlevered, not bankable: tax, debt, DSCR, "

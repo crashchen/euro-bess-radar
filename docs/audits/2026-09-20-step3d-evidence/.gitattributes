@@ -1,0 +1,4 @@
+*.patch -text whitespace=-blank-at-eol
+*.pdf binary
+*.xlsx binary
+*.png binary

@@ -1,0 +1,38 @@
+BESS Pulse - Market Report
+Zone                                    DE_LU
+Timezone                                Europe/Berlin
+Date Range                              2026-03-29 to 2026-03-29
+Total Days                              1
+
+Avg Price (EUR/MWh)                     40.00
+Avg Price Basis                         Duration-weighted: finite prices cover 23.00 of 23.00 delivery hours (100.0%).
+Median Price (row-based, EUR/MWh)       40.00
+
+50th-percentile Spread                  0.00
+75th-percentile Spread                  0.00
+90th-percentile Spread                  0.00
+Mean Spread                             0.00
+
+Est. Annual Revenue (EUR/MW)            0
+Headline Annual Revenue (EUR)           0
+Headline Total Mode                     conservative_da_primary
+Gross Additive Total (Reference, EUR)   250,536
+Note                                    Capacity reserve revenue is not added to the headline total because it cannot be fully co-dispatched with
+                                        day-ahead arbitrage. Gross additive total is shown as a non-co-optimized reference.
+Joint MILP Capacity Settlement Basis    DE_LU / aggregate capacity: FCR, aFRR Up: physical-hour screening; capacity cash uses elapsed delivery
+                                        hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered
+                                        DE_LU Project Case profile uses six nominal 4h blocks/day.
+Joint MILP Co-optimized Total (EUR)     239,421
+Joint MILP Avg Reserve Commitment       100%
+DA Arbitrage Revenue (EUR)      0
+FCR Revenue (EUR)               166,440
+aFRR Up Revenue (EUR)           83,220
+mFRR Up Revenue (EUR)           876
+
+Modeled Cycles per Day          1.0
+Capture Rate Assumption         1.0
+
+Negative Price Hours            0.0
+Negative Price Intervals        0
+Negative Price % of Intervals   0.0%
+

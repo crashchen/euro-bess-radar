@@ -1,0 +1,395 @@
+{
+  "base": "2e4ed73d7357e4d556373f6019198045f8fc8d04",
+  "tracked_src_files": 55,
+  "unchanged": [
+    "src/__init__.py",
+    "src/activation_overlay.py",
+    "src/analytics.py",
+    "src/ancillary.py",
+    "src/ancillary_fetchers.py",
+    "src/assumptions.py",
+    "src/components/__init__.py",
+    "src/components/sidebar.py",
+    "src/config.py",
+    "src/content_fingerprint.py",
+    "src/contracted_floor.py",
+    "src/cycle_frontier.py",
+    "src/da_forecast.py",
+    "src/data_ingestion.py",
+    "src/data_trust.py",
+    "src/degradation.py",
+    "src/dispatch.py",
+    "src/forward_curve.py",
+    "src/ida_forecast.py",
+    "src/ida_scenarios.py",
+    "src/imbalance_overlay.py",
+    "src/liquidity.py",
+    "src/pages/__init__.py",
+    "src/pages/ancillary_services.py",
+    "src/pages/data_trust.py",
+    "src/pages/forward_scenarios.py",
+    "src/pages/heatmaps.py",
+    "src/pages/market_overview.py",
+    "src/pages/renewable_correlation.py",
+    "src/pages/zone_comparison.py",
+    "src/portfolio.py",
+    "src/project_case/__init__.py",
+    "src/project_case/adapters.py",
+    "src/project_case/audit.py",
+    "src/project_case/bootstrap.py",
+    "src/project_case/enums.py",
+    "src/project_case/fingerprint.py",
+    "src/project_case/grid.py",
+    "src/project_case/imports.py",
+    "src/project_case/producer_specs.py",
+    "src/project_case/revenue_handoff.py",
+    "src/project_case/schema.py",
+    "src/project_case/valuation.py",
+    "src/reserve_forecast.py",
+    "src/scenario.py",
+    "src/simulation.py",
+    "src/stochastic_dispatch.py",
+    "src/strategy_compare.py",
+    "src/time_utils.py",
+    "src/trader_benchmark.py",
+    "src/ui_theme.py"
+  ],
+  "changed": [
+    "src/export.py",
+    "src/pages/project_case.py",
+    "src/pages/revenue_estimation.py",
+    "src/pages/simulation_cockpit.py"
+  ],
+  "files": [
+    {
+      "path": "src/__init__.py",
+      "unchanged": true,
+      "base_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "working_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "src/activation_overlay.py",
+      "unchanged": true,
+      "base_sha256": "aa0466e173e8d0b8a718e4d3325c9167ce46aed38ea36abaf25a9f3e3bf6881f",
+      "working_sha256": "aa0466e173e8d0b8a718e4d3325c9167ce46aed38ea36abaf25a9f3e3bf6881f"
+    },
+    {
+      "path": "src/analytics.py",
+      "unchanged": true,
+      "base_sha256": "d425eced732793fc631ccf13a2351d896f812308ba6a284f2eef050b13ee499a",
+      "working_sha256": "d425eced732793fc631ccf13a2351d896f812308ba6a284f2eef050b13ee499a"
+    },
+    {
+      "path": "src/ancillary.py",
+      "unchanged": true,
+      "base_sha256": "f77a822752415ce50a4504bf641a9e1aa0485ad7242d50712c5c395bffd95c70",
+      "working_sha256": "f77a822752415ce50a4504bf641a9e1aa0485ad7242d50712c5c395bffd95c70"
+    },
+    {
+      "path": "src/ancillary_fetchers.py",
+      "unchanged": true,
+      "base_sha256": "32848142e22747ea8fc5d4a932b7dbcd360c71f19ba53dfdd6a98faa100fa570",
+      "working_sha256": "32848142e22747ea8fc5d4a932b7dbcd360c71f19ba53dfdd6a98faa100fa570"
+    },
+    {
+      "path": "src/assumptions.py",
+      "unchanged": true,
+      "base_sha256": "73955a5f2ce90234321b636dc7bf78493f53e903024d80f47394a648cd68bf29",
+      "working_sha256": "73955a5f2ce90234321b636dc7bf78493f53e903024d80f47394a648cd68bf29"
+    },
+    {
+      "path": "src/components/__init__.py",
+      "unchanged": true,
+      "base_sha256": "110e0b25d0246a93662c12ea8c0de9488ec2616e294f012f3615f9a2ab9eacc4",
+      "working_sha256": "110e0b25d0246a93662c12ea8c0de9488ec2616e294f012f3615f9a2ab9eacc4"
+    },
+    {
+      "path": "src/components/sidebar.py",
+      "unchanged": true,
+      "base_sha256": "097fa1c50d02b5ba9efbf296df66f1f49eddf03f17a5c3464d1feccdbc7844b0",
+      "working_sha256": "097fa1c50d02b5ba9efbf296df66f1f49eddf03f17a5c3464d1feccdbc7844b0"
+    },
+    {
+      "path": "src/config.py",
+      "unchanged": true,
+      "base_sha256": "9e59266a5a80423d9aeea5f5ca0e8ea1a1ddf4f2e26f28f9ddbebc945dee739e",
+      "working_sha256": "9e59266a5a80423d9aeea5f5ca0e8ea1a1ddf4f2e26f28f9ddbebc945dee739e"
+    },
+    {
+      "path": "src/content_fingerprint.py",
+      "unchanged": true,
+      "base_sha256": "9dc96d9d36ed29bb354021853ce3a45c7fdd689a59be4a89077e52bc402732e5",
+      "working_sha256": "9dc96d9d36ed29bb354021853ce3a45c7fdd689a59be4a89077e52bc402732e5"
+    },
+    {
+      "path": "src/contracted_floor.py",
+      "unchanged": true,
+      "base_sha256": "8c5fba6ec2241b8fd541fd3b5a25d934421c51f8aabe01e3777914e804e49f86",
+      "working_sha256": "8c5fba6ec2241b8fd541fd3b5a25d934421c51f8aabe01e3777914e804e49f86"
+    },
+    {
+      "path": "src/cycle_frontier.py",
+      "unchanged": true,
+      "base_sha256": "7ca33fa7871eb85828dadb540557ff7bbe1f090891563a676562600bda54d56f",
+      "working_sha256": "7ca33fa7871eb85828dadb540557ff7bbe1f090891563a676562600bda54d56f"
+    },
+    {
+      "path": "src/da_forecast.py",
+      "unchanged": true,
+      "base_sha256": "2516864f7ad2a1ca5717098844d57bc5295ae6d8df26dc84a2eeb382227ca180",
+      "working_sha256": "2516864f7ad2a1ca5717098844d57bc5295ae6d8df26dc84a2eeb382227ca180"
+    },
+    {
+      "path": "src/data_ingestion.py",
+      "unchanged": true,
+      "base_sha256": "102410efa206362aeafe4d810ccb7fa90b8a7996f7752ce8839b4fcf98c2c060",
+      "working_sha256": "102410efa206362aeafe4d810ccb7fa90b8a7996f7752ce8839b4fcf98c2c060"
+    },
+    {
+      "path": "src/data_trust.py",
+      "unchanged": true,
+      "base_sha256": "2e4f2c865a588d511fefb545986df3a5f0b1eee78cab763e5b801b1e837c8cbe",
+      "working_sha256": "2e4f2c865a588d511fefb545986df3a5f0b1eee78cab763e5b801b1e837c8cbe"
+    },
+    {
+      "path": "src/degradation.py",
+      "unchanged": true,
+      "base_sha256": "4fe2e4009384a9dae3642a48aabb0d7b1bdf92420907020a1edaaa0c62adfecb",
+      "working_sha256": "4fe2e4009384a9dae3642a48aabb0d7b1bdf92420907020a1edaaa0c62adfecb"
+    },
+    {
+      "path": "src/dispatch.py",
+      "unchanged": true,
+      "base_sha256": "feb17d68c5067997dafbab4ba781823d1e0a89f374fb0395be2b42ced66dadd4",
+      "working_sha256": "feb17d68c5067997dafbab4ba781823d1e0a89f374fb0395be2b42ced66dadd4"
+    },
+    {
+      "path": "src/export.py",
+      "unchanged": false,
+      "base_sha256": "70c97c48f0000544f9ea0438f20c63c4d03c6247af6a93181dcfd624e62043c0",
+      "working_sha256": "bf83ca27862a02b8c71f55e8a52dd4c6d37538a0ad7fdf73e29ed3c90a1978a0"
+    },
+    {
+      "path": "src/forward_curve.py",
+      "unchanged": true,
+      "base_sha256": "f2e3709ea1a1dd781754ecd9f6341bb153126712c5fef3c6c42b0cbb8609862b",
+      "working_sha256": "f2e3709ea1a1dd781754ecd9f6341bb153126712c5fef3c6c42b0cbb8609862b"
+    },
+    {
+      "path": "src/ida_forecast.py",
+      "unchanged": true,
+      "base_sha256": "b4c62182a62df1d4e6170326276ca083d68850d5ab02ba740c6eccd6c598c7e7",
+      "working_sha256": "b4c62182a62df1d4e6170326276ca083d68850d5ab02ba740c6eccd6c598c7e7"
+    },
+    {
+      "path": "src/ida_scenarios.py",
+      "unchanged": true,
+      "base_sha256": "a118adf73239a71d8dcd8c602c4147547309d3d58a0b576e63a4c0b1fd5eb3a4",
+      "working_sha256": "a118adf73239a71d8dcd8c602c4147547309d3d58a0b576e63a4c0b1fd5eb3a4"
+    },
+    {
+      "path": "src/imbalance_overlay.py",
+      "unchanged": true,
+      "base_sha256": "b8459c0454ae6c8fc6e4f682c4730f756be3533ef1228b8e64a58874aeb5e49c",
+      "working_sha256": "b8459c0454ae6c8fc6e4f682c4730f756be3533ef1228b8e64a58874aeb5e49c"
+    },
+    {
+      "path": "src/liquidity.py",
+      "unchanged": true,
+      "base_sha256": "6577bb696a2aef8b7a2104ffb20b308321d201f14150ac092464cb8d2711e784",
+      "working_sha256": "6577bb696a2aef8b7a2104ffb20b308321d201f14150ac092464cb8d2711e784"
+    },
+    {
+      "path": "src/pages/__init__.py",
+      "unchanged": true,
+      "base_sha256": "d85c764f9d18cbaf4ed39b4eba6038f346d6717abe6bf4bac55fe30b25ff0199",
+      "working_sha256": "d85c764f9d18cbaf4ed39b4eba6038f346d6717abe6bf4bac55fe30b25ff0199"
+    },
+    {
+      "path": "src/pages/ancillary_services.py",
+      "unchanged": true,
+      "base_sha256": "f38068193b1997b97e31f38ab7c48b9c0f8ce2803c8cfa3402a24059cbc73c21",
+      "working_sha256": "f38068193b1997b97e31f38ab7c48b9c0f8ce2803c8cfa3402a24059cbc73c21"
+    },
+    {
+      "path": "src/pages/data_trust.py",
+      "unchanged": true,
+      "base_sha256": "0222922c22a9f2ce494d0ed423142c68829f5897f58f8dc6acd98c1468307483",
+      "working_sha256": "0222922c22a9f2ce494d0ed423142c68829f5897f58f8dc6acd98c1468307483"
+    },
+    {
+      "path": "src/pages/forward_scenarios.py",
+      "unchanged": true,
+      "base_sha256": "d0c36a1963702841f591784d70837c2859a3af5b33b2620012e12e836ddaa57c",
+      "working_sha256": "d0c36a1963702841f591784d70837c2859a3af5b33b2620012e12e836ddaa57c"
+    },
+    {
+      "path": "src/pages/heatmaps.py",
+      "unchanged": true,
+      "base_sha256": "0cff81fd5bd8b0b05bb5d38807ced3d44cb6e7166cae1e5808102e81ce4e5783",
+      "working_sha256": "0cff81fd5bd8b0b05bb5d38807ced3d44cb6e7166cae1e5808102e81ce4e5783"
+    },
+    {
+      "path": "src/pages/market_overview.py",
+      "unchanged": true,
+      "base_sha256": "2f78941347df20c53fb51c5e93dcaf5403b8adee85f10f763b89727b1b4e60f0",
+      "working_sha256": "2f78941347df20c53fb51c5e93dcaf5403b8adee85f10f763b89727b1b4e60f0"
+    },
+    {
+      "path": "src/pages/project_case.py",
+      "unchanged": false,
+      "base_sha256": "6dff38b23f6e3a55433d6810f5e26cd2595374ab1a282136cac36e592a1e6a55",
+      "working_sha256": "e9c73c13b5a55c024d6a5e0209f004bf1fc2e6405207645174c45003e16dfcac"
+    },
+    {
+      "path": "src/pages/renewable_correlation.py",
+      "unchanged": true,
+      "base_sha256": "224a5add1b66ac321e85f0083cec2b13fe65a663b6c977b86b8345946cd24b9e",
+      "working_sha256": "224a5add1b66ac321e85f0083cec2b13fe65a663b6c977b86b8345946cd24b9e"
+    },
+    {
+      "path": "src/pages/revenue_estimation.py",
+      "unchanged": false,
+      "base_sha256": "c307a64424cfd94b0ab54832e156e9dbf3ae97429750a1baa75ce9ec93fd3cec",
+      "working_sha256": "cb00e12f983a55931f0b16f5846e3c50d3fad5e44911060f0a7b84459e706313"
+    },
+    {
+      "path": "src/pages/simulation_cockpit.py",
+      "unchanged": false,
+      "base_sha256": "29a37a929e641a4939d31924ccd78c6efc22b2b27199e0a569ab73d42c6b57ce",
+      "working_sha256": "035f0121de96e142e93f50ae1538d97637b5287f942b44b0494e302e724a4be8"
+    },
+    {
+      "path": "src/pages/zone_comparison.py",
+      "unchanged": true,
+      "base_sha256": "08aba6e85c943c9d9aaaca01a3558f15d896d90259fd6c9ebea96453f082f4ba",
+      "working_sha256": "08aba6e85c943c9d9aaaca01a3558f15d896d90259fd6c9ebea96453f082f4ba"
+    },
+    {
+      "path": "src/portfolio.py",
+      "unchanged": true,
+      "base_sha256": "eaa4374cf404fc8aacdac5c1c6e9f7da55b86a5d0770938095e4aa86e50b8935",
+      "working_sha256": "eaa4374cf404fc8aacdac5c1c6e9f7da55b86a5d0770938095e4aa86e50b8935"
+    },
+    {
+      "path": "src/project_case/__init__.py",
+      "unchanged": true,
+      "base_sha256": "027435ed38a0c1edd8b754b148b0ae75237bda1205fb911d770effbb250cfe7c",
+      "working_sha256": "027435ed38a0c1edd8b754b148b0ae75237bda1205fb911d770effbb250cfe7c"
+    },
+    {
+      "path": "src/project_case/adapters.py",
+      "unchanged": true,
+      "base_sha256": "09bc697c11c751474043935712ce11fee147d84d3b3769cdb13d8b1979d614d1",
+      "working_sha256": "09bc697c11c751474043935712ce11fee147d84d3b3769cdb13d8b1979d614d1"
+    },
+    {
+      "path": "src/project_case/audit.py",
+      "unchanged": true,
+      "base_sha256": "f2c50c8e7df2687be38ae54e1d6877ce0e3cc67a392da6ebf9945cf7cebff841",
+      "working_sha256": "f2c50c8e7df2687be38ae54e1d6877ce0e3cc67a392da6ebf9945cf7cebff841"
+    },
+    {
+      "path": "src/project_case/bootstrap.py",
+      "unchanged": true,
+      "base_sha256": "738032878f8c00718f9f42d0481c7ac0a22ba7c16b50de0353352f71ae2509f2",
+      "working_sha256": "738032878f8c00718f9f42d0481c7ac0a22ba7c16b50de0353352f71ae2509f2"
+    },
+    {
+      "path": "src/project_case/enums.py",
+      "unchanged": true,
+      "base_sha256": "0c482ec7cf60b0766ec8c29a3c718de6dc2ac32c715fe71f0ca6a48a30214527",
+      "working_sha256": "0c482ec7cf60b0766ec8c29a3c718de6dc2ac32c715fe71f0ca6a48a30214527"
+    },
+    {
+      "path": "src/project_case/fingerprint.py",
+      "unchanged": true,
+      "base_sha256": "7e444aab283cd50f6ca67dfaed35c811a5a416ed76995ac3eb3d81f72570becd",
+      "working_sha256": "7e444aab283cd50f6ca67dfaed35c811a5a416ed76995ac3eb3d81f72570becd"
+    },
+    {
+      "path": "src/project_case/grid.py",
+      "unchanged": true,
+      "base_sha256": "6feb398cd99bcda57935f144e7ed1cefe7a63ae0d3d5849806ecb979ea5a3a4a",
+      "working_sha256": "6feb398cd99bcda57935f144e7ed1cefe7a63ae0d3d5849806ecb979ea5a3a4a"
+    },
+    {
+      "path": "src/project_case/imports.py",
+      "unchanged": true,
+      "base_sha256": "8533e7aaab32faf907830d274889fe5fb8ece1750a278391e3dfcf3090e5c750",
+      "working_sha256": "8533e7aaab32faf907830d274889fe5fb8ece1750a278391e3dfcf3090e5c750"
+    },
+    {
+      "path": "src/project_case/producer_specs.py",
+      "unchanged": true,
+      "base_sha256": "fac8333502ac669b2175159e3bb8d1bd5af35d8c5e2358632abdbb1842b086be",
+      "working_sha256": "fac8333502ac669b2175159e3bb8d1bd5af35d8c5e2358632abdbb1842b086be"
+    },
+    {
+      "path": "src/project_case/revenue_handoff.py",
+      "unchanged": true,
+      "base_sha256": "27b4473c0264a64d84dc93334393cf72ae66ae5bb34932b481f8792e515e2c0f",
+      "working_sha256": "27b4473c0264a64d84dc93334393cf72ae66ae5bb34932b481f8792e515e2c0f"
+    },
+    {
+      "path": "src/project_case/schema.py",
+      "unchanged": true,
+      "base_sha256": "2239491422c19311a4e00e41372b6b7ed481c1f31a8de0cb4f27d6fc8185b19d",
+      "working_sha256": "2239491422c19311a4e00e41372b6b7ed481c1f31a8de0cb4f27d6fc8185b19d"
+    },
+    {
+      "path": "src/project_case/valuation.py",
+      "unchanged": true,
+      "base_sha256": "f06c13dfa3151eb1ef1c0373ca66bbf63f38e25ea1dbf0354e9c29eafd108086",
+      "working_sha256": "f06c13dfa3151eb1ef1c0373ca66bbf63f38e25ea1dbf0354e9c29eafd108086"
+    },
+    {
+      "path": "src/reserve_forecast.py",
+      "unchanged": true,
+      "base_sha256": "b83194af68dd8a30e43e94c18e408f58c453ed887e15a9991f80cbe4d683e766",
+      "working_sha256": "b83194af68dd8a30e43e94c18e408f58c453ed887e15a9991f80cbe4d683e766"
+    },
+    {
+      "path": "src/scenario.py",
+      "unchanged": true,
+      "base_sha256": "247e5b173409ac0d131f7089eb2cf99866084add4559b305417fdf5bd758dd56",
+      "working_sha256": "247e5b173409ac0d131f7089eb2cf99866084add4559b305417fdf5bd758dd56"
+    },
+    {
+      "path": "src/simulation.py",
+      "unchanged": true,
+      "base_sha256": "2287ff715f0c56dc61eeffe8a9c0b7f32232a4715476b8af7ac01c4c8a43b21b",
+      "working_sha256": "2287ff715f0c56dc61eeffe8a9c0b7f32232a4715476b8af7ac01c4c8a43b21b"
+    },
+    {
+      "path": "src/stochastic_dispatch.py",
+      "unchanged": true,
+      "base_sha256": "5a4e75be950353d1c4b55f6920b32ecb97f766ff941c7a6034a14d65f4239910",
+      "working_sha256": "5a4e75be950353d1c4b55f6920b32ecb97f766ff941c7a6034a14d65f4239910"
+    },
+    {
+      "path": "src/strategy_compare.py",
+      "unchanged": true,
+      "base_sha256": "1c04fa740c1762597d2d17c90dc856dc6c82606ddd4f802932ddf75032e18e31",
+      "working_sha256": "1c04fa740c1762597d2d17c90dc856dc6c82606ddd4f802932ddf75032e18e31"
+    },
+    {
+      "path": "src/time_utils.py",
+      "unchanged": true,
+      "base_sha256": "68a7db123f18b0563e5f5a0f6a66edf2075bbd0d039b92f6f66bd198cc4481e4",
+      "working_sha256": "68a7db123f18b0563e5f5a0f6a66edf2075bbd0d039b92f6f66bd198cc4481e4"
+    },
+    {
+      "path": "src/trader_benchmark.py",
+      "unchanged": true,
+      "base_sha256": "64e378cbfe9ffbe072075d756659d0edeb1254bff0fea13a045cc1ca5c80fde3",
+      "working_sha256": "64e378cbfe9ffbe072075d756659d0edeb1254bff0fea13a045cc1ca5c80fde3"
+    },
+    {
+      "path": "src/ui_theme.py",
+      "unchanged": true,
+      "base_sha256": "94b4dbefa18dbc210663e26896e786d01e84bfb773ef56f80fbced5f9b303765",
+      "working_sha256": "94b4dbefa18dbc210663e26896e786d01e84bfb773ef56f80fbced5f9b303765"
+    }
+  ]
+}

@@ -1,0 +1,339 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="64" skipped="0" tests="82" time="3.270" timestamp="2026-09-20T12:30:12.624323+02:00" hostname="MacBook-Pro-2.local"><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_capacity_rows_bind_actual_run_zone_product[DE_LU-FCR]" time="0.062"><failure message="KeyError: 'capacity_settlement'">&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:94: in test_capacity_rows_bind_actual_run_zone_product
+    settlement = bundle["derived"]["capacity_settlement"]
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'capacity_settlement'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_capacity_rows_bind_actual_run_zone_product[FI-FCR-N]" time="0.002"><failure message="KeyError: 'capacity_settlement'">&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:94: in test_capacity_rows_bind_actual_run_zone_product
+    settlement = bundle["derived"]["capacity_settlement"]
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'capacity_settlement'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_capacity_rows_bind_actual_run_zone_product[NL-aFRR]" time="0.001"><failure message="KeyError: 'capacity_settlement'">&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:94: in test_capacity_rows_bind_actual_run_zone_product
+    settlement = bundle["derived"]["capacity_settlement"]
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'capacity_settlement'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_only_real_finite_capacity_paths_receive_basis[437.0-None-None-None-False-1]" time="0.001"><failure message="KeyError: 'capacity_settlement_basis'">&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3812: in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pandas/_libs/index.pyx:167: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/index.pyx:196: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7088: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7096: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+E   KeyError: 'capacity_settlement_basis'
+
+The above exception was the direct cause of the following exception:
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:129: in test_only_real_finite_capacity_paths_receive_basis
+    assert len(_capacity_rows(bundle)) == expected
+               ^^^^^^^^^^^^^^^^^^^^^^
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:88: in _capacity_rows
+    return table.loc[~table["capacity_settlement_basis"].str.startswith("Not applicable")]
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/frame.py:4113: in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3819: in get_loc
+    raise KeyError(key) from err
+E   KeyError: 'capacity_settlement_basis'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_only_real_finite_capacity_paths_receive_basis[None-450.0-None-None-False-1]" time="0.001"><failure message="KeyError: 'capacity_settlement_basis'">&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3812: in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pandas/_libs/index.pyx:167: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/index.pyx:196: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7088: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7096: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+E   KeyError: 'capacity_settlement_basis'
+
+The above exception was the direct cause of the following exception:
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:129: in test_only_real_finite_capacity_paths_receive_basis
+    assert len(_capacity_rows(bundle)) == expected
+               ^^^^^^^^^^^^^^^^^^^^^^
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:88: in _capacity_rows
+    return table.loc[~table["capacity_settlement_basis"].str.startswith("Not applicable")]
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/frame.py:4113: in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3819: in get_loc
+    raise KeyError(key) from err
+E   KeyError: 'capacity_settlement_basis'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_only_real_finite_capacity_paths_receive_basis[None-None-430.0-None-False-1]" time="0.001"><failure message="KeyError: 'capacity_settlement_basis'">&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3812: in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pandas/_libs/index.pyx:167: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/index.pyx:196: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7088: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7096: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+E   KeyError: 'capacity_settlement_basis'
+
+The above exception was the direct cause of the following exception:
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:129: in test_only_real_finite_capacity_paths_receive_basis
+    assert len(_capacity_rows(bundle)) == expected
+               ^^^^^^^^^^^^^^^^^^^^^^
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:88: in _capacity_rows
+    return table.loc[~table["capacity_settlement_basis"].str.startswith("Not applicable")]
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/frame.py:4113: in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3819: in get_loc
+    raise KeyError(key) from err
+E   KeyError: 'capacity_settlement_basis'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_only_real_finite_capacity_paths_receive_basis[None-None-None--3.0-True-1]" time="0.002"><failure message="KeyError: 'capacity_settlement_basis'">&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3812: in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pandas/_libs/index.pyx:167: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/index.pyx:196: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7088: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7096: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+E   KeyError: 'capacity_settlement_basis'
+
+The above exception was the direct cause of the following exception:
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:129: in test_only_real_finite_capacity_paths_receive_basis
+    assert len(_capacity_rows(bundle)) == expected
+               ^^^^^^^^^^^^^^^^^^^^^^
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:88: in _capacity_rows
+    return table.loc[~table["capacity_settlement_basis"].str.startswith("Not applicable")]
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/frame.py:4113: in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3819: in get_loc
+    raise KeyError(key) from err
+E   KeyError: 'capacity_settlement_basis'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_only_real_finite_capacity_paths_receive_basis[None-None-None--3.0-False-0]" time="0.001"><failure message="KeyError: 'capacity_settlement_basis'">&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3812: in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pandas/_libs/index.pyx:167: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/index.pyx:196: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7088: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7096: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+E   KeyError: 'capacity_settlement_basis'
+
+The above exception was the direct cause of the following exception:
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:129: in test_only_real_finite_capacity_paths_receive_basis
+    assert len(_capacity_rows(bundle)) == expected
+               ^^^^^^^^^^^^^^^^^^^^^^
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:88: in _capacity_rows
+    return table.loc[~table["capacity_settlement_basis"].str.startswith("Not applicable")]
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/frame.py:4113: in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3819: in get_loc
+    raise KeyError(key) from err
+E   KeyError: 'capacity_settlement_basis'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_only_real_finite_capacity_paths_receive_basis[None-None-None-None-False-0]" time="0.001"><failure message="KeyError: 'capacity_settlement_basis'">&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3812: in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pandas/_libs/index.pyx:167: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/index.pyx:196: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7088: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7096: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+E   KeyError: 'capacity_settlement_basis'
+
+The above exception was the direct cause of the following exception:
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:129: in test_only_real_finite_capacity_paths_receive_basis
+    assert len(_capacity_rows(bundle)) == expected
+               ^^^^^^^^^^^^^^^^^^^^^^
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:88: in _capacity_rows
+    return table.loc[~table["capacity_settlement_basis"].str.startswith("Not applicable")]
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/frame.py:4113: in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3819: in get_loc
+    raise KeyError(key) from err
+E   KeyError: 'capacity_settlement_basis'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_only_real_finite_capacity_paths_receive_basis[0.0-0.0-0.0-0.0-True-4]" time="0.002"><failure message="KeyError: 'capacity_settlement_basis'">&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3812: in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pandas/_libs/index.pyx:167: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/index.pyx:196: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7088: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7096: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+E   KeyError: 'capacity_settlement_basis'
+
+The above exception was the direct cause of the following exception:
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:129: in test_only_real_finite_capacity_paths_receive_basis
+    assert len(_capacity_rows(bundle)) == expected
+               ^^^^^^^^^^^^^^^^^^^^^^
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:88: in _capacity_rows
+    return table.loc[~table["capacity_settlement_basis"].str.startswith("Not applicable")]
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/frame.py:4113: in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3819: in get_loc
+    raise KeyError(key) from err
+E   KeyError: 'capacity_settlement_basis'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_only_real_finite_capacity_paths_receive_basis[nan-inf-None-None-False-0]" time="0.001"><failure message="KeyError: 'capacity_settlement_basis'">&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3812: in get_loc
+    return self._engine.get_loc(casted_key)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+pandas/_libs/index.pyx:167: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/index.pyx:196: in pandas._libs.index.IndexEngine.get_loc
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7088: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+pandas/_libs/hashtable_class_helper.pxi:7096: in pandas._libs.hashtable.PyObjectHashTable.get_item
+    ???
+E   KeyError: 'capacity_settlement_basis'
+
+The above exception was the direct cause of the following exception:
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:129: in test_only_real_finite_capacity_paths_receive_basis
+    assert len(_capacity_rows(bundle)) == expected
+               ^^^^^^^^^^^^^^^^^^^^^^
+&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:88: in _capacity_rows
+    return table.loc[~table["capacity_settlement_basis"].str.startswith("Not applicable")]
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/frame.py:4113: in __getitem__
+    indexer = self.columns.get_loc(key)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/pandas/core/indexes/base.py:3819: in get_loc
+    raise KeyError(key) from err
+E   KeyError: 'capacity_settlement_basis'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_numeric_comparison_unchanged_including_negative_delta" time="0.002" /><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_text_containing_reserve_does_not_classify_a_row" time="0.000"><failure message="ImportError: cannot import name '_comparison_capacity_disclosure' from 'src.pages.simulation_cockpit' (&lt;baseline-repo&gt;/src/pages/simulation_cockpit.py)">&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:152: in test_text_containing_reserve_does_not_classify_a_row
+    from src.pages.simulation_cockpit import _comparison_capacity_disclosure
+E   ImportError: cannot import name '_comparison_capacity_disclosure' from 'src.pages.simulation_cockpit' (&lt;baseline-repo&gt;/src/pages/simulation_cockpit.py)</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_export_without_caller_assumptions_still_has_bound_basis[None]" time="0.008"><failure message="KeyError: 'Worksheet Assumptions does not exist.'">&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:172: in test_export_without_caller_assumptions_still_has_bound_basis
+    rows = list(wb["Assumptions"].values)
+                ^^^^^^^^^^^^^^^^^
+&lt;repo&gt;/.venv/lib/python3.13/site-packages/openpyxl/workbook/workbook.py:287: in __getitem__
+    raise KeyError("Worksheet {0} does not exist.".format(key))
+E   KeyError: 'Worksheet Assumptions does not exist.'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_export_without_caller_assumptions_still_has_bound_basis[assumptions1]" time="0.010"><failure message="KeyError: 'Capacity settlement zone'">&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:174: in test_export_without_caller_assumptions_still_has_bound_basis
+    assert labels["Capacity settlement zone"] == "DE_LU"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'Capacity settlement zone'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_missing_product_is_unavailable_not_a_no_capacity_claim" time="0.001"><failure message="KeyError: 'capacity_settlement'">&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:186: in test_missing_product_is_unavailable_not_a_no_capacity_claim
+    assert "not recorded" in bundle["derived"]["capacity_settlement"]["basis"]
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'capacity_settlement'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_unregistered_zone_is_explicitly_unverified" time="0.001"><failure message="KeyError: 'capacity_settlement'">&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:192: in test_unregistered_zone_is_explicitly_unverified
+    settlement = bundle["derived"]["capacity_settlement"]
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'capacity_settlement'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_no_product_no_capacity_paths_remain_not_applicable" time="0.001"><failure message="KeyError: 'capacity_settlement'">&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:206: in test_no_product_no_capacity_paths_remain_not_applicable
+    assert derived["capacity_settlement"] is None
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'capacity_settlement'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_all_solver_failed_preserves_guard_and_never_builds_disclosure" time="0.001" /><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_renderer_and_export_use_frozen_basis_without_resolving" time="0.002"><failure message="KeyError: 'capacity_settlement'">&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:237: in test_renderer_and_export_use_frozen_basis_without_resolving
+    original = bundle["derived"]["capacity_settlement"]["basis"]
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'capacity_settlement'</failure></testcase><testcase classname="tests.test_step3d_cockpit_disclosure" name="test_pre_disclosure_session_bundle_is_stale" time="0.036"><failure message="AssertionError: assert 'f024fd5c8709431ecbdebbfabd69d719b9a43fe3f32310d5bf576dd381ccb9bd' != 'f024fd5c8709431ecbdebbfabd69d719b9a43fe3f32310d5bf576dd381ccb9bd'&#10; +  where 'f024fd5c8709431ecbdebbfabd69d719b9a43fe3f32310d5bf576dd381ccb9bd' = &lt;function _forecast_policy_fingerprint at 0x11e2954e0&gt;(**{'batch_dates': ['2025-06-01', '2025-06-02'], 'bucket': 'hour_of_day', 'capacity_df':                           produc...00:00          FCR                    8.0\n\n[72 rows x 2 columns], 'capacity_source': 'Session ancillary fallback', ...})&#10; +    where &lt;function _forecast_policy_fingerprint at 0x11e2954e0&gt; = &lt;module 'src.pages.simulation_cockpit' from '&lt;baseline-repo&gt;/src/pages/simulation_cockpit.py'&gt;._forecast_policy_fingerprint&#10; +    and   {'batch_dates': ['2025-06-01', '2025-06-02'], 'bucket': 'hour_of_day', 'capacity_df':                           produc...00:00          FCR                    8.0\n\n[72 rows x 2 columns], 'capacity_source': 'Session ancillary fallback', ...} = &lt;function _forecast_kwargs at 0x11e321760&gt;()">&lt;baseline-repo&gt;/tests/test_step3d_cockpit_disclosure.py:267: in test_pre_disclosure_session_bundle_is_stale
+    assert current != cockpit._forecast_policy_fingerprint(**_forecast_kwargs())
+E   AssertionError: assert 'f024fd5c8709431ecbdebbfabd69d719b9a43fe3f32310d5bf576dd381ccb9bd' != 'f024fd5c8709431ecbdebbfabd69d719b9a43fe3f32310d5bf576dd381ccb9bd'
+E    +  where 'f024fd5c8709431ecbdebbfabd69d719b9a43fe3f32310d5bf576dd381ccb9bd' = &lt;function _forecast_policy_fingerprint at 0x11e2954e0&gt;(**{'batch_dates': ['2025-06-01', '2025-06-02'], 'bucket': 'hour_of_day', 'capacity_df':                           produc...00:00          FCR                    8.0\n\n[72 rows x 2 columns], 'capacity_source': 'Session ancillary fallback', ...})
+E    +    where &lt;function _forecast_policy_fingerprint at 0x11e2954e0&gt; = &lt;module 'src.pages.simulation_cockpit' from '&lt;baseline-repo&gt;/src/pages/simulation_cockpit.py'&gt;._forecast_policy_fingerprint
+E    +    and   {'batch_dates': ['2025-06-01', '2025-06-02'], 'bucket': 'hour_of_day', 'capacity_df':                           produc...00:00          FCR                    8.0\n\n[72 rows x 2 columns], 'capacity_source': 'Session ancillary fallback', ...} = &lt;function _forecast_kwargs at 0x11e321760&gt;()</failure></testcase><testcase classname="tests.test_step3d_export_disclosure" name="test_joint_summary_and_pdf_share_the_bound_basis[DE_LU-FCR]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_export_disclosure.py:30: in test_joint_summary_and_pdf_share_the_bound_basis
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_export_disclosure" name="test_joint_summary_and_pdf_share_the_bound_basis[FI-FCR-N]" time="0.001"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_export_disclosure.py:30: in test_joint_summary_and_pdf_share_the_bound_basis
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_export_disclosure" name="test_legacy_joint_export_explicitly_discloses_missing_product_identity" time="0.017"><failure message="KeyError: 'Joint MILP Capacity Settlement Basis'">&lt;baseline-repo&gt;/tests/test_step3d_export_disclosure.py:54: in test_legacy_joint_export_explicitly_discloses_missing_product_identity
+    basis = pairs['Joint MILP Capacity Settlement Basis'].value
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'Joint MILP Capacity Settlement Basis'</failure></testcase><testcase classname="tests.test_step3d_export_disclosure" name="test_da_only_exports_do_not_claim_capacity_settlement" time="0.120" /><testcase classname="tests.test_step3d_export_disclosure" name="test_project_case_excel_names_basis_but_keeps_fingerprinted_payload_exact" time="0.001"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_export_disclosure.py:68: in test_project_case_excel_names_basis_but_keeps_fingerprinted_payload_exact
+    from src.settlement_disclosure import project_case_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_export_disclosure" name="test_appended_project_case_workbook_gets_same_run_bound_disclosure" time="0.001"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_export_disclosure.py:88: in test_appended_project_case_workbook_gets_same_run_bound_disclosure
+    from src.settlement_disclosure import project_case_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_export_disclosure" name="test_revenue_page_binds_actual_capacity_products_to_ui_and_exports" time="0.204"><failure message="KeyError: 'joint_capacity_settlement_basis'">&lt;baseline-repo&gt;/tests/test_step3d_export_disclosure.py:156: in test_revenue_page_binds_actual_capacity_products_to_ui_and_exports
+    basis = export['joint_capacity_settlement_basis']
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'joint_capacity_settlement_basis'</failure></testcase><testcase classname="tests.test_step3d_export_disclosure" name="test_revenue_joint_cash_is_unchanged_on_spring_dst" time="0.142" /><testcase classname="tests.test_step3d_export_disclosure" name="test_no_joint_result_has_no_settlement_disclosure[False-False]" time="0.041" /><testcase classname="tests.test_step3d_export_disclosure" name="test_no_joint_result_has_no_settlement_disclosure[True-True]" time="0.079" /><testcase classname="tests.test_step3d_project_case_disclosure" name="test_result_discloses_its_stored_nominal_capacity_basis[FCR [symmetric]-False]" time="0.035"><failure message="assert 0 == 1&#10; +  where 0 = len([])">&lt;baseline-repo&gt;/tests/test_step3d_project_case_disclosure.py:170: in test_result_discloses_its_stored_nominal_capacity_basis
+    assert len(captions) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])</failure></testcase><testcase classname="tests.test_step3d_project_case_disclosure" name="test_result_discloses_its_stored_nominal_capacity_basis[FCR [symmetric]-True]" time="0.004"><failure message="assert 0 == 1&#10; +  where 0 = len([])">&lt;baseline-repo&gt;/tests/test_step3d_project_case_disclosure.py:170: in test_result_discloses_its_stored_nominal_capacity_basis
+    assert len(captions) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])</failure></testcase><testcase classname="tests.test_step3d_project_case_disclosure" name="test_result_discloses_its_stored_nominal_capacity_basis[aFRR [up]-False]" time="0.036"><failure message="assert 0 == 1&#10; +  where 0 = len([])">&lt;baseline-repo&gt;/tests/test_step3d_project_case_disclosure.py:170: in test_result_discloses_its_stored_nominal_capacity_basis
+    assert len(captions) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])</failure></testcase><testcase classname="tests.test_step3d_project_case_disclosure" name="test_result_discloses_its_stored_nominal_capacity_basis[aFRR [up]-True]" time="0.003"><failure message="assert 0 == 1&#10; +  where 0 = len([])">&lt;baseline-repo&gt;/tests/test_step3d_project_case_disclosure.py:170: in test_result_discloses_its_stored_nominal_capacity_basis
+    assert len(captions) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])</failure></testcase><testcase classname="tests.test_step3d_project_case_disclosure" name="test_da_only_result_has_no_reserve_capacity_disclosure[False]" time="0.045" /><testcase classname="tests.test_step3d_project_case_disclosure" name="test_da_only_result_has_no_reserve_capacity_disclosure[True]" time="0.003" /><testcase classname="tests.test_step3d_project_case_disclosure" name="test_real_dst_fixture_keeps_nominal_cash_and_provenance" time="0.036" /><testcase classname="tests.test_step3d_project_case_disclosure" name="test_real_cockpit_mirror_uses_only_the_cached_result[False]" time="0.004" /><testcase classname="tests.test_step3d_project_case_disclosure" name="test_real_cockpit_mirror_uses_only_the_cached_result[True]" time="0.004"><failure message="AssertionError: assert 0 == 1&#10; +  where 0 = len([])&#10; +    where [] = _capacity_captions(AppTest(\n    _script_path='&lt;tmp&gt;/tmp8wdw0ulg/bdb13edd4dd8a9d255c4816ac80538...SpecialBlock(\n            type='sidebar'\n        ),\n        2: SpecialBlock(\n            type='event'\n        )\n    }\n))&#10; +  and   1 = int(True)">&lt;baseline-repo&gt;/tests/test_step3d_project_case_disclosure.py:206: in test_real_cockpit_mirror_uses_only_the_cached_result
+    assert len(_capacity_captions(app)) == int(populated)
+E   AssertionError: assert 0 == 1
+E    +  where 0 = len([])
+E    +    where [] = _capacity_captions(AppTest(\n    _script_path='&lt;tmp&gt;/tmp8wdw0ulg/bdb13edd4dd8a9d255c4816ac80538...SpecialBlock(\n            type='sidebar'\n        ),\n        2: SpecialBlock(\n            type='event'\n        )\n    }\n))
+E    +  and   1 = int(True)</failure></testcase><testcase classname="tests.test_step3d_project_case_disclosure" name="test_stale_project_case_hides_basis_and_mirror_without_recomputation" time="0.065"><failure message="AssertionError: assert 0 == 2&#10; +  where 0 = len([])&#10; +    where [] = _capacity_captions(AppTest(\n    _script_path='&lt;tmp&gt;/tmp8wdw0ulg/704f128018b63a2fe19220da82e33f...SpecialBlock(\n            type='sidebar'\n        ),\n        2: SpecialBlock(\n            type='event'\n        )\n    }\n))">&lt;baseline-repo&gt;/tests/test_step3d_project_case_disclosure.py:231: in test_stale_project_case_hides_basis_and_mirror_without_recomputation
+    assert len(_capacity_captions(app)) == 2  # Panel and its read-only mirror.
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   AssertionError: assert 0 == 2
+E    +  where 0 = len([])
+E    +    where [] = _capacity_captions(AppTest(\n    _script_path='&lt;tmp&gt;/tmp8wdw0ulg/704f128018b63a2fe19220da82e33f...SpecialBlock(\n            type='sidebar'\n        ),\n        2: SpecialBlock(\n            type='event'\n        )\n    }\n))</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_compact_table_label_preserves_full_disclosure_scope[DE_LU-FCR-Physical delivery hours]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:41: in test_compact_table_label_preserves_full_disclosure_scope
+    from src.settlement_disclosure import (
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_compact_table_label_preserves_full_disclosure_scope[FI-FCR-N-Physical delivery hours]" time="0.001"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:41: in test_compact_table_label_preserves_full_disclosure_scope
+    from src.settlement_disclosure import (
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_compact_table_label_preserves_full_disclosure_scope[GB-custom capacity-Physical delivery hours]" time="0.001"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:41: in test_compact_table_label_preserves_full_disclosure_scope
+    from src.settlement_disclosure import (
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_compact_table_label_preserves_full_disclosure_scope[UNREGISTERED-FCR-Unverified]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:41: in test_compact_table_label_preserves_full_disclosure_scope
+    from src.settlement_disclosure import (
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_compact_table_label_preserves_full_disclosure_scope[None-FCR-Unverified]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:41: in test_compact_table_label_preserves_full_disclosure_scope
+    from src.settlement_disclosure import (
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_compact_table_label_preserves_full_disclosure_scope[DE_LU-None-None]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:41: in test_compact_table_label_preserves_full_disclosure_scope
+    from src.settlement_disclosure import (
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_compact_table_label_preserves_full_disclosure_scope[DE_LU--None]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:41: in test_compact_table_label_preserves_full_disclosure_scope
+    from src.settlement_disclosure import (
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_compact_table_label_preserves_full_disclosure_scope[DE_LU-   -None]" time="0.001"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:41: in test_compact_table_label_preserves_full_disclosure_scope
+    from src.settlement_disclosure import (
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_screening_without_capacity_product_has_no_capacity_disclosure[None]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:58: in test_screening_without_capacity_product_has_no_capacity_disclosure
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_screening_without_capacity_product_has_no_capacity_disclosure[]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:58: in test_screening_without_capacity_product_has_no_capacity_disclosure
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_screening_without_capacity_product_has_no_capacity_disclosure[   ]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:58: in test_screening_without_capacity_product_has_no_capacity_disclosure
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_screening_describes_actual_selected_product_without_product_whitelist[FCR]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:65: in test_screening_describes_actual_selected_product_without_product_whitelist
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_screening_describes_actual_selected_product_without_product_whitelist[aFRR Up]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:65: in test_screening_describes_actual_selected_product_without_product_whitelist
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_screening_describes_actual_selected_product_without_product_whitelist[mFRR Down]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:65: in test_screening_describes_actual_selected_product_without_product_whitelist
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_screening_describes_actual_selected_product_without_product_whitelist[custom product]" time="0.001"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:65: in test_screening_describes_actual_selected_product_without_product_whitelist
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_other_screening_zones_do_not_inherit_german_product_calendar[FI]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:78: in test_other_screening_zones_do_not_inherit_german_product_calendar
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_other_screening_zones_do_not_inherit_german_product_calendar[FR]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:78: in test_other_screening_zones_do_not_inherit_german_product_calendar
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_other_screening_zones_do_not_inherit_german_product_calendar[GB]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:78: in test_other_screening_zones_do_not_inherit_german_product_calendar
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_unknown_screening_zone_is_explicitly_unverified[None]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:89: in test_unknown_screening_zone_is_explicitly_unverified
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_unknown_screening_zone_is_explicitly_unverified[]" time="0.001"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:89: in test_unknown_screening_zone_is_explicitly_unverified
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_unknown_screening_zone_is_explicitly_unverified[UNREGISTERED]" time="0.001"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:89: in test_unknown_screening_zone_is_explicitly_unverified
+    from src.settlement_disclosure import screening_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_project_case_uses_frozen_run_scope_and_preserves_payload_and_fingerprint" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:97: in test_project_case_uses_frozen_run_scope_and_preserves_payload_and_fingerprint
+    from src.settlement_disclosure import project_case_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_da_only_project_case_has_no_reserve_settlement_disclosure" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:115: in test_da_only_project_case_has_no_reserve_settlement_disclosure
+    from src.settlement_disclosure import project_case_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_recorded_reserve_profile_controls_disclosure_not_product_spelling[FCR [symmetric]-PC_ADP_RESERVE_COOPT]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:125: in test_recorded_reserve_profile_controls_disclosure_not_product_spelling
+    from src.settlement_disclosure import project_case_strategy_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_recorded_reserve_profile_controls_disclosure_not_product_spelling[FCR [symmetric]-PC_ADP_DA_ID_RESERVE]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:125: in test_recorded_reserve_profile_controls_disclosure_not_product_spelling
+    from src.settlement_disclosure import project_case_strategy_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_recorded_reserve_profile_controls_disclosure_not_product_spelling[mFRR [down]-PC_ADP_RESERVE_COOPT]" time="0.001"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:125: in test_recorded_reserve_profile_controls_disclosure_not_product_spelling
+    from src.settlement_disclosure import project_case_strategy_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_recorded_reserve_profile_controls_disclosure_not_product_spelling[mFRR [down]-PC_ADP_DA_ID_RESERVE]" time="0.002"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:125: in test_recorded_reserve_profile_controls_disclosure_not_product_spelling
+    from src.settlement_disclosure import project_case_strategy_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_unknown_recorded_reserve_contract_remains_visible_without_false_claim[zone-FI]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:147: in test_unknown_recorded_reserve_contract_remains_visible_without_false_claim
+    from src.settlement_disclosure import project_case_strategy_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_unknown_recorded_reserve_contract_remains_visible_without_false_claim[reserve_product-None]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:147: in test_unknown_recorded_reserve_contract_remains_visible_without_false_claim
+    from src.settlement_disclosure import project_case_strategy_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_unknown_recorded_reserve_contract_remains_visible_without_false_claim[producer_adapter_id-PC_ADP_FUTURE_RESERVE]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:147: in test_unknown_recorded_reserve_contract_remains_visible_without_false_claim
+    from src.settlement_disclosure import project_case_strategy_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_unknown_recorded_reserve_contract_remains_visible_without_false_claim[expected_grid_registry_version-pc-market-grid-v2]" time="0.001"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:147: in test_unknown_recorded_reserve_contract_remains_visible_without_false_claim
+    from src.settlement_disclosure import project_case_strategy_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_unknown_recorded_reserve_contract_remains_visible_without_false_claim[reserve_profile-pc-reserve-hourly-v2]" time="0.001"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:147: in test_unknown_recorded_reserve_contract_remains_visible_without_false_claim
+    from src.settlement_disclosure import project_case_strategy_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_unknown_recorded_reserve_contract_remains_visible_without_false_claim[reserve_profile-None]" time="0.000"><failure message="ModuleNotFoundError: No module named 'src.settlement_disclosure'">&lt;baseline-repo&gt;/tests/test_step3d_settlement_basis.py:147: in test_unknown_recorded_reserve_contract_remains_visible_without_false_claim
+    from src.settlement_disclosure import project_case_strategy_capacity_settlement_basis
+E   ModuleNotFoundError: No module named 'src.settlement_disclosure'</failure></testcase><testcase classname="tests.test_step3d_settlement_basis" name="test_existing_same_source_coopt_cash_contract_is_preserved[target0-24-456.0]" time="0.025" /><testcase classname="tests.test_step3d_settlement_basis" name="test_existing_same_source_coopt_cash_contract_is_preserved[target1-23-437.0]" time="0.022" /><testcase classname="tests.test_step3d_settlement_basis" name="test_existing_same_source_coopt_cash_contract_is_preserved[target2-25-475.0]" time="0.082" /><testcase classname="tests.test_step3d_settlement_basis" name="test_existing_same_source_sequential_and_ceiling_cash_contract_is_preserved[target0-456.0]" time="0.336" /><testcase classname="tests.test_step3d_settlement_basis" name="test_existing_same_source_sequential_and_ceiling_cash_contract_is_preserved[target1-437.0]" time="0.365" /><testcase classname="tests.test_step3d_settlement_basis" name="test_existing_same_source_sequential_and_ceiling_cash_contract_is_preserved[target2-475.0]" time="0.363" /><testcase classname="tests.test_step3d_settlement_basis" name="test_finnish_project_case_does_not_gain_a_reserve_profile" time="0.000" /><testcase classname="tests.test_step3d_settlement_basis" name="test_pre_cutover_spring_triple_retains_mismatched_grid_rejection" time="0.068" /></testsuite></testsuites>

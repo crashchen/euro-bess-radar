@@ -189,6 +189,53 @@ a mixed-duration day would otherwise let dense intervals dominate a reported
 average power. This step does not generalise the sequential or stochastic
 `dt`, and does not change any settled cash.
 
+## Capacity settlement disclosure
+
+Step 3D describes the existing model conventions without reconciling their
+cash amounts. `settlement_disclosure.py` is presentation only: it does not
+change delivery grids, reserve commitments, availability, energy, SoC or FEC.
+
+The two Project Case reserve adapters use **six nominal 4-hour capacity blocks
+per local day**, including DST, only under the registered `DE_LU` reserve
+profile `pc-reserve-block-of-day-4h-v1` in `pc-market-grid-v1`. Disclosure reads
+the recorded adapter, zone, selected product (including direction when recorded),
+registry and profile from the immutable RunResult provenance. This is not a
+claim that every similarly named product or every country settles this way.
+DA-only/DA+IDA cases have no capacity basis; unfamiliar reserve profiles are
+explicitly unverified. FI reserve remains unsupported by Project Case.
+
+Cockpit's capacity co-opt, triple ceiling, sequential reserve policy and
+reserve-mode stochastic paths retain **physical delivery-hour** capacity cash.
+The Revenue page's joint MILP also uses physical hours, with an aggregate
+capacity price; its disclosure identifies the actual capacity/mixed products
+contributing to that aggregate. It does not apply to the separate annual
+standalone ancillary estimate, activation/imbalance energy overlays, or
+DA/IDA-only single-day, multi-day or frontier results.
+
+At 1 MW, EUR 20/MW/h and availability 0.95, the same constant price sample
+gives EUR 456 on an ordinary day in both conventions. On a spring 23-hour day,
+Project Case retains EUR 456 while screening gives EUR 437; on an autumn
+25-hour day they give EUR 456 and EUR 475. These are model-convention checks,
+not a new statement of external market settlement rules. Physical energy and
+SoC time remain unchanged. Any proposal to unify the cash algorithms needs a
+separate versioned settlement-contract change.
+
+The Project Case page and cockpit mirror share a result-bound caption; its
+workbook adds a readable basis on the NPV sheet. The original Assumptions &
+Provenance tree, public schema, fingerprint and JSON handoff are unchanged.
+Cockpit's comparison table shows short basis/scope columns only on actual
+capacity-bearing rows (including negative or zero reserve-mode policy deltas).
+Complete text and the applicable row names are saved with the run and its
+export assumptions, even when no global assumptions table was supplied.
+Rerenders use that snapshot; the existing stale guard hides changed-input
+results. Upgrading an older in-session forecast bundle requests a fresh run.
+
+Market Report XLSX/PDF disclose the screening basis only beside an included
+joint MILP result. Older export callers lacking product metadata explicitly
+say that its identity is unavailable. The ordinary PDF does not include a
+Project Case result, so it must not inherit that case's nominal-block basis.
+This display coverage is distinct from changing either economic convention.
+
 ## Runtime and validation
 
 Both dependency manifests require Streamlit >=1.55,<2.0. Version 1.55.0 is a
@@ -199,12 +246,9 @@ documentation. CI runs the full suite on Python 3.13 and a separate real-panel
 smoke job on Python 3.11 with Streamlit pinned to 1.55.0. Pull requests to any
 base branch trigger CI, including stacked review branches.
 
-The [Step 2 handoff](../audits/2026-09-08-step2-handoff.md) freezes the change,
-baseline failures and validation results. German DST reserve cash still
-differs between Project Case's wall-clock settlement and the cockpit's
-physical-hour screening convention. Step 3B result persistence is merged in
-[#90](https://github.com/crashchen/euro-bess-radar/pull/90) as `cf91374`; the
-Step 3C average-price and metric-layout changes are under review. Clarifying
-the DST settlement distinction remains Step 3D, and full documentation/Vault
+The [Step 2 handoff](../audits/2026-09-08-step2-handoff.md) freezes its change,
+baseline failures and validation results. Step 3B is merged in #90 as
+`cf91374`; Step 3C is merged in #91 as `2e4ed73`. Step 3D adds the capacity
+settlement disclosure above and remains under review. Full documentation/Vault
 housekeeping remains Step 4. See the [audit index](../audits/README.md) for
 revision-specific evidence rather than treating this contract as a test log.
