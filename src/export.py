@@ -71,6 +71,10 @@ from src.project_case.schema import (
     _replay_typed_strategy_payload,
     _validate_strategy_wire_payload,
 )
+from src.settlement_disclosure import (
+    project_case_capacity_settlement_basis,
+    screening_capacity_settlement_basis,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -322,6 +326,26 @@ def _write_kv_pair(
 
 # ── Sheet builders ───────────────────────────────────────────────────────────
 
+
+def _write_settlement_disclosure(ws, row: int, label: str, value: str) -> int:
+    """Wrap a presentation-only basis without changing adjacent numeric cells."""
+    next_row = _write_kv_pair(ws, row, label, value, wrap_key=True)
+    ws.cell(row=row, column=2).alignment = Alignment(wrap_text=True, vertical="top")
+    # The general auto-width pass caps columns at _MAX_COLUMN_WIDTH. Leave
+    # room for glyph variation and a spare line in the saved workbook.
+    lines = len(textwrap.wrap(value, _MAX_COLUMN_WIDTH - 4)) + 1
+    ws.row_dimensions[row].height = max(
+        ws.row_dimensions[row].height or 0, lines * _ROW_HEIGHT_PER_LINE,
+    )
+    return next_row
+
+
+def _joint_capacity_basis(zone: str, revenue_estimate: dict) -> str:
+    """Use producer-bound disclosure; older callers explicitly lack product ID."""
+    return revenue_estimate.get("joint_capacity_settlement_basis") or (
+        screening_capacity_settlement_basis(zone, "capacity product identity unavailable")
+    )
+
 def _build_summary_sheet(
     ws, zone: str, price_df: pd.DataFrame,
     percentiles: dict[str, float],
@@ -409,6 +433,10 @@ def _build_summary_sheet(
             revenue_estimate["capacity_stack_warning"],
         )
     if "joint_cooptimized_total_eur" in revenue_estimate:
+        row = _write_settlement_disclosure(
+            ws, row, "Joint MILP Capacity Settlement Basis",
+            _joint_capacity_basis(zone, revenue_estimate),
+        )
         row = _write_kv_pair(
             ws, row,
             "Joint MILP Co-optimized Total (EUR)",
@@ -1734,6 +1762,11 @@ def _build_project_case_npv_sheet(ws, result: RunResult) -> None:
     row = len(rows) + 3
     row = _write_kv_pair(ws, row, "Schema Version", result.schema_version)
     row = _write_kv_pair(ws, row, "Project Case Input Fingerprint", result.input_fingerprint)
+    capacity_basis = project_case_capacity_settlement_basis(result)
+    if capacity_basis is not None:
+        row = _write_settlement_disclosure(
+            ws, row, "Reserve Capacity Settlement Basis", capacity_basis,
+        )
     row = _write_kv_pair(
         ws,
         row,
@@ -2415,6 +2448,8 @@ def _build_pdf_report(
     if revenue_estimate.get("capacity_stack_warning"):
         rows.append(("Note", str(revenue_estimate["capacity_stack_warning"])))
     if "joint_cooptimized_total_eur" in revenue_estimate:
+        rows.append(("Joint MILP Capacity Settlement Basis",
+                     _joint_capacity_basis(zone, revenue_estimate)))
         rows.append(("Joint MILP Co-optimized Total (EUR)",
                      f"{revenue_estimate['joint_cooptimized_total_eur']:,.0f}"))
         rows.append(("Joint MILP Avg Reserve Commitment",
@@ -2706,6 +2741,48 @@ def cockpit_tables_to_excel(
         ws = wb.active if i == 0 else wb.create_sheet()
         # Excel caps sheet names at 31 chars.
         _build_table_sheet(ws, name[:31], df)
+        _format_capacity_disclosures(ws, df)
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def _format_capacity_disclosures(ws, frame: pd.DataFrame) -> None:
+    """Keep the added capacity basis readable without altering table values."""
+    display_columns = {
+        "capacity_settlement_basis": "Capacity basis",
+        "capacity_settlement_scope": "Capacity scope",
+    }
+    for field, title in display_columns.items():
+        if field not in frame.columns:
+            continue
+        column = frame.columns.get_loc(field) + 1
+        ws.cell(row=1, column=column, value=title)
+        ws.column_dimensions[get_column_letter(column)].width = 30
+        for row in range(2, len(frame) + 2):
+            cell = ws.cell(row=row, column=column)
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            lines = len(textwrap.wrap(str(cell.value), 26)) + 1
+            ws.row_dimensions[row].height = max(
+                ws.row_dimensions[row].height or 0, lines * _ROW_HEIGHT_PER_LINE,
+            )
+    if not {"parameter", "value"}.issubset(frame.columns):
+        return
+    mask = frame["parameter"].astype(str).str.startswith("Capacity settlement ")
+    if not mask.any():
+        return
+    widths = {"parameter": 32, "value": 70, "source": 35, "affects": 55}
+    for field, width in widths.items():
+        if field not in frame.columns:
+            continue
+        column = frame.columns.get_loc(field) + 1
+        ws.column_dimensions[get_column_letter(column)].width = width
+        for position, applies in enumerate(mask, start=2):
+            if not applies:
+                continue
+            cell = ws.cell(row=position, column=column)
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            lines = len(textwrap.wrap(str(cell.value), width - 4)) + 1
+            ws.row_dimensions[position].height = max(
+                ws.row_dimensions[position].height or 0, lines * _ROW_HEIGHT_PER_LINE,
+            )

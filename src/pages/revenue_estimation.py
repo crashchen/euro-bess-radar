@@ -53,6 +53,7 @@ from src.scenario import (
     calculate_npv_distribution,
     sensitivity_table,
 )
+from src.settlement_disclosure import screening_capacity_settlement_basis
 from src.ui_theme import apply_cockpit_plot_theme
 
 _REVENUE_DECAY_HARD_CAPTION = (
@@ -315,6 +316,22 @@ def render(
                             avg_reserve_fraction, 4,
                         ),
                     })
+                    # This screening solve uses an aggregate capacity price.
+                    # Bind the disclosure to its actual contributing products,
+                    # rather than suggesting a single product was dispatched.
+                    capacity_products = sorted(
+                        product for product, kind in
+                        anc_rev.get("product_revenue_types", {}).items()
+                        if kind in {"capacity", "mixed"}
+                    )
+                    product_scope = (
+                        "aggregate capacity: " + ", ".join(capacity_products)
+                        if capacity_products else
+                        "aggregate capacity (product identity unavailable)"
+                    )
+                    export_revenue["joint_capacity_settlement_basis"] = (
+                        screening_capacity_settlement_basis(primary_zone, product_scope)
+                    )
 
                 with st.expander("Joint MILP co-optimization estimate", expanded=False):
                     if not joint_available:
@@ -323,6 +340,7 @@ def render(
                             "successfully. No €0 estimate has been generated."
                         )
                     else:
+                        st.caption(export_revenue["joint_capacity_settlement_basis"])
                         co1, co2, co3 = st.columns(3)
                         co1.metric(
                             "Avg Reserve Commitment",

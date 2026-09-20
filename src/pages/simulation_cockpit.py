@@ -16,7 +16,7 @@ from src.ancillary import (
     capacity_price_series_for_product,
     list_capacity_products,
 )
-from src.assumptions import CAPTURE_PARAM_LABEL
+from src.assumptions import ASSUMPTION_COLUMNS, CAPTURE_PARAM_LABEL
 from src.config import (
     ANCILLARY_CAPACITY_AVAILABILITY,
     MAX_CONTINUOUS_REPLAY_INTERVALS,
@@ -43,6 +43,10 @@ from src.imbalance_overlay import compute_imbalance_overlay
 from src.liquidity import compute_liquidity_cap
 from src.pages.project_case import render_project_case_cockpit_mirror
 from src.reserve_forecast import RESERVE_VALUE_COL, compute_reserve_forecast_skill
+from src.settlement_disclosure import (
+    screening_capacity_settlement_basis,
+    screening_capacity_settlement_label,
+)
 from src.simulation import (
     DAYS_PER_YEAR,
     available_local_dates,
@@ -84,7 +88,7 @@ _STOCHASTIC_SEED = 0
 _MULTI_DAY_RESULT_KEY = "simulation_batch_result"
 _MULTI_DAY_PANEL_ID = "cockpit-multi-day-replay/v1"
 _FORECAST_POLICY_RESULT_KEY = "forecast_policy_result"
-_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v1"
+_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v2-settlement-disclosure"
 
 
 def _solver_constants() -> dict[str, object]:
@@ -3307,7 +3311,8 @@ def _render_forecast_policy_section(
             st.session_state.pop(_FORECAST_POLICY_RESULT_KEY, None)
             st.session_state[_FORECAST_POLICY_RESULT_KEY] = (
                 _compute_forecast_policy_bundle(
-                    fingerprint=fingerprint, assumptions=assumptions, **inputs,
+                    fingerprint=fingerprint, primary_zone=primary_zone,
+                    assumptions=assumptions, **inputs,
                 )
             )
         bundle = st.session_state[_FORECAST_POLICY_RESULT_KEY]
@@ -3373,6 +3378,7 @@ def _forecast_policy_fingerprint(
 def _compute_forecast_policy_bundle(
     *,
     fingerprint: str,
+    primary_zone: str,
     primary_df: pd.DataFrame,
     intraday_df: pd.DataFrame,
     capacity_df: pd.DataFrame | None,
@@ -3454,26 +3460,40 @@ def _compute_forecast_policy_bundle(
         duration_hours=duration_hours, efficiency=efficiency, bucket=bucket,
         forecast_mode=forecast_mode, min_rebid_uplift_eur=min_rebid_uplift_eur,
     )
+    triple_label = f"DA + IDA1 + {reserve_product} (co-opt ceiling)"
+    realistic_label = f"DA + IDA1 + {reserve_product} (forecast-driven realistic)"
     comparison = build_strategy_comparison(
         summary,
         power_mw=power_mw,
         reserve_coopt_total=reserve_total,
         reserve_label=reserve_label,
         triple_joint_total=triple["triple_total"],
-        triple_joint_label=(
-            f"DA + IDA1 + {reserve_product} (co-opt ceiling)"
-            if triple["triple_total"] is not None else None
-        ),
+        triple_joint_label=triple_label,
         realistic_triple_total=triple["realistic_total"],
-        realistic_triple_label=(
-            f"DA + IDA1 + {reserve_product} (forecast-driven realistic)"
-            if triple["realistic_total"] is not None else None
-        ),
+        realistic_triple_label=realistic_label,
         triple_valid_days=triple["triple_valid_days"],
         triple_da_baseline=triple["triple_da_baseline"],
         policy_value_total=stochastic["policy_value_total"],
         policy_value_valid_days=stochastic["policy_value_valid_days"],
         policy_value_label=stochastic["policy_value_label"],
+    )
+    # Identify capacity-bearing rows from the actual solver routes and the exact
+    # labels supplied to the comparison builder, never by searching label text.
+    reserve_labels = []
+    for total, label in (
+        (reserve_total, reserve_label),
+        (triple["triple_total"], triple_label),
+        (triple["realistic_total"], realistic_label),
+        (
+            stochastic["policy_value_total"] if stochastic["reserve_mode"] else None,
+            stochastic["policy_value_label"],
+        ),
+    ):
+        if total is not None and math.isfinite(float(total)) and label is not None:
+            reserve_labels.append(label)
+    comparison, settlement = _comparison_capacity_disclosure(
+        comparison, zone=primary_zone, product=reserve_product,
+        reserve_labels=reserve_labels,
     )
     bundle["derived"] = {
         "reserve_product": reserve_product,
@@ -3482,6 +3502,7 @@ def _compute_forecast_policy_bundle(
         "triple": triple,
         "stochastic": stochastic,
         "comparison": comparison,
+        "capacity_settlement": settlement,
         "export_tables": _forecast_policy_export_tables(
             comparison, per_day, triple, stochastic,
         ),
@@ -3494,6 +3515,7 @@ def _compute_forecast_policy_bundle(
             reserve_price=reserve_price,
             triple=triple,
             stochastic=stochastic,
+            settlement=settlement,
         ),
     }
     return bundle
@@ -3567,6 +3589,44 @@ def _compute_stochastic_policy(
     return out
 
 
+def _comparison_capacity_disclosure(
+    comparison: pd.DataFrame,
+    *,
+    zone: str,
+    product: str | None,
+    reserve_labels: list[str],
+) -> tuple[pd.DataFrame, dict | None]:
+    """Attach presentation-only settlement context to the computed rows.
+
+    The numeric comparison and annualisation contract is unchanged. Explicit
+    solver-route labels identify capacity-bearing totals/deltas; DA/IDA-only
+    rows cannot inherit a capacity convention merely because a product was
+    selected. The returned context is snapshotted alongside the result.
+    """
+    out = comparison.copy()
+    out["capacity_settlement_basis"] = "Not applicable"
+    out["capacity_settlement_scope"] = "Not applicable"
+    capacity_rows = out["strategy"].isin(reserve_labels)
+    if not capacity_rows.any():
+        return out, None
+    basis = screening_capacity_settlement_basis(zone, product)
+    label = screening_capacity_settlement_label(zone, product)
+    if basis is None:
+        # A capacity-bearing row without a product is incomplete metadata, not
+        # a DA-only row. Keep that distinction visible instead of guessing.
+        basis = "Unavailable: the reserve product was not recorded for this run."
+        label = "Unverified"
+    out.loc[capacity_rows, "capacity_settlement_basis"] = label
+    out.loc[capacity_rows, "capacity_settlement_scope"] = f"{zone} / {product or 'Not recorded'}"
+    return out, {
+        "zone": zone,
+        "product": product or "Not recorded",
+        "basis": basis,
+        "label": label,
+        "strategies": tuple(out.loc[capacity_rows, "strategy"]),
+    }
+
+
 def _forecast_policy_export_assumptions(
     assumptions: pd.DataFrame | None,
     *,
@@ -3575,6 +3635,7 @@ def _forecast_policy_export_assumptions(
     reserve_price: float | None,
     triple: dict,
     stochastic: dict,
+    settlement: dict | None = None,
 ) -> pd.DataFrame | None:
     """Assumptions sheet for the forecast-policy export, built at run time."""
     # This panel reports raw solver values — no capture haircut applied.
@@ -3599,6 +3660,26 @@ def _forecast_policy_export_assumptions(
     if stoch_summary is not None and stoch_summary["valid_days"] > 0:
         out = _append_stochastic_assumptions(
             out, summary=stoch_summary, reserve_mode=stochastic["reserve_mode"],
+        )
+    if settlement is not None:
+        # This disclosure is required even when no caller assumptions were
+        # supplied. Its context is captured with the result, not read on rerun.
+        affects = "Reserve capacity components of: " + "; ".join(
+            settlement["strategies"]
+        )
+        rows = pd.DataFrame([
+            {
+                "parameter": parameter, "value": value, "unit": "",
+                "source": "Run-time screening capacity model", "affects": affects,
+            }
+            for parameter, value in (
+                ("Capacity settlement zone", settlement["zone"]),
+                ("Capacity settlement product", settlement["product"]),
+                ("Capacity settlement basis", settlement["basis"]),
+            )
+        ], columns=ASSUMPTION_COLUMNS)
+        out = rows if out is None or out.empty else pd.concat(
+            [out, rows], ignore_index=True,
         )
     return out
 
@@ -3676,6 +3757,9 @@ def _render_forecast_policy_bundle(bundle: dict, chart_template: str) -> None:
             ),
         )
     reserve_product = derived["reserve_product"]
+    settlement = derived["capacity_settlement"]
+    if settlement is not None:
+        st.caption(f"Capacity settlement basis: {settlement['basis']}")
     _render_strategy_comparison(
         derived["comparison"], chart_template,
         has_reserve=derived["reserve_total"] is not None,
@@ -3895,6 +3979,19 @@ def _render_strategy_comparison(
             ),
             "uplift_vs_da_pct": st.column_config.NumberColumn(
                 "Uplift vs DA", format="%.1f%%",
+            ),
+            "capacity_settlement_basis": st.column_config.TextColumn(
+                "Capacity basis",
+                width="medium",
+                help=(
+                    "Applies only to the reserve capacity component of each "
+                    "strategy total or policy-value delta; not to DA/IDA energy."
+                ),
+            ),
+            "capacity_settlement_scope": st.column_config.TextColumn(
+                "Capacity scope",
+                width="medium",
+                help="The zone and reserve product captured when this result was run.",
             ),
         },
     )
