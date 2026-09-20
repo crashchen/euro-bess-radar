@@ -24,6 +24,8 @@ limits. This directory records a fresh run, not copied Step 3D results.
   `STEP4_OUTPUT` may choose an output directory, otherwise the system temporary
   directory is used. It does not check internet URLs or launch an application.
 
-Full note text and workstation paths are excluded. The later Step 4 handoff
-records the relative Vault synchronization scope; local before/after copies
+Full note text and workstation paths are excluded. The [Step 4 handoff](../2026-09-20-step4-handoff.md) and `vault-sync.json`
+record the relative Vault synchronization scope; local before/after copies
 are kept outside this repository. No ESS files, schemas or digests change.
+
+`manifest.json` freezes the verification artifacts by SHA-256 and excludes itself.

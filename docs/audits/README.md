@@ -25,6 +25,7 @@ entry point for today's code-bound results. The records below remain historical.
 | Step 3B | Increment relative to `e60a74f`; merged in [#90](https://github.com/crashchen/euro-bess-radar/pull/90) as `cf91374` | [Handoff and evidence](2026-09-16-step3b-handoff.md) |
 | Step 3C | Both increments independently reviewed; merged in [#91](https://github.com/crashchen/euro-bess-radar/pull/91) as `2e4ed73` | [Original frozen handoff](2026-09-16-step3c-handoff.md), [current increment and evidence](2026-09-19-step3c-r2-handoff.md), [duration contract](../design/delivery-duration-v1.md) |
 | Step 3D | Independently reviewed; merged in [#92](https://github.com/crashchen/euro-bess-radar/pull/92) as `fb72dbf` | [Handoff and evidence](2026-09-20-step3d-handoff.md), [duration contract](../design/delivery-duration-v1.md) |
+| Step 4 | Documentation branch based on `fb72dbf`; not merged | [Housekeeping handoff](2026-09-20-step4-handoff.md), [current snapshot](../validation/current.md), [local-note sync receipt](2026-09-20-step4-evidence/vault-sync.json) |
 
 The original Step 1b patch is unchanged: its SHA-256 remains
 `a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12`.
