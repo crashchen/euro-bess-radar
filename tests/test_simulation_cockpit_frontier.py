@@ -85,6 +85,7 @@ class TestFrontierCapParsing:
 class TestFrontierFingerprint:
     _KW: ClassVar[dict] = dict(
         primary_zone="DE_LU",
+        primary_df=pd.DataFrame({"price_eur_mwh": [10.0, 100.0]}),
         cycle_life=6000.0,
         sweep_dates=["2026-03-02", "2026-03-03"],
         zone_tz="UTC",

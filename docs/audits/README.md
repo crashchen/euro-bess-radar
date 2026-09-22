@@ -25,7 +25,8 @@ entry point for today's code-bound results. The records below remain historical.
 | Step 3B | Increment relative to `e60a74f`; merged in [#90](https://github.com/crashchen/euro-bess-radar/pull/90) as `cf91374` | [Handoff and evidence](2026-09-16-step3b-handoff.md) |
 | Step 3C | Both increments independently reviewed; merged in [#91](https://github.com/crashchen/euro-bess-radar/pull/91) as `2e4ed73` | [Original frozen handoff](2026-09-16-step3c-handoff.md), [current increment and evidence](2026-09-19-step3c-r2-handoff.md), [duration contract](../design/delivery-duration-v1.md) |
 | Step 3D | Independently reviewed; merged in [#92](https://github.com/crashchen/euro-bess-radar/pull/92) as `fb72dbf` | [Handoff and evidence](2026-09-20-step3d-handoff.md), [duration contract](../design/delivery-duration-v1.md) |
-| Step 4 | Documentation branch based on `fb72dbf`; not merged | [Housekeeping handoff](2026-09-20-step4-handoff.md), [current snapshot](../validation/current.md), [local-note sync receipt](2026-09-20-step4-evidence/vault-sync.json) |
+| Step 4 | Documentation based on `fb72dbf`; merged in [#93](https://github.com/crashchen/euro-bess-radar/pull/93) as `6d986e3` | [Housekeeping handoff](2026-09-20-step4-handoff.md), [current snapshot](../validation/current.md), [local-note sync receipt](2026-09-20-step4-evidence/vault-sync.json) |
+| Frontier follow-up | Increment from `6d986e3`; implemented on the review branch, awaiting review | [Result identity and export-snapshot handoff](2026-09-22-frontier-handoff.md), [panel contract](../design/cycle-cap-frontier-v1.md#session-identity-and-export-assumptions--2026-09-22-follow-up) |
 
 The original Step 1b patch is unchanged: its SHA-256 remains
 `a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12`.
@@ -55,14 +56,15 @@ Remote CI status is attached to each PR's exact head in GitHub Checks.
 
 ## Current sequence
 
-Steps 1, 1b, 2 and 3A–3D are merged. Step 4 reconciles repository documentation
-and the nine project notes against the [dated snapshot](../validation/current.md),
-retaining the earlier records unchanged. Its documentation branch is separately
-reviewed; no new model or cash behavior is included.
+Steps 1, 1b, 2, 3A–3D and Step 4 are merged. Step 4 reconciled repository
+documentation and the nine project notes against the [dated snapshot](../validation/current.md),
+retaining the earlier records unchanged. The frontier follow-up now extends
+content identity and freezes run-time export assumptions; it awaits independent
+review, with separate revision-bound evidence and unchanged numerical models.
 
-[Remaining work](../validation/follow-ups.md) records the frontier content
-fingerprint, remaining-page layouts, existing export clipping, warnings and
-unexecuted manual/consumer checks. A reconciled checklist is not an assertion
+[Remaining work](../validation/follow-ups.md) distinguishes the frontier change
+awaiting review from remaining-page layouts, existing export clipping, warnings,
+bounded floor-export/retry behavior and unexecuted manual/consumer checks. A reconciled checklist is not an assertion
 that every check passed. Private Vault note text and workstation paths stay
 outside this repository; the Step 4 handoff records relative synchronization scope.
 

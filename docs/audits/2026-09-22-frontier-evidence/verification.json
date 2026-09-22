@@ -1,0 +1,60 @@
+{
+  "code_base": "6d986e30d45bb0fe932dd0477e228b361c4ca240",
+  "code_head": "e11eacad27766e1f305d9444279ae82d261da8a1",
+  "verified_at_utc": "2026-09-22T08:08:36.695562+00:00",
+  "full_suite": {
+    "passed": 2100,
+    "skipped": 2,
+    "collected": 2102,
+    "slow": 35,
+    "seconds": 283.62,
+    "warnings": 29
+  },
+  "collection": {
+    "test_function_definitions_ast": 1562,
+    "collected_callables": 1562,
+    "collected": 2102,
+    "slow": 35,
+    "files": 57
+  },
+  "new_tests": {
+    "total": 43,
+    "head_passed": 43,
+    "baseline_failed": 25,
+    "baseline_passed": 18,
+    "compatibility_nodeids": [
+      "tests/test_frontier_result_identity.py::test_equal_frame_copies_and_reordered_caps_match_compat",
+      "tests/test_frontier_result_identity.py::test_disabled_liquidity_ignores_its_inactive_parameters_compat",
+      "tests/test_frontier_result_identity.py::test_uncapped_sentinel_cannot_collide_with_zero_cap_compat",
+      "tests/test_frontier_result_identity.py::test_existing_active_inputs_still_invalidate_compat[primary_zone-AT]",
+      "tests/test_frontier_result_identity.py::test_existing_active_inputs_still_invalidate_compat[caps-value1]",
+      "tests/test_frontier_result_identity.py::test_existing_active_inputs_still_invalidate_compat[cycle_life-3000.0]",
+      "tests/test_frontier_result_identity.py::test_existing_active_inputs_still_invalidate_compat[sweep_dates-value3]",
+      "tests/test_frontier_result_identity.py::test_existing_active_inputs_still_invalidate_compat[zone_tz-Europe/Berlin]",
+      "tests/test_frontier_result_identity.py::test_existing_active_inputs_still_invalidate_compat[power_mw-2.0]",
+      "tests/test_frontier_result_identity.py::test_existing_active_inputs_still_invalidate_compat[duration_hours-2.0]",
+      "tests/test_frontier_result_identity.py::test_existing_active_inputs_still_invalidate_compat[efficiency-0.8]",
+      "tests/test_frontier_result_identity.py::test_existing_active_inputs_still_invalidate_compat[capex_eur_kwh-100.0]",
+      "tests/test_frontier_result_identity.py::test_existing_active_inputs_still_invalidate_compat[liquidity_enabled-True]",
+      "tests/test_frontier_result_identity.py::test_enabled_liquidity_values_still_invalidate_compat[zone_da_volume_mw-20.0]",
+      "tests/test_frontier_result_identity.py::test_enabled_liquidity_values_still_invalidate_compat[max_participation_share-0.2]",
+      "tests/test_frontier_result_identity.py::test_real_frontier_reuses_result_on_rerun_and_theme_change_compat",
+      "tests/test_frontier_result_identity.py::test_empty_frontier_keeps_download_and_floor_gated_compat[empty_selection]",
+      "tests/test_frontier_result_identity.py::test_empty_frontier_keeps_download_and_floor_gated_compat[no_valid_days]"
+    ]
+  },
+  "targeted": {
+    "passed": 150,
+    "seconds": 5.2
+  },
+  "non_slow_derived": {
+    "passed": 2065,
+    "skipped": 2,
+    "collected": 2067,
+    "basis": "Derived from full run, not a separate fast command"
+  },
+  "ruff": "pass",
+  "patch_sha256": "c11506a692f6244a117b9cec224e6ecbc0004269317997b0a4dcf30fabd73824",
+  "ci": "Consult the draft PR exact-head Checks separately; local verification does not imply remote CI success.",
+  "browser": "See browser-check.json for successful state checks and unverified download completion."
+}

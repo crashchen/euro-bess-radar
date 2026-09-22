@@ -1,0 +1,17 @@
+{
+  "code_head": "e11eacad27766e1f305d9444279ae82d261da8a1",
+  "date": "2026-09-22",
+  "method": "Chrome via computer-use accessibility/DOM observations; synthetic harness invokes production panels and real daily solver",
+  "fixture": "2 hourly UTC days, caps 1 and uncapped, 1 MW/1h, efficiency 0.9, capex 150, one selectable price correction from 100 to 900",
+  "observations": [
+    "Initial render: frontier_compute_calls=0, daily_solver_calls=0, no result",
+    "Frontier Run: frontier_compute_calls=1, daily_solver_calls=4; real chart/table/Excel download visible",
+    "Floor Run: merchant metrics and both downloads visible; counts remained 1/4",
+    "Same-shape price correction: both results and downloads hidden, stale and missing-current-frontier messages shown; counts remained 1/4",
+    "Restore original price: frontier chart/table/download returned without solving; floor prompted its own Run, counts remained 1/4",
+    "Direct Excel download-button click: result stayed visible and counts stayed 1/4",
+    "Change harness chart-template checkbox: checked state changed and result remained; counts stayed 1/4"
+  ],
+  "download_completion": "Not certified. Browser download-event observation timed out; browser internal downloads page is prohibited by the browser tool policy. No bypass attempted. Actual workbook contents are verified independently by AppTest through the production export function.",
+  "evidence_limit": "Observations transcribed from this tool session, not archived screenshots or a layout/readability certification. No claim that a browser-downloaded file was located or inspected. No live market data or production cache access. Browser tab closed after verification."
+}

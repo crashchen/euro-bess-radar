@@ -1,0 +1,243 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: /private<baseline-repo>
+configfile: pyproject.toml
+collected 43 items
+
+tests/test_frontier_result_identity.py F...............FFFFFFFFFFFFFFFFF [ 76%]
+.FFFFFFF..                                                               [100%]
+
+=================================== FAILURES ===================================
+________________ test_primary_frame_is_a_required_keyword_input ________________
+tests/test_frontier_result_identity.py:97: in test_primary_frame_is_a_required_keyword_input
+    assert parameter is not None, "Frontier identity must require the actual price frame"
+E   AssertionError: Frontier identity must require the actual price frame
+E   assert None is not None
+___ test_full_frame_content_and_layout_are_part_of_identity[selected_price] ____
+tests/test_frontier_result_identity.py:156: in test_full_frame_content_and_layout_are_part_of_identity
+    assert _identity() != _identity(primary_df=corrected)
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+E    +  and   ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity(primary_df=                           price_eur_mwh\ntimestamp                               \n2026-03-02 00:00:00+00:00           ...          50.0\n2026-03-05 22:00:00+00:00           50.0\n2026-03-05 23:00:00+00:00           50.0\n\n[96 rows x 1 columns])
+__ test_full_frame_content_and_layout_are_part_of_identity[unselected_price] ___
+tests/test_frontier_result_identity.py:156: in test_full_frame_content_and_layout_are_part_of_identity
+    assert _identity() != _identity(primary_df=corrected)
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+E    +  and   ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity(primary_df=                           price_eur_mwh\ntimestamp                               \n2026-03-02 00:00:00+00:00           ...          50.0\n2026-03-05 22:00:00+00:00           50.0\n2026-03-05 23:00:00+00:00           50.0\n\n[96 rows x 1 columns])
+___ test_full_frame_content_and_layout_are_part_of_identity[interior_index] ____
+tests/test_frontier_result_identity.py:156: in test_full_frame_content_and_layout_are_part_of_identity
+    assert _identity() != _identity(primary_df=corrected)
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+E    +  and   ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity(primary_df=                           price_eur_mwh\ntimestamp                               \n2026-03-02 00:00:00+00:00           ...          50.0\n2026-03-05 22:00:00+00:00           50.0\n2026-03-05 23:00:00+00:00           50.0\n\n[96 rows x 1 columns])
+________ test_full_frame_content_and_layout_are_part_of_identity[dtype] ________
+tests/test_frontier_result_identity.py:156: in test_full_frame_content_and_layout_are_part_of_identity
+    assert _identity() != _identity(primary_df=corrected)
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+E    +  and   ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity(primary_df=                           price_eur_mwh\ntimestamp                               \n2026-03-02 00:00:00+00:00           ...            50\n2026-03-05 22:00:00+00:00             50\n2026-03-05 23:00:00+00:00             50\n\n[96 rows x 1 columns])
+______ test_full_frame_content_and_layout_are_part_of_identity[timezone] _______
+tests/test_frontier_result_identity.py:156: in test_full_frame_content_and_layout_are_part_of_identity
+    assert _identity() != _identity(primary_df=corrected)
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+E    +  and   ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity(primary_df=                           price_eur_mwh\ntimestamp                               \n2026-03-02 01:00:00+01:00           ...          50.0\n2026-03-05 23:00:00+01:00           50.0\n2026-03-06 00:00:00+01:00           50.0\n\n[96 rows x 1 columns])
+_____ test_full_frame_content_and_layout_are_part_of_identity[index_name] ______
+tests/test_frontier_result_identity.py:156: in test_full_frame_content_and_layout_are_part_of_identity
+    assert _identity() != _identity(primary_df=corrected)
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+E    +  and   ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity(primary_df=                           price_eur_mwh\ncorrected_timestamp                     \n2026-03-02 00:00:00+00:00           ...          50.0\n2026-03-05 22:00:00+00:00           50.0\n2026-03-05 23:00:00+00:00           50.0\n\n[96 rows x 1 columns])
+_____ test_full_frame_content_and_layout_are_part_of_identity[column_name] _____
+tests/test_frontier_result_identity.py:156: in test_full_frame_content_and_layout_are_part_of_identity
+    assert _identity() != _identity(primary_df=corrected)
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+E    +  and   ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity(primary_df=                           corrected_price\ntimestamp                                 \n2026-03-02 00:00:00+00:00       ...      50.0\n2026-03-05 22:00:00+00:00             50.0\n2026-03-05 23:00:00+00:00             50.0\n\n[96 rows x 1 columns])
+______ test_full_frame_content_and_layout_are_part_of_identity[row_order] ______
+tests/test_frontier_result_identity.py:156: in test_full_frame_content_and_layout_are_part_of_identity
+    assert _identity() != _identity(primary_df=corrected)
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+E    +  and   ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity(primary_df=                           price_eur_mwh\ntimestamp                               \n2026-03-02 01:00:00+00:00           ...          50.0\n2026-03-05 22:00:00+00:00           50.0\n2026-03-05 23:00:00+00:00           50.0\n\n[96 rows x 1 columns])
+____ test_full_frame_content_and_layout_are_part_of_identity[extra_column] _____
+tests/test_frontier_result_identity.py:156: in test_full_frame_content_and_layout_are_part_of_identity
+    assert _identity() != _identity(primary_df=corrected)
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+E    +  and   ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity(primary_df=                           price_eur_mwh source_revision\ntimestamp                                               \n2026...00+00:00           50.0         revised\n2026-03-05 23:00:00+00:00           50.0         revised\n\n[96 rows x 2 columns])
+_ test_exact_ordered_selected_dates_are_part_of_identity[interior_replacement] _
+tests/test_frontier_result_identity.py:169: in test_exact_ordered_selected_dates_are_part_of_identity
+    assert _identity(sweep_dates=original) != _identity(sweep_dates=days)
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity(sweep_dates=[datetime.date(2026, 3, 2), datetime.date(2026, 3, 3), datetime.date(2026, 3, 5)])
+E    +  and   ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity(sweep_dates=[datetime.date(2026, 3, 2), datetime.date(2026, 3, 4), datetime.date(2026, 3, 5)])
+________ test_exact_ordered_selected_dates_are_part_of_identity[order] _________
+tests/test_frontier_result_identity.py:169: in test_exact_ordered_selected_dates_are_part_of_identity
+    assert _identity(sweep_dates=original) != _identity(sweep_dates=days)
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 4), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 4), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 4), 'UTC', 1.0, ...) = _identity(sweep_dates=[datetime.date(2026, 3, 2), datetime.date(2026, 3, 3), datetime.date(2026, 3, 4), datetime.date(2026, 3, 5)])
+E    +  and   ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 4), 'UTC', 1.0, ...) = _identity(sweep_dates=[datetime.date(2026, 3, 2), datetime.date(2026, 3, 4), datetime.date(2026, 3, 3), datetime.date(2026, 3, 5)])
+_________________ test_panel_version_participates_in_identity __________________
+tests/test_frontier_result_identity.py:174: in test_panel_version_participates_in_identity
+    assert version, "A panel version must invalidate results after semantic code changes"
+E   AssertionError: A panel version must invalidate results after semantic code changes
+E   assert None
+_ test_consumed_solver_constants_participate_in_identity[src.dispatch-DISPATCH_VOM_COST_EUR_MWH] _
+tests/test_frontier_result_identity.py:194: in test_consumed_solver_constants_participate_in_identity
+    assert _identity() != original
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+_ test_consumed_solver_constants_participate_in_identity[src.cycle_frontier-DAYS_PER_YEAR] _
+tests/test_frontier_result_identity.py:194: in test_consumed_solver_constants_participate_in_identity
+    assert _identity() != original
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+_ test_consumed_solver_constants_participate_in_identity[src.degradation-DAYS_PER_YEAR] _
+tests/test_frontier_result_identity.py:194: in test_consumed_solver_constants_participate_in_identity
+    assert _identity() != original
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+_ test_consumed_solver_constants_participate_in_identity[src.cycle_frontier-NET_TOL_EUR_PER_MW_YR] _
+tests/test_frontier_result_identity.py:194: in test_consumed_solver_constants_participate_in_identity
+    assert _identity() != original
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+___________ test_pre_content_identity_cannot_match_a_current_result ____________
+tests/test_frontier_result_identity.py:198: in test_pre_content_identity_cannot_match_a_current_result
+    assert _identity() != _legacy_identity()
+E   AssertionError: assert ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) != ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...)
+E    +  where ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _identity()
+E    +  and   ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...) = _legacy_identity()
+_ test_stale_source_hides_frontier_floor_and_downloads_without_solving[selected_price] _
+tests/test_frontier_result_identity.py:387: in test_stale_source_hides_frontier_floor_and_downloads_without_solving
+    _assert_stale(app)
+tests/test_frontier_result_identity.py:257: in _assert_stale
+    assert app.session_state["identity_returned_context"] is None
+E   AssertionError: assert {'capex_eur_kwh': 150.0, 'cycle_life': 6000.0, 'duration_hours': 1.0, 'fingerprint': ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...), ...} is None
+---------------------------- Captured stderr setup -----------------------------
+2026-09-22 10:01:57.063 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.064 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.064 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.064 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.064 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+----------------------------- Captured stderr call -----------------------------
+2026-09-22 10:01:57.189 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_ test_stale_source_hides_frontier_floor_and_downloads_without_solving[interior_index] _
+tests/test_frontier_result_identity.py:387: in test_stale_source_hides_frontier_floor_and_downloads_without_solving
+    _assert_stale(app)
+tests/test_frontier_result_identity.py:257: in _assert_stale
+    assert app.session_state["identity_returned_context"] is None
+E   AssertionError: assert {'capex_eur_kwh': 150.0, 'cycle_life': 6000.0, 'duration_hours': 1.0, 'fingerprint': ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...), ...} is None
+---------------------------- Captured stderr setup -----------------------------
+2026-09-22 10:01:57.226 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.226 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.226 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.226 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.226 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+----------------------------- Captured stderr call -----------------------------
+2026-09-22 10:01:57.345 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_ test_stale_source_hides_frontier_floor_and_downloads_without_solving[unselected_price] _
+tests/test_frontier_result_identity.py:387: in test_stale_source_hides_frontier_floor_and_downloads_without_solving
+    _assert_stale(app)
+tests/test_frontier_result_identity.py:257: in _assert_stale
+    assert app.session_state["identity_returned_context"] is None
+E   AssertionError: assert {'capex_eur_kwh': 150.0, 'cycle_life': 6000.0, 'duration_hours': 1.0, 'fingerprint': ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...), ...} is None
+---------------------------- Captured stderr setup -----------------------------
+2026-09-22 10:01:57.379 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.380 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.380 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.380 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.380 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+----------------------------- Captured stderr call -----------------------------
+2026-09-22 10:01:57.497 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_ test_stale_source_hides_frontier_floor_and_downloads_without_solving[interior_date] _
+tests/test_frontier_result_identity.py:387: in test_stale_source_hides_frontier_floor_and_downloads_without_solving
+    _assert_stale(app)
+tests/test_frontier_result_identity.py:257: in _assert_stale
+    assert app.session_state["identity_returned_context"] is None
+E   AssertionError: assert {'capex_eur_kwh': 150.0, 'cycle_life': 6000.0, 'duration_hours': 1.0, 'fingerprint': ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...), ...} is None
+---------------------------- Captured stderr setup -----------------------------
+2026-09-22 10:01:57.529 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.530 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.530 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.530 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.530 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+----------------------------- Captured stderr call -----------------------------
+2026-09-22 10:01:57.649 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+____________ test_run_after_correction_recomputes_current_data_once ____________
+tests/test_frontier_result_identity.py:423: in test_run_after_correction_recomputes_current_data_once
+    _assert_stale(app)
+tests/test_frontier_result_identity.py:257: in _assert_stale
+    assert app.session_state["identity_returned_context"] is None
+E   AssertionError: assert {'capex_eur_kwh': 150.0, 'cycle_life': 6000.0, 'duration_hours': 1.0, 'fingerprint': ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...), ...} is None
+---------------------------- Captured stderr setup -----------------------------
+2026-09-22 10:01:57.670 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.670 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.671 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.671 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.671 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+----------------------------- Captured stderr call -----------------------------
+2026-09-22 10:01:57.759 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+________ test_real_excel_download_keeps_run_assumptions_until_next_run _________
+tests/test_frontier_result_identity.py:455: in test_real_excel_download_keeps_run_assumptions_until_next_run
+    pd.testing.assert_frame_equal(after_edit, initial)
+pandas/_libs/testing.pyx:55: in pandas._libs.testing.assert_almost_equal
+    ???
+pandas/_libs/testing.pyx:173: in pandas._libs.testing.assert_almost_equal
+    ???
+E   AssertionError: DataFrame.iloc[:, 0] (column name="value") are different
+E
+E   DataFrame.iloc[:, 0] (column name="value") values are different (11.11111 %)
+E   [index]: [Harness provenance, Cockpit capture haircut, Frontier wear model, Frontier cost per cycle, Frontier wear per MWh discharged, Frontier cycle life, Frontier capex basis, Frontier revenue basis, Frontier annualisation]
+E   [left]:  [edited-after-run, Not applied (raw solver values), LINEAR capex amortisation: capex x capacity / cycle life per FEC (no DoD / C-rate / temperature / calendar dependence), 25.00, 25.00, 6000, 150, DA-only per-day standalone terminal-neutral MILP with min-FEC tie-break; VOM in-objective; no capture haircut, 365.25 / 3 common valid days]
+E   [right]: [original-run, Not applied (raw solver values), LINEAR capex amortisation: capex x capacity / cycle life per FEC (no DoD / C-rate / temperature / calendar dependence), 25.00, 25.00, 6000, 150, DA-only per-day standalone terminal-neutral MILP with min-FEC tie-break; VOM in-objective; no capture haircut, 365.25 / 3 common valid days]
+E   At positional index 0, first diff: edited-after-run != original-run
+---------------------------- Captured stderr setup -----------------------------
+2026-09-22 10:01:57.780 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.780 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.781 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.781 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.781 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_____________ test_legacy_session_cache_is_hidden_until_a_new_run ______________
+tests/test_frontier_result_identity.py:477: in test_legacy_session_cache_is_hidden_until_a_new_run
+    _assert_stale(app)
+tests/test_frontier_result_identity.py:257: in _assert_stale
+    assert app.session_state["identity_returned_context"] is None
+E   AssertionError: assert {'capex_eur_kwh': 150.0, 'cycle_life': 6000.0, 'duration_hours': 1.0, 'fingerprint': ('DE_LU', (-1.0, 1.0), 6000.0, ('2026-03-02', '2026-03-05', 3), 'UTC', 1.0, ...), ...} is None
+---------------------------- Captured stderr setup -----------------------------
+2026-09-22 10:01:57.923 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.924 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.924 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.924 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 10:01:57.924 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+----------------------------- Captured stderr call -----------------------------
+2026-09-22 10:01:58.012 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+=========================== short test summary info ============================
+FAILED tests/test_frontier_result_identity.py::test_primary_frame_is_a_required_keyword_input
+FAILED tests/test_frontier_result_identity.py::test_full_frame_content_and_layout_are_part_of_identity[selected_price]
+FAILED tests/test_frontier_result_identity.py::test_full_frame_content_and_layout_are_part_of_identity[unselected_price]
+FAILED tests/test_frontier_result_identity.py::test_full_frame_content_and_layout_are_part_of_identity[interior_index]
+FAILED tests/test_frontier_result_identity.py::test_full_frame_content_and_layout_are_part_of_identity[dtype]
+FAILED tests/test_frontier_result_identity.py::test_full_frame_content_and_layout_are_part_of_identity[timezone]
+FAILED tests/test_frontier_result_identity.py::test_full_frame_content_and_layout_are_part_of_identity[index_name]
+FAILED tests/test_frontier_result_identity.py::test_full_frame_content_and_layout_are_part_of_identity[column_name]
+FAILED tests/test_frontier_result_identity.py::test_full_frame_content_and_layout_are_part_of_identity[row_order]
+FAILED tests/test_frontier_result_identity.py::test_full_frame_content_and_layout_are_part_of_identity[extra_column]
+FAILED tests/test_frontier_result_identity.py::test_exact_ordered_selected_dates_are_part_of_identity[interior_replacement]
+FAILED tests/test_frontier_result_identity.py::test_exact_ordered_selected_dates_are_part_of_identity[order]
+FAILED tests/test_frontier_result_identity.py::test_panel_version_participates_in_identity
+FAILED tests/test_frontier_result_identity.py::test_consumed_solver_constants_participate_in_identity[src.dispatch-DISPATCH_VOM_COST_EUR_MWH]
+FAILED tests/test_frontier_result_identity.py::test_consumed_solver_constants_participate_in_identity[src.cycle_frontier-DAYS_PER_YEAR]
+FAILED tests/test_frontier_result_identity.py::test_consumed_solver_constants_participate_in_identity[src.degradation-DAYS_PER_YEAR]
+FAILED tests/test_frontier_result_identity.py::test_consumed_solver_constants_participate_in_identity[src.cycle_frontier-NET_TOL_EUR_PER_MW_YR]
+FAILED tests/test_frontier_result_identity.py::test_pre_content_identity_cannot_match_a_current_result
+FAILED tests/test_frontier_result_identity.py::test_stale_source_hides_frontier_floor_and_downloads_without_solving[selected_price]
+FAILED tests/test_frontier_result_identity.py::test_stale_source_hides_frontier_floor_and_downloads_without_solving[interior_index]
+FAILED tests/test_frontier_result_identity.py::test_stale_source_hides_frontier_floor_and_downloads_without_solving[unselected_price]
+FAILED tests/test_frontier_result_identity.py::test_stale_source_hides_frontier_floor_and_downloads_without_solving[interior_date]
+FAILED tests/test_frontier_result_identity.py::test_run_after_correction_recomputes_current_data_once
+FAILED tests/test_frontier_result_identity.py::test_real_excel_download_keeps_run_assumptions_until_next_run
+FAILED tests/test_frontier_result_identity.py::test_legacy_session_cache_is_hidden_until_a_new_run
+======================== 25 failed, 18 passed in 1.66s =========================

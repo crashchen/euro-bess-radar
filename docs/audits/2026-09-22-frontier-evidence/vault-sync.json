@@ -1,0 +1,23 @@
+{
+  "synced_at_utc": "2026-09-22T08:15:53.883326+00:00",
+  "docs_snapshot_commit": "bda9f3e166f48139f873a2d7bd72d5dc977fc016",
+  "code_head": "e11eacad27766e1f305d9444279ae82d261da8a1",
+  "merged_main": "6d986e30d45bb0fe932dd0477e228b361c4ca240",
+  "candidate_state": "awaiting independent review, not merged",
+  "notes": [
+    "README.md",
+    "导入模板与口径红线.md",
+    "操作指南.md",
+    "概览.md",
+    "模型语义与可靠性合同.md",
+    "测试分布.md",
+    "激活电量 live fetcher scope.md",
+    "路线图.md",
+    "迭代记录.md"
+  ],
+  "method": "Original content SHA-256 checked before writing, local backups, saved-byte read-back comparison.",
+  "metadata": "Frontmatter preserved byte-for-byte except docs_updated: 2026-09-22.",
+  "history": "Existing dated historical sections retained; current narrative and 57-file test inventory reconciled.",
+  "publication": "No private paths/full text/hashes or backups published. No Vault commit/push or Obsidian CLI/GUI invocation.",
+  "limits": "Public receipt records method and relative scope only; authorized local reviewer can inspect private notes/originals/diff."
+}

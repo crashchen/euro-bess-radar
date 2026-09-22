@@ -1,0 +1,23 @@
+[
+  {
+    "category": "UserWarning",
+    "message": "Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.",
+    "file": "<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py",
+    "line": 734,
+    "count": 23
+  },
+  {
+    "category": "FutureWarning",
+    "message": "The behavior of array concatenation with empty entries is deprecated. In a future version, this will no longer exclude empty items when determining the result dtype. To retain the old behavior, exclude the empty entries before the concat operation.",
+    "file": "<repo>/src/ancillary.py",
+    "line": 1036,
+    "count": 3
+  },
+  {
+    "category": "FutureWarning",
+    "message": "The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.",
+    "file": "<repo>/src/ancillary.py",
+    "line": 1036,
+    "count": 3
+  }
+]

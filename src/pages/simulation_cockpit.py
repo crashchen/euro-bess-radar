@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src import cycle_frontier, degradation, dispatch
 from src.activation_overlay import compute_activation_overlay
 from src.ancillary import (
     capacity_price_for_product,
@@ -1272,6 +1273,8 @@ def _liquidity_assumption_records(
 
 
 _FRONTIER_STATE_KEY = "cycle_frontier_result"
+# Bump when computation or bundle semantics change across a session hot reload.
+_FRONTIER_PANEL_ID = "cockpit-cycle-frontier/v2-content-snapshot"
 _LIQUIDITY_HARD_CAPTION = (
     "Liquidity participation cap: screening feasible-volume derating, not a "
     "price-impact or market-depth model; executable power min(P, s x V) at "
@@ -1287,6 +1290,7 @@ def _optional_percent_fraction(value: float | None) -> float | None:
 def _frontier_fingerprint(
     *,
     primary_zone: str,
+    primary_df: pd.DataFrame,
     caps: list[float | None],
     cycle_life: float,
     sweep_dates: list,
@@ -1299,20 +1303,21 @@ def _frontier_fingerprint(
     zone_da_volume_mw: float | None = None,
     max_participation_share: float | None = None,
 ) -> tuple:
-    """Identity of one sweep's inputs, for session-state cache invalidation.
+    """Identity of the full DA input and every selected day/solver knob.
 
-    ``None`` (uncapped) maps to a -1.0 sentinel (real caps are >= 0, so no
-    collision). The date component is (first, last, count) — a same-length
-    in-place data correction is the accepted blind spot (the user re-runs).
+    Hash the complete frame passed to the sweep, including values and index.
+    Corrections outside the selected dates conservatively mark the result
+    stale too. Theme and unrelated sidebar assumptions are not solver inputs;
+    exports retain their run-time assumptions snapshot instead.
     """
     cap_key = tuple(sorted(-1.0 if c is None else float(c) for c in caps))
-    if sweep_dates:
-        date_key = (
-            str(sweep_dates[0]), str(sweep_dates[-1]), len(sweep_dates),
-        )
-    else:
-        date_key = ("", "", 0)
+    date_key = tuple(str(day) for day in sweep_dates)
     base = (
+        _FRONTIER_PANEL_ID, frame_content_hash(primary_df),
+        float(dispatch.DISPATCH_VOM_COST_EUR_MWH),
+        float(cycle_frontier.DAYS_PER_YEAR),
+        float(degradation.DAYS_PER_YEAR),
+        float(cycle_frontier.NET_TOL_EUR_PER_MW_YR),
         str(primary_zone), cap_key, float(cycle_life), date_key, str(zone_tz),
         float(power_mw), float(duration_hours), float(efficiency),
         float(capex_eur_kwh),
@@ -1510,6 +1515,7 @@ def _render_cycle_frontier_section(
         sweep_dates = dates if limit is None else dates[-limit:]
         fingerprint = _frontier_fingerprint(
             primary_zone=primary_zone,
+            primary_df=primary_df,
             caps=caps,
             cycle_life=float(cycle_life),
             sweep_dates=sweep_dates,
@@ -1556,11 +1562,26 @@ def _render_cycle_frontier_section(
             # back at False, which would otherwise collapse the results) —
             # solving on every rerun instead would make the whole dashboard
             # pay the sweep on any widget interaction.
+            export_assumptions = _append_frontier_assumptions(
+                _cockpit_export_assumptions(
+                    assumptions,
+                    capture_value="Not applied (raw solver values)",
+                    capture_affects=(
+                        "Frontier gross/net use raw MILP revenue; the ex-post "
+                        "wear deduction and any separately labelled liquidity "
+                        "feasible-volume cap are the only panel adjustments"
+                    ),
+                ),
+                summary=summary,
+                capex_eur_kwh=capex_eur_kwh,
+                liquidity=liquidity,
+            )
             st.session_state[_FRONTIER_STATE_KEY] = {
                 "fingerprint": fingerprint,
                 "frontier": frontier,
                 "summary": summary,
                 "liquidity": liquidity,
+                "export_assumptions": export_assumptions,
             }
 
         cached = st.session_state.get(_FRONTIER_STATE_KEY)
@@ -1584,22 +1605,8 @@ def _render_cycle_frontier_section(
             return
 
         _render_frontier_result(frontier, summary, chart_template)
-        export_assumptions = _append_frontier_assumptions(
-            _cockpit_export_assumptions(
-                assumptions,
-                capture_value="Not applied (raw solver values)",
-                capture_affects=(
-                    "Frontier gross/net use raw MILP revenue; the ex-post "
-                    "wear deduction and any separately labelled liquidity "
-                    "feasible-volume cap are the only panel adjustments"
-                ),
-            ),
-            summary=summary,
-            capex_eur_kwh=capex_eur_kwh,
-            liquidity=cached_liquidity,
-        )
         _cockpit_download_button(
-            {"Cycle-cap frontier": frontier}, export_assumptions,
+            {"Cycle-cap frontier": frontier}, cached["export_assumptions"],
             key="dl_cycle_frontier",
             label="\U0001f4e5 Download frontier table (Excel)",
             file_name="cockpit_cycle_frontier.xlsx",
@@ -1816,9 +1823,9 @@ def _contracted_floor_fingerprint(
     """Identity of the current merchant baseline plus all contract inputs.
 
     The selected row's values are included in addition to the frontier input
-    fingerprint. Re-running the same frontier inputs after a source-data
-    correction therefore invalidates an older floor result even though the
-    frontier's own documented input fingerprint remains unchanged.
+    fingerprint. This also detects a different solved baseline after an
+    explicit rerun with unchanged inputs. A stale frontier supplies no context
+    and the floor panel clears its result until the user runs it again.
     """
     best = _contracted_floor_best_row(frontier_context)
     summary = frontier_context["summary"]
