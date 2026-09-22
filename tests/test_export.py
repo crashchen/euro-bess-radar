@@ -88,6 +88,25 @@ def test_cockpit_tables_to_excel_truncates_long_sheet_name() -> None:
     assert wb.sheetnames == [long_name[:31]]
 
 
+def test_cockpit_strategy_names_are_readable_without_changing_values() -> None:
+    long_name = "Stochastic policy value (vs capped 9.2b reserve-first)"
+    comparison = pd.DataFrame({
+        "strategy": ["DA-only", long_name],
+        "window_revenue_eur": [300.0, -3.0],
+        "capacity_settlement_basis": ["Not applicable", "Physical delivery hours"],
+    })
+    data = cockpit_tables_to_excel({"Strategy comparison": comparison})
+    ws = load_workbook(BytesIO(data))["Strategy comparison"]
+
+    assert ws["A3"].value == long_name
+    assert ws["A3"].alignment.wrap_text is True
+    assert ws.row_dimensions[3].height >= 45
+    assert ws.column_dimensions["A"].width == 30
+    assert ws["B3"].value == -3.0
+    assert ws["B3"].data_type == "n"
+    assert ws["B3"].number_format == "#,##0.00"
+
+
 def test_stochastic_policy_per_day_export_includes_tiebreak_stable() -> None:
     per_day = pd.DataFrame({
         "date": ["2026-01-01"],
