@@ -141,6 +141,39 @@ def _cockpit_export_assumptions(
     return pd.concat([out, pd.DataFrame([new_row])], ignore_index=True)
 
 
+def _frontier_basis_export_assumptions(
+    assumptions: pd.DataFrame | None, *, capex_eur_kwh: float,
+) -> pd.DataFrame | None:
+    """Describe the actual DA-only frontier basis in an export-only copy."""
+    if assumptions is None or assumptions.empty:
+        return assumptions
+    out = assumptions.copy(deep=True)
+    dispatch_row = {
+        "parameter": "Dispatch model",
+        "value": "DA-only MILP multi-cycle",
+        "unit": "",
+        "source": "Cycle-cap frontier",
+        "affects": "Frontier gross revenue and wear-net merchant baseline",
+    }
+    dispatch_mask = out["parameter"] == "Dispatch model"
+    if dispatch_mask.any():
+        for column, value in dispatch_row.items():
+            out.loc[dispatch_mask, column] = value
+    else:
+        out = pd.concat([out, pd.DataFrame([dispatch_row])], ignore_index=True)
+    capex_mask = out["parameter"] == "CapEx"
+    if capex_mask.any():
+        capex_row = {
+            "value": f"{float(capex_eur_kwh):g}",
+            "unit": "EUR/kWh",
+            "source": "Frontier (sidebar CapEx)",
+            "affects": "Linear wear numerator in the frontier merchant baseline",
+        }
+        for column, value in capex_row.items():
+            out.loc[capex_mask, column] = value
+    return out
+
+
 def _cockpit_download_button(
     tables: dict, assumptions, *, key: str, label: str, file_name: str,
 ) -> None:
@@ -1274,7 +1307,7 @@ def _liquidity_assumption_records(
 
 _FRONTIER_STATE_KEY = "cycle_frontier_result"
 # Bump when computation or bundle semantics change across a session hot reload.
-_FRONTIER_PANEL_ID = "cockpit-cycle-frontier/v2-content-snapshot"
+_FRONTIER_PANEL_ID = "cockpit-cycle-frontier/v3-export-provenance"
 _LIQUIDITY_HARD_CAPTION = (
     "Liquidity participation cap: screening feasible-volume derating, not a "
     "price-impact or market-depth model; executable power min(P, s x V) at "
@@ -1533,6 +1566,9 @@ def _render_cycle_frontier_section(
         if liquidity_enabled and liquidity is None:
             return
         if run_clicked:
+            # An explicit failed retry must not revive an earlier success on
+            # the next rerun. Input reversion without Run still uses the cache.
+            st.session_state.pop(_FRONTIER_STATE_KEY, None)
             try:
                 with st.spinner(
                     f"Solving {len(sweep_dates)} day(s) x {len(set(caps))} "
@@ -1563,14 +1599,17 @@ def _render_cycle_frontier_section(
             # solving on every rerun instead would make the whole dashboard
             # pay the sweep on any widget interaction.
             export_assumptions = _append_frontier_assumptions(
-                _cockpit_export_assumptions(
-                    assumptions,
-                    capture_value="Not applied (raw solver values)",
-                    capture_affects=(
-                        "Frontier gross/net use raw MILP revenue; the ex-post "
-                        "wear deduction and any separately labelled liquidity "
-                        "feasible-volume cap are the only panel adjustments"
+                _frontier_basis_export_assumptions(
+                    _cockpit_export_assumptions(
+                        assumptions,
+                        capture_value="Not applied (raw solver values)",
+                        capture_affects=(
+                            "Frontier gross/net use raw MILP revenue; the ex-post "
+                            "wear deduction and any separately labelled liquidity "
+                            "feasible-volume cap are the only panel adjustments"
+                        ),
                     ),
+                    capex_eur_kwh=capex_eur_kwh,
                 ),
                 summary=summary,
                 capex_eur_kwh=capex_eur_kwh,
@@ -1745,6 +1784,7 @@ def _render_frontier_result(
 
 
 _CONTRACTED_FLOOR_STATE_KEY = "contracted_floor_result"
+_CONTRACTED_FLOOR_PANEL_ID = "cockpit-contracted-floor/v2-export-snapshot"
 _CONTRACTED_FLOOR_SOURCE_LABEL = (
     "DA-only merchant net after linear wear - cycle-frontier best cap"
 )
@@ -1830,6 +1870,7 @@ def _contracted_floor_fingerprint(
     best = _contracted_floor_best_row(frontier_context)
     summary = frontier_context["summary"]
     return (
+        _CONTRACTED_FLOOR_PANEL_ID,
         tuple(frontier_context["fingerprint"]),
         str(frontier_context["primary_zone"]),
         tuple(frontier_context["sweep_dates"]),
@@ -2056,6 +2097,35 @@ def _append_contracted_floor_assumptions(
     if assumptions is None or assumptions.empty:
         return rows
     return pd.concat([assumptions.copy(), rows], ignore_index=True)
+
+
+def _contracted_floor_export_assumptions(
+    assumptions: pd.DataFrame | None,
+    *,
+    frontier_context: dict,
+    result: dict[str, object],
+) -> pd.DataFrame:
+    """Capture this floor run's actual merchant basis and global metadata.
+
+    The floor inherits a raw DA-only MILP frontier, regardless of the
+    unrelated sidebar capture or dispatch selection. Its CapEx contributes to
+    frontier linear wear, not only to the dashboard payback estimate. Keep the
+    global audit table itself unchanged and append the floor's own provenance.
+    """
+    adapted = _cockpit_export_assumptions(
+        assumptions,
+        capture_value="Not applied",
+        capture_affects=(
+            "DA-only frontier merchant baseline and contracted-floor overlay "
+            "use no sidebar DA-slippage haircut"
+        ),
+    )
+    adapted = _frontier_basis_export_assumptions(
+        adapted, capex_eur_kwh=float(frontier_context["summary"]["capex_eur_kwh"]),
+    )
+    return _append_contracted_floor_assumptions(
+        adapted, frontier_context=frontier_context, result=result,
+    )
 
 
 def _contracted_floor_export_table(
@@ -2362,6 +2432,9 @@ def _render_contracted_floor_section(
         )
 
         if run_clicked:
+            # Clear a previous success before a retry; a caught failure must
+            # not silently turn back into that old result on a later rerun.
+            st.session_state.pop(_CONTRACTED_FLOOR_STATE_KEY, None)
             try:
                 result = compute_decaying_contracted_floor_overlay(
                     merchant_net_eur_per_mw_yr=float(
@@ -2382,9 +2455,15 @@ def _render_contracted_floor_section(
             except ValueError as exc:
                 st.error(f"Contracted-floor calculation failed: {exc}")
                 return
+            export_assumptions = _contracted_floor_export_assumptions(
+                assumptions,
+                frontier_context=frontier_context,
+                result=result,
+            )
             st.session_state[_CONTRACTED_FLOOR_STATE_KEY] = {
                 "fingerprint": fingerprint,
                 "result": result,
+                "export_assumptions": export_assumptions,
             }
 
         cached = st.session_state.get(_CONTRACTED_FLOOR_STATE_KEY)
@@ -2404,18 +2483,13 @@ def _render_contracted_floor_section(
             result=result,
             chart_template=chart_template,
         )
-        export_assumptions = _append_contracted_floor_assumptions(
-            assumptions,
-            frontier_context=frontier_context,
-            result=result,
-        )
         _cockpit_download_button(
             {
                 "Contracted floor": _contracted_floor_export_table(
                     frontier_context=frontier_context, result=result,
                 )
             },
-            export_assumptions,
+            cached["export_assumptions"],
             key="dl_contracted_floor",
             label="Download contracted-floor comparison (Excel)",
             file_name="cockpit_contracted_floor.xlsx",

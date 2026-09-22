@@ -1,0 +1,60 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <baseline-repo>
+configfile: pyproject.toml
+collected 5 items
+
+tests/test_floor_frontier_followups.py FF.FF                             [100%]
+
+=================================== FAILURES ===================================
+___________ test_floor_excel_uses_panel_basis_and_run_time_snapshot ____________
+tests/test_floor_frontier_followups.py:140: in test_floor_excel_uses_panel_basis_and_run_time_snapshot
+    assert frontier_assumptions["Dispatch model"]["value"] == (
+E   AssertionError: assert 'Greedy single-cycle' == 'DA-only MILP multi-cycle'
+E
+E     - DA-only MILP multi-cycle
+E     + Greedy single-cycle
+---------------------------- Captured stderr setup -----------------------------
+2026-09-22 22:55:05.325 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.326 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.326 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.327 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.327 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+______________ test_failed_frontier_retry_clears_previous_success ______________
+tests/test_floor_frontier_followups.py:212: in test_failed_frontier_retry_clears_previous_success
+    assert app.session_state["followup_frontier_context"] is None
+E   AssertionError: assert {'capex_eur_kwh': 150.0, 'cycle_life': 6000.0, 'duration_hours': 1.0, 'fingerprint': ('cockpit-cycle-frontier/v2-content-snapshot', '2655976fb24d423bb8bcdf449d92fc4b84c66944e1c399863c4e2386aea280fd', 0.5, 365.25, 365.25, 1.0, ...), ...} is None
+---------------------------- Captured stderr setup -----------------------------
+2026-09-22 22:55:05.551 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.551 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.551 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.551 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.552 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+__________ test_pre_provenance_frontier_session_requires_a_fresh_run ___________
+tests/test_floor_frontier_followups.py:244: in test_pre_provenance_frontier_session_requires_a_fresh_run
+    assert app.session_state["followup_frontier_context"] is None
+E   AssertionError: assert {'capex_eur_kwh': 150.0, 'cycle_life': 6000.0, 'duration_hours': 1.0, 'fingerprint': ('cockpit-cycle-frontier/v2-content-snapshot', '2655976fb24d423bb8bcdf449d92fc4b84c66944e1c399863c4e2386aea280fd', 0.5, 365.25, 365.25, 1.0, ...), ...} is None
+---------------------------- Captured stderr setup -----------------------------
+2026-09-22 22:55:05.807 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.807 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.807 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.808 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.808 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+----------------------------- Captured stderr call -----------------------------
+2026-09-22 22:55:05.899 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_______________ test_failed_floor_retry_clears_previous_success ________________
+tests/test_floor_frontier_followups.py:271: in test_failed_floor_retry_clears_previous_success
+    assert "Annual merchant net" not in [metric.label for metric in app.metric]
+E   AssertionError: assert 'Annual merchant net' not in ['Best cap (net of wear)', 'Cost per cycle', 'Wear per MWh discharged', 'Valid days', 'Annual merchant net', 'Effective contracted floor', ...]
+---------------------------- Captured stderr setup -----------------------------
+2026-09-22 22:55:05.920 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.920 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.920 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.921 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+2026-09-22 22:55:05.921 Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+=========================== short test summary info ============================
+FAILED tests/test_floor_frontier_followups.py::test_floor_excel_uses_panel_basis_and_run_time_snapshot
+FAILED tests/test_floor_frontier_followups.py::test_failed_frontier_retry_clears_previous_success
+FAILED tests/test_floor_frontier_followups.py::test_pre_provenance_frontier_session_requires_a_fresh_run
+FAILED tests/test_floor_frontier_followups.py::test_failed_floor_retry_clears_previous_success
+========================= 4 failed, 1 passed in 0.97s ==========================
