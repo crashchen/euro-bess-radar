@@ -1,0 +1,332 @@
+{
+  "src/pages/revenue_estimation.py": {
+    "metric_call_sites": 48,
+    "calls": [
+      {
+        "line": 254,
+        "label": "'Headline Annual Revenue'",
+        "owner": "r1"
+      },
+      {
+        "line": 259,
+        "label": "'DA Arbitrage'",
+        "owner": "r2"
+      },
+      {
+        "line": 261,
+        "label": "'Ancillary Standalone'",
+        "owner": "r3"
+      },
+      {
+        "line": 345,
+        "label": "'Avg Reserve Commitment'",
+        "owner": "co1"
+      },
+      {
+        "line": 349,
+        "label": "'Joint MILP Total'",
+        "owner": "co2"
+      },
+      {
+        "line": 354,
+        "label": "'Uplift vs DA-only'",
+        "owner": "co3"
+      },
+      {
+        "line": 363,
+        "label": "'MILP DA Component'",
+        "owner": "co4"
+      },
+      {
+        "line": 364,
+        "label": "'MILP Capacity Component'",
+        "owner": "co5"
+      },
+      {
+        "line": 426,
+        "label": "'Avg DA-Imbalance Spread'",
+        "owner": "im1"
+      },
+      {
+        "line": 428,
+        "label": "'90th-pct Spread'",
+        "owner": "im2"
+      },
+      {
+        "line": 430,
+        "label": "'Est. Annual Value/MW'",
+        "owner": "im3"
+      },
+      {
+        "line": 441,
+        "label": "'Est. Annual Revenue'",
+        "owner": "r1"
+      },
+      {
+        "line": 451,
+        "label": "'Revenue per MW'",
+        "owner": "r2"
+      },
+      {
+        "line": 452,
+        "label": "'Avg Daily Revenue'",
+        "owner": "r3"
+      },
+      {
+        "line": 480,
+        "label": "'Total CapEx'",
+        "owner": "p1"
+      },
+      {
+        "line": 481,
+        "label": "'Annual Revenue'",
+        "owner": "p2"
+      },
+      {
+        "line": 482,
+        "label": "'Simple Payback'",
+        "owner": "p3"
+      },
+      {
+        "line": 547,
+        "label": "'Shadow Wear/Year'",
+        "owner": "d1"
+      },
+      {
+        "line": 551,
+        "label": "'Economic Margin/Year'",
+        "owner": "d2"
+      },
+      {
+        "line": 556,
+        "label": "'Effective Lifetime'",
+        "owner": "d3"
+      },
+      {
+        "line": 567,
+        "label": "'Cost per Cycle'",
+        "owner": "d4"
+      },
+      {
+        "line": 568,
+        "label": "'Economic Payback Proxy'",
+        "owner": "d5"
+      },
+      {
+        "line": 572,
+        "label": "'Two-leg Throughput Cost'",
+        "owner": "d6"
+      },
+      {
+        "line": 578,
+        "label": "'Avg Cycles/Day'",
+        "owner": "d7"
+      },
+      {
+        "line": 642,
+        "label": "'Avg Cycles/Day'",
+        "owner": "lp1"
+      },
+      {
+        "line": 643,
+        "label": "'MILP Spread (EUR/MWh)'",
+        "owner": "lp2"
+      },
+      {
+        "line": 644,
+        "label": "'MILP vs Greedy Uplift'",
+        "owner": "lp3"
+      },
+      {
+        "line": 707,
+        "label": "'Revenue CoV'",
+        "owner": "y1"
+      },
+      {
+        "line": 709,
+        "label": "'Years in Sample'",
+        "owner": "y2"
+      },
+      {
+        "line": 818,
+        "label": "'10th-pct Revenue (Downside)'",
+        "owner": "mc1"
+      },
+      {
+        "line": 819,
+        "label": "'50th-pct Revenue (Median)'",
+        "owner": "mc2"
+      },
+      {
+        "line": 820,
+        "label": "'90th-pct Revenue (Upside)'",
+        "owner": "mc3"
+      },
+      {
+        "line": 920,
+        "label": "'NPV 10th pct (Downside)'",
+        "owner": "n1"
+      },
+      {
+        "line": 921,
+        "label": "'NPV 50th pct (Median)'",
+        "owner": "n2"
+      },
+      {
+        "line": 922,
+        "label": "'NPV 90th pct (Upside)'",
+        "owner": "n3"
+      },
+      {
+        "line": 924,
+        "label": "'P(NPV>0)'",
+        "owner": "n4"
+      },
+      {
+        "line": 1038,
+        "label": "'Spread CV'",
+        "owner": "v1"
+      },
+      {
+        "line": 1040,
+        "label": "'Best Month'",
+        "owner": "v2"
+      },
+      {
+        "line": 1042,
+        "label": "'Worst Month'",
+        "owner": "v3"
+      },
+      {
+        "line": 1045,
+        "label": "'Zero-Spread Days'",
+        "owner": "v4"
+      },
+      {
+        "line": 1197,
+        "label": "'Avg |IDA-DA|'",
+        "owner": "m1"
+      },
+      {
+        "line": 1198,
+        "label": "'P90 |IDA-DA|'",
+        "owner": "m2"
+      },
+      {
+        "line": 1199,
+        "label": "'Mean signed'",
+        "owner": "m3"
+      },
+      {
+        "line": 1204,
+        "label": "'Coverage-adjusted uplift'",
+        "owner": "m4"
+      },
+      {
+        "line": 1305,
+        "label": "'Sample DA Revenue'",
+        "owner": "t1"
+      },
+      {
+        "line": 1310,
+        "label": "'Sample Rebid Uplift'",
+        "owner": "t2"
+      },
+      {
+        "line": 1315,
+        "label": "'Annualised Total'",
+        "owner": "t3"
+      },
+      {
+        "line": 1320,
+        "label": "'Annualised Uplift'",
+        "owner": "t4"
+      }
+    ]
+  },
+  "src/pages/forward_scenarios.py": {
+    "metric_call_sites": 6,
+    "calls": [
+      {
+        "line": 252,
+        "label": "'Benchmark avg (all years)'",
+        "owner": "k1"
+      },
+      {
+        "line": 257,
+        "label": "'Benchmark endpoint CAGR'",
+        "owner": "k2"
+      },
+      {
+        "line": 265,
+        "label": "f'Model avg ({overlap} overlap yr)'",
+        "owner": "k3"
+      },
+      {
+        "line": 269,
+        "label": "'Benchmark / model ratio'",
+        "owner": "k4"
+      },
+      {
+        "line": 276,
+        "label": "'Model overlap'",
+        "owner": "k3"
+      },
+      {
+        "line": 277,
+        "label": "'Benchmark / model ratio'",
+        "owner": "k4"
+      }
+    ]
+  },
+  "src/pages/renewable_correlation.py": {
+    "metric_call_sites": 4,
+    "calls": [
+      {
+        "line": 70,
+        "label": "'RE-Price Corr'",
+        "owner": "c1"
+      },
+      {
+        "line": 84,
+        "label": "'Avg Price (High RE Hours)'",
+        "owner": "c2"
+      },
+      {
+        "line": 96,
+        "label": "'Avg Price (Low RE Hours)'",
+        "owner": "c3"
+      },
+      {
+        "line": 109,
+        "label": "'Spread Uplift (High RE Days vs Low RE Days)'",
+        "owner": "c4"
+      }
+    ]
+  },
+  "src/pages/data_trust.py": {
+    "metric_call_sites": 4,
+    "calls": [
+      {
+        "line": 44,
+        "label": "'Fetched Zones'",
+        "owner": "c1"
+      },
+      {
+        "line": 45,
+        "label": "'Avg Coverage'",
+        "owner": "c2"
+      },
+      {
+        "line": 46,
+        "label": "'Source Gap Intervals'",
+        "owner": "c3"
+      },
+      {
+        "line": 47,
+        "label": "'Unresolved Missing'",
+        "owner": "c4"
+      }
+    ]
+  }
+}

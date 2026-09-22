@@ -113,5 +113,8 @@ from EUR 110.4375 to EUR 114. It adds a DA-only full-day guard while retaining
 the strict DA/IDA checks above. It also discloses forecast DA-baseline coverage,
 weights the moving average over physical time and sets a tested UI dependency
 floor. See the [Step 2 evidence](../audits/2026-09-08-step2-handoff.md).
-Other interaction/visual changes, DST settlement disclosure and full project-note
-housekeeping remain in the [next-step sequence](../audits/README.md).
+Steps 3A–3D are merged: unavailable-value display, batch/forecast run snapshots,
+duration-weighted overall prices and scoped metric layouts, and DST settlement
+disclosure. The [current verification snapshot](../validation/current.md)
+records what was actually checked; [remaining work](../validation/follow-ups.md)
+keeps unverified manual paths and further model/layout work separate.

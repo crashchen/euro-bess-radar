@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "code_head": "fb72dbf529e9e06ba1716aa66120b2f4f68fe4de",
+  "verified_at": "2026-09-20T11:15:50.857477+00:00",
+  "local_runtime": {
+    "streamlit": "1.55.0",
+    "pytest": "8.4.2",
+    "numpy": "2.4.3",
+    "pandas": "2.3.3",
+    "scipy": "1.17.1",
+    "openpyxl": "3.1.5",
+    "fpdf2": "2.8.7",
+    "ruff": "0.15.12"
+  },
+  "local_python": "3.13.9",
+  "full_suite": {
+    "command": "python -m pytest tests/ -q -p snapshot_plugin --junitxml=<verification-tmp>/full-suite.xml",
+    "collector": "../audits/2026-09-20-step4-evidence/snapshot_plugin.py",
+    "passed": 2057,
+    "skipped": 2,
+    "collected": 2059,
+    "seconds": 308.86,
+    "warnings": 29,
+    "includes_all_slow": true
+  },
+  "collection": {
+    "test_function_definitions_ast": 1545,
+    "collected_callables": 1545,
+    "collected": 2059,
+    "slow": 35,
+    "test_files": 56
+  },
+  "subsets": {
+    "slow": {
+      "collected": 35,
+      "outcomes": {
+        "passed": 35
+      },
+      "basis": "subset derived from this full run; not a separate command"
+    },
+    "not_slow": {
+      "collected": 2024,
+      "outcomes": {
+        "passed": 2022,
+        "skipped": 2
+      },
+      "basis": "subset derived from this full run; not a separate command"
+    }
+  },
+  "ruff": {
+    "command": "ruff check src/ app.py tests/",
+    "result": "pass"
+  },
+  "ci": {
+    "conclusion": "success",
+    "headSha": "fb72dbf529e9e06ba1716aa66120b2f4f68fe4de",
+    "jobs": [
+      {
+        "completedAt": "2026-09-20T11:03:04Z",
+        "conclusion": "success",
+        "name": "Python 3.11 / Streamlit 1.55.0 compatibility check",
+        "status": "completed",
+        "url": "https://github.com/crashchen/euro-bess-radar/actions/runs/35506713370/job/106067654138"
+      },
+      {
+        "completedAt": "2026-09-20T11:12:24Z",
+        "conclusion": "success",
+        "name": "test",
+        "status": "completed",
+        "url": "https://github.com/crashchen/euro-bess-radar/actions/runs/35506713370/job/106067654400"
+      }
+    ],
+    "status": "completed",
+    "url": "https://github.com/crashchen/euro-bess-radar/actions/runs/35506713370"
+  },
+  "manual_coverage_basis": "Existing revision-specific synthetic browser/export evidence; no new browser/live API/ESS execution in Step 4. See current.md matrix.",
+  "scope_evidence": "../audits/2026-09-20-step4-evidence/runtime-scope.json"
+}

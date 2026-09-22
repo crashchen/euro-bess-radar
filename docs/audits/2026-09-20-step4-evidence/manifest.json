@@ -1,0 +1,77 @@
+{
+  "algorithm": "sha256",
+  "code_baseline": "fb72dbf529e9e06ba1716aa66120b2f4f68fe4de",
+  "excludes": [
+    "manifest.json"
+  ],
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "f83bf2fb9dc9b71dd731a2c91e3ffb802ea84bc68d70f4e3eb79da189b36dec4"
+    },
+    {
+      "path": "check_docs.py",
+      "sha256": "f1873a3e5b330e4a5b9f8caa8bca7807a677c402b68df487e8175eb296214383"
+    },
+    {
+      "path": "doc-link-check.json",
+      "sha256": "70aae96374f7f0df8b13487a765e7e2ffa09c23b1a30b7adbbc73452d4d6f364"
+    },
+    {
+      "path": "focused-command.txt",
+      "sha256": "514b5354b819974d694beecac76730aeb6325c3ed233c043e3f6fb717dc997c0"
+    },
+    {
+      "path": "full-suite.txt",
+      "sha256": "62cc966baa871b4853651e3dbc257567c65d6a6a3f50b9feee0b46e02d5af3a3"
+    },
+    {
+      "path": "full-suite.xml",
+      "sha256": "0c42ad25d6ab543010f0051162da48adf18a5076c8294b5b85ea470e29faf45b"
+    },
+    {
+      "path": "historical-patches.json",
+      "sha256": "50b52adbd5865b5f3bb703ea5c99ef8ba9adebc5701a3bcb32b7c58d95e7b34c"
+    },
+    {
+      "path": "layout-inventory.json",
+      "sha256": "0ba5883c053e1094bf1d10f66a4a0b570fc9903cd2b848c0e0b6782eb5a28fa5"
+    },
+    {
+      "path": "main-ci.json",
+      "sha256": "1665e4fbe23b0f1fcb91bb8e4efee1f4d03563f445c41d728258181f38913409"
+    },
+    {
+      "path": "ruff.txt",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "path": "run-results.json",
+      "sha256": "b8567156d23b036ac47cc9c29372856c84e10624fe87bf3167835e8474ce407e"
+    },
+    {
+      "path": "runtime-scope.json",
+      "sha256": "17ccb42c7ac2aca0f8abcae8f4d349e6fa9179c40cf8f033bb5400efca983aec"
+    },
+    {
+      "path": "runtime.json",
+      "sha256": "83cd25162844e6d3c96f0e1836258f02a13194c43ae46cc02a41a61f6390e724"
+    },
+    {
+      "path": "snapshot_plugin.py",
+      "sha256": "36a521c4c6bbd2b364211e64feefe3b0023e3d4f8906af5b22e84dadbb7aae43"
+    },
+    {
+      "path": "test-inventory.json",
+      "sha256": "9de4644112cf1543dc818977bc7e3708c7ec7a2fde054e41f12d23e81eced4ad"
+    },
+    {
+      "path": "vault-sync.json",
+      "sha256": "00e92d0216fa00c3d55d13459d4366b944e072ce8b623dad234f86e23d4ae72a"
+    },
+    {
+      "path": "warning-summary.json",
+      "sha256": "022aad0f5cb5228adcedf2f60e8e05d17953bbea3f2f87313926fef088872567"
+    }
+  ]
+}

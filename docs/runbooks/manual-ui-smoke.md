@@ -1,14 +1,16 @@
 # Manual UI smoke checklist (last-inch browser acceptance)
 
-Every import/fetch path in this repo is covered by mocked tests up to — but
-not including — the literal Streamlit widget interaction (file picker, button
-click, success/error rendering). This checklist covers exactly that last inch.
-Run it after changes to `src/components/sidebar.py` wiring or after a
-Streamlit version bump; each item takes well under a minute.
+Use this checklist for browser behavior after sidebar wiring, result-display or
+Streamlit changes. The suite includes mocked I/O, real solver tests and AppTest
+panel interactions. Those cover different layers; none establishes that every
+file-picker, live fetch, download and visible layout below has been exercised.
 
-Mocked CI cannot see `app.py`/sidebar-only breakage (a past regression shipped
-a `NameError` that crashed every fresh session while CI stayed green), so this
-list is the cheap guard for that class of bug.
+There are 47 numbered checks. This is a checklist, not a completed test report.
+The [current verification snapshot](../validation/current.md) links dated,
+commit-specific acceptance evidence and records partial/unexecuted coverage.
+Items 44–47 were added during documentation housekeeping; their end-to-end
+browser workflow has not been run in this round. Record code head, date,
+fixture, viewport/sidebar state, result and evidence for each executed item.
 
 ## Setup
 
@@ -123,8 +125,9 @@ check; browser screenshots and overflow inspection supply layout evidence.
 
 The Step 3C layout acceptance covers Market Overview, Project Case and Simulation
 Cockpit only. Revenue Estimation, Forward Scenarios, Renewable Correlation and
-Data Trust metrics retain their previous layouts; their layout inventory and
-prioritization are Step 4 work, not a completed acceptance claim.
+Data Trust metrics retain their previous layouts. Their source inventory and
+priority are recorded in [remaining work](../validation/follow-ups.md); that
+inventory is not a completed visual acceptance claim.
 
 ## Step 3D — reserve capacity settlement disclosure
 
@@ -135,9 +138,28 @@ cash conventions; this is a disclosure check, not a settlement migration.
 |---|---|---|---|
 | 39 | Recorded Project Case basis | Run a DE_LU reserve case and inspect its full result, cockpit mirror and standalone/appended Excel NPV sheet | All use the recorded zone/product and six nominal 4h blocks per local day, including DST; the input fingerprint and raw provenance remain unchanged. DA-only cases have no reserve-capacity caption |
 | 40 | Actual Cockpit capacity rows | Run forecast comparison with capacity co-opt, triple ceiling, realistic reserve and reserve-mode stochastic results available | Capacity basis/scope columns identify physical hours and the selected zone/product; DA/IDA and non-reserve stochastic rows say Not applicable. Full basis appears nearby and in Excel Assumptions, including when no global assumptions were supplied |
-| 41 | Snapshot and unavailable results | Refresh a populated panel, then change zone/product or an input and inspect/download; restore original inputs | Refresh retains the original basis without re-solving; changed inputs hide stale results/downloads under the existing guard; reverting restores the original run. Unavailable models do not acquire a capacity-payment claim |
+| 41 | Forecast-policy snapshot and unavailable results | Refresh the populated forecast-policy comparison, then change zone/product or an input and inspect/download; restore original inputs | Refresh retains the original basis without re-solving; changed inputs hide stale results/downloads under the existing guard; reverting restores the original run. Unavailable models do not acquire a capacity-payment claim |
 | 42 | Joint Revenue report | Inspect Revenue joint MILP with two capacity products and an energy-only product; export XLSX/PDF | Disclosure names the actual aggregate capacity products, excludes the energy-only product, and agrees on physical-hour screening. Do not apply it to standalone annual ancillary fees or the Project Case cash model |
 | 43 | DST and readability | Use the same 1 MW / EUR 20/MW/h / 0.95 availability fixture on ordinary and spring/autumn DST days; inspect captions at 1280/390 px and render actual exports | PC/screening cash is 456/456, 456/437, 456/475. Text explains the difference without changing energy/SoC. Basis labels and long product strings remain readable in the tested fixtures; table horizontal scrolling is acceptable |
+
+## Checklist — Radar → ESS annual-revenue JSON handoff
+
+Start from an available Project Case result. These steps are an operator
+walkthrough, not a report of a completed cross-application browser test.
+Radar's producer contract and tests are verified in this repository. ESS control
+names below were checked in sibling source `e7cdac0` on 2026-09-20; its live
+UI, imports and downstream calculations were not executed in this round.
+
+| # | Entry | Action | Expect |
+|---|-------|--------|--------|
+| 44 | Export the displayed Project Case | Run Project Case, note its input fingerprint, then click **Export Project Revenue Handoff JSON** | `radar_project_revenue_handoff.json` downloads; schema is `euro_bess_radar.project_revenue_handoff`, version `1`; relative years and signed settled revenue come from that RunResult's screening cash-flow table |
+| 45 | A stale result cannot export | Change an economic input without re-running | Project Case shows its stale warning and removes result/download. Its stale cache is deleted: even after restoring the input, click **Run Project Case** again. This differs from the multi-day/forecast panels' restore-without-recompute behavior |
+| 46 | Preview and apply in ESS | Select **Radar Project Revenue Handoff JSON**, upload through **Project Revenue Handoff JSON**, choose a stream name, then **Preview revenue handoff**; inspect basis/provenance before **Apply to Revenue Stack** | Digest/fingerprint and years reconcile; signed annual cash is retained. Review/enable the consumer's CPI Common Assumptions layer for real-base-year EUR rather than treating it as nominal. This consumer/browser check is pending execution |
+| 47 | Avoid double application | Compare Radar's annual settled revenue with the applied ESS source curve before additional lifecycle/finance layers | Do not multiply by MW, RTE, embedded availability/capture/liquidity or settle the floor again. Radar exports revenue, not lifecycle net cash; ESS owns its CapEx, fixed OpEx, maintenance/augmentation, tax and financing layers. Preserve negative cash and inspect embedded flags. Downstream reconciliation remains unverified until actually run |
+
+The [wire contract](../design/project-revenue-handoff-v1.md) defines the exact
+schema/digest and economic boundary. Changing those requires its own coordinated
+contract review; this checklist does not authorize a change to either product.
 
 ## Downstream spot-checks (after 3/4/7/8)
 
@@ -153,11 +175,10 @@ cash conventions; this is a disclosure check, not a settlement migration.
 
 ## Scope
 
-This checklist is deliberately manual — automating the Streamlit file-picker
-adds a browser-driver dependency for marginal value. Everything below the
-widget layer (parsers, persistence, provenance, Data Trust tables, overlays,
-Project Case gating and settlement) is covered by the mocked suite; see
-`tests/`.
+This checklist records the browser checks that complement parser, persistence,
+provenance, solver and AppTest tests. Consult the dated snapshot for actual
+coverage; test existence or a string assertion does not certify every live
+source, rendered artifact or cross-application workflow.
 
 Items 15–21 and 25–27 exist because an assertion that a string is *present*
 cannot tell you it is *readable* or that it describes the right thing. The

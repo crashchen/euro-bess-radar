@@ -1,4 +1,4 @@
-# Replay review evidence — 2026-09-08
+# September review evidence
 
 These checked-in records contain synthetic fixtures, frozen source/test patches,
 baseline failures and validation logs. Commands run from the repository root
@@ -9,6 +9,9 @@ assertions and test results are retained. Frozen patches retain their exact
 bytes, including the space prefix on blank context lines; each evidence
 directory carries a `.gitattributes` so `git diff --check` does not report
 those preserved bytes as whitespace errors.
+
+The [current verification snapshot](../validation/current.md) is the single
+entry point for today's code-bound results. The records below remain historical.
 
 ## Review stages
 
@@ -21,7 +24,8 @@ those preserved bytes as whitespace errors.
 | Step 3A | Increment relative to `95f6d09`; merged in [#89](https://github.com/crashchen/euro-bess-radar/pull/89) as `e60a74f` | [Handoff and evidence](2026-09-15-step3a-handoff.md) |
 | Step 3B | Increment relative to `e60a74f`; merged in [#90](https://github.com/crashchen/euro-bess-radar/pull/90) as `cf91374` | [Handoff and evidence](2026-09-16-step3b-handoff.md) |
 | Step 3C | Both increments independently reviewed; merged in [#91](https://github.com/crashchen/euro-bess-radar/pull/91) as `2e4ed73` | [Original frozen handoff](2026-09-16-step3c-handoff.md), [current increment and evidence](2026-09-19-step3c-r2-handoff.md), [duration contract](../design/delivery-duration-v1.md) |
-| Step 3D | `2e4ed73` → `252a9ab`; implementation complete, draft review pending | [Handoff and evidence](2026-09-20-step3d-handoff.md), [duration contract](../design/delivery-duration-v1.md) |
+| Step 3D | Independently reviewed; merged in [#92](https://github.com/crashchen/euro-bess-radar/pull/92) as `fb72dbf` | [Handoff and evidence](2026-09-20-step3d-handoff.md), [duration contract](../design/delivery-duration-v1.md) |
+| Step 4 | Documentation branch based on `fb72dbf`; not merged | [Housekeeping handoff](2026-09-20-step4-handoff.md), [current snapshot](../validation/current.md), [local-note sync receipt](2026-09-20-step4-evidence/vault-sync.json) |
 
 The original Step 1b patch is unchanged: its SHA-256 remains
 `a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12`.
@@ -49,30 +53,18 @@ prices. Archived outputs describe their recorded revision, not a new run.
 The two opt-in chart-render skips do not establish PDF rendering success.
 Remote CI status is attached to each PR's exact head in GitHub Checks.
 
-## Remaining optimization sequence
+## Current sequence
 
-Steps 1, 1b, 2, 3A, 3B and 3C are merged. Step 2 delivered the bounded native DA
-contract, FI physical capacity cash, forecast comparator coverage, the
-physical-time moving average and the UI runtime floor, and was externally
-reviewed with #87 before #88 merged. Step 3 is split into four separately reviewed increments.
+Steps 1, 1b, 2 and 3A–3D are merged. Step 4 reconciles repository documentation
+and the nine project notes against the [dated snapshot](../validation/current.md),
+retaining the earlier records unchanged. Its documentation branch is separately
+reviewed; no new model or cash behavior is included.
 
-1. Step 3A (merged in #89): show an explained `n/a` wherever a physical
-   duration cannot be verified, name the compatibility CI job accurately,
-   replace the market page's bare index exception with a visible diagnostic,
-   and record the reserve-average-power uniform-grid premise.
-2. Step 3B (merged in #90): retain batch replay and forecast results across
-   unrelated reruns behind a content fingerprint, marking stale results and
-   blocking their downloads.
-3. Step 3C (merged in #91): put the overall average price on
-   the shared duration-weighted basis across all four consumers, and make key
-   monetary values and quantiles readable at desktop and mobile widths.
-4. Step 3D (implementation under review): disclose the zone/product-qualified DST capacity
-   settlement basis on the pages, the strategy table and the exports,
-   retaining both existing sets of numbers.
-5. Step 4 (deferred): reconcile README, CLAUDE.md, validation instructions and
-   project notes against verified behavior, against one dated verification snapshot.
-   The current publication repairs the audit evidence trail; it is not a claim
-   that all documentation or Vault housekeeping is done.
+[Remaining work](../validation/follow-ups.md) records the frontier content
+fingerprint, remaining-page layouts, existing export clipping, warnings and
+unexecuted manual/consumer checks. A reconciled checklist is not an assertion
+that every check passed. Private Vault note text and workstation paths stay
+outside this repository; the Step 4 handoff records relative synchronization scope.
 
 External reviewer results here were supplied by the user. This task did not
 invoke or send code to CC or another external reviewer.

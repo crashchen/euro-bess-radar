@@ -1,0 +1,24 @@
+{
+  "synced_at_utc": "2026-09-20T11:24:22.830038+00:00",
+  "code_baseline": "fb72dbf529e9e06ba1716aa66120b2f4f68fe4de",
+  "docs_snapshot_commit": "434beba35125c22e4f7dc0abaff93072d8b5ad4b",
+  "status": "applied and read-back verified locally",
+  "notes": [
+    "README.md",
+    "导入模板与口径红线.md",
+    "操作指南.md",
+    "概览.md",
+    "模型语义与可靠性合同.md",
+    "测试分布.md",
+    "激活电量 live fetcher scope.md",
+    "路线图.md",
+    "迭代记录.md"
+  ],
+  "scope": "Nine notes relative to the euro-bess-radar project-note directory; no full paths or note text published.",
+  "original_content_hash_guard": "All nine matched the pre-edit snapshot before the first write and immediately before each write.",
+  "metadata": "Original frontmatter bytes preserved except docs_updated, set to 2026-09-20.",
+  "history": "Dated historical records retained; current summaries and the test-distribution table reconciled to the code baseline.",
+  "backup": "Original bytes, final hashes and full diff retained locally outside this repository.",
+  "publication": "Vault was not committed or pushed. New snapshot links pin the already-pushed documentation commit until a later explicit synchronization.",
+  "limits": "This receipt is not a public independent proof of private note content. An authorized local reviewer can inspect the notes and private backup. No Obsidian CLI or GUI was launched."
+}
