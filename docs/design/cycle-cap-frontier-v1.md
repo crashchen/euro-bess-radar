@@ -213,6 +213,49 @@ changes `z*` and reduces (never raises) reported FEC on a degenerate fixture.
 - `build_assumptions_table` is NOT extended in v1 (the panel's export carries
   its own rows; the global audit table only carries sidebar/config state).
 
+### Session identity and export assumptions — 2026-09-22 follow-up
+
+Implemented on the review branch; review evidence is recorded in the
+[frontier handoff](../audits/2026-09-22-frontier-handoff.md). This extends the
+panel's existing Run/cache boundary without changing dispatch, the cap sweep,
+wear, annualisation, best-cap selection, liquidity or floor cash calculations.
+
+The tuple returned by `_frontier_fingerprint` includes:
+
+- the full DA frame's content hash, including its index and values, and every
+  selected local date, rather than only the first/last dates and their count;
+- the panel version, the live VOM constant read by `dispatch`, both
+  `cycle_frontier` and `degradation` annualisation constants, and the frontier's
+  best-cap tolerance;
+- zone, sorted caps with an uncapped sentinel, cycle life, timezone, power, duration, efficiency,
+  CapEx and enabled liquidity inputs.
+
+The full frame is the object supplied to the sweep. Correcting data outside
+its selected dates can conservatively mark the result stale. Theme and global
+assumptions that the sweep does not consume are excluded from the identity.
+The tuple representation remains compatible with the downstream floor's
+fingerprint composition; the panel version invalidates older session bundles.
+
+On successful Run, the panel stores the frontier, summary, liquidity state
+and the completed export-assumptions value together. As before, a `None`
+global assumptions table remains `None`; no new provenance rows are invented
+for that path. Rerenders and downloads reuse the saved value without solving
+or replacing it with current sidebar metadata.
+Changed consumed inputs hide the table, chart and download, and return no
+current frontier context. Restoring the inputs restores the saved frontier
+without a solver call. That restoration does not revive a dependent floor
+result: the existing floor guard clears its cache when frontier context is
+absent and requires a new floor Run.
+
+Two pre-existing behaviors remain outside this change. The floor's own
+numerical inputs and baseline are fingerprinted, but its export assumptions
+are still assembled from the live global table on rerender. Also, if an
+explicit frontier rerun with unchanged inputs raises `ValueError`, that render
+shows the error without replacing the previous successful cache; a later
+same-input rerender can display the earlier successful result. This does not
+bypass the changed-input guard and is not evidence of a newly computed result.
+Track either behavior change separately in the [follow-ups](../validation/follow-ups.md).
+
 ## 5. Non-goals (v1)
 
 - No IDA / reserve / stochastic interaction with the cap (the frontier is

@@ -1,0 +1,85 @@
+{
+  "algorithm": "sha256",
+  "code_head": "e11eacad27766e1f305d9444279ae82d261da8a1",
+  "excludes": [
+    "manifest.json"
+  ],
+  "files": [
+    {
+      "path": ".gitattributes",
+      "sha256": "fb25a78a6381f5646d71aacea4486f6aeeeb03c4d71740227011024be0d20a8f"
+    },
+    {
+      "path": "README.md",
+      "sha256": "b64f1a833ed19ad84796f2d8823e216c5130e5d4f14ec2bffea306aa0a1a241f"
+    },
+    {
+      "path": "baseline-tests.txt",
+      "sha256": "594376ddad990c3b686421747781864ff3ccac0e1a1d6f5ee12fb4c8b3b780cc"
+    },
+    {
+      "path": "browser-check.json",
+      "sha256": "d970dbb4490dca43cc386deb13457dd72bae89c744725cbd633f3202b312c48d"
+    },
+    {
+      "path": "browser-harness.py",
+      "sha256": "ce3dfd461cf694b8d2b570ac96a62662ed19891c38759816e2ec1ef1f54afa83"
+    },
+    {
+      "path": "cache-check.json",
+      "sha256": "bc196ef303a05cd8d0526eb1b89e763a3cfafaaf186d4190633df59e1d234c5a"
+    },
+    {
+      "path": "check_docs.py",
+      "sha256": "1d95804439b0c6461674979838409c917d3724b3e8c14e1a65229132c518f442"
+    },
+    {
+      "path": "doc-link-check.json",
+      "sha256": "9c905bfc7796858528c33c134d22891442881592136ed582a5ad6984b081ab14"
+    },
+    {
+      "path": "frontier-code.patch",
+      "sha256": "c11506a692f6244a117b9cec224e6ecbc0004269317997b0a4dcf30fabd73824"
+    },
+    {
+      "path": "full-suite.txt",
+      "sha256": "d95d1128ef726fe258732673a713cfed32f07b64cd30d74e2ff297c0e2b6a15a"
+    },
+    {
+      "path": "full-suite.xml",
+      "sha256": "9889d7df4666aa0eae1deb0e1d6146197e71d33c8ea972b56221efe4226125c0"
+    },
+    {
+      "path": "ruff.txt",
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    {
+      "path": "run-results.json",
+      "sha256": "88dbc4348c900edca16b81c5972f904a4d75b0db2a530d1b75d5e7868a92518e"
+    },
+    {
+      "path": "runtime.json",
+      "sha256": "b0898af293d3b169c4e6e2b5cf8b56fac8f946efb1477f8e3e010dffe76d7b9d"
+    },
+    {
+      "path": "scope.json",
+      "sha256": "f7a03da07a020e5cee33072b784639876831b358c9b4b10d496f2626c2190a0d"
+    },
+    {
+      "path": "targeted-tests.txt",
+      "sha256": "377a7983f0c00da1418fc1e02170c238777ae9457dc4f47c89a943905158d905"
+    },
+    {
+      "path": "test-inventory.json",
+      "sha256": "29a4b27ce17c9402af5ea4b584a6d21c03f8b085b07518e9574923db42192ad2"
+    },
+    {
+      "path": "verification.json",
+      "sha256": "3e01e56701cc0d700e3b189df4ff223e55950030b423741862ba1acb6f22daa0"
+    },
+    {
+      "path": "warning-summary.json",
+      "sha256": "5f9e5dcccb502c6d3a488b9a0e6304fdedd8929c45ee5e4428c2e17aacf6cb15"
+    }
+  ]
+}
