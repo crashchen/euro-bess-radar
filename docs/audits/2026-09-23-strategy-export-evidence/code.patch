@@ -1,0 +1,71 @@
+diff --git a/src/export.py b/src/export.py
+index c64d8fad256a80c6d5607a2b328350ff11d6a40b..eff8745c2fddb8a8c6bffeff1a9dfff2409f4e19 100644
+--- a/src/export.py
++++ b/src/export.py
+@@ -2742,6 +2742,8 @@ def cockpit_tables_to_excel(
+         # Excel caps sheet names at 31 chars.
+         _build_table_sheet(ws, name[:31], df)
+         _format_capacity_disclosures(ws, df)
++        if name == "Strategy comparison":
++            _format_cockpit_strategy_names(ws, df)
+     buf = BytesIO()
+     wb.save(buf)
+     return buf.getvalue()
+@@ -2786,3 +2788,27 @@ def _format_capacity_disclosures(ws, frame: pd.DataFrame) -> None:
+             ws.row_dimensions[position].height = max(
+                 ws.row_dimensions[position].height or 0, lines * _ROW_HEIGHT_PER_LINE,
+             )
++
++
++def _format_cockpit_strategy_names(ws, frame: pd.DataFrame) -> None:
++    """Show full strategy names within the capped-width comparison column."""
++    if "strategy" not in frame.columns:
++        return
++    column = frame.columns.get_loc("strategy") + 1
++    width = min(
++        ws.column_dimensions[get_column_letter(column)].width or _MAX_COLUMN_WIDTH,
++        _MAX_COLUMN_WIDTH,
++    )
++    for row in range(2, len(frame) + 2):
++        cell = ws.cell(row=row, column=column)
++        if not isinstance(cell.value, str):
++            continue
++        cell.alignment = Alignment(wrap_text=True, vertical="top")
++        wrapped_lines = len(textwrap.wrap(cell.value, max(1, int(width) - 4)))
++        # Keep one spare line only when a label wraps: glyph widths vary
++        # across spreadsheet viewers, while short names need no extra height.
++        lines = wrapped_lines + (wrapped_lines > 1)
++        ws.row_dimensions[row].height = max(
++            ws.row_dimensions[row].height or 0,
++            lines * _ROW_HEIGHT_PER_LINE,
++        )
+diff --git a/tests/test_export.py b/tests/test_export.py
+index 76e79e335f2baf1b0506dbd278e807a785fa33d9..45d63ebb326812529a33faf34fe754dd01a75612 100644
+--- a/tests/test_export.py
++++ b/tests/test_export.py
+@@ -88,6 +88,25 @@ def test_cockpit_tables_to_excel_truncates_long_sheet_name() -> None:
+     assert wb.sheetnames == [long_name[:31]]
+ 
+ 
++def test_cockpit_strategy_names_are_readable_without_changing_values() -> None:
++    long_name = "Stochastic policy value (vs capped 9.2b reserve-first)"
++    comparison = pd.DataFrame({
++        "strategy": ["DA-only", long_name],
++        "window_revenue_eur": [300.0, -3.0],
++        "capacity_settlement_basis": ["Not applicable", "Physical delivery hours"],
++    })
++    data = cockpit_tables_to_excel({"Strategy comparison": comparison})
++    ws = load_workbook(BytesIO(data))["Strategy comparison"]
++
++    assert ws["A3"].value == long_name
++    assert ws["A3"].alignment.wrap_text is True
++    assert ws.row_dimensions[3].height >= 45
++    assert ws.column_dimensions["A"].width == 30
++    assert ws["B3"].value == -3.0
++    assert ws["B3"].data_type == "n"
++    assert ws["B3"].number_format == "#,##0.00"
++
++
+ def test_stochastic_policy_per_day_export_includes_tiebreak_stable() -> None:
+     per_day = pd.DataFrame({
+         "date": ["2026-01-01"],
