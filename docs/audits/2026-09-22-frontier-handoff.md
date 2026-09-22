@@ -124,5 +124,8 @@ Bounded pre-existing follow-ups remain separate:
 
 README, agent guidance, the frontier contract and the current validation entry
 are reconciled. Historical handoffs and the 2026-09-20 snapshot remain intact.
-The later local-note synchronization receipt records private-note scope only;
-no Vault text or paths are published. The user retains ownership of invoking CC.
+Nine local project notes were synchronized, with original-content guards,
+backups and saved-byte verification; metadata and history were preserved.
+Their new links pin the published documentation commit `bda9f3e`, distinct from
+the tested code `e11eaca` and merged main `6d986e3`. The [synchronization receipt](2026-09-22-frontier-evidence/vault-sync.json)
+records relative scope only; no Vault text or paths are published. The user retains ownership of invoking CC.

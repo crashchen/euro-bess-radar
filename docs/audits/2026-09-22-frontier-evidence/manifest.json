@@ -11,7 +11,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "b64f1a833ed19ad84796f2d8823e216c5130e5d4f14ec2bffea306aa0a1a241f"
+      "sha256": "9af102d55f689bfd954ca49e65886b6338a5ed9c7a955a1c27399be8703a5e47"
     },
     {
       "path": "baseline-tests.txt",
@@ -35,7 +35,7 @@
     },
     {
       "path": "doc-link-check.json",
-      "sha256": "9c905bfc7796858528c33c134d22891442881592136ed582a5ad6984b081ab14"
+      "sha256": "772c2103744a8c09cec357c720ad764802e8078c74d2c2d48d7e795b7198722f"
     },
     {
       "path": "frontier-code.patch",
@@ -72,6 +72,10 @@
     {
       "path": "test-inventory.json",
       "sha256": "29a4b27ce17c9402af5ea4b584a6d21c03f8b085b07518e9574923db42192ad2"
+    },
+    {
+      "path": "vault-sync.json",
+      "sha256": "0f1e47568480052d6a8c4cf694700accf265df6974333a2432700fb01a513dae"
     },
     {
       "path": "verification.json",

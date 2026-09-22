@@ -28,6 +28,6 @@ export STEP4_OUTPUT
 PYTHONPATH=docs/audits/2026-09-20-step4-evidence:. .venv/bin/python -m pytest tests/ -q -p snapshot_plugin --junitxml="$STEP4_OUTPUT/full-suite.xml"
 ```
 
-The private Vault before/after copies stay outside this repository. A later
-`vault-sync.json` records only relative scope. `manifest.json` records artifact
+The private Vault before/after copies stay outside this repository. `vault-sync.json`
+records the completed nine-note synchronization by relative scope only. `manifest.json` records artifact
 hashes excluding itself, not a public proof of private note text.
