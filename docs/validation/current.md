@@ -1,79 +1,66 @@
 # Current verification snapshot
 
 Verified **2026-09-22** against code commit
-[`886b2d5605c770fb34645ba7636f9324d49ec6b4`](https://github.com/crashchen/euro-bess-radar/commit/886b2d5605c770fb34645ba7636f9324d49ec6b4),
-the frontier/floor export-provenance and failed-retry follow-up. This code is
-**awaiting independent review**, not merged. Main is
-`bd4bb888775fb775b61de10dc6715b9673b1401c`, the ordinary merge of
-reviewed frontier [#94](https://github.com/crashchen/euro-bess-radar/pull/94).
-Steps 1–4 (#86–#93) and #94 are merged. Later commits on this branch record
-documentation and evidence only; they do not change this tested code.
+[`e39968dd93eb72f8c792c11049035f2210b8c5eb`](https://github.com/crashchen/euro-bess-radar/commit/e39968dd93eb72f8c792c11049035f2210b8c5eb),
+the multi-day replay and forecast-policy Excel provenance correction. This
+code is **awaiting independent review**, not merged. Main is
+`cc6b1e24c527d5eec5454ffbdb2cfcc07cabaff0`, the ordinary merge of
+reviewed [#95](https://github.com/crashchen/euro-bess-radar/pull/95).
+Steps 1–4 (#86–#93) and follow-ups #94–#95 are merged. Later commits on this
+branch document the tested code; they must not be read as new numerical
+validation. The #95 snapshot is archived [verbatim](2026-09-22-floor-followup.md).
 
-[Machine-readable result](2026-09-22-floor-followup.json) ·
-[Review handoff](../audits/2026-09-22-floor-followup-handoff.md) ·
-[Reproduction evidence](../audits/2026-09-22-floor-followup-evidence/README.md) ·
-[Archived #94 snapshot](2026-09-22-frontier.md) ·
-[Archived Step 4 snapshot](2026-09-20.md).
-Earlier counts and limitations remain bound to their own revisions; this
-entry does not retroactively verify them on the current code.
+[Review handoff](../audits/2026-09-22-cockpit-export-handoff.md) ·
+[Reproduction evidence](../audits/2026-09-22-cockpit-export-evidence/README.md) ·
+[Remaining work](follow-ups.md).
 
 ## Executed checks
 
 | Check | Result | Evidence |
 |---|---|---|
-| Full local suite | **2105 passed / 2 skipped**, 2107 collected, all 35 slow cases, 308.83 seconds, 29 warnings | [Full output](../audits/2026-09-22-floor-followup-evidence/full-suite.txt) |
-| Collection | 2107 collected; 35 selected by the slow marker | `pytest tests/ --collect-only -m slow -q` |
-| New regression file | 5 passed on candidate; the same file on clean `git archive bd4bb88` gives 4 assertion failures / 1 pass | [Baseline](../audits/2026-09-22-floor-followup-evidence/baseline-tests.txt) |
-| Related frontier/floor suites | 155 passed | [Targeted log](../audits/2026-09-22-floor-followup-evidence/targeted-tests.txt) |
-| Ruff | Passed for `src/ app.py tests/` | [Output](../audits/2026-09-22-floor-followup-evidence/ruff.txt) |
+| Full local suite | **2111 passed / 2 skipped**, 2113 collected, including the 35 slow cases, 296.83 seconds, 29 warnings | [Full output](../audits/2026-09-22-cockpit-export-evidence/full-suite.txt) |
+| New regression file | 6 passed on candidate; the same file on clean `git archive cc6b1e2` gives 5 assertion failures / 1 pass | [Baseline output](../audits/2026-09-22-cockpit-export-evidence/baseline-tests.txt) |
+| Related non-slow suites | 106 passed, 6 slow cases deselected | [Targeted output](../audits/2026-09-22-cockpit-export-evidence/targeted-tests.txt) |
+| Ruff | Passed for `src/ app.py tests/` | [Output](../audits/2026-09-22-cockpit-export-evidence/ruff.txt) |
+| Synthetic baseline/candidate probe | Same multi-day gross revenue, degradation cost and valid days in both replay modes; same forecast comparison revenue and valid days; same global sidebar assumptions. The diff contains only the corrected export rows | [Baseline](../audits/2026-09-22-cockpit-export-evidence/baseline-probe.json), [candidate](../audits/2026-09-22-cockpit-export-evidence/candidate-probe.json) |
 
-The two opt-in PDF chart-render checks remain skipped by default unless
-`BESS_PULSE_RUN_KALEIDO_TESTS=1` and working Kaleido/Chrome are available.
-This increment changes no PDF or workbook layout and makes no new PDF-render
-claim. Remote CI is a separate gate: consult the draft PR's **exact-head
-Checks** after it runs. A green #94 run is not a test of this candidate.
-The warnings were the previously observed 23 Streamlit DataFrame-attrs
-serialization warnings and 6 pandas concat FutureWarnings; no NumPy scalar
-conversion warning appeared. The non-slow subset is **2070 passed / 2 skipped**
-by subtraction from this full run, not by a separate fast test command.
+Remote CI is a separate gate. Verify the draft PR's **exact-head Checks**;
+the prior #95 checks do not validate this increment. The same pre-existing
+warning categories appear: Streamlit DataFrame-attrs serialization and pandas
+concat FutureWarnings. The two opt-in Kaleido/Chrome PDF tests remain skipped
+by default. This increment changes no PDF output.
 
 ## Behavior and evidence boundaries
 
-The merged #94 content fingerprint still protects the full DA frame and exact
-selected dates. On this review branch, frontier/floor Excel assumption copies
-label the actual DA-only MILP, no sidebar DA-slippage capture and inherited
-linear-wear CapEx. The floor saves its export assumptions at successful Run;
-later unrelated sidebar changes do not rewrite the workbook or rerun the
-solver. Both panels clear the previous success immediately before a valid-input
-explicit retry; a caught failure therefore cannot make that success reappear
-on the next ordinary rerun. Merely reverting changed frontier inputs without
-pressing Run retains #94's restore-from-cache behavior.
+On Run, the multi-day replay saves an Excel assumptions copy that identifies
+either DA-only MILP or two-stage DA+IDA1 MILP, its own capture haircut, and the
+sidebar CapEx actually passed to its ex-post linear degradation calculation.
+That CapEx does not affect dispatch or gross revenue. The forecast-policy
+export identifies its sequential DA+IDA1 MILP; existing rows separately
+describe optional reserve, triple and stochastic variants. Neither correction
+changes the global Data Trust table, solvers, cash, result-table numbers or
+Excel numeric cell types. Panel-version bumps make older session snapshots
+stale until Run creates an export with current labels.
 
-AppTest drives the actual production panels and real local solvers. It reads
-the generated XLSX bytes with openpyxl, checks corrected labels and numeric
-cell type, and verifies the saved floor Assumptions/result sheets across an
-in-place metadata edit and a fresh Run. This is **saved-file inspection**, not
-a browser download, native Excel render or responsive-layout acceptance.
-No live provider data, production cache mutation, ESS execution or Project
-Case model/wire change was added.
-
-[Remaining work](follow-ups.md) retains separate metric-page layouts, existing
-strategy-name clipping, manual/ESS acceptance, warnings and versioned
-settlement questions. The #94 snapshot is archived verbatim at
-[2026-09-22-frontier.md](2026-09-22-frontier.md); its test count is not a
-fresh run on this branch.
+The new tests inspect actual generated XLSX bytes with openpyxl and exercise
+both multi-day solver modes. Existing AppTest suites exercise session
+persistence and stale-result gating. There is no new browser-download,
+native-Excel rendering, live-provider, ESS-consumer or full responsive-layout
+acceptance claim. Global assumptions may be absent in direct helper calls;
+the established `None` passthrough remains, while normal `app.py` supplies a
+nonempty table.
 
 ## Reproduction
 
 From the repository root:
 
 ```sh
-.venv/bin/python -m pytest tests/test_floor_frontier_followups.py tests/test_frontier_result_identity.py tests/test_simulation_cockpit_contracted_floor.py tests/test_simulation_cockpit_frontier.py tests/test_cycle_frontier.py -q
+.venv/bin/python -m pytest tests/test_cockpit_export_provenance.py -q
 .venv/bin/python -m pytest tests/ -q
 .venv/bin/ruff check src/ app.py tests/
-git diff --binary --full-index bd4bb88..886b2d5 -- src/ tests/ .github/workflows/ci.yml | shasum -a 256
+git diff --binary --full-index cc6b1e2..e39968d -- src/ tests/ .github/workflows/ci.yml | shasum -a 256
+shasum -a 256 docs/audits/2026-09-22-cockpit-export-evidence/code.patch
 ```
 
-The frozen patch SHA-256 is
-`d378f1571698bda7cd767dd221adb5fcf7cf19a100da639b74ee9170c3cc333f`.
-The handoff records the clean-baseline procedure and known limits.
+Both hash commands return
+`b295b4bf8e648c3e262d375f6cbc92a52001af87c456e7235539185c90b051ae`.

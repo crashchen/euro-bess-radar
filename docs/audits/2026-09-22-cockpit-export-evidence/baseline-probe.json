@@ -1,0 +1,64 @@
+{
+  "forecast": {
+    "comparison_revenue_eur": [
+      500.002396,
+      478.835693,
+      527.853622
+    ],
+    "dispatch": {
+      "affects": "Daily spread / revenue basis",
+      "source": "Sidebar",
+      "unit": "",
+      "value": "Greedy single-cycle"
+    },
+    "valid_days": 4
+  },
+  "global_capex": {
+    "affects": "Payback period only (0 = skipped)",
+    "source": "Sidebar",
+    "unit": "EUR/kWh",
+    "value": "150"
+  },
+  "global_dispatch": {
+    "affects": "Daily spread / revenue basis",
+    "source": "Sidebar",
+    "unit": "",
+    "value": "Greedy single-cycle"
+  },
+  "multi_day": {
+    "DA + IDA1 Replay": {
+      "capex": {
+        "affects": "Payback period only (0 = skipped)",
+        "source": "Sidebar",
+        "unit": "EUR/kWh",
+        "value": "150"
+      },
+      "degradation_cost_eur": 117.260393996,
+      "dispatch": {
+        "affects": "Daily spread / revenue basis",
+        "source": "Sidebar",
+        "unit": "",
+        "value": "Greedy single-cycle"
+      },
+      "total_revenue_eur": 288.743411119,
+      "valid_days": 2
+    },
+    "DA MILP Replay": {
+      "capex": {
+        "affects": "Payback period only (0 = skipped)",
+        "source": "Sidebar",
+        "unit": "EUR/kWh",
+        "value": "150"
+      },
+      "degradation_cost_eur": 117.260393996,
+      "dispatch": {
+        "affects": "Daily spread / revenue basis",
+        "source": "Sidebar",
+        "unit": "",
+        "value": "Greedy single-cycle"
+      },
+      "total_revenue_eur": 267.7943342,
+      "valid_days": 2
+    }
+  }
+}

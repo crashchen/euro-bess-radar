@@ -1,0 +1,333 @@
+diff --git a/src/assumptions.py b/src/assumptions.py
+index f31c30374f6472d978e6ce18c9652003097de349..b73e51d2ade0f04d68219085407443ac0a17ff1d 100644
+--- a/src/assumptions.py
++++ b/src/assumptions.py
+@@ -20,6 +20,8 @@ ASSUMPTION_COLUMNS = ["parameter", "value", "unit", "source", "affects"]
+ # The sidebar DA-slippage capture row; the cockpit export overrides it because
+ # the cockpit uses its own capture haircut (or none, for the forecast panel).
+ CAPTURE_PARAM_LABEL = "Capture rate (DA slippage)"
++CAPEX_PARAM_LABEL = "CapEx"
++DISPATCH_PARAM_LABEL = "Dispatch model"
+ 
+ 
+ def build_assumptions_table(
+@@ -59,9 +61,9 @@ def build_assumptions_table(
+         (CAPTURE_PARAM_LABEL, f"{capture_rate:.0%}", "", "Sidebar",
+          "Haircut on realised DA arbitrage; NOT applied to the "
+          "forecast-policy panel"),
+-        ("CapEx", f"{capex_eur_kwh:g}", "EUR/kWh", "Sidebar",
++        (CAPEX_PARAM_LABEL, f"{capex_eur_kwh:g}", "EUR/kWh", "Sidebar",
+          "Payback period only (0 = skipped)"),
+-        ("Dispatch model",
++        (DISPATCH_PARAM_LABEL,
+          "MILP multi-cycle" if use_lp_dispatch else "Greedy single-cycle",
+          "", "Sidebar", "Daily spread / revenue basis"),
+         ("VOM cost", f"{DISPATCH_VOM_COST_EUR_MWH:g}", "EUR/MWh",
+diff --git a/src/pages/simulation_cockpit.py b/src/pages/simulation_cockpit.py
+index e76c2f8f204468884b47252f4ef229634552cc62..de178fe338965b3f00698ce71f3230bea6fac826 100644
+--- a/src/pages/simulation_cockpit.py
++++ b/src/pages/simulation_cockpit.py
+@@ -17,7 +17,12 @@ from src.ancillary import (
+     capacity_price_series_for_product,
+     list_capacity_products,
+ )
+-from src.assumptions import ASSUMPTION_COLUMNS, CAPTURE_PARAM_LABEL
++from src.assumptions import (
++    ASSUMPTION_COLUMNS,
++    CAPEX_PARAM_LABEL,
++    CAPTURE_PARAM_LABEL,
++    DISPATCH_PARAM_LABEL,
++)
+ from src.config import (
+     ANCILLARY_CAPACITY_AVAILABILITY,
+     MAX_CONTINUOUS_REPLAY_INTERVALS,
+@@ -87,9 +92,9 @@ _STOCHASTIC_SEED = 0
+ # code in the same session (Streamlit keeps session state across a hot reload)
+ # can never be shown as current.
+ _MULTI_DAY_RESULT_KEY = "simulation_batch_result"
+-_MULTI_DAY_PANEL_ID = "cockpit-multi-day-replay/v1"
++_MULTI_DAY_PANEL_ID = "cockpit-multi-day-replay/v2-export-basis"
+ _FORECAST_POLICY_RESULT_KEY = "forecast_policy_result"
+-_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v2-settlement-disclosure"
++_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v3-export-basis"
+ 
+ 
+ def _solver_constants() -> dict[str, object]:
+@@ -141,27 +146,34 @@ def _cockpit_export_assumptions(
+     return pd.concat([out, pd.DataFrame([new_row])], ignore_index=True)
+ 
+ 
++def _with_export_assumption_row(
++    assumptions: pd.DataFrame, row: dict[str, str],
++) -> pd.DataFrame:
++    """Replace one panel-local row, or append it when the input omitted it."""
++    out = assumptions.copy(deep=True)
++    mask = out["parameter"] == row["parameter"]
++    if mask.any():
++        for column, value in row.items():
++            out.loc[mask, column] = value
++        return out
++    return pd.concat([out, pd.DataFrame([row])], ignore_index=True)
++
++
+ def _frontier_basis_export_assumptions(
+     assumptions: pd.DataFrame | None, *, capex_eur_kwh: float,
+ ) -> pd.DataFrame | None:
+     """Describe the actual DA-only frontier basis in an export-only copy."""
+     if assumptions is None or assumptions.empty:
+         return assumptions
+-    out = assumptions.copy(deep=True)
+     dispatch_row = {
+-        "parameter": "Dispatch model",
++        "parameter": DISPATCH_PARAM_LABEL,
+         "value": "DA-only MILP multi-cycle",
+         "unit": "",
+         "source": "Cycle-cap frontier",
+         "affects": "Frontier gross revenue and wear-net merchant baseline",
+     }
+-    dispatch_mask = out["parameter"] == "Dispatch model"
+-    if dispatch_mask.any():
+-        for column, value in dispatch_row.items():
+-            out.loc[dispatch_mask, column] = value
+-    else:
+-        out = pd.concat([out, pd.DataFrame([dispatch_row])], ignore_index=True)
+-    capex_mask = out["parameter"] == "CapEx"
++    out = _with_export_assumption_row(assumptions, dispatch_row)
++    capex_mask = out["parameter"] == CAPEX_PARAM_LABEL
+     if capex_mask.any():
+         capex_row = {
+             "value": f"{float(capex_eur_kwh):g}",
+@@ -174,6 +186,44 @@ def _frontier_basis_export_assumptions(
+     return out
+ 
+ 
++def _multi_day_export_assumptions(
++    assumptions: pd.DataFrame | None, *, mode: str,
++    capture_rate: float, capex_eur_kwh: float,
++) -> pd.DataFrame | None:
++    """Snapshot the replay solver, capture and ex-post wear basis at Run."""
++    out = _cockpit_export_assumptions(
++        assumptions,
++        capture_value=f"{capture_rate:.0%}",
++        capture_affects=(
++            "Haircut on cockpit replay revenue (the sidebar capture rate "
++            "is intentionally ignored in the cockpit)"
++        ),
++    )
++    if out is None or out.empty:
++        return out
++    is_da_id = mode == "DA + IDA1 Replay"
++    out = _with_export_assumption_row(out, {
++        "parameter": DISPATCH_PARAM_LABEL,
++        "value": (
++            "Two-stage DA+IDA1 MILP multi-cycle" if is_da_id
++            else "DA-only MILP multi-cycle"
++        ),
++        "unit": "",
++        "source": "Multi-day replay",
++        "affects": "Replay dispatch schedule and gross revenue",
++    })
++    return _with_export_assumption_row(out, {
++        "parameter": CAPEX_PARAM_LABEL,
++        "value": f"{max(float(capex_eur_kwh), 0.0):g}",
++        "unit": "EUR/kWh",
++        "source": "Multi-day replay (sidebar CapEx)",
++        "affects": (
++            "Ex-post linear degradation cost; not the dispatch objective "
++            "or gross revenue"
++        ),
++    })
++
++
+ def _cockpit_download_button(
+     tables: dict, assumptions, *, key: str, label: str, file_name: str,
+ ) -> None:
+@@ -968,16 +1018,11 @@ def _compute_multi_day_bundle(
+             capex_eur_kwh=capex_eur_kwh,
+             carry_soc=carry_soc,
+         )
+-    # `capture_rate` here is the cockpit's own haircut, not the sidebar's.
+-    # The assumptions are snapshotted with the result so a later export can
+-    # never pair this batch with a newer assumptions table.
+-    export_assumptions = _cockpit_export_assumptions(
+-        assumptions,
+-        capture_value=f"{capture_rate:.0%}",
+-        capture_affects=(
+-            "Haircut on cockpit replay revenue (the sidebar capture rate "
+-            "is intentionally ignored in the cockpit)"
+-        ),
++    # Snapshot the panel's actual basis, not the sidebar's dispatch switch.
++    # Later reruns must not pair this batch with newer assumptions.
++    export_assumptions = _multi_day_export_assumptions(
++        assumptions, mode=mode, capture_rate=capture_rate,
++        capex_eur_kwh=capex_eur_kwh,
+     )
+     return {
+         "fingerprint": fingerprint,
+@@ -3729,6 +3774,17 @@ def _forecast_policy_export_assumptions(
+             "capture haircut is applied"
+         ),
+     )
++    if out is not None and not out.empty:
++        out = _with_export_assumption_row(out, {
++            "parameter": DISPATCH_PARAM_LABEL,
++            "value": "Sequential DA+IDA1 MILP multi-cycle",
++            "unit": "",
++            "source": "Forecast-policy panel",
++            "affects": (
++                "Core DA+IDA1 comparison rows; optional reserve, triple and "
++                "stochastic rows use their separately disclosed MILP variants"
++            ),
++        })
+     if reserve_total is not None:
+         out = _append_reserve_assumptions(
+             out, product=reserve_product, capacity_price_eur_mw_h=reserve_price,
+diff --git a/tests/test_cockpit_export_provenance.py b/tests/test_cockpit_export_provenance.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..36cdc5e78184fbe67a6167d7ac9495562ba7d991
+--- /dev/null
++++ b/tests/test_cockpit_export_provenance.py
+@@ -0,0 +1,143 @@
++"""Saved cockpit workbooks describe the solver and wear basis actually used."""
++
++from __future__ import annotations
++
++from io import BytesIO
++
++import pandas as pd
++import pytest
++from openpyxl import load_workbook
++
++from src.assumptions import build_assumptions_table
++from src.export import cockpit_tables_to_excel
++from src.pages import simulation_cockpit as cockpit
++
++
++def _global_assumptions() -> pd.DataFrame:
++    return build_assumptions_table(
++        power_mw=1.0, duration_hours=2.0, efficiency=0.88,
++        capture_rate=0.7, capex_eur_kwh=150.0, use_lp_dispatch=False,
++    )
++
++
++def _workbook_rows(data: bytes, sheet: str) -> tuple[object, dict[str, dict]]:
++    workbook = load_workbook(BytesIO(data), data_only=True)
++    values = list(workbook[sheet].values)
++    records = [dict(zip(values[0], row, strict=True)) for row in values[1:]]
++    return workbook, {row["parameter"]: row for row in records}
++
++
++@pytest.mark.parametrize(
++    ("mode", "expected_dispatch"),
++    [
++        ("DA MILP Replay", "DA-only MILP multi-cycle"),
++        ("DA + IDA1 Replay", "Two-stage DA+IDA1 MILP multi-cycle"),
++    ],
++)
++def test_multiday_saved_workbook_has_its_solver_and_wear_basis(
++    mode: str, expected_dispatch: str,
++) -> None:
++    index = pd.date_range("2025-06-01", periods=48, freq="h", tz="UTC")
++    prices = [10.0] * 6 + [100.0] * 6 + [20.0] * 6 + [90.0] * 6
++    da = pd.DataFrame({"price_eur_mwh": prices * 2}, index=index)
++    ida = pd.DataFrame({"intraday_price_eur_mwh": [p + 5 for p in prices] * 2}, index=index)
++    assumptions = _global_assumptions()
++    original = assumptions.copy(deep=True)
++
++    bundle = cockpit._compute_multi_day_bundle(
++        fingerprint="frozen-input", primary_df=da, intraday_df=ida,
++        batch_dates=[pd.Timestamp("2025-06-01").date(), pd.Timestamp("2025-06-02").date()],
++        mode=mode, zone_tz="UTC", carry_soc=True, power_mw=1.0,
++        duration_hours=2, efficiency=0.88, capture_rate=1.0,
++        capex_eur_kwh=150.0, assumptions=assumptions,
++    )
++    batch = bundle["batch"]
++    assert len(batch) == 2
++    assert batch["total_revenue_eur"].sum() > 0
++    assert batch["degradation_cost_eur"].sum() > 0
++    workbook, rows = _workbook_rows(cockpit_tables_to_excel(
++        {"Multi-day Replay": batch}, assumptions=bundle["export_assumptions"],
++    ), "Assumptions")
++
++    assert rows["Dispatch model"]["value"] == expected_dispatch
++    assert rows["Dispatch model"]["source"] == "Multi-day replay"
++    assert rows["CapEx"]["value"] == "150"
++    assert "degradation" in rows["CapEx"]["affects"].lower()
++    assert "dispatch" in rows["CapEx"]["affects"].lower()
++    assert rows["Cockpit capture haircut"]["value"] == "100%"
++    assert "Capture rate (DA slippage)" not in rows
++    assert len([row for row in workbook["Assumptions"].values if row[0] == "Dispatch model"]) == 1
++    result_sheet = workbook["Multi-day Replay"]
++    headers = [cell.value for cell in result_sheet[1]]
++    for column in ("total_revenue_eur", "degradation_cost_eur", "daily_fce"):
++        cell = result_sheet.cell(2, headers.index(column) + 1)
++        assert cell.data_type == "n"
++        # The existing workbook writer stores two-decimal numeric values.
++        assert cell.value == pytest.approx(round(float(batch.iloc[0][column]), 2))
++    pd.testing.assert_frame_equal(assumptions, original)
++    assert assumptions.set_index("parameter").loc["Dispatch model", "value"] == "Greedy single-cycle"
++    assert assumptions.set_index("parameter").loc["CapEx", "affects"] == "Payback period only (0 = skipped)"
++
++
++def test_forecast_saved_workbook_describes_sequential_milp() -> None:
++    assumptions = _global_assumptions()
++    original = assumptions.copy(deep=True)
++    export_assumptions = cockpit._forecast_policy_export_assumptions(
++        assumptions, reserve_total=None, reserve_product=None,
++        reserve_price=None, triple={"triple_total": None, "realistic_total": None},
++        stochastic={"summary": None},
++    )
++    workbook, rows = _workbook_rows(cockpit_tables_to_excel(
++        {"Strategy comparison": pd.DataFrame({"window_revenue_eur": [123.45]})},
++        assumptions=export_assumptions,
++    ), "Assumptions")
++
++    assert rows["Dispatch model"]["value"] == "Sequential DA+IDA1 MILP multi-cycle"
++    assert rows["Dispatch model"]["source"] == "Forecast-policy panel"
++    assert "optional" in rows["Dispatch model"]["affects"].lower()
++    assert rows["Capture haircut"]["value"] == "not applied"
++    assert workbook["Strategy comparison"]["A2"].data_type == "n"
++    assert workbook["Strategy comparison"]["A2"].value == 123.45
++    pd.testing.assert_frame_equal(assumptions, original)
++
++
++def test_missing_sidebar_dispatch_row_gets_one_panel_basis() -> None:
++    assumptions = _global_assumptions()
++    assumptions = assumptions.loc[assumptions["parameter"] != "Dispatch model"].copy()
++    export = cockpit._forecast_policy_export_assumptions(
++        assumptions, reserve_total=None, reserve_product=None,
++        reserve_price=None, triple={"triple_total": None, "realistic_total": None},
++        stochastic={"summary": None},
++    )
++    rows = export.loc[export["parameter"] == "Dispatch model"]
++    assert rows["value"].tolist() == ["Sequential DA+IDA1 MILP multi-cycle"]
++    assert "Dispatch model" not in set(assumptions["parameter"])
++
++
++def test_absent_global_assumptions_stay_absent() -> None:
++    assert cockpit._forecast_policy_export_assumptions(
++        None, reserve_total=None, reserve_product=None,
++        reserve_price=None, triple={"triple_total": None, "realistic_total": None},
++        stochastic={"summary": None},
++    ) is None
++
++
++def test_global_and_cockpit_adapters_share_dispatch_and_capex_labels(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    from src import assumptions as assumption_module
++
++    monkeypatch.setattr(assumption_module, "DISPATCH_PARAM_LABEL", "Dispatch solver", raising=False)
++    monkeypatch.setattr(assumption_module, "CAPEX_PARAM_LABEL", "Capital cost", raising=False)
++    monkeypatch.setattr(cockpit, "DISPATCH_PARAM_LABEL", "Dispatch solver", raising=False)
++    monkeypatch.setattr(cockpit, "CAPEX_PARAM_LABEL", "Capital cost", raising=False)
++    global_table = _global_assumptions()
++    export_table = cockpit._frontier_basis_export_assumptions(
++        global_table, capex_eur_kwh=150.0,
++    )
++    assert global_table["parameter"].tolist().count("Dispatch solver") == 1
++    assert global_table["parameter"].tolist().count("Capital cost") == 1
++    assert export_table["parameter"].tolist().count("Dispatch solver") == 1
++    assert export_table["parameter"].tolist().count("Capital cost") == 1
++    assert "Dispatch model" not in set(export_table["parameter"])
++    assert "CapEx" not in set(export_table["parameter"])

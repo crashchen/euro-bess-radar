@@ -1,0 +1,109 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 2113 items
+
+tests/test_activation_overlay.py ..........                              [  0%]
+tests/test_analytics.py ................................................ [  2%]
+...................................................                      [  5%]
+tests/test_ancillary.py ................................................ [  7%]
+.................................................................        [ 10%]
+tests/test_assumptions.py .............                                  [ 11%]
+tests/test_batch_export.py .....                                         [ 11%]
+tests/test_cockpit_export_provenance.py ......                           [ 11%]
+tests/test_contracted_floor.py ......................................... [ 13%]
+.........................                                                [ 14%]
+tests/test_cycle_frontier.py .....................................       [ 16%]
+tests/test_da_forecast.py .....                                          [ 16%]
+tests/test_data_trust.py ..........................                      [ 17%]
+tests/test_degradation.py ..................                             [ 18%]
+tests/test_delivery_durations.py ....................................... [ 20%]
+.........................................                                [ 22%]
+tests/test_dispatch.py ................................................. [ 24%]
+........................................................................ [ 28%]
+........                                                                 [ 28%]
+tests/test_export.py ......................ss                            [ 29%]
+tests/test_floor_frontier_followups.py .....                             [ 30%]
+tests/test_forward_curve.py ..............................               [ 31%]
+tests/test_frontier_result_identity.py ................................. [ 33%]
+..........                                                               [ 33%]
+tests/test_ida_forecast.py ................                              [ 34%]
+tests/test_ida_scenarios.py ................                             [ 35%]
+tests/test_imbalance_overlay.py ............                             [ 35%]
+tests/test_ingestion.py ................................................ [ 37%]
+........................................................................ [ 41%]
+........................................................................ [ 44%]
+..                                                                       [ 44%]
+tests/test_liquidity.py ..............................                   [ 46%]
+tests/test_market_grid_guards.py ....................................... [ 48%]
+.......................................                                  [ 49%]
+tests/test_netztransparenz_converter.py .........                        [ 50%]
+tests/test_portfolio.py ........................                         [ 51%]
+tests/test_project_case_adapters.py ..............................       [ 52%]
+tests/test_project_case_audit.py .................                       [ 53%]
+tests/test_project_case_contract_schema.py .............                 [ 54%]
+tests/test_project_case_contract_ui.py ................................. [ 55%]
+............                                                             [ 56%]
+tests/test_project_case_contract_valuation.py .........                  [ 56%]
+tests/test_project_case_export.py ...................................... [ 58%]
+..                                                                       [ 58%]
+tests/test_project_case_fingerprint.py ....................              [ 59%]
+tests/test_project_case_grid.py ..........                               [ 60%]
+tests/test_project_case_imports.py ..................................... [ 61%]
+                                                                         [ 61%]
+tests/test_project_case_schema.py ...................................... [ 63%]
+...........................................                              [ 65%]
+tests/test_project_case_ui.py ..................                         [ 66%]
+tests/test_project_case_valuation.py ...................                 [ 67%]
+tests/test_project_revenue_handoff.py ....                               [ 67%]
+tests/test_reserve_forecast.py ..............                            [ 68%]
+tests/test_revenue_estimation_decay.py ................                  [ 69%]
+tests/test_scenario.py ................................................. [ 71%]
+.............                                                            [ 72%]
+tests/test_seed_demo.py .....                                            [ 72%]
+tests/test_sidebar.py ....                                               [ 72%]
+tests/test_simulation.py ............................................... [ 74%]
+..................................                                       [ 76%]
+tests/test_simulation_cockpit_contracted_floor.py ...................... [ 77%]
+.....................                                                    [ 78%]
+tests/test_simulation_cockpit_frontier.py ...........................    [ 79%]
+tests/test_step2_views.py ..........                                     [ 80%]
+tests/test_step3a_display_contract.py ...........................        [ 81%]
+tests/test_step3b_batch_result_persistence.py .......................... [ 82%]
+.........................................                                [ 84%]
+tests/test_step3c_average_price.py ..................................... [ 86%]
+                                                                         [ 86%]
+tests/test_step3d_cockpit_disclosure.py .....................            [ 87%]
+tests/test_step3d_export_disclosure.py ..........                        [ 87%]
+tests/test_step3d_project_case_disclosure.py ..........                  [ 88%]
+tests/test_step3d_settlement_basis.py .................................. [ 89%]
+.......                                                                  [ 90%]
+tests/test_stochastic_batch.py ......................                    [ 91%]
+tests/test_stochastic_dispatch.py ...................................... [ 93%]
+...................................................                      [ 95%]
+tests/test_strategy_compare.py ......................................... [ 97%]
+...........                                                              [ 97%]
+tests/test_trader_benchmark.py ...............................           [ 99%]
+tests/test_ui_theme.py .............                                     [100%]
+
+=============================== warnings summary ===============================
+tests/test_step3b_batch_result_persistence.py: 23 warnings
+  <repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+    proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+
+tests/test_step3d_export_disclosure.py::test_revenue_page_binds_actual_capacity_products_to_ui_and_exports
+tests/test_step3d_export_disclosure.py::test_revenue_joint_cash_is_unchanged_on_spring_dst
+tests/test_step3d_export_disclosure.py::test_no_joint_result_has_no_settlement_disclosure[True-True]
+  <repo>/src/ancillary.py:1036: FutureWarning: The behavior of array concatenation with empty entries is deprecated. In a future version, this will no longer exclude empty items when determining the result dtype. To retain the old behavior, exclude the empty entries before the concat operation.
+    combined = pd.concat([combined, manual]).sort_index()
+
+tests/test_step3d_export_disclosure.py::test_revenue_page_binds_actual_capacity_products_to_ui_and_exports
+tests/test_step3d_export_disclosure.py::test_revenue_joint_cash_is_unchanged_on_spring_dst
+tests/test_step3d_export_disclosure.py::test_no_joint_result_has_no_settlement_disclosure[True-True]
+  <repo>/src/ancillary.py:1036: FutureWarning: The behavior of DataFrame concatenation with empty or all-NA entries is deprecated. In a future version, this will no longer exclude empty or all-NA columns when determining the result dtypes. To retain the old behavior, exclude the relevant entries before the concat operation.
+    combined = pd.concat([combined, manual]).sort_index()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========== 2111 passed, 2 skipped, 29 warnings in 296.83s (0:04:56) ===========
+HighsMipSolverData::transformNewIntegerFeasibleSolution tmpSolver.run();
