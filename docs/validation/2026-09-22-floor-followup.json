@@ -1,0 +1,34 @@
+{
+  "code_base": "bd4bb888775fb775b61de10dc6715b9673b1401c",
+  "code_head": "886b2d5605c770fb34645ba7636f9324d49ec6b4",
+  "verified_at_utc": "2026-09-22T21:01:32Z",
+  "full_suite": {
+    "passed": 2105,
+    "skipped": 2,
+    "collected": 2107,
+    "slow_collected": 35,
+    "seconds": 308.83,
+    "warnings": 29
+  },
+  "new_tests": {
+    "total": 5,
+    "head_passed": 5,
+    "baseline_failed": 4,
+    "baseline_passed": 1,
+    "baseline_control": "test_pre_snapshot_floor_session_requires_a_fresh_run"
+  },
+  "targeted": {
+    "passed": 155,
+    "seconds": 6.80
+  },
+  "non_slow_derived": {
+    "passed": 2070,
+    "skipped": 2,
+    "collected": 2072,
+    "basis": "Derived from the full run; not separately executed"
+  },
+  "ruff": "pass",
+  "patch_sha256": "d378f1571698bda7cd767dd221adb5fcf7cf19a100da639b74ee9170c3cc333f",
+  "ci": "Consult the draft PR exact-head Checks; no remote CI is claimed by this local run.",
+  "browser": "No new browser download or layout verification; AppTest inspects saved XLSX bytes."
+}

@@ -215,7 +215,8 @@ changes `z*` and reduces (never raises) reported FEC on a degenerate fixture.
 
 ### Session identity and export assumptions — 2026-09-22 follow-up
 
-Implemented on the review branch; review evidence is recorded in the
+Merged in [#94](https://github.com/crashchen/euro-bess-radar/pull/94) as
+`bd4bb88`; review evidence is recorded in the
 [frontier handoff](../audits/2026-09-22-frontier-handoff.md). This extends the
 panel's existing Run/cache boundary without changing dispatch, the cap sweep,
 wear, annualisation, best-cap selection, liquidity or floor cash calculations.
@@ -247,14 +248,33 @@ without a solver call. That restoration does not revive a dependent floor
 result: the existing floor guard clears its cache when frontier context is
 absent and requires a new floor Run.
 
-Two pre-existing behaviors remain outside this change. The floor's own
-numerical inputs and baseline are fingerprinted, but its export assumptions
-are still assembled from the live global table on rerender. Also, if an
+At the #94 merge, two pre-existing behaviors remained outside that change. The floor's own
+numerical inputs and baseline were fingerprinted, but its export assumptions
+were assembled from the live global table on rerender. Also, if an
 explicit frontier rerun with unchanged inputs raises `ValueError`, that render
 shows the error without replacing the previous successful cache; a later
 same-input rerender can display the earlier successful result. This does not
 bypass the changed-input guard and is not evidence of a newly computed result.
-Track either behavior change separately in the [follow-ups](../validation/follow-ups.md).
+Their separate resolution is tracked in the [follow-ups](../validation/follow-ups.md).
+
+### Frontier/floor provenance and failed-retry follow-up — 2026-09-22 review branch
+
+The separate [review-branch follow-up](../audits/2026-09-22-floor-followup-handoff.md)
+corrects the global-assumption copy in both frontier and contracted-floor
+workbooks: DA-slippage capture is not applied, dispatch names the DA-only
+frontier MILP, and CapEx describes the inherited linear-wear basis. The global
+audit table itself is never mutated; panel-local source rows remain. The
+frontier panel version changes so an older session's incorrect export snapshot
+requires a fresh Run. The floor captures its corrected assumptions when Run
+succeeds; later sidebar changes do not rewrite that saved workbook. Its own
+panel-version guard rejects old session bundles without a floor snapshot.
+
+With valid inputs, an explicit frontier or floor Run now clears that panel's
+previous success immediately before computing. If the retry fails, a subsequent ordinary rerun cannot
+resurrect the old chart, table or download. Merely changing an input and then
+restoring it without pressing Run retains the frontier's existing cache
+reversion behavior. No dispatch, wear, cash, floor quote or settlement equation
+changes in this follow-up.
 
 ## 5. Non-goals (v1)
 

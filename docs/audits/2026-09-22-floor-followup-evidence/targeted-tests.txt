@@ -1,0 +1,15 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 155 items
+
+tests/test_floor_frontier_followups.py .....                             [  3%]
+tests/test_frontier_result_identity.py ................................. [ 24%]
+..........                                                               [ 30%]
+tests/test_simulation_cockpit_contracted_floor.py ...................... [ 45%]
+.....................                                                    [ 58%]
+tests/test_simulation_cockpit_frontier.py ...........................    [ 76%]
+tests/test_cycle_frontier.py .....................................       [100%]
+
+============================= 155 passed in 6.80s ==============================
