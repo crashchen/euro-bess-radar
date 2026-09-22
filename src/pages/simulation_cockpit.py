@@ -17,7 +17,12 @@ from src.ancillary import (
     capacity_price_series_for_product,
     list_capacity_products,
 )
-from src.assumptions import ASSUMPTION_COLUMNS, CAPTURE_PARAM_LABEL
+from src.assumptions import (
+    ASSUMPTION_COLUMNS,
+    CAPEX_PARAM_LABEL,
+    CAPTURE_PARAM_LABEL,
+    DISPATCH_PARAM_LABEL,
+)
 from src.config import (
     ANCILLARY_CAPACITY_AVAILABILITY,
     MAX_CONTINUOUS_REPLAY_INTERVALS,
@@ -87,9 +92,9 @@ _STOCHASTIC_SEED = 0
 # code in the same session (Streamlit keeps session state across a hot reload)
 # can never be shown as current.
 _MULTI_DAY_RESULT_KEY = "simulation_batch_result"
-_MULTI_DAY_PANEL_ID = "cockpit-multi-day-replay/v1"
+_MULTI_DAY_PANEL_ID = "cockpit-multi-day-replay/v2-export-basis"
 _FORECAST_POLICY_RESULT_KEY = "forecast_policy_result"
-_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v2-settlement-disclosure"
+_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v3-export-basis"
 
 
 def _solver_constants() -> dict[str, object]:
@@ -141,27 +146,34 @@ def _cockpit_export_assumptions(
     return pd.concat([out, pd.DataFrame([new_row])], ignore_index=True)
 
 
+def _with_export_assumption_row(
+    assumptions: pd.DataFrame, row: dict[str, str],
+) -> pd.DataFrame:
+    """Replace one panel-local row, or append it when the input omitted it."""
+    out = assumptions.copy(deep=True)
+    mask = out["parameter"] == row["parameter"]
+    if mask.any():
+        for column, value in row.items():
+            out.loc[mask, column] = value
+        return out
+    return pd.concat([out, pd.DataFrame([row])], ignore_index=True)
+
+
 def _frontier_basis_export_assumptions(
     assumptions: pd.DataFrame | None, *, capex_eur_kwh: float,
 ) -> pd.DataFrame | None:
     """Describe the actual DA-only frontier basis in an export-only copy."""
     if assumptions is None or assumptions.empty:
         return assumptions
-    out = assumptions.copy(deep=True)
     dispatch_row = {
-        "parameter": "Dispatch model",
+        "parameter": DISPATCH_PARAM_LABEL,
         "value": "DA-only MILP multi-cycle",
         "unit": "",
         "source": "Cycle-cap frontier",
         "affects": "Frontier gross revenue and wear-net merchant baseline",
     }
-    dispatch_mask = out["parameter"] == "Dispatch model"
-    if dispatch_mask.any():
-        for column, value in dispatch_row.items():
-            out.loc[dispatch_mask, column] = value
-    else:
-        out = pd.concat([out, pd.DataFrame([dispatch_row])], ignore_index=True)
-    capex_mask = out["parameter"] == "CapEx"
+    out = _with_export_assumption_row(assumptions, dispatch_row)
+    capex_mask = out["parameter"] == CAPEX_PARAM_LABEL
     if capex_mask.any():
         capex_row = {
             "value": f"{float(capex_eur_kwh):g}",
@@ -172,6 +184,44 @@ def _frontier_basis_export_assumptions(
         for column, value in capex_row.items():
             out.loc[capex_mask, column] = value
     return out
+
+
+def _multi_day_export_assumptions(
+    assumptions: pd.DataFrame | None, *, mode: str,
+    capture_rate: float, capex_eur_kwh: float,
+) -> pd.DataFrame | None:
+    """Snapshot the replay solver, capture and ex-post wear basis at Run."""
+    out = _cockpit_export_assumptions(
+        assumptions,
+        capture_value=f"{capture_rate:.0%}",
+        capture_affects=(
+            "Haircut on cockpit replay revenue (the sidebar capture rate "
+            "is intentionally ignored in the cockpit)"
+        ),
+    )
+    if out is None or out.empty:
+        return out
+    is_da_id = mode == "DA + IDA1 Replay"
+    out = _with_export_assumption_row(out, {
+        "parameter": DISPATCH_PARAM_LABEL,
+        "value": (
+            "Two-stage DA+IDA1 MILP multi-cycle" if is_da_id
+            else "DA-only MILP multi-cycle"
+        ),
+        "unit": "",
+        "source": "Multi-day replay",
+        "affects": "Replay dispatch schedule and gross revenue",
+    })
+    return _with_export_assumption_row(out, {
+        "parameter": CAPEX_PARAM_LABEL,
+        "value": f"{max(float(capex_eur_kwh), 0.0):g}",
+        "unit": "EUR/kWh",
+        "source": "Multi-day replay (sidebar CapEx)",
+        "affects": (
+            "Ex-post linear degradation cost; not the dispatch objective "
+            "or gross revenue"
+        ),
+    })
 
 
 def _cockpit_download_button(
@@ -968,16 +1018,11 @@ def _compute_multi_day_bundle(
             capex_eur_kwh=capex_eur_kwh,
             carry_soc=carry_soc,
         )
-    # `capture_rate` here is the cockpit's own haircut, not the sidebar's.
-    # The assumptions are snapshotted with the result so a later export can
-    # never pair this batch with a newer assumptions table.
-    export_assumptions = _cockpit_export_assumptions(
-        assumptions,
-        capture_value=f"{capture_rate:.0%}",
-        capture_affects=(
-            "Haircut on cockpit replay revenue (the sidebar capture rate "
-            "is intentionally ignored in the cockpit)"
-        ),
+    # Snapshot the panel's actual basis, not the sidebar's dispatch switch.
+    # Later reruns must not pair this batch with newer assumptions.
+    export_assumptions = _multi_day_export_assumptions(
+        assumptions, mode=mode, capture_rate=capture_rate,
+        capex_eur_kwh=capex_eur_kwh,
     )
     return {
         "fingerprint": fingerprint,
@@ -3729,6 +3774,17 @@ def _forecast_policy_export_assumptions(
             "capture haircut is applied"
         ),
     )
+    if out is not None and not out.empty:
+        out = _with_export_assumption_row(out, {
+            "parameter": DISPATCH_PARAM_LABEL,
+            "value": "Sequential DA+IDA1 MILP multi-cycle",
+            "unit": "",
+            "source": "Forecast-policy panel",
+            "affects": (
+                "Core DA+IDA1 comparison rows; optional reserve, triple and "
+                "stochastic rows use their separately disclosed MILP variants"
+            ),
+        })
     if reserve_total is not None:
         out = _append_reserve_assumptions(
             out, product=reserve_product, capacity_price_eur_mw_h=reserve_price,

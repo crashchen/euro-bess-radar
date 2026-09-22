@@ -20,6 +20,8 @@ ASSUMPTION_COLUMNS = ["parameter", "value", "unit", "source", "affects"]
 # The sidebar DA-slippage capture row; the cockpit export overrides it because
 # the cockpit uses its own capture haircut (or none, for the forecast panel).
 CAPTURE_PARAM_LABEL = "Capture rate (DA slippage)"
+CAPEX_PARAM_LABEL = "CapEx"
+DISPATCH_PARAM_LABEL = "Dispatch model"
 
 
 def build_assumptions_table(
@@ -59,9 +61,9 @@ def build_assumptions_table(
         (CAPTURE_PARAM_LABEL, f"{capture_rate:.0%}", "", "Sidebar",
          "Haircut on realised DA arbitrage; NOT applied to the "
          "forecast-policy panel"),
-        ("CapEx", f"{capex_eur_kwh:g}", "EUR/kWh", "Sidebar",
+        (CAPEX_PARAM_LABEL, f"{capex_eur_kwh:g}", "EUR/kWh", "Sidebar",
          "Payback period only (0 = skipped)"),
-        ("Dispatch model",
+        (DISPATCH_PARAM_LABEL,
          "MILP multi-cycle" if use_lp_dispatch else "Greedy single-cycle",
          "", "Sidebar", "Daily spread / revenue basis"),
         ("VOM cost", f"{DISPATCH_VOM_COST_EUR_MWH:g}", "EUR/MWh",

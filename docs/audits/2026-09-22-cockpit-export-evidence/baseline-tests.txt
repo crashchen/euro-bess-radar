@@ -1,0 +1,56 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <baseline-repo>
+configfile: pyproject.toml
+collected 6 items
+
+tests/test_cockpit_export_provenance.py FFFF.F                           [100%]
+
+=================================== FAILURES ===================================
+_ test_multiday_saved_workbook_has_its_solver_and_wear_basis[DA MILP Replay-DA-only MILP multi-cycle] _
+tests/test_cockpit_export_provenance.py:62: in test_multiday_saved_workbook_has_its_solver_and_wear_basis
+    assert rows["Dispatch model"]["value"] == expected_dispatch
+E   AssertionError: assert 'Greedy single-cycle' == 'DA-only MILP multi-cycle'
+E
+E     - DA-only MILP multi-cycle
+E     + Greedy single-cycle
+----------------------------- Captured stderr call -----------------------------
+2026-09-22 23:50:27.184 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_ test_multiday_saved_workbook_has_its_solver_and_wear_basis[DA + IDA1 Replay-Two-stage DA+IDA1 MILP multi-cycle] _
+tests/test_cockpit_export_provenance.py:62: in test_multiday_saved_workbook_has_its_solver_and_wear_basis
+    assert rows["Dispatch model"]["value"] == expected_dispatch
+E   AssertionError: assert 'Greedy single-cycle' == 'Two-stage DA...P multi-cycle'
+E
+E     - Two-stage DA+IDA1 MILP multi-cycle
+E     + Greedy single-cycle
+----------------------------- Captured stderr call -----------------------------
+2026-09-22 23:50:27.254 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+____________ test_forecast_saved_workbook_describes_sequential_milp ____________
+tests/test_cockpit_export_provenance.py:95: in test_forecast_saved_workbook_describes_sequential_milp
+    assert rows["Dispatch model"]["value"] == "Sequential DA+IDA1 MILP multi-cycle"
+E   AssertionError: assert 'Greedy single-cycle' == 'Sequential D...P multi-cycle'
+E
+E     - Sequential DA+IDA1 MILP multi-cycle
+E     + Greedy single-cycle
+____________ test_missing_sidebar_dispatch_row_gets_one_panel_basis ____________
+tests/test_cockpit_export_provenance.py:113: in test_missing_sidebar_dispatch_row_gets_one_panel_basis
+    assert rows["value"].tolist() == ["Sequential DA+IDA1 MILP multi-cycle"]
+E   AssertionError: assert [] == ['Sequential ... multi-cycle']
+E
+E     Right contains one more item: 'Sequential DA+IDA1 MILP multi-cycle'
+E     Use -v to get more diff
+_______ test_global_and_cockpit_adapters_share_dispatch_and_capex_labels _______
+tests/test_cockpit_export_provenance.py:138: in test_global_and_cockpit_adapters_share_dispatch_and_capex_labels
+    assert global_table["parameter"].tolist().count("Dispatch solver") == 1
+E   AssertionError: assert 0 == 1
+E    +  where 0 = <built-in method count of list object at 0x122415900>('Dispatch solver')
+E    +    where <built-in method count of list object at 0x122415900> = ['Power', 'Duration', 'Round-trip efficiency', 'Capture rate (DA slippage)', 'CapEx', 'Dispatch model', ...].count
+E    +      where ['Power', 'Duration', 'Round-trip efficiency', 'Capture rate (DA slippage)', 'CapEx', 'Dispatch model', ...] = tolist()
+E    +        where tolist = 0                                 Power\n1                              Duration\n2                 Round-trip efficienc...on share\n11          Max short-gap interpolation\n12       Continuous-replay interval cap\nName: parameter, dtype: object.tolist
+=========================== short test summary info ============================
+FAILED tests/test_cockpit_export_provenance.py::test_multiday_saved_workbook_has_its_solver_and_wear_basis[DA MILP Replay-DA-only MILP multi-cycle]
+FAILED tests/test_cockpit_export_provenance.py::test_multiday_saved_workbook_has_its_solver_and_wear_basis[DA + IDA1 Replay-Two-stage DA+IDA1 MILP multi-cycle]
+FAILED tests/test_cockpit_export_provenance.py::test_forecast_saved_workbook_describes_sequential_milp
+FAILED tests/test_cockpit_export_provenance.py::test_missing_sidebar_dispatch_row_gets_one_panel_basis
+FAILED tests/test_cockpit_export_provenance.py::test_global_and_cockpit_adapters_share_dispatch_and_capex_labels
+========================= 5 failed, 1 passed in 0.38s ==========================

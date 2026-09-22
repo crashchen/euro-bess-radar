@@ -27,7 +27,8 @@ entry point for today's code-bound results. The records below remain historical.
 | Step 3D | Independently reviewed; merged in [#92](https://github.com/crashchen/euro-bess-radar/pull/92) as `fb72dbf` | [Handoff and evidence](2026-09-20-step3d-handoff.md), [duration contract](../design/delivery-duration-v1.md) |
 | Step 4 | Documentation based on `fb72dbf`; merged in [#93](https://github.com/crashchen/euro-bess-radar/pull/93) as `6d986e3` | [Housekeeping handoff](2026-09-20-step4-handoff.md), [dated snapshot](../validation/2026-09-20.md), [local-note sync receipt](2026-09-20-step4-evidence/vault-sync.json) |
 | Frontier follow-up | Increment from `6d986e3`; merged in [#94](https://github.com/crashchen/euro-bess-radar/pull/94) as `bd4bb88` | [Result identity and export-snapshot handoff](2026-09-22-frontier-handoff.md), [archived verification snapshot](../validation/2026-09-22-frontier.md), [panel contract](../design/cycle-cap-frontier-v1.md#session-identity-and-export-assumptions--2026-09-22-follow-up) |
-| Frontier/floor export provenance and retry state | Increment from `bd4bb88`; implemented on the review branch, awaiting independent review | [Export and retry handoff](2026-09-22-floor-followup-handoff.md), [current verification snapshot](../validation/current.md) |
+| Frontier/floor export provenance and retry state | Increment from `bd4bb88`; merged in [#95](https://github.com/crashchen/euro-bess-radar/pull/95) as `cc6b1e2` | [Export and retry handoff](2026-09-22-floor-followup-handoff.md), [archived verification snapshot](../validation/2026-09-22-floor-followup.md) |
+| Cockpit batch export provenance | Increment from `cc6b1e2`; code commit `e39968d`, awaiting independent review | [Handoff and evidence](2026-09-22-cockpit-export-handoff.md), [current verification snapshot](../validation/current.md) |
 
 The original Step 1b patch is unchanged: its SHA-256 remains
 `a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12`.
@@ -57,13 +58,14 @@ Remote CI status is attached to each PR's exact head in GitHub Checks.
 
 ## Current sequence
 
-Steps 1, 1b, 2, 3A–3D, Step 4 and the frontier follow-up are merged. Step 4 reconciled repository
+Steps 1, 1b, 2, 3A–3D, Step 4 and the frontier/floor follow-ups are merged. Step 4 reconciled repository
 documentation and the nine project notes against its [dated snapshot](../validation/2026-09-20.md),
 retaining the earlier records unchanged. #94 extends frontier content identity
-and freezes run-time export assumptions. The export-provenance and retry-state
-follow-up is a separate review-branch candidate; it changes no numerical model.
+and freezes run-time export assumptions. #95 corrects frontier/floor export
+provenance and explicit retry state. The current review-branch candidate corrects
+multi-day/forecast-policy export provenance without changing numerical models.
 
-[Remaining work](../validation/follow-ups.md) distinguishes this candidate
+[Remaining work](../validation/follow-ups.md) distinguishes the candidate
 from remaining-page layouts, existing export clipping, warnings,
 and unexecuted manual/consumer checks. A reconciled checklist is not an assertion
 that every check passed. Private Vault note text and workstation paths stay

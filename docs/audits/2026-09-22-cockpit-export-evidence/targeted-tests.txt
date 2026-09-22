@@ -1,0 +1,22 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <repo>
+configfile: pyproject.toml
+collected 112 items / 6 deselected / 106 selected
+
+tests/test_cockpit_export_provenance.py ......                           [  5%]
+tests/test_assumptions.py .............                                  [ 17%]
+tests/test_floor_frontier_followups.py .....                             [ 22%]
+tests/test_step3b_batch_result_persistence.py .......................... [ 47%]
+...................................                                      [ 80%]
+tests/test_step3d_cockpit_disclosure.py .....................            [100%]
+
+=============================== warnings summary ===============================
+tests/test_step3b_batch_result_persistence.py::TestReserveSolverFailureNotice::test_notice_is_shown_on_run
+tests/test_step3b_batch_result_persistence.py::TestReserveSolverFailureNotice::test_notice_survives_a_rerun_without_resolving
+tests/test_step3b_batch_result_persistence.py::TestReserveSolverFailureNotice::test_notice_survives_a_rerun_without_resolving
+  <repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+    proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================ 106 passed, 6 deselected, 3 warnings in 2.77s =================
