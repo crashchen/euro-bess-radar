@@ -88,13 +88,13 @@ _STOCHASTIC_SEED = 0
 
 # Step 3B: the two button-run batch panels keep their last result in session
 # state, bound to a content fingerprint of every input the solvers read. Bump a
-# panel id when its compute path changes meaning, so a result produced by older
-# code in the same session (Streamlit keeps session state across a hot reload)
-# can never be shown as current.
+# panel id when its compute path or saved export-assumption basis changes, so
+# a result produced by older code in the same session (Streamlit keeps session
+# state across a hot reload) can never be shown as current.
 _MULTI_DAY_RESULT_KEY = "simulation_batch_result"
-_MULTI_DAY_PANEL_ID = "cockpit-multi-day-replay/v2-export-basis"
+_MULTI_DAY_PANEL_ID = "cockpit-multi-day-replay/v3-export-copy"
 _FORECAST_POLICY_RESULT_KEY = "forecast_policy_result"
-_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v3-export-basis"
+_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v4-export-copy"
 
 
 def _solver_constants() -> dict[str, object]:
@@ -173,17 +173,13 @@ def _frontier_basis_export_assumptions(
         "affects": "Frontier gross revenue and wear-net merchant baseline",
     }
     out = _with_export_assumption_row(assumptions, dispatch_row)
-    capex_mask = out["parameter"] == CAPEX_PARAM_LABEL
-    if capex_mask.any():
-        capex_row = {
-            "value": f"{float(capex_eur_kwh):g}",
-            "unit": "EUR/kWh",
-            "source": "Frontier (sidebar CapEx)",
-            "affects": "Linear wear numerator in the frontier merchant baseline",
-        }
-        for column, value in capex_row.items():
-            out.loc[capex_mask, column] = value
-    return out
+    return _with_export_assumption_row(out, {
+        "parameter": CAPEX_PARAM_LABEL,
+        "value": f"{float(capex_eur_kwh):g}",
+        "unit": "EUR/kWh",
+        "source": "Frontier (sidebar CapEx)",
+        "affects": "Linear wear numerator in the frontier merchant baseline",
+    })
 
 
 def _multi_day_export_assumptions(
@@ -205,12 +201,16 @@ def _multi_day_export_assumptions(
     out = _with_export_assumption_row(out, {
         "parameter": DISPATCH_PARAM_LABEL,
         "value": (
-            "Two-stage DA+IDA1 MILP multi-cycle" if is_da_id
+            "Ex-post DA+IDA1 MILP" if is_da_id
             else "DA-only MILP multi-cycle"
         ),
         "unit": "",
         "source": "Multi-day replay",
-        "affects": "Replay dispatch schedule and gross revenue",
+        "affects": (
+            "Multi-cycle replay uses realised IDA prices for dispatch and "
+            "gross revenue"
+            if is_da_id else "Replay dispatch schedule and gross revenue"
+        ),
     })
     return _with_export_assumption_row(out, {
         "parameter": CAPEX_PARAM_LABEL,
@@ -1352,7 +1352,7 @@ def _liquidity_assumption_records(
 
 _FRONTIER_STATE_KEY = "cycle_frontier_result"
 # Bump when computation or bundle semantics change across a session hot reload.
-_FRONTIER_PANEL_ID = "cockpit-cycle-frontier/v3-export-provenance"
+_FRONTIER_PANEL_ID = "cockpit-cycle-frontier/v4-export-copy"
 _LIQUIDITY_HARD_CAPTION = (
     "Liquidity participation cap: screening feasible-volume derating, not a "
     "price-impact or market-depth model; executable power min(P, s x V) at "
@@ -3777,12 +3777,14 @@ def _forecast_policy_export_assumptions(
     if out is not None and not out.empty:
         out = _with_export_assumption_row(out, {
             "parameter": DISPATCH_PARAM_LABEL,
-            "value": "Sequential DA+IDA1 MILP multi-cycle",
+            "value": "DA-only, sequential, ceiling",
             "unit": "",
-            "source": "Forecast-policy panel",
+            "source": "Forecast-policy MILP panel",
             "affects": (
-                "Core DA+IDA1 comparison rows; optional reserve, triple and "
-                "stochastic rows use their separately disclosed MILP variants"
+                "MILP variants: DA-only baseline, forecast-driven sequential "
+                "DA+IDA1 policy and ex-post perfect-foresight DA+IDA1 ceiling; "
+                "optional reserve, triple and stochastic rows use separately "
+                "disclosed variants"
             ),
         })
     if reserve_total is not None:
