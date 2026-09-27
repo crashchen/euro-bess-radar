@@ -2742,6 +2742,8 @@ def cockpit_tables_to_excel(
         # Excel caps sheet names at 31 chars.
         _build_table_sheet(ws, name[:31], df)
         _format_capacity_disclosures(ws, df)
+        if name == "Strategy comparison":
+            _format_cockpit_strategy_names(ws, df)
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
@@ -2786,3 +2788,27 @@ def _format_capacity_disclosures(ws, frame: pd.DataFrame) -> None:
             ws.row_dimensions[position].height = max(
                 ws.row_dimensions[position].height or 0, lines * _ROW_HEIGHT_PER_LINE,
             )
+
+
+def _format_cockpit_strategy_names(ws, frame: pd.DataFrame) -> None:
+    """Show full strategy names within the capped-width comparison column."""
+    if "strategy" not in frame.columns:
+        return
+    column = frame.columns.get_loc("strategy") + 1
+    width = min(
+        ws.column_dimensions[get_column_letter(column)].width or _MAX_COLUMN_WIDTH,
+        _MAX_COLUMN_WIDTH,
+    )
+    for row in range(2, len(frame) + 2):
+        cell = ws.cell(row=row, column=column)
+        if not isinstance(cell.value, str):
+            continue
+        cell.alignment = Alignment(wrap_text=True, vertical="top")
+        wrapped_lines = len(textwrap.wrap(cell.value, max(1, int(width) - 4)))
+        # Keep one spare line only when a label wraps: glyph widths vary
+        # across spreadsheet viewers, while short names need no extra height.
+        lines = wrapped_lines + (wrapped_lines > 1)
+        ws.row_dimensions[row].height = max(
+            ws.row_dimensions[row].height or 0,
+            lines * _ROW_HEIGHT_PER_LINE,
+        )

@@ -28,7 +28,8 @@ entry point for today's code-bound results. The records below remain historical.
 | Step 4 | Documentation based on `fb72dbf`; merged in [#93](https://github.com/crashchen/euro-bess-radar/pull/93) as `6d986e3` | [Housekeeping handoff](2026-09-20-step4-handoff.md), [dated snapshot](../validation/2026-09-20.md), [local-note sync receipt](2026-09-20-step4-evidence/vault-sync.json) |
 | Frontier follow-up | Increment from `6d986e3`; merged in [#94](https://github.com/crashchen/euro-bess-radar/pull/94) as `bd4bb88` | [Result identity and export-snapshot handoff](2026-09-22-frontier-handoff.md), [archived verification snapshot](../validation/2026-09-22-frontier.md), [panel contract](../design/cycle-cap-frontier-v1.md#session-identity-and-export-assumptions--2026-09-22-follow-up) |
 | Frontier/floor export provenance and retry state | Increment from `bd4bb88`; merged in [#95](https://github.com/crashchen/euro-bess-radar/pull/95) as `cc6b1e2` | [Export and retry handoff](2026-09-22-floor-followup-handoff.md), [archived verification snapshot](../validation/2026-09-22-floor-followup.md) |
-| Cockpit batch export provenance | Increment from `cc6b1e2`; code commit `e39968d`, awaiting independent review | [Handoff and evidence](2026-09-22-cockpit-export-handoff.md), [current verification snapshot](../validation/current.md) |
+| Cockpit batch export provenance | Increment from `cc6b1e2`; merged in [#96](https://github.com/crashchen/euro-bess-radar/pull/96) as `175c6a7` | [Handoff and evidence](2026-09-22-cockpit-export-handoff.md), [archived verification snapshot](../validation/2026-09-22-cockpit-export.md) |
+| Cockpit strategy-name XLSX readability | Increment from `175c6a7`; code commit `2bb14f7`, awaiting independent review | [Current verification snapshot](../validation/current.md), [saved-file evidence](2026-09-23-strategy-export-evidence/README.md) |
 
 The original Step 1b patch is unchanged: its SHA-256 remains
 `a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12`.
@@ -58,15 +59,16 @@ Remote CI status is attached to each PR's exact head in GitHub Checks.
 
 ## Current sequence
 
-Steps 1, 1b, 2, 3A–3D, Step 4 and the frontier/floor follow-ups are merged. Step 4 reconciled repository
+Steps 1, 1b, 2, 3A–3D, Step 4 and follow-ups #94–#96 are merged. Step 4 reconciled repository
 documentation and the nine project notes against its [dated snapshot](../validation/2026-09-20.md),
 retaining the earlier records unchanged. #94 extends frontier content identity
 and freezes run-time export assumptions. #95 corrects frontier/floor export
-provenance and explicit retry state. The current review-branch candidate corrects
-multi-day/forecast-policy export provenance without changing numerical models.
+provenance and explicit retry state. #96 corrects multi-day/forecast-policy
+export provenance. The current review-branch candidate makes long strategy
+names readable in the Cockpit XLSX comparison sheet.
 
 [Remaining work](../validation/follow-ups.md) distinguishes the candidate
-from remaining-page layouts, existing export clipping, warnings,
+from remaining-page layouts, other export-copy notes, warnings,
 and unexecuted manual/consumer checks. A reconciled checklist is not an assertion
 that every check passed. Private Vault note text and workstation paths stay
 outside this repository; the Step 4 handoff records relative synchronization scope.
