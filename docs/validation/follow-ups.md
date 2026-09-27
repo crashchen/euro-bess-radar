@@ -1,18 +1,19 @@
 # Work remaining after the September audit sequence
 
-The [dated verification snapshot](current.md) records the current metric-layout
-candidate. Step 4 housekeeping and the export/retry follow-ups are merged
-through [#97](https://github.com/crashchen/euro-bess-radar/pull/97)
-as `47a8495`. The #94 [snapshot](2026-09-22-frontier.md),
+The [dated verification snapshot](current.md) records the reviewed metric-layout
+head and its [#98](https://github.com/crashchen/euro-bess-radar/pull/98) merge
+as `3ab98c5`. Step 4 housekeeping and the export/retry follow-ups #94–#97
+are also merged. The #94 [snapshot](2026-09-22-frontier.md),
 #95 [snapshot](2026-09-22-floor-followup.md) and
 #96 [snapshot](2026-09-22-cockpit-export.md) and
-#97 [snapshot](2026-09-23-strategy-export.md) remain revision-bound.
-Historical findings remain in their original handoffs and patches; pending
-review must not be presented as merged or as covered by an earlier test run.
+#97 [snapshot](2026-09-23-strategy-export.md) and
+#98 [candidate snapshot](2026-09-27-metric-layout.md) remain revision-bound.
+Historical findings remain in their original handoffs and patches; a merge
+does not extend a fixture-bound test to untested inputs.
 
 | Priority | Work | Current evidence and required boundary |
 |---|---|---|
-| Implemented; awaiting review | Remaining metric pages | The [browser pass](../audits/2026-09-27-metric-layout-evidence/README.md) compares loaded Revenue, Renewable, Forward and Data Trust panels on a clean base and candidate at 1280/1440/390px. Only the first three need code changes; Data Trust is unchanged. Conditional Revenue branches and arbitrary large values are not certified by the synthetic fixtures |
+| Visual follow-up | Forward benchmark chart year axis | The existing comparison chart supplies integer calendar years but lets Plotly choose numeric ticks, observed as fractional, comma-formatted labels such as `2,027.2` in the #98 browser review. Constrain ticks to integer years and verify the chart at 1280/1440/390px without changing comparison data or revenue calculations. The #98 metric-card pass did not address this chart |
 | Operator verification | Manual checks 1–50 | Existing browser evidence covers named synthetic panels and selected interactions. Live imports/fetches, every parameter combination, remaining Revenue branches and Radar→ESS consumer reconciliation have not all been run. Record each tested revision; do not mark the entire checklist passed |
 | Dependency maintenance | Observed warnings | The dated Step 4 run emitted Streamlit DataFrame-attrs serialization warnings and pandas concatenation FutureWarnings. Address reproducible sources in small behavior-preserving PRs. The historical NumPy scalar-conversion warning did not recur; do not claim it is a current failure or fixed |
 | Optional diagnostics | Explicit settlement-version assertions | Existing Project Case real-adapter page/provenance tests fail under simulated registry/profile v2 drift. The screening disclosure assertion lacks a direct binding to those producer version constants; add a focused binding check if tightening that contract. Keep this optional and distinguish PC drift coverage from screening assertion coverage |
@@ -21,10 +22,11 @@ review must not be presented as merged or as covered by an earlier test run.
 | Before changing settlement cash | DST convention migration | Project Case's registered DE_LU profile retains nominal blocks; screening retains physical hours. The 456/437/475 examples explain implemented conventions, not externally verified billing rules. Any cash unification needs a new versioned contract |
 
 The [layout inventory](../audits/2026-09-20-step4-evidence/layout-inventory.json)
-records source locations. Existing Revenue desktop `100% of power` clipping
-was visible in [Step 3D evidence](../audits/2026-09-20-step3d-evidence/browser/revenue-1280.png).
-Forward and Renewable were independently reproduced in the later browser pass;
-Data Trust's loaded metric row showed no clipping and was not changed.
+records source locations. The Revenue, Forward and Renewable clipping was
+reproduced on the clean #97 base and corrected in #98's loaded-page browser
+pass at 1280/1440/390px. Data Trust's loaded metric row showed no clipping and
+was not changed. Conditional Revenue branches and arbitrary large values remain
+outside that fixture-bound pass.
 
 Other bounded input-review observations from Step 3C remain optional follow-ups:
 arbitrary object-typed prices are not normalized by `calculate_average_price`,
