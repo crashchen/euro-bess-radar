@@ -124,7 +124,7 @@ check; browser screenshots and overflow inspection supply layout evidence.
 | 38 | Layout reruns preserve stored results | With populated multi-day and forecast panels, resize the viewport, change theme, then repeat their download/stale-state checks in items 28–31 | Results still follow the stored run and its assumptions; presentation changes do not trigger a new solver run or expose a stale download |
 
 The merged Step 3C layout acceptance covers Market Overview, Project Case and
-Simulation Cockpit only. The later remaining-page candidate has its own
+Simulation Cockpit only. The separately merged #98 remaining-page pass has its own
 [fixture-bound browser evidence](../audits/2026-09-27-metric-layout-evidence/README.md)
 for loaded Revenue, Forward, Renewable and Data Trust rows. Data Trust needed
 no code change. Conditional branches and arbitrary monetary magnitudes still
