@@ -18,7 +18,7 @@ from src.data_ingestion import (
     DataSourceNetworkError,
     DataSourceParseError,
 )
-from src.ui_theme import apply_cockpit_plot_theme
+from src.ui_theme import apply_cockpit_plot_theme, metric_columns
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def render(
         duration_hours=duration_hours,
     )
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4 = metric_columns(4)
     c1.metric(
         "RE-Price Corr",
         (

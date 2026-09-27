@@ -54,7 +54,7 @@ from src.scenario import (
     sensitivity_table,
 )
 from src.settlement_disclosure import screening_capacity_settlement_basis
-from src.ui_theme import apply_cockpit_plot_theme
+from src.ui_theme import apply_cockpit_plot_theme, metric_columns
 
 _REVENUE_DECAY_HARD_CAPTION = (
     "Revenue-trajectory decay: screening assumption on annual merchant cash "
@@ -249,7 +249,7 @@ def render(
         elif auto_fetch_results:
             anc_source = f"auto-fetch ({len(auto_fetch_results)} dataset(s))"
 
-    r1, r2, r3 = st.columns(3)
+    r1, r2, r3 = metric_columns(3)
     if stack:
         r1.metric(
             "Headline Annual Revenue",
@@ -341,7 +341,7 @@ def render(
                         )
                     else:
                         st.caption(export_revenue["joint_capacity_settlement_basis"])
-                        co1, co2, co3 = st.columns(3)
+                        co1, co2, co3 = metric_columns(3)
                         co1.metric(
                             "Avg Reserve Commitment",
                             f"{avg_reserve_fraction:.0%} of power",
@@ -359,7 +359,7 @@ def render(
                                 if stack["da_arbitrage_eur"] > 0 else ""
                             ),
                         )
-                        co4, co5 = st.columns(2)
+                        co4, co5 = metric_columns(2)
                         co4.metric("MILP DA Component", f"\u20ac{co_da:,.0f}/yr")
                         co5.metric(
                             "MILP Capacity Component", f"\u20ac{co_capacity:,.0f}/yr",
@@ -422,7 +422,7 @@ def render(
                 )
                 if imb_spread["avg_spread"] > 0:
                     with st.expander("Imbalance Spread Opportunity", expanded=False):
-                        im1, im2, im3 = st.columns(3)
+                        im1, im2, im3 = metric_columns(3)
                         im1.metric("Avg DA-Imbalance Spread",
                                    f"\u20ac{imb_spread['avg_spread']:.1f}/MWh")
                         im2.metric("90th-pct Spread",
@@ -476,7 +476,7 @@ def render(
         )
         payback_years = total_capex / annual_rev if annual_rev > 0 else float("inf")
         st.divider()
-        p1, p2, p3 = st.columns(3)
+        p1, p2, p3 = metric_columns(3)
         p1.metric("Total CapEx", f"\u20ac{total_capex:,.0f}")
         p2.metric("Annual Revenue", f"\u20ac{annual_rev:,.0f}")
         p3.metric(
@@ -543,7 +543,7 @@ def render(
 
         st.divider()
         st.markdown("**Battery Degradation & Lifetime**")
-        d1, d2, d3 = st.columns(3)
+        d1, d2, d3 = metric_columns(3)
         d1.metric(
             "Shadow Wear/Year",
             f"\u20ac{deg_cost['total_degradation_eur']:,.0f}",
@@ -563,7 +563,7 @@ def render(
             ),
         )
 
-        d4, d5, d6, d7 = st.columns(4)
+        d4, d5, d6, d7 = metric_columns(4)
         d4.metric("Cost per Cycle", f"\u20ac{deg_cost['cost_per_cycle_eur']:,.0f}")
         d5.metric(
             "Economic Payback Proxy",
@@ -631,7 +631,7 @@ def render(
     if use_lp_dispatch and "lp_revenue" in daily_spreads.columns:
         st.divider()
         st.markdown("**MILP Dispatch Details**")
-        lp1, lp2, lp3 = st.columns(3)
+        lp1, lp2, lp3 = metric_columns(3)
         avg_cycles = float(daily_spreads["n_cycles"].mean())
         avg_lp_spread = float(daily_spreads["lp_spread_eur_mwh"].mean())
         greedy_spread = float(daily_spreads["spread"].mean())
@@ -703,7 +703,7 @@ def render(
             float(yearly["annual_revenue"].std() / yearly["annual_revenue"].mean())
             if yearly["annual_revenue"].mean() > 0 else 0.0
         )
-        y1, y2 = st.columns(2)
+        y1, y2 = metric_columns(2)
         y1.metric("Revenue CoV", f"{rev_cov:.2f}",
                    help="Coefficient of variation across years — lower = more stable")
         y2.metric("Years in Sample", str(len(yearly)))
@@ -814,7 +814,7 @@ def _render_revenue_risk_analysis(
 
         mc = bootstrap_annual_revenue(daily_rev_series, n_simulations=5000)
 
-        mc1, mc2, mc3 = st.columns(3)
+        mc1, mc2, mc3 = metric_columns(3)
         mc1.metric("10th-pct Revenue (Downside)", f"\u20ac{mc['p10']:,.0f}")
         mc2.metric("50th-pct Revenue (Median)", f"\u20ac{mc['p50']:,.0f}")
         mc3.metric("90th-pct Revenue (Upside)", f"\u20ac{mc['p90']:,.0f}")
@@ -916,7 +916,7 @@ def _render_revenue_risk_analysis(
             "assumptions are provided."
         )
 
-        n1, n2, n3, n4 = st.columns(4)
+        n1, n2, n3, n4 = metric_columns(4)
         n1.metric("NPV 10th pct (Downside)", f"\u20ac{npv_dist['npv_p10']:,.0f}")
         n2.metric("NPV 50th pct (Median)", f"\u20ac{npv_dist['npv_p50']:,.0f}")
         n3.metric("NPV 90th pct (Upside)", f"\u20ac{npv_dist['npv_p90']:,.0f}")
@@ -1034,7 +1034,7 @@ def _render_monthly_seasonality(
     worst_month = monthly_spreads.loc[monthly_spreads["avg_spread"].idxmin()]
     zero_spread_days = int((daily_spreads["spread"] <= 0).sum())
 
-    v1, v2, v3, v4 = st.columns(4)
+    v1, v2, v3, v4 = metric_columns(4)
     v1.metric("Spread CV", f"{spread_cv:.2f}",
                help="Coefficient of variation — lower = more stable revenue")
     v2.metric("Best Month", f"{best_month['year_month']}",
@@ -1193,7 +1193,7 @@ def _render_intraday_uplift_section(
             st.warning(uplift["reason"])
             return
 
-        m1, m2, m3, m4 = st.columns(4)
+        m1, m2, m3, m4 = metric_columns(4)
         m1.metric("Avg |IDA-DA|", f"€{uplift['avg_abs_spread']:.1f}/MWh")
         m2.metric("P90 |IDA-DA|", f"€{uplift['p90_abs']:.1f}/MWh")
         m3.metric(
@@ -1301,7 +1301,7 @@ def _render_intraday_uplift_section(
             )
             # Annualise on the same 365.25-day basis used elsewhere.
             scale = 365.25 / n_days if n_days > 0 else 0.0
-            t1, t2, t3, t4 = st.columns(4)
+            t1, t2, t3, t4 = metric_columns(4)
             t1.metric(
                 "Sample DA Revenue",
                 f"€{total_da:,.0f}",
