@@ -41,6 +41,7 @@ from src.trader_benchmark import (
     parse_trader_benchmark_csv,
     reconcile_trader_benchmark,
 )
+from src.ui_theme import metric_columns
 
 _XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _BENCHMARK_HARD_CAPTION = (
@@ -246,12 +247,13 @@ def _render_external_benchmark_section(
                 "still differ; matching labels do not make the quote bankable."
             )
         st.caption(_platform_basis_caption(capture_rate))
+        st.caption("Annual revenue and model-minus-benchmark amounts below: EUR/MW/yr.")
 
         overlap = int(summary["n_overlap_years"])
-        k1, k2, k3, k4 = st.columns(4)
+        k1, k2, k3, k4 = metric_columns(4)
         k1.metric(
             "Benchmark avg (all years)",
-            f"EUR {float(summary['benchmark_average_eur_per_mw_yr']):,.0f}/MW/yr",
+            f"€{float(summary['benchmark_average_eur_per_mw_yr']):,.0f}",
         )
         cagr = float(summary["benchmark_endpoint_cagr"])
         k2.metric(
@@ -264,12 +266,12 @@ def _render_external_benchmark_section(
             ratio = float(summary["benchmark_to_model_ratio"])
             k3.metric(
                 f"Model avg ({overlap} overlap yr)",
-                f"EUR {model_avg:,.0f}/MW/yr",
+                f"€{model_avg:,.0f}",
             )
             k4.metric(
                 "Benchmark / model ratio",
                 "n/a" if math.isnan(ratio) else f"{ratio:.1%}",
-                delta=f"model - benchmark: EUR {gap:+,.0f}/MW/yr",
+                delta=f"model - benchmark: €{gap:+,.0f}",
                 delta_color="off",
             )
         else:

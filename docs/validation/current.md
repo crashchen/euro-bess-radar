@@ -1,57 +1,44 @@
 # Current verification snapshot
 
-Verified **2026-09-23** against code commit
-[`2bb14f7`](https://github.com/crashchen/euro-bess-radar/commit/2bb14f7),
-the Cockpit strategy-name XLSX readability candidate. This code is **awaiting
-independent review**, not merged. Main is
-`175c6a7fba90e0b6e8774cc51f6cf03241eb7610`, the ordinary merge of
-reviewed [#96](https://github.com/crashchen/euro-bess-radar/pull/96).
-Steps 1–4 (#86–#93) and follow-ups #94–#96 are merged. Later documentation
-commits must not be read as new numerical validation. The #96 snapshot is
-archived [verbatim](2026-09-22-cockpit-export.md).
+Verified **2026-09-27** against code commit `4b4df23`, the remaining-page
+metric-layout candidate. Base `47a8495` is the ordinary merge of independently
+reviewed [#97](https://github.com/crashchen/euro-bess-radar/pull/97). This
+candidate is **awaiting independent review**, not merged. Steps 1–4 and
+follow-ups #94–#97 are merged. The #97 verification snapshot is archived
+[verbatim](2026-09-23-strategy-export.md); later documentation does not make
+its tests evidence for this new code.
 
-[Review handoff](../audits/2026-09-23-strategy-export-handoff.md) ·
-[Saved-file evidence](../audits/2026-09-23-strategy-export-evidence/README.md) ·
-[Remaining work](follow-ups.md).
+[Browser measurements and reproducible synthetic harness](../audits/2026-09-27-metric-layout-evidence/README.md)
+· [Remaining work](follow-ups.md).
 
-## Executed checks
+## Checks and scope
 
-| Check | Result | Evidence |
-|---|---|---|
-| New regression on clean base | 1 assertion failure: long strategy cell lacks `wrap_text` | [Evidence](../audits/2026-09-23-strategy-export-evidence/README.md) |
-| New regression on candidate | 1 passed | `tests/test_export.py::test_cockpit_strategy_names_are_readable_without_changing_values` |
-| Related export/disclosure suites | 60 passed / 2 opt-in chart-render skips | `tests/test_export.py`, `test_step3d_export_disclosure.py`, `test_step3d_cockpit_disclosure.py`, `test_cockpit_export_provenance.py` |
-| Full local suite | 2112 passed / 2 skipped, 2114 collected, including 35 slow cases; 297.84 seconds, 29 warnings | `.venv/bin/python -m pytest tests/ -q` |
-| Ruff and diff check | Passed; no whitespace errors | `.venv/bin/ruff check src/ app.py tests/`; `git diff --check` |
-| Saved-XLSX render | Both previously clipped strategy names visible in candidate; baseline clips them | [Before](../audits/2026-09-23-strategy-export-evidence/baseline.png), [after](../audits/2026-09-23-strategy-export-evidence/candidate.png) |
-| Saved-cell comparison | All populated values, data types and number formats equal; only strategy wrapping and row heights differ | [Base](../audits/2026-09-23-strategy-export-evidence/baseline.xlsx), [candidate](../audits/2026-09-23-strategy-export-evidence/candidate.xlsx) |
+| Check | Result |
+|---|---|
+| Browser at 1280/1440/390px | The loaded Revenue main/joint, Renewable and Forward benchmark metric labels/values fit in the candidate. The baseline defects and explicit limits are in the evidence README. Data Trust was checked and left unchanged. |
+| Targeted regression | 161 passed: benchmark, Step 3D display, Data Trust, Revenue decay and market-grid guards. |
+| Full local suite | 2112 passed / 2 skipped, 2114 collected, including 35 slow cases; 341.01 seconds, 38 warnings. Run completed after code commit `4b4df23`. |
+| Ruff and whitespace | `.venv/bin/ruff check src/ app.py tests/`, harness Ruff and `git diff --check` passed. |
+| Remote CI | Check the draft PR at its exact final head; not inferred from local checks. |
 
-Remote CI is a separate exact-head gate; check the draft PR's current head.
-The two opt-in Kaleido/Chrome chart-render skips are not evidence of successful
-chart rendering. The saved-XLSX image is an Artifact Tool read-only render,
-not a screenshot from Microsoft Excel. The synthetic fixture has stubbed
-Cockpit solvers and does not test market revenue economics.
+The code changes only Streamlit metric placement in Revenue Estimation,
+Renewable Correlation and Forward Scenarios. In the Forward external benchmark
+panel, the two average revenue values and gap use a shorter `€` display, with
+their shared `EUR/MW/yr` unit stated in a visible caption. Parsing,
+reconciliation values, chart/table/export data, solver cash and model contracts
+are unchanged. The browser fixture uses synthetic data; no live provider,
+download interaction or exhaustive numeric-width validation was run.
 
-## Behavior and scope
-
-Only the `Strategy comparison` sheet in `cockpit_tables_to_excel` gains wrapped
-strategy-name cells and row heights sufficient to display long labels inside
-the existing width-30 column. The source strings, table values, numeric cell
-types and `#,##0.00` formats are unchanged. No solver, cash, session cache,
-assumptions or Project Case code is touched. Normal app downloads have not
-been clicked in a browser during this increment; the production exporter and
-saved workbook bytes were tested directly.
-
-## Reproduction
+## Repeat
 
 ```sh
-.venv/bin/python -m pytest tests/test_export.py::test_cockpit_strategy_names_are_readable_without_changing_values -q
-.venv/bin/python -m pytest tests/test_export.py tests/test_step3d_export_disclosure.py tests/test_step3d_cockpit_disclosure.py tests/test_cockpit_export_provenance.py -q
+.venv/bin/python -m pytest tests/test_trader_benchmark.py tests/test_step3d_export_disclosure.py tests/test_data_trust.py tests/test_revenue_estimation_decay.py tests/test_market_grid_guards.py -q
 .venv/bin/python -m pytest tests/ -q
 .venv/bin/ruff check src/ app.py tests/
-git diff --binary --full-index 175c6a7 2bb14f7 -- src/ tests/ .github/workflows/ci.yml | shasum -a 256
-shasum -a 256 docs/audits/2026-09-23-strategy-export-evidence/code.patch
+git diff --check
+git diff --binary --full-index 47a8495 4b4df23 -- src/ tests/ .github/workflows/ci.yml | shasum -a 256
+shasum -a 256 docs/audits/2026-09-27-metric-layout-evidence/code.patch
 ```
 
 Both hash commands return
-`cd1cb1ca7abd4f8a0c4a6141a8730da196c7e64bda0d654c20de123242ac97d1`.
+`72b6589d1eb843630f35ff7957a1637fb1d419113d50567ad53d6d5d5723cf6c`.
