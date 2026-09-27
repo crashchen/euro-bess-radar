@@ -123,11 +123,12 @@ check; browser screenshots and overflow inspection supply layout evidence.
 | 37 | Cockpit KPI rows | At each width inspect single-day KPI/health cards, multi-day replay, the frontier, price and reserve forecast skill, forecast policy, reserve gap, stochastic attribution/risk, activation/imbalance overlays and floor/NPV metrics when their inputs make them available | Labels, amounts, quantiles and their units remain readable; custom grids and Streamlit metric rows wrap within their actual containers, including expanders. No value is lost to clipping or overlap |
 | 38 | Layout reruns preserve stored results | With populated multi-day and forecast panels, resize the viewport, change theme, then repeat their download/stale-state checks in items 28–31 | Results still follow the stored run and its assumptions; presentation changes do not trigger a new solver run or expose a stale download |
 
-The Step 3C layout acceptance covers Market Overview, Project Case and Simulation
-Cockpit only. Revenue Estimation, Forward Scenarios, Renewable Correlation and
-Data Trust metrics retain their previous layouts. Their source inventory and
-priority are recorded in [remaining work](../validation/follow-ups.md); that
-inventory is not a completed visual acceptance claim.
+The merged Step 3C layout acceptance covers Market Overview, Project Case and
+Simulation Cockpit only. The later remaining-page candidate has its own
+[fixture-bound browser evidence](../audits/2026-09-27-metric-layout-evidence/README.md)
+for loaded Revenue, Forward, Renewable and Data Trust rows. Data Trust needed
+no code change. Conditional branches and arbitrary monetary magnitudes still
+need the operator checks below before claiming broad visual acceptance.
 
 ## Step 3D — reserve capacity settlement disclosure
 
@@ -156,6 +157,18 @@ UI, imports and downstream calculations were not executed in this round.
 | 45 | A stale result cannot export | Change an economic input without re-running | Project Case shows its stale warning and removes result/download. Its stale cache is deleted: even after restoring the input, click **Run Project Case** again. This differs from the multi-day/forecast panels' restore-without-recompute behavior |
 | 46 | Preview and apply in ESS | Select **Radar Project Revenue Handoff JSON**, upload through **Project Revenue Handoff JSON**, choose a stream name, then **Preview revenue handoff**; inspect basis/provenance before **Apply to Revenue Stack** | Digest/fingerprint and years reconcile; signed annual cash is retained. Review/enable the consumer's CPI Common Assumptions layer for real-base-year EUR rather than treating it as nominal. This consumer/browser check is pending execution |
 | 47 | Avoid double application | Compare Radar's annual settled revenue with the applied ESS source curve before additional lifecycle/finance layers | Do not multiply by MW, RTE, embedded availability/capture/liquidity or settle the floor again. Radar exports revenue, not lifecycle net cash; ESS owns its CapEx, fixed OpEx, maintenance/augmentation, tax and financing layers. Preserve negative cash and inspect embedded flags. Downstream reconciliation remains unverified until actually run |
+
+## Remaining metric pages — operator layout checks
+
+Use 1280/1440/390px at 100% zoom, record sidebar state, and include values
+large enough to test a real financial case. The synthetic browser fixture in
+the dated evidence tests named rows, not every available branch.
+
+| # | Entry | Action | Expect |
+|---|-------|--------|--------|
+| 48 | Revenue conditional cards | Populate ancillary, imbalance, CapEx/degradation, MILP, Monte Carlo, monthly seasonality and IDA sections; open their expanders at each width | Every card shows its full label, value, unit and applicable delta. Wrapping does not change the result or imply that a screening overlay is additive |
+| 49 | Forward external benchmark | Upload a two-year annual benchmark with an overlapping platform curve; open its expander at each width | Both annual averages and the model-minus-benchmark gap are readable with the nearby EUR/MW/yr caption; CAGR and ratio stay distinct. The reconciliation table and download remain unchanged |
+| 50 | Renewable and Data Trust | Load generation data and a zone with documented quality gaps, then inspect their four metric cards at each width | Renewable label/value text fits; Data Trust stays readable in its unchanged four-column desktop row and stacked mobile layout |
 
 The [wire contract](../design/project-revenue-handoff-v1.md) defines the exact
 schema/digest and economic boundary. Changing those requires its own coordinated

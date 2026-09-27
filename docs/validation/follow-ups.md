@@ -1,19 +1,19 @@
 # Work remaining after the September audit sequence
 
-The [dated verification snapshot](current.md) records the current cockpit
-strategy-name export candidate. Step 4 housekeeping and the export/retry
-follow-ups are merged through [#96](https://github.com/crashchen/euro-bess-radar/pull/96)
-as `175c6a7`. The #94 [snapshot](2026-09-22-frontier.md),
+The [dated verification snapshot](current.md) records the current metric-layout
+candidate. Step 4 housekeeping and the export/retry follow-ups are merged
+through [#97](https://github.com/crashchen/euro-bess-radar/pull/97)
+as `47a8495`. The #94 [snapshot](2026-09-22-frontier.md),
 #95 [snapshot](2026-09-22-floor-followup.md) and
-#96 [snapshot](2026-09-22-cockpit-export.md) remain revision-bound.
+#96 [snapshot](2026-09-22-cockpit-export.md) and
+#97 [snapshot](2026-09-23-strategy-export.md) remain revision-bound.
 Historical findings remain in their original handoffs and patches; pending
 review must not be presented as merged or as covered by an earlier test run.
 
 | Priority | Work | Current evidence and required boundary |
 |---|---|---|
-| Next visual pass | Remaining metric pages | Revenue Estimation has 48 metric call sites, Forward Scenarios 6, Renewable Correlation 4 and Data Trust 4. These are static call sites, including alternative branches, not simultaneously visible card counts. Audit actual loaded panels at 1280/1440/390px before expanding the Step 3C layout claim |
-| Implemented; awaiting review | Cockpit strategy names | Long names in the saved Strategy comparison XLSX sheet now wrap within the existing width-30 column, with enough row height. Candidate and base saved-file renders and a full cell-value/type/format comparison are in the [current snapshot](current.md). No solver or cash change |
-| Operator verification | Manual checks 1–47 | Existing browser evidence covers named synthetic panels and selected interactions. Live imports/fetches, every parameter combination and Radar→ESS consumer reconciliation have not all been run. Record each tested revision; do not mark the entire checklist passed |
+| Implemented; awaiting review | Remaining metric pages | The [browser pass](../audits/2026-09-27-metric-layout-evidence/README.md) compares loaded Revenue, Renewable, Forward and Data Trust panels on a clean base and candidate at 1280/1440/390px. Only the first three need code changes; Data Trust is unchanged. Conditional Revenue branches and arbitrary large values are not certified by the synthetic fixtures |
+| Operator verification | Manual checks 1–50 | Existing browser evidence covers named synthetic panels and selected interactions. Live imports/fetches, every parameter combination, remaining Revenue branches and Radar→ESS consumer reconciliation have not all been run. Record each tested revision; do not mark the entire checklist passed |
 | Dependency maintenance | Observed warnings | The dated Step 4 run emitted Streamlit DataFrame-attrs serialization warnings and pandas concatenation FutureWarnings. Address reproducible sources in small behavior-preserving PRs. The historical NumPy scalar-conversion warning did not recur; do not claim it is a current failure or fixed |
 | Optional diagnostics | Explicit settlement-version assertions | Existing Project Case real-adapter page/provenance tests fail under simulated registry/profile v2 drift. The screening disclosure assertion lacks a direct binding to those producer version constants; add a focused binding check if tightening that contract. Keep this optional and distinguish PC drift coverage from screening assertion coverage |
 | Optional defensive API handling | Null adapter/profile mappings | Calling the raw display helper with explicit `None` mappings raises AttributeError. Validated RunResult paths reject these payloads earlier; a future raw-mapping API hardening change can clarify that interface without widening current model claims |
@@ -23,7 +23,8 @@ review must not be presented as merged or as covered by an earlier test run.
 The [layout inventory](../audits/2026-09-20-step4-evidence/layout-inventory.json)
 records source locations. Existing Revenue desktop `100% of power` clipping
 was visible in [Step 3D evidence](../audits/2026-09-20-step3d-evidence/browser/revenue-1280.png).
-Forward/Renewable/Data Trust inventory alone establishes no visual defect.
+Forward and Renewable were independently reproduced in the later browser pass;
+Data Trust's loaded metric row showed no clipping and was not changed.
 
 Other bounded input-review observations from Step 3C remain optional follow-ups:
 arbitrary object-typed prices are not normalized by `calculate_average_price`,
