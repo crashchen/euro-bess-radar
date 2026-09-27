@@ -1,46 +1,43 @@
 # Current verification snapshot
 
-Verified **2026-09-27** against code commit `4b4df23` and final PR head
-`7060149`. The remaining-page metric-layout change was independently reviewed
-and [#98](https://github.com/crashchen/euro-bess-radar/pull/98) was ordinarily
-merged as `3ab98c5`. Base `47a8495` is the ordinary merge of #97. Steps 1–4
-and follow-ups #94–#98 are merged. The pre-merge candidate snapshot is archived
-[verbatim](2026-09-27-metric-layout.md); the documentation status update does
-not constitute a new code validation run.
+Verified **2026-09-28** against Forward chart code commit `49a2d77`, based on
+`76dc758` (the ordinary merge of documentation [#99](https://github.com/crashchen/euro-bess-radar/pull/99)).
+The chart change is a **review candidate**, not merged. Steps 1–4 and
+follow-ups #94–#99 are merged. The prior #99 current snapshot is archived
+[verbatim](2026-09-28-pre-forward-chart.md); its tests are not evidence for
+this chart change.
 
-[Browser measurements and reproducible synthetic harness](../audits/2026-09-27-metric-layout-evidence/README.md)
+[Forward chart evidence and frozen patch](../audits/2026-09-28-forward-chart-evidence/README.md)
 · [Remaining work](follow-ups.md).
 
 ## Checks and scope
 
 | Check | Result |
 |---|---|
-| Browser at 1280/1440/390px | The loaded Revenue main/joint, Renewable and Forward benchmark metric labels/values fit at the reviewed head. The baseline defects and explicit limits are in the evidence README. Data Trust was checked and left unchanged. The user's external reviewer independently repeated these checks on the same head. |
-| Targeted regression | 161 passed: benchmark, Step 3D display, Data Trust, Revenue decay and market-grid guards. |
-| Full local suite | 2112 passed / 2 skipped, 2114 collected, including 35 slow cases; 341.01 seconds, 38 warnings. Run completed after code commit `4b4df23`. |
-| Ruff and whitespace | `.venv/bin/ruff check src/ app.py tests/`, harness Ruff and `git diff --check` passed. |
-| Remote CI | At exact PR head `70601497468e8c9af14892a935e3b86e968228f7`, both `test` and `Python 3.11 / Streamlit 1.55.0 compatibility check` concluded SUCCESS before merge. |
+| Clean baseline contrast | The new `test_trader_benchmark.py` on a clean `76dc758` archive: 2 failed / 32 passed. Both failures are the missing chart builder; the unit-caption compatibility check passes. |
+| Candidate targeted tests | 34 passed in `tests/test_trader_benchmark.py`; the chart tests pin integer labels, sparse long-horizon labels and unchanged x/y traces. AppTest confirms the abbreviated euro KPIs still have their EUR/MW/yr caption. |
+| Browser | The existing full Forward benchmark renderer on the base showed fractional/comma-formatted year ticks. A chart-only Streamlit harness calling the production builder showed whole-year ticks at 390/1280/1440 CSS px. At those widths the legend sits below the x-axis title and inherits readable light-theme text color. This does not certify the full Forward page at every width. |
+| Full local suite | On a clean archive of code commit `49a2d77`: 2115 passed / 2 skipped, 29 warnings in 298.35 seconds; pytest and its corrected shell wrapper exited 0. The warnings are the previously tracked 23 Streamlit attrs and 6 pandas concat warnings. |
+| Ruff and whitespace | Targeted Ruff and `git diff --check` passed. |
+| Remote CI | Verify against the PR's exact final head after publication; local checks are not remote CI. |
 
-The code changes only Streamlit metric placement in Revenue Estimation,
-Renewable Correlation and Forward Scenarios. In the Forward external benchmark
-panel, the two average revenue values and gap use a shorter `€` display, with
-their shared `EUR/MW/yr` unit stated in a visible caption. Parsing,
-reconciliation values, chart/table/export data, solver cash and model contracts
-are unchanged. The browser fixture uses synthetic data; no live provider,
-download interaction or exhaustive numeric-width validation was run. The
-Forward benchmark chart still has a separate pre-existing fractional-year
-x-axis tick formatting issue, tracked in [follow-ups](follow-ups.md).
+The candidate changes only the Forward external benchmark chart's tick labels,
+legend placement and text-color inheritance. It preserves comparison x/y
+values, parsed benchmark data, reconciliation, exports and solver cash. A
+separate Cockpit export-copy correction is being prepared for review; it is
+not part of this code commit or these checks. No live provider or production
+cache was used for browser evidence.
 
 ## Repeat
 
 ```sh
-.venv/bin/python -m pytest tests/test_trader_benchmark.py tests/test_step3d_export_disclosure.py tests/test_data_trust.py tests/test_revenue_estimation_decay.py tests/test_market_grid_guards.py -q
+.venv/bin/python -m pytest tests/test_trader_benchmark.py -q
 .venv/bin/python -m pytest tests/ -q
 .venv/bin/ruff check src/ app.py tests/
 git diff --check
-git diff --binary --full-index 47a8495 4b4df23 -- src/ tests/ .github/workflows/ci.yml | shasum -a 256
-shasum -a 256 docs/audits/2026-09-27-metric-layout-evidence/code.patch
+git diff --binary --full-index 76dc758 49a2d77 -- src/ tests/ .github/workflows/ci.yml | shasum -a 256
+shasum -a 256 docs/audits/2026-09-28-forward-chart-evidence/code.patch
 ```
 
 Both hash commands return
-`72b6589d1eb843630f35ff7957a1637fb1d419113d50567ad53d6d5d5723cf6c`.
+`61d15bed759c368793ac24402584f02853fbcd81a9a642653b8c46c364dc449f`.

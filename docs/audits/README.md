@@ -31,6 +31,7 @@ entry point for today's code-bound results. The records below remain historical.
 | Cockpit batch export provenance | Increment from `cc6b1e2`; merged in [#96](https://github.com/crashchen/euro-bess-radar/pull/96) as `175c6a7` | [Handoff and evidence](2026-09-22-cockpit-export-handoff.md), [archived verification snapshot](../validation/2026-09-22-cockpit-export.md) |
 | Cockpit strategy-name XLSX readability | Increment from `175c6a7`; merged in [#97](https://github.com/crashchen/euro-bess-radar/pull/97) as `47a8495` | [Handoff](2026-09-23-strategy-export-handoff.md), [archived verification snapshot](../validation/2026-09-23-strategy-export.md), [saved-file evidence](2026-09-23-strategy-export-evidence/README.md) |
 | Remaining-page metric layout | Increment from `47a8495`; merged in [#98](https://github.com/crashchen/euro-bess-radar/pull/98) as `3ab98c5` | [Archived candidate snapshot](../validation/2026-09-27-metric-layout.md), [browser measurements and harness](2026-09-27-metric-layout-evidence/README.md) |
+| Forward benchmark chart readability | Increment from `76dc758` (#99 merge); code commit `49a2d77`, awaiting independent review | [Current verification snapshot](../validation/current.md), [frozen patch and browser evidence](2026-09-28-forward-chart-evidence/README.md) |
 
 The original Step 1b patch is unchanged: its SHA-256 remains
 `a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12`.
@@ -60,7 +61,7 @@ Remote CI status is attached to each PR's exact head in GitHub Checks.
 
 ## Current sequence
 
-Steps 1, 1b, 2, 3A–3D, Step 4 and follow-ups #94–#98 are merged. Step 4 reconciled repository
+Steps 1, 1b, 2, 3A–3D, Step 4 and follow-ups #94–#99 are merged. Step 4 reconciled repository
 documentation and the nine project notes against its [dated snapshot](../validation/2026-09-20.md),
 retaining the earlier records unchanged. #94 extends frontier content identity
 and freezes run-time export assumptions. #95 corrects frontier/floor export
@@ -69,6 +70,8 @@ export provenance; #97 makes long strategy names readable in the Cockpit XLSX
 comparison sheet. #98 addresses metric-card clipping on Revenue Estimation,
 Renewable Correlation and Forward Scenarios; the loaded Data Trust row needed
 no code change.
+The current review candidate addresses the Forward benchmark chart's
+fractional-year ticks and overlapping/light legend.
 
 [Remaining work](../validation/follow-ups.md) distinguishes the bounded #98
 browser evidence from other export-copy notes, warnings,
