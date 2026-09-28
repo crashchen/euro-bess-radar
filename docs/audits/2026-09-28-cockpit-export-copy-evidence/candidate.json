@@ -1,0 +1,72 @@
+{
+  "forecast": [
+    {
+      "affects": "Payback period only (0 = skipped)",
+      "parameter": "CapEx",
+      "source": "Sidebar",
+      "unit": "EUR/kWh",
+      "value": "150"
+    },
+    {
+      "affects": "MILP variants: DA-only baseline, forecast-driven sequential DA+IDA1 policy and ex-post perfect-foresight DA+IDA1 ceiling; optional reserve, triple and stochastic rows use separately disclosed variants",
+      "parameter": "Dispatch model",
+      "source": "Forecast-policy MILP panel",
+      "unit": "",
+      "value": "DA-only, sequential, ceiling"
+    }
+  ],
+  "frontier_missing_global_capex": [
+    {
+      "affects": "Frontier gross revenue and wear-net merchant baseline",
+      "parameter": "Dispatch model",
+      "source": "Cycle-cap frontier",
+      "unit": "",
+      "value": "DA-only MILP multi-cycle"
+    },
+    {
+      "affects": "Linear wear numerator in the frontier merchant baseline",
+      "parameter": "CapEx",
+      "source": "Frontier (sidebar CapEx)",
+      "unit": "EUR/kWh",
+      "value": "150"
+    }
+  ],
+  "global": [
+    {
+      "affects": "Payback period only (0 = skipped)",
+      "parameter": "CapEx",
+      "source": "Sidebar",
+      "unit": "EUR/kWh",
+      "value": "150"
+    },
+    {
+      "affects": "Daily spread / revenue basis",
+      "parameter": "Dispatch model",
+      "source": "Sidebar",
+      "unit": "",
+      "value": "Greedy single-cycle"
+    }
+  ],
+  "multi_day_da_id": [
+    {
+      "affects": "Ex-post linear degradation cost; not the dispatch objective or gross revenue",
+      "parameter": "CapEx",
+      "source": "Multi-day replay (sidebar CapEx)",
+      "unit": "EUR/kWh",
+      "value": "150"
+    },
+    {
+      "affects": "Multi-cycle replay uses realised IDA prices for dispatch and gross revenue",
+      "parameter": "Dispatch model",
+      "source": "Multi-day replay",
+      "unit": "",
+      "value": "Ex-post DA+IDA1 MILP"
+    }
+  ],
+  "none_global_frontier": null,
+  "numeric_export_cell": {
+    "format": "#,##0.00",
+    "type": "n",
+    "value": 123.45
+  }
+}

@@ -31,7 +31,8 @@ entry point for today's code-bound results. The records below remain historical.
 | Cockpit batch export provenance | Increment from `cc6b1e2`; merged in [#96](https://github.com/crashchen/euro-bess-radar/pull/96) as `175c6a7` | [Handoff and evidence](2026-09-22-cockpit-export-handoff.md), [archived verification snapshot](../validation/2026-09-22-cockpit-export.md) |
 | Cockpit strategy-name XLSX readability | Increment from `175c6a7`; merged in [#97](https://github.com/crashchen/euro-bess-radar/pull/97) as `47a8495` | [Handoff](2026-09-23-strategy-export-handoff.md), [archived verification snapshot](../validation/2026-09-23-strategy-export.md), [saved-file evidence](2026-09-23-strategy-export-evidence/README.md) |
 | Remaining-page metric layout | Increment from `47a8495`; merged in [#98](https://github.com/crashchen/euro-bess-radar/pull/98) as `3ab98c5` | [Archived candidate snapshot](../validation/2026-09-27-metric-layout.md), [browser measurements and harness](2026-09-27-metric-layout-evidence/README.md) |
-| Forward benchmark chart readability | Increment from `76dc758` (#99 merge); code commit `49a2d77`, awaiting independent review | [Current verification snapshot](../validation/current.md), [frozen patch and browser evidence](2026-09-28-forward-chart-evidence/README.md) |
+| Forward benchmark chart readability | Increment from `76dc758` (#99 merge); code commit `49a2d77`, draft [#100](https://github.com/crashchen/euro-bess-radar/pull/100), awaiting independent review | [Archived candidate snapshot](../validation/2026-09-28-forward-chart.md), [handoff](2026-09-28-forward-chart-handoff.md), [frozen patch and browser evidence](2026-09-28-forward-chart-evidence/README.md) |
+| Cockpit export-copy precision | Increment from chart draft head `938cf03`; code commit `7ec5302`, awaiting independent review | [Current verification snapshot](../validation/current.md), [handoff](2026-09-28-cockpit-export-copy-handoff.md), [frozen patch and probe](2026-09-28-cockpit-export-copy-evidence/README.md) |
 
 The original Step 1b patch is unchanged: its SHA-256 remains
 `a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12`.
@@ -70,11 +71,13 @@ export provenance; #97 makes long strategy names readable in the Cockpit XLSX
 comparison sheet. #98 addresses metric-card clipping on Revenue Estimation,
 Renewable Correlation and Forward Scenarios; the loaded Data Trust row needed
 no code change.
-The current review candidate addresses the Forward benchmark chart's
-fractional-year ticks and overlapping/light legend.
+The first unmerged review candidate addresses the Forward benchmark chart's
+fractional-year ticks and overlapping/light legend. A second, stacked
+candidate clarifies Cockpit Assumptions-sheet copy and one frontier CapEx
+provenance edge case. Neither is a released behavior claim.
 
 [Remaining work](../validation/follow-ups.md) distinguishes the bounded #98
-browser evidence from other export-copy notes, warnings,
+browser evidence and two review candidates from warnings,
 and unexecuted manual/consumer checks. A reconciled checklist is not an assertion
 that every check passed. Private Vault note text and workstation paths stay
 outside this repository; the Step 4 handoff records relative synchronization scope.

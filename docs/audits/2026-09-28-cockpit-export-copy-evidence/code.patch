@@ -1,0 +1,171 @@
+diff --git a/src/pages/simulation_cockpit.py b/src/pages/simulation_cockpit.py
+index de178fe338965b3f00698ce71f3230bea6fac826..5a515f7fb965fbba95747502fe410445eeb701db 100644
+--- a/src/pages/simulation_cockpit.py
++++ b/src/pages/simulation_cockpit.py
+@@ -88,13 +88,13 @@ _STOCHASTIC_SEED = 0
+ 
+ # Step 3B: the two button-run batch panels keep their last result in session
+ # state, bound to a content fingerprint of every input the solvers read. Bump a
+-# panel id when its compute path changes meaning, so a result produced by older
+-# code in the same session (Streamlit keeps session state across a hot reload)
+-# can never be shown as current.
++# panel id when its compute path or saved export-assumption basis changes, so
++# a result produced by older code in the same session (Streamlit keeps session
++# state across a hot reload) can never be shown as current.
+ _MULTI_DAY_RESULT_KEY = "simulation_batch_result"
+-_MULTI_DAY_PANEL_ID = "cockpit-multi-day-replay/v2-export-basis"
++_MULTI_DAY_PANEL_ID = "cockpit-multi-day-replay/v3-export-copy"
+ _FORECAST_POLICY_RESULT_KEY = "forecast_policy_result"
+-_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v3-export-basis"
++_FORECAST_POLICY_PANEL_ID = "cockpit-forecast-policy/v4-export-copy"
+ 
+ 
+ def _solver_constants() -> dict[str, object]:
+@@ -173,17 +173,13 @@ def _frontier_basis_export_assumptions(
+         "affects": "Frontier gross revenue and wear-net merchant baseline",
+     }
+     out = _with_export_assumption_row(assumptions, dispatch_row)
+-    capex_mask = out["parameter"] == CAPEX_PARAM_LABEL
+-    if capex_mask.any():
+-        capex_row = {
+-            "value": f"{float(capex_eur_kwh):g}",
+-            "unit": "EUR/kWh",
+-            "source": "Frontier (sidebar CapEx)",
+-            "affects": "Linear wear numerator in the frontier merchant baseline",
+-        }
+-        for column, value in capex_row.items():
+-            out.loc[capex_mask, column] = value
+-    return out
++    return _with_export_assumption_row(out, {
++        "parameter": CAPEX_PARAM_LABEL,
++        "value": f"{float(capex_eur_kwh):g}",
++        "unit": "EUR/kWh",
++        "source": "Frontier (sidebar CapEx)",
++        "affects": "Linear wear numerator in the frontier merchant baseline",
++    })
+ 
+ 
+ def _multi_day_export_assumptions(
+@@ -205,12 +201,16 @@ def _multi_day_export_assumptions(
+     out = _with_export_assumption_row(out, {
+         "parameter": DISPATCH_PARAM_LABEL,
+         "value": (
+-            "Two-stage DA+IDA1 MILP multi-cycle" if is_da_id
++            "Ex-post DA+IDA1 MILP" if is_da_id
+             else "DA-only MILP multi-cycle"
+         ),
+         "unit": "",
+         "source": "Multi-day replay",
+-        "affects": "Replay dispatch schedule and gross revenue",
++        "affects": (
++            "Multi-cycle replay uses realised IDA prices for dispatch and "
++            "gross revenue"
++            if is_da_id else "Replay dispatch schedule and gross revenue"
++        ),
+     })
+     return _with_export_assumption_row(out, {
+         "parameter": CAPEX_PARAM_LABEL,
+@@ -1352,7 +1352,7 @@ def _liquidity_assumption_records(
+ 
+ _FRONTIER_STATE_KEY = "cycle_frontier_result"
+ # Bump when computation or bundle semantics change across a session hot reload.
+-_FRONTIER_PANEL_ID = "cockpit-cycle-frontier/v3-export-provenance"
++_FRONTIER_PANEL_ID = "cockpit-cycle-frontier/v4-export-copy"
+ _LIQUIDITY_HARD_CAPTION = (
+     "Liquidity participation cap: screening feasible-volume derating, not a "
+     "price-impact or market-depth model; executable power min(P, s x V) at "
+@@ -3777,12 +3777,14 @@ def _forecast_policy_export_assumptions(
+     if out is not None and not out.empty:
+         out = _with_export_assumption_row(out, {
+             "parameter": DISPATCH_PARAM_LABEL,
+-            "value": "Sequential DA+IDA1 MILP multi-cycle",
++            "value": "DA-only, sequential, ceiling",
+             "unit": "",
+-            "source": "Forecast-policy panel",
++            "source": "Forecast-policy MILP panel",
+             "affects": (
+-                "Core DA+IDA1 comparison rows; optional reserve, triple and "
+-                "stochastic rows use their separately disclosed MILP variants"
++                "MILP variants: DA-only baseline, forecast-driven sequential "
++                "DA+IDA1 policy and ex-post perfect-foresight DA+IDA1 ceiling; "
++                "optional reserve, triple and stochastic rows use separately "
++                "disclosed variants"
+             ),
+         })
+     if reserve_total is not None:
+diff --git a/tests/test_cockpit_export_provenance.py b/tests/test_cockpit_export_provenance.py
+index 36cdc5e78184fbe67a6167d7ac9495562ba7d991..0d373a57e9597bc2b960120c58018d4743c4d1f8 100644
+--- a/tests/test_cockpit_export_provenance.py
++++ b/tests/test_cockpit_export_provenance.py
+@@ -31,7 +31,7 @@ def _workbook_rows(data: bytes, sheet: str) -> tuple[object, dict[str, dict]]:
+     ("mode", "expected_dispatch"),
+     [
+         ("DA MILP Replay", "DA-only MILP multi-cycle"),
+-        ("DA + IDA1 Replay", "Two-stage DA+IDA1 MILP multi-cycle"),
++        ("DA + IDA1 Replay", "Ex-post DA+IDA1 MILP"),
+     ],
+ )
+ def test_multiday_saved_workbook_has_its_solver_and_wear_basis(
+@@ -60,7 +60,10 @@ def test_multiday_saved_workbook_has_its_solver_and_wear_basis(
+     ), "Assumptions")
+ 
+     assert rows["Dispatch model"]["value"] == expected_dispatch
++    assert len(expected_dispatch) <= workbook["Assumptions"].column_dimensions["B"].width
+     assert rows["Dispatch model"]["source"] == "Multi-day replay"
++    if mode == "DA + IDA1 Replay":
++        assert "realised IDA prices" in rows["Dispatch model"]["affects"]
+     assert rows["CapEx"]["value"] == "150"
+     assert "degradation" in rows["CapEx"]["affects"].lower()
+     assert "dispatch" in rows["CapEx"]["affects"].lower()
+@@ -92,9 +95,11 @@ def test_forecast_saved_workbook_describes_sequential_milp() -> None:
+         assumptions=export_assumptions,
+     ), "Assumptions")
+ 
+-    assert rows["Dispatch model"]["value"] == "Sequential DA+IDA1 MILP multi-cycle"
+-    assert rows["Dispatch model"]["source"] == "Forecast-policy panel"
++    assert rows["Dispatch model"]["value"] == "DA-only, sequential, ceiling"
++    assert len(rows["Dispatch model"]["value"]) <= workbook["Assumptions"].column_dimensions["B"].width
++    assert rows["Dispatch model"]["source"] == "Forecast-policy MILP panel"
+     assert "optional" in rows["Dispatch model"]["affects"].lower()
++    assert "perfect-foresight" in rows["Dispatch model"]["affects"]
+     assert rows["Capture haircut"]["value"] == "not applied"
+     assert workbook["Strategy comparison"]["A2"].data_type == "n"
+     assert workbook["Strategy comparison"]["A2"].value == 123.45
+@@ -110,7 +115,9 @@ def test_missing_sidebar_dispatch_row_gets_one_panel_basis() -> None:
+         stochastic={"summary": None},
+     )
+     rows = export.loc[export["parameter"] == "Dispatch model"]
+-    assert rows["value"].tolist() == ["Sequential DA+IDA1 MILP multi-cycle"]
++    assert rows["value"].tolist() == [
++        "DA-only, sequential, ceiling"
++    ]
+     assert "Dispatch model" not in set(assumptions["parameter"])
+ 
+ 
+@@ -122,6 +129,26 @@ def test_absent_global_assumptions_stay_absent() -> None:
+     ) is None
+ 
+ 
++def test_frontier_adds_missing_capex_row_to_nonempty_export_copy() -> None:
++    assumptions = _global_assumptions()
++    assumptions = assumptions.loc[assumptions["parameter"] != "CapEx"].copy()
++    original = assumptions.copy(deep=True)
++
++    export = cockpit._frontier_basis_export_assumptions(
++        assumptions, capex_eur_kwh=150.0,
++    )
++
++    assert export is not None
++    capex = export.loc[export["parameter"] == "CapEx"]
++    assert len(capex) == 1
++    assert capex.iloc[0]["value"] == "150"
++    assert "linear wear" in capex.iloc[0]["affects"].lower()
++    pd.testing.assert_frame_equal(assumptions, original)
++    assert cockpit._frontier_basis_export_assumptions(
++        None, capex_eur_kwh=150.0,
++    ) is None
++
++
+ def test_global_and_cockpit_adapters_share_dispatch_and_capex_labels(
+     monkeypatch: pytest.MonkeyPatch,
+ ) -> None:

@@ -31,7 +31,7 @@ def _workbook_rows(data: bytes, sheet: str) -> tuple[object, dict[str, dict]]:
     ("mode", "expected_dispatch"),
     [
         ("DA MILP Replay", "DA-only MILP multi-cycle"),
-        ("DA + IDA1 Replay", "Two-stage DA+IDA1 MILP multi-cycle"),
+        ("DA + IDA1 Replay", "Ex-post DA+IDA1 MILP"),
     ],
 )
 def test_multiday_saved_workbook_has_its_solver_and_wear_basis(
@@ -60,7 +60,10 @@ def test_multiday_saved_workbook_has_its_solver_and_wear_basis(
     ), "Assumptions")
 
     assert rows["Dispatch model"]["value"] == expected_dispatch
+    assert len(expected_dispatch) <= workbook["Assumptions"].column_dimensions["B"].width
     assert rows["Dispatch model"]["source"] == "Multi-day replay"
+    if mode == "DA + IDA1 Replay":
+        assert "realised IDA prices" in rows["Dispatch model"]["affects"]
     assert rows["CapEx"]["value"] == "150"
     assert "degradation" in rows["CapEx"]["affects"].lower()
     assert "dispatch" in rows["CapEx"]["affects"].lower()
@@ -92,9 +95,11 @@ def test_forecast_saved_workbook_describes_sequential_milp() -> None:
         assumptions=export_assumptions,
     ), "Assumptions")
 
-    assert rows["Dispatch model"]["value"] == "Sequential DA+IDA1 MILP multi-cycle"
-    assert rows["Dispatch model"]["source"] == "Forecast-policy panel"
+    assert rows["Dispatch model"]["value"] == "DA-only, sequential, ceiling"
+    assert len(rows["Dispatch model"]["value"]) <= workbook["Assumptions"].column_dimensions["B"].width
+    assert rows["Dispatch model"]["source"] == "Forecast-policy MILP panel"
     assert "optional" in rows["Dispatch model"]["affects"].lower()
+    assert "perfect-foresight" in rows["Dispatch model"]["affects"]
     assert rows["Capture haircut"]["value"] == "not applied"
     assert workbook["Strategy comparison"]["A2"].data_type == "n"
     assert workbook["Strategy comparison"]["A2"].value == 123.45
@@ -110,7 +115,9 @@ def test_missing_sidebar_dispatch_row_gets_one_panel_basis() -> None:
         stochastic={"summary": None},
     )
     rows = export.loc[export["parameter"] == "Dispatch model"]
-    assert rows["value"].tolist() == ["Sequential DA+IDA1 MILP multi-cycle"]
+    assert rows["value"].tolist() == [
+        "DA-only, sequential, ceiling"
+    ]
     assert "Dispatch model" not in set(assumptions["parameter"])
 
 
@@ -119,6 +126,26 @@ def test_absent_global_assumptions_stay_absent() -> None:
         None, reserve_total=None, reserve_product=None,
         reserve_price=None, triple={"triple_total": None, "realistic_total": None},
         stochastic={"summary": None},
+    ) is None
+
+
+def test_frontier_adds_missing_capex_row_to_nonempty_export_copy() -> None:
+    assumptions = _global_assumptions()
+    assumptions = assumptions.loc[assumptions["parameter"] != "CapEx"].copy()
+    original = assumptions.copy(deep=True)
+
+    export = cockpit._frontier_basis_export_assumptions(
+        assumptions, capex_eur_kwh=150.0,
+    )
+
+    assert export is not None
+    capex = export.loc[export["parameter"] == "CapEx"]
+    assert len(capex) == 1
+    assert capex.iloc[0]["value"] == "150"
+    assert "linear wear" in capex.iloc[0]["affects"].lower()
+    pd.testing.assert_frame_equal(assumptions, original)
+    assert cockpit._frontier_basis_export_assumptions(
+        None, capex_eur_kwh=150.0,
     ) is None
 
 
