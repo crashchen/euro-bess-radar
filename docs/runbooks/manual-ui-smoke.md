@@ -169,6 +169,7 @@ the dated evidence tests named rows, not every available branch.
 | 48 | Revenue conditional cards | Populate ancillary, imbalance, CapEx/degradation, MILP, Monte Carlo, monthly seasonality and IDA sections; open their expanders at each width | Every card shows its full label, value, unit and applicable delta. Wrapping does not change the result or imply that a screening overlay is additive |
 | 49 | Forward external benchmark | Upload a two-year annual benchmark with an overlapping platform curve; open its expander at each width | Both annual averages and the model-minus-benchmark gap are readable with the nearby EUR/MW/yr caption; CAGR and ratio stay distinct. The reconciliation table and download remain unchanged |
 | 50 | Renewable and Data Trust | Load generation data and a zone with documented quality gaps, then inspect their four metric cards at each width | Renewable label/value text fits; Data Trust stays readable in its unchanged four-column desktop row and stacked mobile layout |
+| 51 | Forward comparison chart | Upload two annual benchmark points with an overlapping platform curve, inspect the chart in light and dark themes at 1280/1440/390px, then try a longer year range | The year axis displays whole calendar years only, first/last years remain labelled, both series keep their original annual values, and the legend is readable without covering ticks or axis title |
 
 The [wire contract](../design/project-revenue-handoff-v1.md) defines the exact
 schema/digest and economic boundary. Changing those requires its own coordinated

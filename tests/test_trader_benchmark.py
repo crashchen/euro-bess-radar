@@ -44,6 +44,39 @@ def _benchmark() -> pd.DataFrame:
     )
 
 
+def _benchmark_page_app() -> None:
+    import pandas as pd
+    from streamlit.delta_generator import DeltaGenerator
+
+    from src.pages.forward_scenarios import _render_external_benchmark_section
+    from src.trader_benchmark import build_forward_model_yearly
+
+    content = (
+        "zone,scenario,year,revenue_eur_per_mw_yr,asset_type,market_scope,"
+        "revenue_basis,duration_hours,max_efc_per_day,source,as_of\n"
+        "DE_LU,Base,2027,123456,standalone,da-only,gross,2,,Synthetic,2026-01-01\n"
+        "DE_LU,Base,2028,145678,standalone,da-only,gross,2,,Synthetic,2026-01-01\n"
+    )
+
+    class _Upload:
+        def getvalue(self) -> bytes:
+            return content.encode()
+
+    DeltaGenerator.file_uploader = lambda *args, **kwargs: _Upload()
+    model = build_forward_model_yearly(
+        {"DE_LU": pd.DataFrame({
+            "date": [pd.Timestamp("2027-01-01"), pd.Timestamp("2028-01-01")],
+            "spread": [100, 120], "lp_revenue": [600, 800],
+            "n_cycles": [1, 1],
+        })},
+        power_mw=1, duration_hours=2, efficiency=.9, capture_rate=.75,
+    )
+    _render_external_benchmark_section(
+        model_yearly=model, power_mw=1, duration_hours=2,
+        efficiency=.9, capture_rate=.75, chart_template="plotly_dark",
+    )
+
+
 class TestParseTraderBenchmark:
     def test_template_is_parseable_and_audited(self) -> None:
         parsed = parse_trader_benchmark_csv(
@@ -273,6 +306,57 @@ class TestComparabilityNotes:
 
 
 class TestBenchmarkPresentationContract:
+    def test_shortened_metric_values_keep_their_unit_caption(self) -> None:
+        from streamlit.testing.v1 import AppTest
+
+        app = AppTest.from_function(_benchmark_page_app).run(timeout=30)
+        assert not app.exception
+        assert any(
+            caption.value == (
+                "Annual revenue and model-minus-benchmark amounts below: "
+                "EUR/MW/yr."
+            )
+            for caption in app.caption
+        )
+        metrics = {metric.label: metric.value for metric in app.metric}
+        assert metrics["Benchmark avg (all years)"] == "€134,567"
+        assert metrics["Model avg (2 overlap yr)"] == "€191,756"
+
+    def test_comparison_chart_uses_whole_year_ticks_without_changing_curves(self) -> None:
+        from src.pages.forward_scenarios import _benchmark_comparison_figure
+
+        comparison = pd.DataFrame({
+            "year": [2027, 2028],
+            QUOTE_REVENUE_COLUMN: [123456.0, 145678.0],
+            MODEL_REVENUE_COLUMN: [190000.0, 193512.0],
+        })
+        fig = _benchmark_comparison_figure(comparison, chart_template="plotly_dark")
+
+        assert list(fig.layout.xaxis.tickvals) == [2027, 2028]
+        assert list(fig.layout.xaxis.ticktext) == ["2027", "2028"]
+        assert list(fig.data[0].x) == [2027, 2028]
+        assert list(fig.data[0].y) == [123456.0, 145678.0]
+        assert list(fig.data[1].x) == [2027, 2028]
+        assert list(fig.data[1].y) == [190000.0, 193512.0]
+
+    def test_long_benchmark_chart_keeps_integer_endpoints_and_sparse_ticks(self) -> None:
+        from src.pages.forward_scenarios import _benchmark_comparison_figure
+
+        years = list(range(2027, 2052))
+        comparison = pd.DataFrame({
+            "year": years,
+            QUOTE_REVENUE_COLUMN: [100000.0] * len(years),
+            MODEL_REVENUE_COLUMN: [math.nan] * len(years),
+        })
+        fig = _benchmark_comparison_figure(comparison, chart_template="plotly_dark")
+
+        ticks = list(fig.layout.xaxis.tickvals)
+        assert 1 < len(ticks) <= 8
+        assert (ticks[0], ticks[-1]) == (2027, 2051)
+        assert list(fig.layout.xaxis.ticktext) == [str(year) for year in ticks]
+        assert len(fig.data) == 1
+        assert list(fig.data[0].x) == years
+
     def test_locked_caption_is_verbatim(self) -> None:
         assert _BENCHMARK_HARD_CAPTION == (
             "External benchmark reconciliation only: the uploaded annual "

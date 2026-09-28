@@ -1,0 +1,31 @@
+{
+  "scope": "Synthetic Forward benchmark chart, no live provider or production cache",
+  "baseline": {
+    "source": "#98 renderer harness on origin/main at the default 1280px browser viewport",
+    "visible_year_ticks": ["2027", "2,027.2", "2,027.4", "2,027.6", "2,027.8", "2028"]
+  },
+  "candidate": {
+    "source": "Production chart builder in a Streamlit chart-only harness embedded at fixed CSS widths",
+    "390": {
+      "chart_width_px": 358,
+      "visible_year_ticks": ["2027", "2028"],
+      "axis_title_bottom_px": 434.8,
+      "legend_top_px": 468,
+      "legend_color_rgb": "49,51,63"
+    },
+    "1280": {
+      "chart_width_px": 1120,
+      "visible_year_ticks": ["2027", "2028"],
+      "axis_title_bottom_px": 446.8,
+      "legend_top_px": 486,
+      "legend_color_rgb": "49,51,63"
+    },
+    "1440": {
+      "chart_width_px": 1280,
+      "visible_year_ticks": ["2027", "2028"],
+      "axis_title_bottom_px": 446.8,
+      "legend_top_px": 486,
+      "legend_color_rgb": "49,51,63"
+    }
+  }
+}

@@ -157,6 +157,50 @@ def _benchmark_display_frame(comparison: pd.DataFrame) -> pd.DataFrame:
     return display
 
 
+def _benchmark_comparison_figure(
+    comparison: pd.DataFrame, *, chart_template: str,
+) -> go.Figure:
+    """Plot the actual annual points with a small set of whole-year labels."""
+    fig = go.Figure()
+    fig.add_scatter(
+        name="External benchmark",
+        x=comparison["year"],
+        y=comparison[QUOTE_REVENUE_COLUMN],
+        mode="lines+markers",
+        line={"color": "#FF2D95", "width": 3},
+    )
+    model_points = comparison.dropna(subset=[MODEL_REVENUE_COLUMN])
+    if not model_points.empty:
+        fig.add_scatter(
+            name="Platform forward-DA model",
+            x=model_points["year"],
+            y=model_points[MODEL_REVENUE_COLUMN],
+            mode="lines+markers",
+            line={"color": "#00A3FF", "width": 3},
+        )
+    years = sorted({int(year) for year in comparison["year"]})
+    step = max(1, math.ceil((len(years) - 1) / 7))
+    tick_years = years[::step]
+    if years and tick_years[-1] != years[-1]:
+        tick_years.append(years[-1])
+    fig.update_layout(
+        title="External benchmark vs platform model",
+        xaxis_title="Calendar year",
+        yaxis_title="EUR/MW/yr",
+        template=chart_template,
+        height=420,
+        margin={"b": 120},
+        legend={
+            "orientation": "h", "y": -0.45, "yanchor": "top",
+        },
+    )
+    fig.update_xaxes(
+        tickmode="array", tickvals=tick_years,
+        ticktext=[str(year) for year in tick_years],
+    )
+    return fig
+
+
 def _render_external_benchmark_section(
     *,
     model_yearly: pd.DataFrame,
@@ -283,32 +327,10 @@ def _render_external_benchmark_section(
                 "is shown for provenance only."
             )
 
-        fig = go.Figure()
-        fig.add_scatter(
-            name="External benchmark",
-            x=comparison["year"],
-            y=comparison[QUOTE_REVENUE_COLUMN],
-            mode="lines+markers",
-            line={"color": "#FF2D95", "width": 3},
+        st.plotly_chart(
+            _benchmark_comparison_figure(comparison, chart_template=chart_template),
+            width="stretch",
         )
-        model_points = comparison.dropna(subset=[MODEL_REVENUE_COLUMN])
-        if not model_points.empty:
-            fig.add_scatter(
-                name="Platform forward-DA model",
-                x=model_points["year"],
-                y=model_points[MODEL_REVENUE_COLUMN],
-                mode="lines+markers",
-                line={"color": "#00A3FF", "width": 3},
-            )
-        fig.update_layout(
-            title="External benchmark vs platform model",
-            xaxis_title="Calendar year",
-            yaxis_title="EUR/MW/yr",
-            template=chart_template,
-            height=360,
-            legend={"orientation": "h", "font": {"color": "#cfd8e6"}},
-        )
-        st.plotly_chart(fig, width="stretch")
 
         st.dataframe(
             _benchmark_display_frame(comparison),
