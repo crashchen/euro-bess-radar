@@ -14,7 +14,8 @@ candidate's completed validation state.
 A clean archive of the code commit passed the full suite, including slow tests:
 **2121 passed / 2 skipped / 29 warnings** in 291.01s, exit 0. The warnings
 are the tracked Streamlit DataFrame-attrs and pandas empty-concat warnings.
-Remote CI remains separate and pending at the final PR head.
+Remote CI is tracked separately at [draft PR #102](https://github.com/crashchen/euro-bess-radar/pull/102)
+and must be checked at the final head.
 
 The AppTest no longer leaves `DeltaGenerator.file_uploader` replaced for later
 tests: `patch.object` scopes the synthetic upload to the panel render and

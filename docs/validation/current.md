@@ -20,7 +20,7 @@ follow-up remains an unmerged review candidate.
 | Candidate focused tests | `tests/test_trader_benchmark.py`: **39 passed**. Ruff and whitespace checks passed. |
 | Browser presentation | Offline production figure at 390 CSS px: 17/20/26/32-year samples all render first and last whole-year labels. This is a chart-only fixture, not the complete Forward page. |
 | Full local suite | Clean archive of code commit `d6f101c`: **2121 passed / 2 skipped / 29 warnings**, including slow tests, in 291.01s; command exit 0. Warnings are the tracked Streamlit DataFrame-attrs and pandas empty-concat warnings. |
-| Remote CI | Pending a draft PR at the final head; local results are not remote CI. |
+| Remote CI | Check the [draft PR #102](https://github.com/crashchen/euro-bess-radar/pull/102) at its exact final head. The local full-suite result above is separate from remote CI. |
 
 The change restores `DeltaGenerator.file_uploader` after the AppTest panel
 render and avoids adding a crowded final tick adjacent to the preceding one.
