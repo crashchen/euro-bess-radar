@@ -1,13 +1,12 @@
 # Current verification snapshot
 
-Verified **2026-09-28** against Forward chart follow-up code commit `d6f101c`
-and final PR head `3ccd873`. The follow-up was independently reviewed and
-[#102](https://github.com/crashchen/euro-bess-radar/pull/102) was ordinarily
-merged as `01ea5cd`; its second parent is the reviewed head `3ccd873` and the
-merge tree matches it. Base `87a9533` is the ordinary merge of #101. Steps 1–4
-and follow-ups #94–#102 are merged. The pre-merge candidate snapshot is
-archived [verbatim](2026-09-28-forward-chart-followup.md); this documentation
-status update does not constitute a new code validation run.
+Verified **2026-09-28** against Forward chart follow-up code commit `d6f101c`,
+based on released `main` `87a9533` (ordinary merge of #101). #100 was
+ordinarily merged as `dfcf736`; its second parent was reviewed head `938cf03`.
+#101 was ordinarily merged as `87a9533`; its second parent was reviewed head
+`af24781`. Both merge trees matched their reviewed heads. The preceding #101
+snapshot is archived [verbatim](2026-09-28-cockpit-export-copy.md). This
+follow-up remains an unmerged review candidate.
 
 [Handoff](../audits/2026-09-28-forward-chart-followup-handoff.md) ·
 [Frozen patches and browser record](../audits/2026-09-28-forward-chart-followup-evidence/README.md) ·
@@ -21,15 +20,14 @@ status update does not constitute a new code validation run.
 | Candidate focused tests | `tests/test_trader_benchmark.py`: **39 passed**. Ruff and whitespace checks passed. |
 | Browser presentation | Offline production figure at 390 CSS px: 17/20/26/32-year samples all render first and last whole-year labels. This is a chart-only fixture, not the complete Forward page. |
 | Full local suite | Clean archive of code commit `d6f101c`: **2121 passed / 2 skipped / 29 warnings**, including slow tests, in 291.01s; command exit 0. Warnings are the tracked Streamlit DataFrame-attrs and pandas empty-concat warnings. |
-| Independent review | On the same head, the user's reviewer reproduced the patch hash, the 5 failed / 34 passed red baseline and the 2121 passed / 2 skipped full suite on a clean archive. Reverting either fix alone failed only its own tests (1 and 4 failures). It also rendered the base and candidate figures at 390px and 342px chart widths. The base's final two labels collided; the candidate kept the first and last years separate. These reviewer observations are not archived as repository evidence. |
-| Remote CI | At exact PR head `3ccd87353944607489c1b55fc60de3bbc6affeab`, both `test` and `Python 3.11 / Streamlit 1.55.0 compatibility check` concluded SUCCESS before merge. |
+| Remote CI | Check the [draft PR #102](https://github.com/crashchen/euro-bess-radar/pull/102) at its exact final head. The local full-suite result above is separate from remote CI. |
 
 The change restores `DeltaGenerator.file_uploader` after the AppTest panel
 render and avoids adding a crowded final tick adjacent to the preceding one.
 No curve coordinates, comparison values, export workbook, solver, cache,
-Project Case schema or market-data input changes. The chart checks use
-synthetic horizons; they do not certify every viewport, the complete Forward
-page or a live provider response.
+Project Case schema or market-data input changes. The chart browser probe
+checks four synthetic horizons; it does not certify every viewport or live
+provider response.
 
 ## Repeat
 
