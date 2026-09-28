@@ -1,0 +1,39 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: <baseline-repo>
+configfile: pyproject.toml
+collected 39 items
+
+tests/test_trader_benchmark.py .........................F...FFFF......   [100%]
+
+=================================== FAILURES ===================================
+_ TestBenchmarkPresentationContract.test_benchmark_app_restores_file_uploader_after_render _
+tests/test_trader_benchmark.py:317: in test_benchmark_app_restores_file_uploader_after_render
+    assert DeltaGenerator.file_uploader is original
+E   AssertionError: assert <function _benchmark_page_app.<locals>.<lambda> at 0x139462200> is <function FileUploaderMixin.file_uploader at 0x139246e80>
+E    +  where <function _benchmark_page_app.<locals>.<lambda> at 0x139462200> = <class 'streamlit.delta_generator.DeltaGenerator'>.file_uploader
+----------------------------- Captured stderr call -----------------------------
+2026-09-28 10:19:09.045 WARNING streamlit.runtime.scriptrunner_utils.script_run_context: Thread 'MainThread': missing ScriptRunContext! This warning can be ignored when running in bare mode.
+_ TestBenchmarkPresentationContract.test_mobile_length_chart_keeps_room_for_final_year[17] _
+tests/test_trader_benchmark.py:385: in test_mobile_length_chart_keeps_room_for_final_year
+    assert ticks[-1] - ticks[-2] >= ticks[-2] - ticks[-3]
+E   assert (2043 - 2042) >= (2042 - 2039)
+_ TestBenchmarkPresentationContract.test_mobile_length_chart_keeps_room_for_final_year[20] _
+tests/test_trader_benchmark.py:385: in test_mobile_length_chart_keeps_room_for_final_year
+    assert ticks[-1] - ticks[-2] >= ticks[-2] - ticks[-3]
+E   assert (2046 - 2045) >= (2045 - 2042)
+_ TestBenchmarkPresentationContract.test_mobile_length_chart_keeps_room_for_final_year[26] _
+tests/test_trader_benchmark.py:385: in test_mobile_length_chart_keeps_room_for_final_year
+    assert ticks[-1] - ticks[-2] >= ticks[-2] - ticks[-3]
+E   assert (2052 - 2051) >= (2051 - 2047)
+_ TestBenchmarkPresentationContract.test_mobile_length_chart_keeps_room_for_final_year[32] _
+tests/test_trader_benchmark.py:385: in test_mobile_length_chart_keeps_room_for_final_year
+    assert ticks[-1] - ticks[-2] >= ticks[-2] - ticks[-3]
+E   assert (2058 - 2057) >= (2057 - 2052)
+=========================== short test summary info ============================
+FAILED tests/test_trader_benchmark.py::TestBenchmarkPresentationContract::test_benchmark_app_restores_file_uploader_after_render
+FAILED tests/test_trader_benchmark.py::TestBenchmarkPresentationContract::test_mobile_length_chart_keeps_room_for_final_year[17]
+FAILED tests/test_trader_benchmark.py::TestBenchmarkPresentationContract::test_mobile_length_chart_keeps_room_for_final_year[20]
+FAILED tests/test_trader_benchmark.py::TestBenchmarkPresentationContract::test_mobile_length_chart_keeps_room_for_final_year[26]
+FAILED tests/test_trader_benchmark.py::TestBenchmarkPresentationContract::test_mobile_length_chart_keeps_room_for_final_year[32]
+========================= 5 failed, 34 passed in 0.58s =========================

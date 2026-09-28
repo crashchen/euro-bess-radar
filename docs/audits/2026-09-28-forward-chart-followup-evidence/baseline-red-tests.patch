@@ -1,0 +1,44 @@
+--- a/tests/test_trader_benchmark.py
++++ b/tests/test_trader_benchmark.py
+@@ -306,6 +306,16 @@
+ 
+ 
+ class TestBenchmarkPresentationContract:
++    def test_benchmark_app_restores_file_uploader_after_render(self) -> None:
++        from streamlit.delta_generator import DeltaGenerator
++        from streamlit.testing.v1 import AppTest
++
++        original = DeltaGenerator.file_uploader
++        app = AppTest.from_function(_benchmark_page_app).run(timeout=30)
++
++        assert not app.exception
++        assert DeltaGenerator.file_uploader is original
++
+     def test_shortened_metric_values_keep_their_unit_caption(self) -> None:
+         from streamlit.testing.v1 import AppTest
+ 
+@@ -355,6 +365,24 @@
+         assert (ticks[0], ticks[-1]) == (2027, 2051)
+         assert list(fig.layout.xaxis.ticktext) == [str(year) for year in ticks]
+         assert len(fig.data) == 1
++        assert list(fig.data[0].x) == years
++
++    @pytest.mark.parametrize("n_years", [17, 20, 26, 32])
++    def test_mobile_length_chart_keeps_room_for_final_year(self, n_years: int) -> None:
++        from src.pages.forward_scenarios import _benchmark_comparison_figure
++
++        years = list(range(2027, 2027 + n_years))
++        comparison = pd.DataFrame({
++            "year": years,
++            QUOTE_REVENUE_COLUMN: [100000.0] * n_years,
++            MODEL_REVENUE_COLUMN: [math.nan] * n_years,
++        })
++        fig = _benchmark_comparison_figure(comparison, chart_template="plotly_white")
++
++        ticks = list(fig.layout.xaxis.tickvals)
++        assert ticks[0] == years[0]
++        assert ticks[-1] == years[-1]
++        assert ticks[-1] - ticks[-2] >= ticks[-2] - ticks[-3]
+         assert list(fig.data[0].x) == years
+ 
+     def test_locked_caption_is_verbatim(self) -> None:
