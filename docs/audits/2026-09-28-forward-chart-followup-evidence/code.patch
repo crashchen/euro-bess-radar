@@ -1,0 +1,97 @@
+diff --git a/src/pages/forward_scenarios.py b/src/pages/forward_scenarios.py
+index 38991f36a9e91a88e03e8217059e42011e25aa05..16ab9fd9287efb6d7b15cc88032fcb699171e5df 100644
+--- a/src/pages/forward_scenarios.py
++++ b/src/pages/forward_scenarios.py
+@@ -182,7 +182,12 @@ def _benchmark_comparison_figure(
+     step = max(1, math.ceil((len(years) - 1) / 7))
+     tick_years = years[::step]
+     if years and tick_years[-1] != years[-1]:
+-        tick_years.append(years[-1])
++        if (len(tick_years) > 1
++                and years[-1] - tick_years[-1] < tick_years[-1] - tick_years[-2]):
++            # A short final interval makes Plotly hide the endpoint on mobile.
++            tick_years[-1] = years[-1]
++        else:
++            tick_years.append(years[-1])
+     fig.update_layout(
+         title="External benchmark vs platform model",
+         xaxis_title="Calendar year",
+diff --git a/tests/test_trader_benchmark.py b/tests/test_trader_benchmark.py
+index c918ac49398a10a44eec7f44f0f7f0ffeb527319..4e04d2989b2a2064dccb4964fe41f2c3cd825081 100644
+--- a/tests/test_trader_benchmark.py
++++ b/tests/test_trader_benchmark.py
+@@ -45,6 +45,8 @@ def _benchmark() -> pd.DataFrame:
+ 
+ 
+ def _benchmark_page_app() -> None:
++    from unittest.mock import patch
++
+     import pandas as pd
+     from streamlit.delta_generator import DeltaGenerator
+ 
+@@ -62,7 +64,6 @@ def _benchmark_page_app() -> None:
+         def getvalue(self) -> bytes:
+             return content.encode()
+ 
+-    DeltaGenerator.file_uploader = lambda *args, **kwargs: _Upload()
+     model = build_forward_model_yearly(
+         {"DE_LU": pd.DataFrame({
+             "date": [pd.Timestamp("2027-01-01"), pd.Timestamp("2028-01-01")],
+@@ -71,10 +72,11 @@ def _benchmark_page_app() -> None:
+         })},
+         power_mw=1, duration_hours=2, efficiency=.9, capture_rate=.75,
+     )
+-    _render_external_benchmark_section(
+-        model_yearly=model, power_mw=1, duration_hours=2,
+-        efficiency=.9, capture_rate=.75, chart_template="plotly_dark",
+-    )
++    with patch.object(DeltaGenerator, "file_uploader", lambda *args, **kwargs: _Upload()):
++        _render_external_benchmark_section(
++            model_yearly=model, power_mw=1, duration_hours=2,
++            efficiency=.9, capture_rate=.75, chart_template="plotly_dark",
++        )
+ 
+ 
+ class TestParseTraderBenchmark:
+@@ -306,6 +308,16 @@ class TestComparabilityNotes:
+ 
+ 
+ class TestBenchmarkPresentationContract:
++    def test_benchmark_app_restores_file_uploader_after_render(self) -> None:
++        from streamlit.delta_generator import DeltaGenerator
++        from streamlit.testing.v1 import AppTest
++
++        original = DeltaGenerator.file_uploader
++        app = AppTest.from_function(_benchmark_page_app).run(timeout=30)
++
++        assert not app.exception
++        assert DeltaGenerator.file_uploader is original
++
+     def test_shortened_metric_values_keep_their_unit_caption(self) -> None:
+         from streamlit.testing.v1 import AppTest
+ 
+@@ -357,6 +369,24 @@ class TestBenchmarkPresentationContract:
+         assert len(fig.data) == 1
+         assert list(fig.data[0].x) == years
+ 
++    @pytest.mark.parametrize("n_years", [17, 20, 26, 32])
++    def test_mobile_length_chart_keeps_room_for_final_year(self, n_years: int) -> None:
++        from src.pages.forward_scenarios import _benchmark_comparison_figure
++
++        years = list(range(2027, 2027 + n_years))
++        comparison = pd.DataFrame({
++            "year": years,
++            QUOTE_REVENUE_COLUMN: [100000.0] * n_years,
++            MODEL_REVENUE_COLUMN: [math.nan] * n_years,
++        })
++        fig = _benchmark_comparison_figure(comparison, chart_template="plotly_white")
++
++        ticks = list(fig.layout.xaxis.tickvals)
++        assert ticks[0] == years[0]
++        assert ticks[-1] == years[-1]
++        assert ticks[-1] - ticks[-2] >= ticks[-2] - ticks[-3]
++        assert list(fig.data[0].x) == years
++
+     def test_locked_caption_is_verbatim(self) -> None:
+         assert _BENCHMARK_HARD_CAPTION == (
+             "External benchmark reconciliation only: the uploaded annual "

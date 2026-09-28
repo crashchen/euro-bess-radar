@@ -31,8 +31,9 @@ entry point for today's code-bound results. The records below remain historical.
 | Cockpit batch export provenance | Increment from `cc6b1e2`; merged in [#96](https://github.com/crashchen/euro-bess-radar/pull/96) as `175c6a7` | [Handoff and evidence](2026-09-22-cockpit-export-handoff.md), [archived verification snapshot](../validation/2026-09-22-cockpit-export.md) |
 | Cockpit strategy-name XLSX readability | Increment from `175c6a7`; merged in [#97](https://github.com/crashchen/euro-bess-radar/pull/97) as `47a8495` | [Handoff](2026-09-23-strategy-export-handoff.md), [archived verification snapshot](../validation/2026-09-23-strategy-export.md), [saved-file evidence](2026-09-23-strategy-export-evidence/README.md) |
 | Remaining-page metric layout | Increment from `47a8495`; merged in [#98](https://github.com/crashchen/euro-bess-radar/pull/98) as `3ab98c5` | [Archived candidate snapshot](../validation/2026-09-27-metric-layout.md), [browser measurements and harness](2026-09-27-metric-layout-evidence/README.md) |
-| Forward benchmark chart readability | Increment from `76dc758` (#99 merge); code commit `49a2d77`, draft [#100](https://github.com/crashchen/euro-bess-radar/pull/100), awaiting independent review | [Archived candidate snapshot](../validation/2026-09-28-forward-chart.md), [handoff](2026-09-28-forward-chart-handoff.md), [frozen patch and browser evidence](2026-09-28-forward-chart-evidence/README.md) |
-| Cockpit export-copy precision | Increment from chart draft head `938cf03`; code commit `7ec5302`, awaiting independent review | [Current verification snapshot](../validation/current.md), [handoff](2026-09-28-cockpit-export-copy-handoff.md), [frozen patch and probe](2026-09-28-cockpit-export-copy-evidence/README.md) |
+| Forward benchmark chart readability | Increment from `76dc758` (#99 merge); code commit `49a2d77`, merged in [#100](https://github.com/crashchen/euro-bess-radar/pull/100) as `dfcf736` | [Archived candidate snapshot](../validation/2026-09-28-forward-chart.md), [handoff](2026-09-28-forward-chart-handoff.md), [frozen patch and browser evidence](2026-09-28-forward-chart-evidence/README.md) |
+| Cockpit export-copy precision | Increment from chart head `938cf03`; code commit `7ec5302`, merged in [#101](https://github.com/crashchen/euro-bess-radar/pull/101) as `87a9533` | [Archived candidate snapshot](../validation/2026-09-28-cockpit-export-copy.md), [handoff](2026-09-28-cockpit-export-copy-handoff.md), [frozen patch and probe](2026-09-28-cockpit-export-copy-evidence/README.md) |
+| Forward chart review follow-up | Increment from `87a9533`; code commit `d6f101c`, awaiting independent review | [Current verification snapshot](../validation/current.md), [handoff](2026-09-28-forward-chart-followup-handoff.md), [frozen patches and 390px browser record](2026-09-28-forward-chart-followup-evidence/README.md) |
 
 The original Step 1b patch is unchanged: its SHA-256 remains
 `a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12`.
@@ -62,7 +63,7 @@ Remote CI status is attached to each PR's exact head in GitHub Checks.
 
 ## Current sequence
 
-Steps 1, 1b, 2, 3A–3D, Step 4 and follow-ups #94–#99 are merged. Step 4 reconciled repository
+Steps 1, 1b, 2, 3A–3D, Step 4 and follow-ups #94–#101 are merged. Step 4 reconciled repository
 documentation and the nine project notes against its [dated snapshot](../validation/2026-09-20.md),
 retaining the earlier records unchanged. #94 extends frontier content identity
 and freezes run-time export assumptions. #95 corrects frontier/floor export
@@ -70,14 +71,14 @@ provenance and explicit retry state. #96 corrects multi-day/forecast-policy
 export provenance; #97 makes long strategy names readable in the Cockpit XLSX
 comparison sheet. #98 addresses metric-card clipping on Revenue Estimation,
 Renewable Correlation and Forward Scenarios; the loaded Data Trust row needed
-no code change.
-The first unmerged review candidate addresses the Forward benchmark chart's
-fractional-year ticks and overlapping/light legend. A second, stacked
-candidate clarifies Cockpit Assumptions-sheet copy and one frontier CapEx
-provenance edge case. Neither is a released behavior claim.
+no code change. #100 corrects the Forward benchmark chart's fractional-year
+ticks and overlapping/light legend; #101 clarifies Cockpit Assumptions-sheet
+copy and one frontier CapEx provenance edge case. A separate review candidate
+closes the two non-blocking #100 findings identified after merge: AppTest
+uploader isolation and mobile-width terminal tick spacing.
 
 [Remaining work](../validation/follow-ups.md) distinguishes the bounded #98
-browser evidence and two review candidates from warnings,
+browser evidence and this review candidate from warnings,
 and unexecuted manual/consumer checks. A reconciled checklist is not an assertion
 that every check passed. Private Vault note text and workstation paths stay
 outside this repository; the Step 4 handoff records relative synchronization scope.
