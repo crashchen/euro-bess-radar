@@ -182,7 +182,12 @@ def _benchmark_comparison_figure(
     step = max(1, math.ceil((len(years) - 1) / 7))
     tick_years = years[::step]
     if years and tick_years[-1] != years[-1]:
-        tick_years.append(years[-1])
+        if (len(tick_years) > 1
+                and years[-1] - tick_years[-1] < tick_years[-1] - tick_years[-2]):
+            # A short final interval makes Plotly hide the endpoint on mobile.
+            tick_years[-1] = years[-1]
+        else:
+            tick_years.append(years[-1])
     fig.update_layout(
         title="External benchmark vs platform model",
         xaxis_title="Calendar year",
