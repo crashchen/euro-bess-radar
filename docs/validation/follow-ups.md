@@ -1,22 +1,22 @@
 # Work remaining after the September audit sequence
 
 The [dated verification snapshot](current.md) records the Forward chart
-follow-up candidate based on `87a9533`, the ordinary merge of #101. Step 4
-housekeeping and follow-ups #94–#101 are merged. Historical snapshots remain
-revision-bound: [#94](2026-09-22-frontier.md),
+follow-up, merged in #102 as `01ea5cd`. Step 4 housekeeping and follow-ups
+#94–#102 are merged, and no review candidate is currently open. Historical
+snapshots remain revision-bound: [#94](2026-09-22-frontier.md),
 [#95](2026-09-22-floor-followup.md),
 [#96](2026-09-22-cockpit-export.md),
 [#97](2026-09-23-strategy-export.md),
 [#98](2026-09-27-metric-layout.md),
 [#99](2026-09-28-pre-forward-chart.md),
-[#100](2026-09-28-forward-chart.md) and
-[#101](2026-09-28-cockpit-export-copy.md).
+[#100](2026-09-28-forward-chart.md),
+[#101](2026-09-28-cockpit-export-copy.md) and
+[#102](2026-09-28-forward-chart-followup.md).
 Historical findings remain in their original handoffs and patches; a merge
 does not extend a fixture-bound test to untested inputs.
 
 | Priority | Work | Current evidence and required boundary |
 |---|---|---|
-| Implemented; awaiting review | Forward chart AppTest isolation and mobile terminal year | The [new candidate evidence](../audits/2026-09-28-forward-chart-followup-evidence/README.md) reproduces the leaked `file_uploader` stub and crowded final tick on clean merged #101, then fixes both without changing trace data. Its 390px browser pass covers 17/20/26/32-year static chart fixtures, not the complete Forward page |
 | Operator verification | Manual checks 1–52 | Existing browser evidence covers named synthetic panels and selected interactions. Live imports/fetches, every parameter combination, remaining Revenue branches and Radar→ESS consumer reconciliation have not all been run. Record each tested revision; do not mark the entire checklist passed |
 | Dependency maintenance | Observed warnings | The dated Step 4 run emitted Streamlit DataFrame-attrs serialization warnings and pandas concatenation FutureWarnings. Address reproducible sources in small behavior-preserving PRs. The historical NumPy scalar-conversion warning did not recur; do not claim it is a current failure or fixed |
 | Optional diagnostics | Explicit settlement-version assertions | Existing Project Case real-adapter page/provenance tests fail under simulated registry/profile v2 drift. The screening disclosure assertion lacks a direct binding to those producer version constants; add a focused binding check if tightening that contract. Keep this optional and distinguish PC drift coverage from screening assertion coverage |

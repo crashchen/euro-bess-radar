@@ -33,7 +33,7 @@ entry point for today's code-bound results. The records below remain historical.
 | Remaining-page metric layout | Increment from `47a8495`; merged in [#98](https://github.com/crashchen/euro-bess-radar/pull/98) as `3ab98c5` | [Archived candidate snapshot](../validation/2026-09-27-metric-layout.md), [browser measurements and harness](2026-09-27-metric-layout-evidence/README.md) |
 | Forward benchmark chart readability | Increment from `76dc758` (#99 merge); code commit `49a2d77`, merged in [#100](https://github.com/crashchen/euro-bess-radar/pull/100) as `dfcf736` | [Archived candidate snapshot](../validation/2026-09-28-forward-chart.md), [handoff](2026-09-28-forward-chart-handoff.md), [frozen patch and browser evidence](2026-09-28-forward-chart-evidence/README.md) |
 | Cockpit export-copy precision | Increment from chart head `938cf03`; code commit `7ec5302`, merged in [#101](https://github.com/crashchen/euro-bess-radar/pull/101) as `87a9533` | [Archived candidate snapshot](../validation/2026-09-28-cockpit-export-copy.md), [handoff](2026-09-28-cockpit-export-copy-handoff.md), [frozen patch and probe](2026-09-28-cockpit-export-copy-evidence/README.md) |
-| Forward chart review follow-up | Increment from `87a9533`; code commit `d6f101c`, awaiting independent review | [Current verification snapshot](../validation/current.md), [handoff](2026-09-28-forward-chart-followup-handoff.md), [frozen patches and 390px browser record](2026-09-28-forward-chart-followup-evidence/README.md) |
+| Forward chart review follow-up | Increment from `87a9533`; code commit `d6f101c`, merged in [#102](https://github.com/crashchen/euro-bess-radar/pull/102) as `01ea5cd` | [Archived candidate snapshot](../validation/2026-09-28-forward-chart-followup.md), [handoff](2026-09-28-forward-chart-followup-handoff.md), [frozen patches and 390px browser record](2026-09-28-forward-chart-followup-evidence/README.md) |
 
 The original Step 1b patch is unchanged: its SHA-256 remains
 `a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12`.
@@ -63,7 +63,7 @@ Remote CI status is attached to each PR's exact head in GitHub Checks.
 
 ## Current sequence
 
-Steps 1, 1b, 2, 3A–3D, Step 4 and follow-ups #94–#101 are merged. Step 4 reconciled repository
+Steps 1, 1b, 2, 3A–3D, Step 4 and follow-ups #94–#102 are merged. Step 4 reconciled repository
 documentation and the nine project notes against its [dated snapshot](../validation/2026-09-20.md),
 retaining the earlier records unchanged. #94 extends frontier content identity
 and freezes run-time export assumptions. #95 corrects frontier/floor export
@@ -73,15 +73,15 @@ comparison sheet. #98 addresses metric-card clipping on Revenue Estimation,
 Renewable Correlation and Forward Scenarios; the loaded Data Trust row needed
 no code change. #100 corrects the Forward benchmark chart's fractional-year
 ticks and overlapping/light legend; #101 clarifies Cockpit Assumptions-sheet
-copy and one frontier CapEx provenance edge case. A separate review candidate
-closes the two non-blocking #100 findings identified after merge: AppTest
-uploader isolation and mobile-width terminal tick spacing.
+copy and one frontier CapEx provenance edge case. #102 closes the two
+non-blocking #100 findings identified after merge: AppTest uploader isolation
+and mobile-width terminal tick spacing.
 
 [Remaining work](../validation/follow-ups.md) distinguishes the bounded #98
-browser evidence and this review candidate from warnings,
-and unexecuted manual/consumer checks. A reconciled checklist is not an assertion
+browser evidence from warnings and unexecuted manual/consumer checks. A reconciled checklist is not an assertion
 that every check passed. Private Vault note text and workstation paths stay
 outside this repository; the Step 4 handoff records relative synchronization scope.
 
-External reviewer results here were supplied by the user. This task did not
-invoke or send code to CC or another external reviewer.
+External reviewer results here were supplied by the user or recorded by the
+reviewer the user invoked. No documentation update invokes a reviewer
+automatically.
