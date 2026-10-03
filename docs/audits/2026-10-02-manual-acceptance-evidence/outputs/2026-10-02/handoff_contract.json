@@ -1,0 +1,203 @@
+{
+  "annual_rows": [
+    {
+      "contract_top_up_eur": 906757.052121513,
+      "effective_contract_floor_eur": 1500000.0,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 1,
+      "settled_revenue_eur": 1500000.0,
+      "settlement_adjustment_eur": 906757.052121513
+    },
+    {
+      "contract_top_up_eur": 936757.052121513,
+      "effective_contract_floor_eur": 1530000.0,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 2,
+      "settled_revenue_eur": 1530000.0,
+      "settlement_adjustment_eur": 936757.052121513
+    },
+    {
+      "contract_top_up_eur": 967357.052121513,
+      "effective_contract_floor_eur": 1560600.0,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 3,
+      "settled_revenue_eur": 1560600.0,
+      "settlement_adjustment_eur": 967357.052121513
+    },
+    {
+      "contract_top_up_eur": 998569.052121513,
+      "effective_contract_floor_eur": 1591812.0,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 4,
+      "settled_revenue_eur": 1591812.0,
+      "settlement_adjustment_eur": 998569.052121513
+    },
+    {
+      "contract_top_up_eur": 1030405.292121513,
+      "effective_contract_floor_eur": 1623648.24,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 5,
+      "settled_revenue_eur": 1623648.24,
+      "settlement_adjustment_eur": 1030405.292121513
+    },
+    {
+      "contract_top_up_eur": 1062878.2569215132,
+      "effective_contract_floor_eur": 1656121.2048000002,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 6,
+      "settled_revenue_eur": 1656121.2048000002,
+      "settlement_adjustment_eur": 1062878.2569215132
+    },
+    {
+      "contract_top_up_eur": 1096000.6810175132,
+      "effective_contract_floor_eur": 1689243.628896,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 7,
+      "settled_revenue_eur": 1689243.628896,
+      "settlement_adjustment_eur": 1096000.6810175132
+    },
+    {
+      "contract_top_up_eur": 1129785.5535954332,
+      "effective_contract_floor_eur": 1723028.5014739202,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 8,
+      "settled_revenue_eur": 1723028.5014739202,
+      "settlement_adjustment_eur": 1129785.5535954332
+    },
+    {
+      "contract_top_up_eur": 1164246.1236249115,
+      "effective_contract_floor_eur": 1757489.0715033985,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 9,
+      "settled_revenue_eur": 1757489.0715033985,
+      "settlement_adjustment_eur": 1164246.1236249115
+    },
+    {
+      "contract_top_up_eur": 1199395.9050549795,
+      "effective_contract_floor_eur": 1792638.8529334664,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 10,
+      "settled_revenue_eur": 1792638.8529334664,
+      "settlement_adjustment_eur": 1199395.9050549795
+    },
+    {
+      "contract_top_up_eur": 0.0,
+      "effective_contract_floor_eur": null,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 11,
+      "settled_revenue_eur": 593242.947878487,
+      "settlement_adjustment_eur": 0.0
+    },
+    {
+      "contract_top_up_eur": 0.0,
+      "effective_contract_floor_eur": null,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 12,
+      "settled_revenue_eur": 593242.947878487,
+      "settlement_adjustment_eur": 0.0
+    },
+    {
+      "contract_top_up_eur": 0.0,
+      "effective_contract_floor_eur": null,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 13,
+      "settled_revenue_eur": 593242.947878487,
+      "settlement_adjustment_eur": 0.0
+    },
+    {
+      "contract_top_up_eur": 0.0,
+      "effective_contract_floor_eur": null,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 14,
+      "settled_revenue_eur": 593242.947878487,
+      "settlement_adjustment_eur": 0.0
+    },
+    {
+      "contract_top_up_eur": 0.0,
+      "effective_contract_floor_eur": null,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 15,
+      "settled_revenue_eur": 593242.947878487,
+      "settlement_adjustment_eur": 0.0
+    },
+    {
+      "contract_top_up_eur": 0.0,
+      "effective_contract_floor_eur": null,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 16,
+      "settled_revenue_eur": 593242.947878487,
+      "settlement_adjustment_eur": 0.0
+    },
+    {
+      "contract_top_up_eur": 0.0,
+      "effective_contract_floor_eur": null,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 17,
+      "settled_revenue_eur": 593242.947878487,
+      "settlement_adjustment_eur": 0.0
+    },
+    {
+      "contract_top_up_eur": 0.0,
+      "effective_contract_floor_eur": null,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 18,
+      "settled_revenue_eur": 593242.947878487,
+      "settlement_adjustment_eur": 0.0
+    },
+    {
+      "contract_top_up_eur": 0.0,
+      "effective_contract_floor_eur": null,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 19,
+      "settled_revenue_eur": 593242.947878487,
+      "settlement_adjustment_eur": 0.0
+    },
+    {
+      "contract_top_up_eur": 0.0,
+      "effective_contract_floor_eur": null,
+      "merchant_revenue_eur": 593242.947878487,
+      "project_year": 20,
+      "settled_revenue_eur": 593242.947878487,
+      "settlement_adjustment_eur": 0.0
+    }
+  ],
+  "basis": {
+    "availability_embedded": false,
+    "capture_embedded": true,
+    "cash_timing": "end_of_year",
+    "contract_settlement_basis": "ANNUAL_PRE_LIFECYCLE_STRATEGY_CASH_FLOOR_V1",
+    "contract_settlement_included": true,
+    "currency": "EUR",
+    "currency_mode": "real_base_year_eur",
+    "debt_included": false,
+    "financing_fees_included": false,
+    "lifecycle_costs_included": false,
+    "liquidity_embedded": false,
+    "modeled_duration_hours": 1.0,
+    "modeled_energy_mwh": 10.0,
+    "modeled_power_mw": 10.0,
+    "mw_rescaled": false,
+    "post_vom": true,
+    "project_year_origin": "relative",
+    "real_base_year": 2026,
+    "round_trip_efficiency": 0.88,
+    "rte_embedded": true,
+    "tax_included": false
+  },
+  "handoff_digest_sha256": "c8ea7ee6816f362eb1bacb25ebd70c6bd27eec1695118a3eed6ae57bf50b29ed",
+  "schema": "euro_bess_radar.project_revenue_handoff",
+  "source": {
+    "calculator_version": "pc-d2-v1.1",
+    "cashflow_table_statistic": "p50_npv_rank_interpolated_cashflow_linear_v1",
+    "project_case_input_fingerprint": "5e5e46d0063b6e4dba7cfe61c21e0ccbb44764dc758d071b7408b72f4a5aef65",
+    "run_result_schema_version": "project-case-v1.1",
+    "sample_end_date": "2026-06-28",
+    "sample_start_date": "2026-06-08",
+    "source_data_content_hash": "2e1eb71f0c5c73c9ac0416f513563b85c565e22d2d31545df70e980003c0ec3a",
+    "strategy_calculator_version": "pc-a-v1",
+    "strategy_kind": "DA_ONLY",
+    "strategy_run_fingerprint": "cf090a6abef89819937b27149357dc59a289573ba0085784b9d7eb66f59bfb02",
+    "zone": "DE_LU"
+  },
+  "version": 1
+}

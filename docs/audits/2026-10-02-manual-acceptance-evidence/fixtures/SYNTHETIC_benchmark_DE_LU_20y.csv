@@ -1,0 +1,21 @@
+zone,scenario,year,revenue_eur_per_mw_yr,asset_type,market_scope,revenue_basis,duration_hours,max_efc_per_day,source,as_of
+DE_LU,SYNTHETIC trader curve,2027,134567,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2028,137067,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2029,139567,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2030,142067,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2031,144567,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2032,147067,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2033,149567,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2034,152067,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2035,154567,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2036,157067,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2037,159567,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2038,162067,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2039,164567,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2040,167067,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2041,169567,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2042,172067,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2043,174567,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2044,177067,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2045,179567,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2046,182067,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03

@@ -1,0 +1,3 @@
+zone,scenario,year,revenue_eur_per_mw_yr,asset_type,market_scope,revenue_basis,duration_hours,max_efc_per_day,source,as_of
+DE_LU,SYNTHETIC trader curve,2027,134567,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,SYNTHETIC trader curve,2028,191756,standalone,da-only,gross,1,1.5,SYNTHETIC acceptance fixture,2026-10-03

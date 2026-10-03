@@ -1,0 +1,46 @@
+{
+ "390": {
+  "sidebarAtLoad": "true",
+  "caption": {
+   "text": "DE_LU / aggregate capacity: FCR, aFRR Up: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+   "clientWidth": 322,
+   "scrollWidth": 322,
+   "overflow": false,
+   "docOverflowX": false
+  },
+  "Export to Excel": {
+   "file": "390-check42_DE_LU_report.xlsx",
+   "bytes": 9645
+  },
+  "Export to PDF": {
+   "file": "390-check42_DE_LU_report.pdf",
+   "bytes": 2595
+  },
+  "afterDownloads": {
+   "jointStillVisible": true,
+   "status": 0
+  }
+ },
+ "1280": {
+  "sidebarAtLoad": "true",
+  "caption": {
+   "text": "DE_LU / aggregate capacity: FCR, aFRR Up: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+   "clientWidth": 784,
+   "scrollWidth": 784,
+   "overflow": false,
+   "docOverflowX": false
+  },
+  "Export to Excel": {
+   "file": "1280-check42_DE_LU_report.xlsx",
+   "bytes": 9644
+  },
+  "Export to PDF": {
+   "file": "1280-check42_DE_LU_report.pdf",
+   "bytes": 2595
+  },
+  "afterDownloads": {
+   "jointStillVisible": true,
+   "status": 0
+  }
+ }
+}

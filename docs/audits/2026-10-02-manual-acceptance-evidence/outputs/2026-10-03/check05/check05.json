@@ -1,0 +1,6 @@
+{
+ "window": "2026-09-30..2026-10-03",
+ "alerts": [
+  "Activation-energy fetch error: Aktivierte aFRR needs at least two timestamps; got 0. The quality-assured series lags roughly one month behind delivery, so a recent window may not be published yet."
+ ]
+}

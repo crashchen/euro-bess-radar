@@ -1,46 +1,52 @@
 # Current verification snapshot
 
-Verified **2026-09-28** against Forward chart follow-up code commit `d6f101c`
-and final PR head `3ccd873`. The follow-up was independently reviewed and
-[#102](https://github.com/crashchen/euro-bess-radar/pull/102) was ordinarily
-merged as `01ea5cd`; its second parent is the reviewed head `3ccd873` and the
-merge tree matches it. Base `87a9533` is the ordinary merge of #101. Steps 1–4
-and follow-ups #94–#102 are merged. The pre-merge candidate snapshot is
-archived [verbatim](2026-09-28-forward-chart-followup.md); this documentation
-status update does not constitute a new code validation run.
+Verified **2026-10-03** against main `68d3486`. That head is the ordinary
+merge of the three manual-acceptance follow-ups. Each merge's second parent is
+the approved PR head, and its first-parent diff equals that PR's patch. The
+previous merged-state snapshot is archived
+[verbatim](2026-09-28-forward-chart-followup-merged.md); this snapshot is a
+documentation update and does not re-run the full suite.
 
-[Handoff](../audits/2026-09-28-forward-chart-followup-handoff.md) ·
-[Frozen patches and browser record](../audits/2026-09-28-forward-chart-followup-evidence/README.md) ·
+| PR | Change | Approved head | Merge |
+|---|---|---|---|
+| [#104](https://github.com/crashchen/euro-bess-radar/pull/104) | Project Case keeps every input widget when another section has an error; collected errors block the run | `a74b59e` | `3bbe9f0` |
+| [#106](https://github.com/crashchen/euro-bess-radar/pull/106) | An activation-volume response with fewer than two timestamps names the ~1-month publication lag | `f892e77` | `3ba2f40` |
+| [#105](https://github.com/crashchen/euro-bess-radar/pull/105) | Readable `help=` buttons and main uploaders in both base themes; darker main controls (≥5.06:1 normal, ≥6.17:1 hover); muted disabled Browse; Data Trust cards wrap | `7e97d42` | `68d3486` |
+
+CC authored #104 and #106; Codex's independent review passed both. CC
+authored #105's first increment `d5bf996`. Codex's review requested a
+contrast change, which Codex implemented and reviewed as `a32e707`
+([handoff](../audits/2026-10-03-control-contrast-r2-handoff.md)). All three
+were merged on the user's explicit authorization.
+
+[Manual acceptance record](../audits/2026-10-02-manual-acceptance-evidence/README.md) ·
+[#105 revision evidence](../audits/2026-10-03-control-contrast-r2-evidence/README.md) ·
 [Remaining work](follow-ups.md).
 
 ## Checks and scope
 
 | Check | Result |
 |---|---|
-| Clean baseline red checks | Apply only the new test cases to a clean `87a9533` archive: **5 failed / 34 passed**. The saved red-test patch keeps the base's leaking helper so the isolation failure remains observable. |
-| Candidate focused tests | `tests/test_trader_benchmark.py`: **39 passed**. Ruff and whitespace checks passed. |
-| Browser presentation | Offline production figure at 390 CSS px: 17/20/26/32-year samples all render first and last whole-year labels. This is a chart-only fixture, not the complete Forward page. |
-| Full local suite | Clean archive of code commit `d6f101c`: **2121 passed / 2 skipped / 29 warnings**, including slow tests, in 291.01s; command exit 0. Warnings are the tracked Streamlit DataFrame-attrs and pandas empty-concat warnings. |
-| Independent review | On the same head, the user's reviewer reproduced the patch hash, the 5 failed / 34 passed red baseline and the 2121 passed / 2 skipped full suite on a clean archive. Reverting either fix alone failed only its own tests (1 and 4 failures). It also rendered the base and candidate figures at 390px and 342px chart widths. The base's final two labels collided; the candidate kept the first and last years separate. These reviewer observations are not archived as repository evidence. |
-| Remote CI | At exact PR head `3ccd87353944607489c1b55fc60de3bbc6affeab`, both `test` and `Python 3.11 / Streamlit 1.55.0 compatibility check` concluded SUCCESS before merge. |
+| PR-head CI | `test` and `Python 3.11 / Streamlit 1.55.0 compatibility check` succeeded at each approved head (runs 37123714659, 37137170672, 37141644468). |
+| Main push CI | Succeeded for each merge commit: `3bbe9f0` (37142094921), `3ba2f40` (37142158888), `68d3486` (37142487313). |
+| Full local suite | Codex's review stacked the three first-round patches (#105 at `d5bf996`) on a clean base: **2134 passed / 2 skipped / 29 warnings**, including slow tests. #105 revision code commit `a32e707` alone: **2127 passed / 2 skipped / 29 warnings**, including 35 slow, 296.93s (its handoff). Neither is a re-run of the final merge tree; main push CI is the merged-head check. |
+| Browser acceptance | Agent-driven, not a human operator pass. All 52 checklist items executed: on `e28ee9c` in Chrome on 2026-10-02, and on `68d3486` in headless Chromium on 2026-10-03. 51 met their expectation within the stated scope. Item 37 has one open layout finding (F7): at 390 px the multi-day replay "Avg Annualized" value is ellipsized. The F1 fix was re-checked live on `68d3486`. Resizing populated panels sent no websocket frames (no rerun or solve). |
+| Radar → ESS | Items 44–47 against ESS `9bad91c`: the applied stream reconciles with Radar settled revenue × CPI. ESS consumer defects F5 (DA arbitrage double count via the grid-tariff fallback) and F6 (no asset-size check) belong to ESS. |
+| Real cache | `data/cache` 26/26 file hashes unchanged across the 2026-10-02 run, the #105 revision runs and the 2026-10-03 closeout. |
 
-The change restores `DeltaGenerator.file_uploader` after the AppTest panel
-render and avoids adding a crowded final tick adjacent to the preceding one.
-No curve coordinates, comparison values, export workbook, solver, cache,
-Project Case schema or market-data input changes. The chart checks use
-synthetic horizons; they do not certify every viewport, the complete Forward
-page or a live provider response.
+The acceptance browser checks use the stated synthetic fixtures, isolated
+cache copies and live provider responses at run time. They do not certify
+later revisions, every parameter combination, arbitrary currency magnitudes
+or a desktop Chrome save dialog. Downloads were saved through Playwright
+download events.
 
 ## Repeat
 
 ```sh
-.venv/bin/python -m pytest tests/test_trader_benchmark.py -q
+.venv/bin/python -m pytest tests/ -m "not slow" -q
 .venv/bin/python -m pytest tests/ -q
 .venv/bin/ruff check src/ app.py tests/
-git diff --check
-git diff --binary --full-index 87a9533 d6f101c -- src/ tests/ .github/workflows/ci.yml | shasum -a 256
-shasum -a 256 docs/audits/2026-09-28-forward-chart-followup-evidence/code.patch
+git diff 68d3486^1 68d3486 --stat    # #105 patch; repeat for 3ba2f40 and 3bbe9f0
 ```
 
-Both code-patch hash commands return
-`b11a2085888244d9e2722e63ce004ea1bc93528101f07ff4d2845d4375e1fa04`.
+The acceptance record lists the browser driver, fixture and server commands.

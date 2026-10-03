@@ -1,0 +1,13 @@
+
+  You can now view your Streamlit app in your browser.
+
+  URL: http://127.0.0.1:8633
+
+  For better performance, install the Watchdog module:
+
+  $ xcode-select --install
+  $ pip install watchdog
+
+INFO:src.data_ingestion:Cache hit for DE_LU [2026-06-21 22:00:00+00:00, 2026-06-28 22:00:00+00:00)
+INFO:src.data_ingestion:Fetching generation data for DE_LU
+  Stopping...

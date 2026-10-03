@@ -1,0 +1,132 @@
+
+  You can now view your Streamlit app in your browser.
+
+  URL: http://127.0.0.1:8611
+
+  For better performance, install the Watchdog module:
+
+  $ xcode-select --install
+  $ pip install watchdog
+
+INFO:src.data_ingestion:Cache stale for DE_LU: 2016 rows in requested slice exceed ttl=1 days 00:00:00
+INFO:src.data_ingestion:Fetching ENTSO-E data for DE_LU [2026-06-08 00:00:00+02:00, 2026-06-29 00:00:00+02:00)
+INFO:src.data_ingestion:Wrote CSV cache: <radar-archive>/data/cache/da_prices_de_lu.csv
+INFO:src.data_ingestion:Fetching generation data for DE_LU
+INFO:src.data_ingestion:Fetching ENTSO-E activated balancing energy prices for DE_TENNET
+WARNING:src.data_ingestion:Dropping 91 activated interval(s) with nonzero volume but no published ENTSO-E activation price (max volume 74.0 MW, e.g. [{'timestamp': Timestamp('2026-06-08 09:00:00+0000', tz='UTC'), 'product_type': 'aFRR', 'direction': 'up'}, {'timestamp': Timestamp('2026-06-09 12:30:00+0000', tz='UTC'), 'product_type': 'aFRR', 'direction': 'up'}, {'timestamp': Timestamp('2026-06-10 14:15:00+0000', tz='UTC'), 'product_type': 'aFRR', 'direction': 'up'}]); the replay will understate activated energy for these intervals.
+INFO:src.ancillary_fetchers:Running auto-fetch: FCR/aFRR auctions for DE_LU via Regelleistung.net
+<repo>/.venv/lib/python3.13/site-packages/openpyxl/styles/stylesheet.py:237: UserWarning: Workbook contains no default style, apply openpyxl's default
+  warn("Workbook contains no default style, apply openpyxl's default")
+INFO:src.data_ingestion:Fetched 126 Regelleistung FCR records (2026-06-08 to 2026-06-28)
+INFO:src.data_ingestion:Fetched 252 Regelleistung aFRR records (2026-06-08 to 2026-06-28)
+INFO:src.ancillary_fetchers:Auto-fetch for DE_LU complete: 2/1 succeeded
+INFO:src.ancillary:Parsed 2 rows from DE_FCR template
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 3.27e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 tie-break did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: model_status is Time limit reached; primal_status is None)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.75e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.88e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.52e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.60e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.68e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.81e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 3.44e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 tie-break did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: Time limit reached)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 3.08e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 tie-break did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: model_status is Time limit reached; primal_status is None)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.77e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 tie-break did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: Time limit reached)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.03e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.25e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 1.86e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.06e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 5.45e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 5.68e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.70e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.93e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.97e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 3.24e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 2.81e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 3.16e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 3.21e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 3.47e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 5.57e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 5.82e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a degraded objective by 2.83e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a degraded objective by 3.09e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 6.96e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: model_status is Time limit reached; primal_status is None)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 7.15e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a degraded objective by 2.99e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a degraded objective by 3.24e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 4.17e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: Time limit reached)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 4.40e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a degraded objective by 3.01e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a degraded objective by 3.25e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 4.74e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: model_status is Time limit reached; primal_status is None)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 4.94e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 3.51e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 3.82e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 3.40e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 tie-break did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: model_status is Time limit reached; primal_status is None)); keeping primary solution
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+2026-10-02 19:45:06.919 MediaFileHandler: Missing file 2afbdfb572018e1d8523fefebf1d86bd200f9e9d18b73b1aa9b47448.xlsx
+Traceback (most recent call last):
+  File "<repo>/.venv/lib/python3.13/site-packages/streamlit/runtime/memory_media_file_storage.py", line 152, in get_file
+    return self._files_by_id[file_id]
+           ~~~~~~~~~~~~~~~~~^^^^^^^^^
+KeyError: '2afbdfb572018e1d8523fefebf1d86bd200f9e9d18b73b1aa9b47448'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "<repo>/.venv/lib/python3.13/site-packages/streamlit/web/server/media_file_handler.py", line 95, in validate_absolute_path
+    self._storage.get_file(absolute_path)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^
+  File "<repo>/.venv/lib/python3.13/site-packages/streamlit/runtime/memory_media_file_storage.py", line 154, in get_file
+    raise MediaFileStorageError(
+        f"Bad filename '{filename}'. (No media file with id '{file_id}')"
+    ) from e
+streamlit.runtime.media_file_storage.MediaFileStorageError: Bad filename '2afbdfb572018e1d8523fefebf1d86bd200f9e9d18b73b1aa9b47448.xlsx'. (No media file with id '2afbdfb572018e1d8523fefebf1d86bd200f9e9d18b73b1aa9b47448')
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(

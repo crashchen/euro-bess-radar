@@ -13,16 +13,6 @@ those preserved bytes as whitespace errors.
 The [current verification snapshot](../validation/current.md) is the single
 entry point for today's code-bound results. The records below remain historical.
 
-## Pending control revision
-
-PR [#105](https://github.com/crashchen/euro-bess-radar/pull/105) remains draft.
-Its main-control contrast and disabled Browse review findings are implemented
-at `a32e707`, awaiting user-invoked CC review. See the
-[revision handoff](2026-10-03-control-contrast-r2-handoff.md) and
-[frozen increment, baseline and browser matrix](2026-10-03-control-contrast-r2-evidence/README.md).
-This candidate does not replace the last merged verification snapshot or
-complete the outstanding manual acceptance.
-
 ## Review stages
 
 | Stage | Source reference | Record |
@@ -44,6 +34,8 @@ complete the outstanding manual acceptance.
 | Forward benchmark chart readability | Increment from `76dc758` (#99 merge); code commit `49a2d77`, merged in [#100](https://github.com/crashchen/euro-bess-radar/pull/100) as `dfcf736` | [Archived candidate snapshot](../validation/2026-09-28-forward-chart.md), [handoff](2026-09-28-forward-chart-handoff.md), [frozen patch and browser evidence](2026-09-28-forward-chart-evidence/README.md) |
 | Cockpit export-copy precision | Increment from chart head `938cf03`; code commit `7ec5302`, merged in [#101](https://github.com/crashchen/euro-bess-radar/pull/101) as `87a9533` | [Archived candidate snapshot](../validation/2026-09-28-cockpit-export-copy.md), [handoff](2026-09-28-cockpit-export-copy-handoff.md), [frozen patch and probe](2026-09-28-cockpit-export-copy-evidence/README.md) |
 | Forward chart review follow-up | Increment from `87a9533`; code commit `d6f101c`, merged in [#102](https://github.com/crashchen/euro-bess-radar/pull/102) as `01ea5cd` | [Archived candidate snapshot](../validation/2026-09-28-forward-chart-followup.md), [handoff](2026-09-28-forward-chart-followup-handoff.md), [frozen patches and 390px browser record](2026-09-28-forward-chart-followup-evidence/README.md) |
+| Manual acceptance follow-ups | Increments from `e28ee9c` (#103 merge): Project Case input retention [#104](https://github.com/crashchen/euro-bess-radar/pull/104) → `3bbe9f0`; activation publication-lag message [#106](https://github.com/crashchen/euro-bess-radar/pull/106) → `3ba2f40`; control contrast and Data Trust layout [#105](https://github.com/crashchen/euro-bess-radar/pull/105) → `68d3486` | [#105 contrast revision handoff](2026-10-03-control-contrast-r2-handoff.md), [frozen increment and browser matrix](2026-10-03-control-contrast-r2-evidence/README.md), [current snapshot](../validation/current.md) |
+| Manual UI acceptance | All 52 checklist items on `e28ee9c` (2026-10-02) and `68d3486` (2026-10-03); agent-driven browsers | [Acceptance record, fixtures, drivers, downloads and screenshots](2026-10-02-manual-acceptance-evidence/README.md) |
 
 The original Step 1b patch is unchanged: its SHA-256 remains
 `a5a8f6adb1ca308b8bed9b95242b8c52cc48343bb4a14cbf2e3344278ed40f12`.
