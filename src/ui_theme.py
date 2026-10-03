@@ -849,6 +849,36 @@ def inject_global_cockpit_theme() -> None:
             filter: brightness(1.08);
         }
 
+        /* Main controls need a darker, opaque surface for normal-size text.
+           Keep the brighter brand accents and the sidebar's existing palette.
+           The text rule also reaches children forced near-white by expanders.
+           Explicit hover colors avoid brightening the entire control/filter. */
+        [data-testid="stMain"] :is(.stButton, .stDownloadButton, .stFormSubmitButton, [data-testid="stFileUploaderDropzone"]) button:enabled,
+        [data-testid="stMain"] button[data-testid="stBaseButton-primary"]:enabled {
+            background: linear-gradient(135deg, #b81760, #6f2fba) !important;
+            filter: none !important;
+        }
+
+        [data-testid="stMain"] :is(.stButton, .stDownloadButton, .stFormSubmitButton, [data-testid="stFileUploaderDropzone"]) button:enabled,
+        [data-testid="stMain"] :is(.stButton, .stDownloadButton, .stFormSubmitButton, [data-testid="stFileUploaderDropzone"]) button:enabled *,
+        [data-testid="stMain"] button[data-testid="stBaseButton-primary"]:enabled,
+        [data-testid="stMain"] button[data-testid="stBaseButton-primary"]:enabled * {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+        }
+
+        [data-testid="stMain"] :is(.stButton, .stDownloadButton, .stFormSubmitButton, [data-testid="stFileUploaderDropzone"]) button:enabled:hover,
+        [data-testid="stMain"] button[data-testid="stBaseButton-primary"]:enabled:hover {
+            background: linear-gradient(135deg, #a31454, #6129a3) !important;
+        }
+
+        [data-testid="stMain"] [data-testid="stFileUploaderDropzone"] button:disabled {
+            background:
+                linear-gradient(180deg, rgba(35,42,54,0.98), rgba(22,28,39,0.98)) !important;
+            box-shadow: none !important;
+            filter: none !important;
+        }
+
         [data-testid="stSidebar"] button:disabled,
         [data-testid="stSidebar"] button[disabled],
         [data-testid="stSidebar"] button[aria-disabled="true"],
