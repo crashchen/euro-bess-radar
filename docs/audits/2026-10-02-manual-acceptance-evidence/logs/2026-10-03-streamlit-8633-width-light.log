@@ -1,0 +1,44 @@
+
+  You can now view your Streamlit app in your browser.
+
+  URL: http://127.0.0.1:8633
+
+  For better performance, install the Watchdog module:
+
+  $ xcode-select --install
+  $ pip install watchdog
+
+INFO:src.data_ingestion:Cache stale for DE_LU: 672 rows in requested slice exceed ttl=1 days 00:00:00
+INFO:src.data_ingestion:Fetching ENTSO-E data for DE_LU [2026-06-22 00:00:00+02:00, 2026-06-29 00:00:00+02:00)
+INFO:src.data_ingestion:Wrote CSV cache: <width-archive>/data/cache/da_prices_de_lu.csv
+INFO:src.data_ingestion:Fetching generation data for DE_LU
+INFO:src.ancillary_fetchers:Running auto-fetch: FCR/aFRR auctions for DE_LU via Regelleistung.net
+<repo>/.venv/lib/python3.13/site-packages/openpyxl/styles/stylesheet.py:237: UserWarning: Workbook contains no default style, apply openpyxl's default
+  warn("Workbook contains no default style, apply openpyxl's default")
+INFO:src.data_ingestion:Fetched 42 Regelleistung FCR records (2026-06-22 to 2026-06-28)
+INFO:src.data_ingestion:Fetched 84 Regelleistung aFRR records (2026-06-22 to 2026-06-28)
+INFO:src.ancillary_fetchers:Auto-fetch for DE_LU complete: 2/1 succeeded
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 5.98e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 5.98e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a degraded objective by 4.41e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a degraded objective by 4.70e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 7.57e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: model_status is Time limit reached; primal_status is None)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 7.71e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a degraded objective by 4.98e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a degraded objective by 5.25e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 6.55e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: Time limit reached)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-1 tie-break did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: Time limit reached)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a degraded objective by 4.58e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a degraded objective by 4.84e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 6.13e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-0 pass 2a did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: Time limit reached)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-1 tie-break did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: Time limit reached)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 5.49e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 tie-break did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: Time limit reached)); keeping primary solution
+WARNING:src.stochastic_dispatch:canonical Stage-1 pass degraded objective by 5.14e-06; keeping primary
+WARNING:src.stochastic_dispatch:canonical Stage-1 tie-break did not prove optimal (status=1: Time limit reached. (HiGHS Status 13: Time limit reached)); keeping primary solution
+<repo>/.venv/lib/python3.13/site-packages/streamlit/elements/arrow.py:734: UserWarning: Could not serialize pd.DataFrame.attrs: Object of type DataFrame is not JSON serializable, defaulting to empty attributes.
+  proto.arrow_data.data = dataframe_util.convert_pandas_df_to_arrow_bytes(
+  Stopping...

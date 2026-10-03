@@ -1,0 +1,46 @@
+{
+ "1280-check42_DE_LU_report.xlsx": [
+  [
+   "A23",
+   "Joint MILP Capacity Settlement Basis",
+   "DE_LU / aggregate capacity: FCR, aFRR Up: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day."
+  ],
+  [
+   "A24",
+   "Joint MILP Co-optimized Total (EUR)",
+   239421.38
+  ],
+  [
+   "A25",
+   "Joint MILP Avg Reserve Commitment",
+   1
+  ]
+ ],
+ "390-check42_DE_LU_report.xlsx": [
+  [
+   "A23",
+   "Joint MILP Capacity Settlement Basis",
+   "DE_LU / aggregate capacity: FCR, aFRR Up: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day."
+  ],
+  [
+   "A24",
+   "Joint MILP Co-optimized Total (EUR)",
+   239421.38
+  ],
+  [
+   "A25",
+   "Joint MILP Avg Reserve Commitment",
+   1
+  ]
+ ],
+ "1280-check42_DE_LU_report.pdf": {
+  "snippet": "zed reference. Joint MILP Capacity Settlement Basis DE_LU / aggregate capacity: FCR, aFRR Up: physical-hour screening; capacity cash uses elapsed delivery hours and availability, w",
+  "mFRR_in_basis": false,
+  "mFRR_anywhere": true
+ },
+ "390-check42_DE_LU_report.pdf": {
+  "snippet": "zed reference. Joint MILP Capacity Settlement Basis DE_LU / aggregate capacity: FCR, aFRR Up: physical-hour screening; capacity cash uses elapsed delivery hours and availability, w",
+  "mFRR_in_basis": false,
+  "mFRR_anywhere": true
+ }
+}

@@ -1,0 +1,141 @@
+{
+ "label": "light-forward",
+ "port": 8633,
+ "forwardOnly": true,
+ "populate": {
+  "fetchAlerts": []
+ },
+ "widths": {
+  "390": {
+   "framesSentDuringResize": 0,
+   "tabs": {
+    "Forward Scenarios": {
+     "viewport": "390x900",
+     "sidebar": "false",
+     "docOverflowX": false,
+     "metricCount": 4,
+     "badMetrics": [],
+     "kpiCount": 0,
+     "badKpis": [],
+     "minMetricWidth": 322,
+     "stale": 0,
+     "downloads": 4,
+     "statusWidget": false,
+     "metricsSample": [
+      "BENCHMARK AVG (ALL YEARS) |  | €163,162",
+      "BENCHMARK ENDPOINT CAGR |  | +42.5%/yr",
+      "MODEL AVG (2 OVERLAP YR) |  | €45,338",
+      "BENCHMARK / MODEL RATIO |  | 359.9% |  | model - benchmark: €-117,823"
+     ],
+     "cardShots": 1
+    }
+   },
+   "framesSentTotal": 0
+  },
+  "960": {
+   "framesSentDuringResize": 0,
+   "tabs": {
+    "Forward Scenarios": {
+     "viewport": "960x900",
+     "sidebar": "true",
+     "docOverflowX": false,
+     "metricCount": 4,
+     "badMetrics": [],
+     "kpiCount": 0,
+     "badKpis": [],
+     "minMetricWidth": 360,
+     "stale": 0,
+     "downloads": 4,
+     "statusWidget": false,
+     "metricsSample": [
+      "BENCHMARK AVG (ALL YEARS) |  | €163,162",
+      "BENCHMARK ENDPOINT CAGR |  | +42.5%/yr",
+      "MODEL AVG (2 OVERLAP YR) |  | €45,338",
+      "BENCHMARK / MODEL RATIO |  | 359.9% |  | model - benchmark: €-117,823"
+     ],
+     "cardShots": 1
+    }
+   },
+   "framesSentTotal": 0
+  },
+  "1280": {
+   "framesSentDuringResize": 0,
+   "tabs": {
+    "Forward Scenarios": {
+     "viewport": "1280x900",
+     "sidebar": "true",
+     "docOverflowX": false,
+     "metricCount": 4,
+     "badMetrics": [],
+     "kpiCount": 0,
+     "badKpis": [],
+     "minMetricWidth": 360,
+     "stale": 0,
+     "downloads": 4,
+     "statusWidget": false,
+     "metricsSample": [
+      "BENCHMARK AVG (ALL YEARS) |  | €163,162",
+      "BENCHMARK ENDPOINT CAGR |  | +42.5%/yr",
+      "MODEL AVG (2 OVERLAP YR) |  | €45,338",
+      "BENCHMARK / MODEL RATIO |  | 359.9% |  | model - benchmark: €-117,823"
+     ],
+     "cardShots": 1
+    }
+   },
+   "framesSentTotal": 0
+  },
+  "1440": {
+   "framesSentDuringResize": 0,
+   "tabs": {
+    "Forward Scenarios": {
+     "viewport": "1440x900",
+     "sidebar": "true",
+     "docOverflowX": false,
+     "metricCount": 4,
+     "badMetrics": [],
+     "kpiCount": 0,
+     "badKpis": [],
+     "minMetricWidth": 360,
+     "stale": 0,
+     "downloads": 4,
+     "statusWidget": false,
+     "metricsSample": [
+      "BENCHMARK AVG (ALL YEARS) |  | €163,162",
+      "BENCHMARK ENDPOINT CAGR |  | +42.5%/yr",
+      "MODEL AVG (2 OVERLAP YR) |  | €45,338",
+      "BENCHMARK / MODEL RATIO |  | 359.9% |  | model - benchmark: €-117,823"
+     ],
+     "cardShots": 1
+    }
+   },
+   "framesSentTotal": 0
+  }
+ },
+ "ticks20y_1440": [
+  "2027",
+  "2030",
+  "2033",
+  "2036",
+  "2039",
+  "2042",
+  "2046"
+ ],
+ "ticks20y_1280": [
+  "2027",
+  "2030",
+  "2033",
+  "2036",
+  "2039",
+  "2042",
+  "2046"
+ ],
+ "ticks20y_390": [
+  "2027",
+  "2030",
+  "2033",
+  "2036",
+  "2039",
+  "2042",
+  "2046"
+ ]
+}

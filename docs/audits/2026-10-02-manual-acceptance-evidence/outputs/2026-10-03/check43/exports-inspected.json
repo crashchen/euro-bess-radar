@@ -1,0 +1,152 @@
+{
+ "ordinary": {
+  "handoff_year1": {
+   "contract_top_up_eur": 0.0,
+   "effective_contract_floor_eur": null,
+   "merchant_revenue_eur": 166440.0,
+   "project_year": 1,
+   "settled_revenue_eur": 166440.0,
+   "settlement_adjustment_eur": 0.0
+  },
+  "handoff_years": 20,
+  "handoff_basis_keys": [
+   "availability_embedded",
+   "capture_embedded",
+   "cash_timing",
+   "contract_settlement_basis",
+   "contract_settlement_included",
+   "currency",
+   "currency_mode",
+   "debt_included",
+   "financing_fees_included",
+   "lifecycle_costs_included",
+   "liquidity_embedded",
+   "modeled_duration_hours",
+   "modeled_energy_mwh",
+   "modeled_power_mw",
+   "mw_rescaled",
+   "post_vom",
+   "project_year_origin",
+   "real_base_year",
+   "round_trip_efficiency",
+   "rte_embedded",
+   "tax_included"
+  ],
+  "pc_reserve_basis": "DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+  "pc_keys": [
+   "P(NPV > 0)"
+  ],
+  "summary_joint_basis": "DE_LU / aggregate capacity: FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+  "pdf_has_joint_basis": true,
+  "sheets": [
+   "Summary",
+   "Daily Spreads",
+   "Monthly Summary",
+   "Hourly Prices",
+   "Price Heatmap",
+   "Project Case NPVs",
+   "Screening Cash Flow",
+   "Assumptions & Provenance"
+  ]
+ },
+ "spring": {
+  "handoff_year1": {
+   "contract_top_up_eur": 0.0,
+   "effective_contract_floor_eur": null,
+   "merchant_revenue_eur": 166440.0,
+   "project_year": 1,
+   "settled_revenue_eur": 166440.0,
+   "settlement_adjustment_eur": 0.0
+  },
+  "handoff_years": 20,
+  "handoff_basis_keys": [
+   "availability_embedded",
+   "capture_embedded",
+   "cash_timing",
+   "contract_settlement_basis",
+   "contract_settlement_included",
+   "currency",
+   "currency_mode",
+   "debt_included",
+   "financing_fees_included",
+   "lifecycle_costs_included",
+   "liquidity_embedded",
+   "modeled_duration_hours",
+   "modeled_energy_mwh",
+   "modeled_power_mw",
+   "mw_rescaled",
+   "post_vom",
+   "project_year_origin",
+   "real_base_year",
+   "round_trip_efficiency",
+   "rte_embedded",
+   "tax_included"
+  ],
+  "pc_reserve_basis": "DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+  "pc_keys": [
+   "P(NPV > 0)"
+  ],
+  "summary_joint_basis": "DE_LU / aggregate capacity: FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+  "pdf_has_joint_basis": true,
+  "sheets": [
+   "Summary",
+   "Daily Spreads",
+   "Monthly Summary",
+   "Hourly Prices",
+   "Price Heatmap",
+   "Project Case NPVs",
+   "Screening Cash Flow",
+   "Assumptions & Provenance"
+  ]
+ },
+ "autumn": {
+  "handoff_year1": {
+   "contract_top_up_eur": 0.0,
+   "effective_contract_floor_eur": null,
+   "merchant_revenue_eur": 166440.0,
+   "project_year": 1,
+   "settled_revenue_eur": 166440.0,
+   "settlement_adjustment_eur": 0.0
+  },
+  "handoff_years": 20,
+  "handoff_basis_keys": [
+   "availability_embedded",
+   "capture_embedded",
+   "cash_timing",
+   "contract_settlement_basis",
+   "contract_settlement_included",
+   "currency",
+   "currency_mode",
+   "debt_included",
+   "financing_fees_included",
+   "lifecycle_costs_included",
+   "liquidity_embedded",
+   "modeled_duration_hours",
+   "modeled_energy_mwh",
+   "modeled_power_mw",
+   "mw_rescaled",
+   "post_vom",
+   "project_year_origin",
+   "real_base_year",
+   "round_trip_efficiency",
+   "rte_embedded",
+   "tax_included"
+  ],
+  "pc_reserve_basis": "DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+  "pc_keys": [
+   "P(NPV > 0)"
+  ],
+  "summary_joint_basis": "DE_LU / aggregate capacity: FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+  "pdf_has_joint_basis": true,
+  "sheets": [
+   "Summary",
+   "Daily Spreads",
+   "Monthly Summary",
+   "Hourly Prices",
+   "Price Heatmap",
+   "Project Case NPVs",
+   "Screening Cash Flow",
+   "Assumptions & Provenance"
+  ]
+ }
+}

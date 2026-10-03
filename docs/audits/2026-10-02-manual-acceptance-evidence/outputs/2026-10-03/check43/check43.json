@@ -1,0 +1,326 @@
+{
+ "ordinary": {
+  "day": "2026/03/28",
+  "sessionUpload": [
+   "DE_FCR loaded: 30 rows"
+  ],
+  "capacityUpload": [
+   "Imported 30 reserve-capacity rows (DE_LU FCR symmetric). See Data Trust → 'Reserve-capacity price sources' and the coverage matrix."
+  ],
+  "joint": {
+   "capacity": "€166,554/yr",
+   "da": "€0/yr",
+   "caption": {
+    "viewport": 1280,
+    "sidebar": "true",
+    "docOverflowX": false,
+    "captions": [
+     {
+      "text": "DE_LU / aggregate capacity: FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+      "width": 784,
+      "right": 1182,
+      "clipped": false
+     }
+    ]
+   }
+  },
+  "reserveProduct": "Reserve capacity product and direction |  | FCR — symmetric",
+  "pcCaption": {
+   "viewport": 1280,
+   "sidebar": "true",
+   "docOverflowX": false,
+   "captions": [
+    {
+     "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+     "width": 820,
+     "right": 1200,
+     "clipped": false
+    }
+   ]
+  },
+  "handoff": {
+   "file": "ordinary-radar_project_revenue_handoff.json",
+   "bytes": 6253
+  },
+  "xlsx": {
+   "file": "ordinary-DE_LU_report.xlsx",
+   "bytes": 21399
+  },
+  "pdf": {
+   "file": "ordinary-DE_LU_report.pdf",
+   "bytes": 2632
+  },
+  "narrowRevenue": {
+   "statusWidgets": 0,
+   "pc": {
+    "viewport": 390,
+    "sidebar": "false",
+    "docOverflowX": false,
+    "captions": [
+     {
+      "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+      "width": 358,
+      "right": 374,
+      "clipped": false
+     }
+    ]
+   },
+   "joint": {
+    "viewport": 390,
+    "sidebar": "false",
+    "docOverflowX": false,
+    "captions": [
+     {
+      "text": "DE_LU / aggregate capacity: FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+      "width": 322,
+      "right": 356,
+      "clipped": false
+     }
+    ]
+   }
+  },
+  "mirror": {
+   "viewport": 1280,
+   "sidebar": "true",
+   "docOverflowX": false,
+   "captions": [
+    {
+     "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+     "width": 784,
+     "right": 1182,
+     "clipped": false
+    }
+   ]
+  },
+  "narrowMirror": {
+   "statusWidgets": 0,
+   "mirror": {
+    "viewport": 390,
+    "sidebar": "false",
+    "docOverflowX": false,
+    "captions": [
+     {
+      "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+      "width": 322,
+      "right": 356,
+      "clipped": false
+     }
+    ]
+   }
+  }
+ },
+ "spring": {
+  "day": "2026/03/29",
+  "sessionUpload": [
+   "DE_FCR loaded: 30 rows"
+  ],
+  "joint": {
+   "capacity": "€159,614/yr",
+   "da": "€0/yr",
+   "caption": {
+    "viewport": 1280,
+    "sidebar": "true",
+    "docOverflowX": false,
+    "captions": [
+     {
+      "text": "DE_LU / aggregate capacity: FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+      "width": 784,
+      "right": 1182,
+      "clipped": false
+     }
+    ]
+   }
+  },
+  "reserveProduct": "Reserve capacity product and direction |  | FCR — symmetric",
+  "pcCaption": {
+   "viewport": 1280,
+   "sidebar": "true",
+   "docOverflowX": false,
+   "captions": [
+    {
+     "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+     "width": 820,
+     "right": 1200,
+     "clipped": false
+    }
+   ]
+  },
+  "handoff": {
+   "file": "spring-radar_project_revenue_handoff.json",
+   "bytes": 6253
+  },
+  "xlsx": {
+   "file": "spring-DE_LU_report.xlsx",
+   "bytes": 21364
+  },
+  "pdf": {
+   "file": "spring-DE_LU_report.pdf",
+   "bytes": 2633
+  },
+  "narrowRevenue": {
+   "statusWidgets": 0,
+   "pc": {
+    "viewport": 390,
+    "sidebar": "false",
+    "docOverflowX": false,
+    "captions": [
+     {
+      "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+      "width": 358,
+      "right": 374,
+      "clipped": false
+     }
+    ]
+   },
+   "joint": {
+    "viewport": 390,
+    "sidebar": "false",
+    "docOverflowX": false,
+    "captions": [
+     {
+      "text": "DE_LU / aggregate capacity: FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+      "width": 322,
+      "right": 356,
+      "clipped": false
+     }
+    ]
+   }
+  },
+  "mirror": {
+   "viewport": 1280,
+   "sidebar": "true",
+   "docOverflowX": false,
+   "captions": [
+    {
+     "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+     "width": 784,
+     "right": 1182,
+     "clipped": false
+    }
+   ]
+  },
+  "narrowMirror": {
+   "statusWidgets": 0,
+   "mirror": {
+    "viewport": 390,
+    "sidebar": "false",
+    "docOverflowX": false,
+    "captions": [
+     {
+      "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+      "width": 322,
+      "right": 356,
+      "clipped": false
+     }
+    ]
+   }
+  }
+ },
+ "autumn": {
+  "day": "2025/10/26",
+  "sessionUpload": [
+   "DE_FCR loaded: 30 rows"
+  ],
+  "joint": {
+   "capacity": "€173,494/yr",
+   "da": "€0/yr",
+   "caption": {
+    "viewport": 1280,
+    "sidebar": "true",
+    "docOverflowX": false,
+    "captions": [
+     {
+      "text": "DE_LU / aggregate capacity: FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+      "width": 784,
+      "right": 1182,
+      "clipped": false
+     }
+    ]
+   }
+  },
+  "reserveProduct": "Reserve capacity product and direction |  | FCR — symmetric",
+  "pcCaption": {
+   "viewport": 1280,
+   "sidebar": "true",
+   "docOverflowX": false,
+   "captions": [
+    {
+     "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+     "width": 820,
+     "right": 1200,
+     "clipped": false
+    }
+   ]
+  },
+  "handoff": {
+   "file": "autumn-radar_project_revenue_handoff.json",
+   "bytes": 6253
+  },
+  "xlsx": {
+   "file": "autumn-DE_LU_report.xlsx",
+   "bytes": 21450
+  },
+  "pdf": {
+   "file": "autumn-DE_LU_report.pdf",
+   "bytes": 2633
+  },
+  "narrowRevenue": {
+   "statusWidgets": 0,
+   "pc": {
+    "viewport": 390,
+    "sidebar": "false",
+    "docOverflowX": false,
+    "captions": [
+     {
+      "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+      "width": 358,
+      "right": 374,
+      "clipped": false
+     }
+    ]
+   },
+   "joint": {
+    "viewport": 390,
+    "sidebar": "false",
+    "docOverflowX": false,
+    "captions": [
+     {
+      "text": "DE_LU / aggregate capacity: FCR: physical-hour screening; capacity cash uses elapsed delivery hours and availability, with no nominal-block DST adjustment. Energy/SoC use physical time. The registered DE_LU Project Case profile uses six nominal 4h blocks/day.",
+      "width": 322,
+      "right": 356,
+      "clipped": false
+     }
+    ]
+   }
+  },
+  "mirror": {
+   "viewport": 1280,
+   "sidebar": "true",
+   "docOverflowX": false,
+   "captions": [
+    {
+     "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+     "width": 784,
+     "right": 1182,
+     "clipped": false
+    }
+   ]
+  },
+  "narrowMirror": {
+   "statusWidgets": 0,
+   "mirror": {
+    "viewport": 390,
+    "sidebar": "false",
+    "docOverflowX": false,
+    "captions": [
+     {
+      "text": "Reserve capacity settlement basis — DE_LU / FCR [symmetric]: Project Case uses six nominal 4h capacity blocks per local day, including DST, with availability applied. Energy and SoC use physical delivery time; screening capacity uses elapsed hours without this adjustment.",
+      "width": 322,
+      "right": 356,
+      "clipped": false
+     }
+    ]
+   }
+  }
+ }
+}

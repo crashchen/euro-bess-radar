@@ -1,0 +1,3 @@
+zone,contract,delivery_start,delivery_end,price_eur_mwh,shape,source,as_of
+DE_LU,Cal-2027,2027-01-01,2028-01-01,82.5,base,SYNTHETIC acceptance fixture,2026-10-03
+DE_LU,Cal-2028,2028-01-01,2029-01-01,78.0,base,SYNTHETIC acceptance fixture,2026-10-03

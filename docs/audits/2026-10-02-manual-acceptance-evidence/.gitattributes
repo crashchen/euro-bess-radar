@@ -1,0 +1,4 @@
+# Saved downloads and screenshots are exact rendered bytes, not text.
+*.pdf binary
+*.xlsx binary
+*.png binary

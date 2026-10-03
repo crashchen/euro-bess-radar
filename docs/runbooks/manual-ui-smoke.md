@@ -5,12 +5,13 @@ Streamlit changes. The suite includes mocked I/O, real solver tests and AppTest
 panel interactions. Those cover different layers; none establishes that every
 file-picker, live fetch, download and visible layout below has been exercised.
 
-There are 47 numbered checks. This is a checklist, not a completed test report.
+There are 52 numbered checks. This is a checklist, not a completed test report.
 The [current verification snapshot](../validation/current.md) links dated,
 commit-specific acceptance evidence and records partial/unexecuted coverage.
-Items 44–47 were added during documentation housekeeping; their end-to-end
-browser workflow has not been run in this round. Record code head, date,
-fixture, viewport/sidebar state, result and evidence for each executed item.
+The [2026-10-02/03 acceptance record](../audits/2026-10-02-manual-acceptance-evidence/README.md)
+executed all 52 items on the code heads it names, with stated partial coverage.
+It does not certify later revisions. Record code head, date, fixture,
+viewport/sidebar state, result and evidence for each executed item.
 
 ## Setup
 
@@ -148,8 +149,9 @@ cash conventions; this is a disclosure check, not a settlement migration.
 Start from an available Project Case result. These steps are an operator
 walkthrough, not a report of a completed cross-application browser test.
 Radar's producer contract and tests are verified in this repository. ESS control
-names below were checked in sibling source `e7cdac0` on 2026-09-20; its live
-UI, imports and downstream calculations were not executed in this round.
+names below were checked in sibling source `e7cdac0` on 2026-09-20. The dated
+2026-10-02 acceptance record ran items 44–47 against an ESS `9bad91c` archive;
+its consumer findings belong to ESS and do not certify other ESS revisions.
 
 | # | Entry | Action | Expect |
 |---|-------|--------|--------|
