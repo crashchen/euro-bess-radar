@@ -1,0 +1,358 @@
+diff --git a/src/pages/data_trust.py b/src/pages/data_trust.py
+index 0694648c130371182af4d0ba9e2754b7fe761505..e65734339d61da15380103c5f3ce7501dc64ebc4 100644
+--- a/src/pages/data_trust.py
++++ b/src/pages/data_trust.py
+@@ -13,6 +13,7 @@ from src.data_trust import (
+     build_intraday_source_table,
+     build_zone_data_quality_table,
+ )
++from src.ui_theme import metric_columns
+ 
+ 
+ def render(
+@@ -40,7 +41,7 @@ def render(
+         st.info("Fetch at least one bidding zone to see data trust diagnostics.")
+         return
+ 
+-    c1, c2, c3, c4 = st.columns(4)
++    c1, c2, c3, c4 = metric_columns(4)
+     c1.metric("Fetched Zones", f"{len(quality):,}")
+     c2.metric("Avg Coverage", f"{quality['coverage_pct'].mean():.1f}%")
+     c3.metric("Source Gap Intervals", f"{int(quality['source_gap_intervals'].sum()):,}")
+diff --git a/src/ui_theme.py b/src/ui_theme.py
+index c391b2e1d8fb82583b0e41d89a6cea99ed4c2d44..18a4e85e6bb2aa81b739c83aa55078878e9cffc4 100644
+--- a/src/ui_theme.py
++++ b/src/ui_theme.py
+@@ -340,9 +340,9 @@ def inject_global_cockpit_theme() -> None:
+             -webkit-text-fill-color: #eaf3ff !important;
+         }
+ 
+-        [data-testid="stSidebar"] .stButton > button,
+-        [data-testid="stSidebar"] .stDownloadButton > button,
+-        [data-testid="stSidebar"] .stFormSubmitButton > button,
++        [data-testid="stSidebar"] .stButton button,
++        [data-testid="stSidebar"] .stDownloadButton button,
++        [data-testid="stSidebar"] .stFormSubmitButton button,
+         [data-testid="stSidebar"] [data-testid="stBaseButton-primary"] {
+             color: #ffffff !important;
+             -webkit-text-fill-color: #ffffff !important;
+@@ -352,9 +352,9 @@ def inject_global_cockpit_theme() -> None:
+             box-shadow: 0 10px 24px rgba(255,45,149,0.22) !important;
+         }
+ 
+-        [data-testid="stSidebar"] .stButton > button:hover,
+-        [data-testid="stSidebar"] .stDownloadButton > button:hover,
+-        [data-testid="stSidebar"] .stFormSubmitButton > button:hover,
++        [data-testid="stSidebar"] .stButton button:hover,
++        [data-testid="stSidebar"] .stDownloadButton button:hover,
++        [data-testid="stSidebar"] .stFormSubmitButton button:hover,
+         [data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover {
+             color: #ffffff !important;
+             -webkit-text-fill-color: #ffffff !important;
+@@ -362,12 +362,12 @@ def inject_global_cockpit_theme() -> None:
+             filter: brightness(1.08);
+         }
+ 
+-        [data-testid="stSidebar"] .stButton > button:disabled,
+-        [data-testid="stSidebar"] .stDownloadButton > button:disabled,
+-        [data-testid="stSidebar"] .stFormSubmitButton > button:disabled,
+-        [data-testid="stSidebar"] .stButton > button[disabled],
+-        [data-testid="stSidebar"] .stDownloadButton > button[disabled],
+-        [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] {
++        [data-testid="stSidebar"] .stButton button:disabled,
++        [data-testid="stSidebar"] .stDownloadButton button:disabled,
++        [data-testid="stSidebar"] .stFormSubmitButton button:disabled,
++        [data-testid="stSidebar"] .stButton button[disabled],
++        [data-testid="stSidebar"] .stDownloadButton button[disabled],
++        [data-testid="stSidebar"] .stFormSubmitButton button[disabled] {
+             color: rgba(234,243,255,0.88) !important;
+             -webkit-text-fill-color: rgba(234,243,255,0.88) !important;
+             background:
+@@ -787,9 +787,51 @@ def inject_global_cockpit_theme() -> None:
+             color: var(--bp-muted);
+         }
+ 
+-        .stButton > button,
+-        .stDownloadButton > button,
+-        .stFormSubmitButton > button,
++        /*
++         * Main-canvas file uploaders. Only the sidebar used to style them, so a
++         * light base theme painted the dropzone and its Browse button light
++         * while the expander rules above force near-white text: ~1.0:1 inside
++         * an expander, and an unreadable Browse button elsewhere. Own BOTH the
++         * surface and the text so neither base theme can supply one half; the
++         * more specific sidebar rules above still win in the sidebar.
++         */
++        [data-testid="stFileUploaderDropzone"] {
++            color: #eaf3ff !important;
++            -webkit-text-fill-color: #eaf3ff !important;
++            background:
++                linear-gradient(180deg, rgba(17,25,37,0.98), rgba(8,13,22,0.98)) !important;
++            border: 1px dashed rgba(0,205,255,0.34) !important;
++            border-radius: 14px !important;
++        }
++
++        [data-testid="stFileUploaderDropzone"] *,
++        [data-testid="stFileUploaderFile"],
++        [data-testid="stFileUploaderFile"] * {
++            color: #eaf3ff !important;
++            -webkit-text-fill-color: #eaf3ff !important;
++        }
++
++        [data-testid="stFileUploaderFileErrorMessage"],
++        [data-testid="stFileUploaderFileErrorMessage"] * {
++            color: #ff9db5 !important;
++            -webkit-text-fill-color: #ff9db5 !important;
++        }
++
++        [data-testid="stFileUploaderDropzone"] button {
++            color: #ffffff !important;
++            -webkit-text-fill-color: #ffffff !important;
++            background:
++                linear-gradient(135deg, var(--bp-magenta), var(--bp-magenta-2)) !important;
++            border: 1px solid rgba(255,255,255,0.24) !important;
++            box-shadow: 0 10px 24px rgba(255,45,149,0.22) !important;
++        }
++
++        /* Descendant, not child: a button with help= sits inside Streamlit's
++           tooltip wrappers, and a child selector left it on the base theme's
++           white surface under the app's near-white text. */
++        .stButton button,
++        .stDownloadButton button,
++        .stFormSubmitButton button,
+         [data-testid="stBaseButton-primary"] {
+             color: #ffffff;
+             border: 1px solid rgba(255,255,255,0.14);
+@@ -799,25 +841,55 @@ def inject_global_cockpit_theme() -> None:
+             box-shadow: 0 10px 26px rgba(0,0,0,0.24);
+         }
+ 
+-        .stButton > button:hover,
+-        .stDownloadButton > button:hover,
+-        .stFormSubmitButton > button:hover,
++        .stButton button:hover,
++        .stDownloadButton button:hover,
++        .stFormSubmitButton button:hover,
+         [data-testid="stBaseButton-primary"]:hover {
+             border-color: rgba(255,255,255,0.38);
+             filter: brightness(1.08);
+         }
+ 
++        /* Main controls need a darker, opaque surface for normal-size text.
++           Keep the brighter brand accents and the sidebar's existing palette.
++           The text rule also reaches children forced near-white by expanders.
++           Explicit hover colors avoid brightening the entire control/filter. */
++        [data-testid="stMain"] :is(.stButton, .stDownloadButton, .stFormSubmitButton, [data-testid="stFileUploaderDropzone"]) button:enabled,
++        [data-testid="stMain"] button[data-testid="stBaseButton-primary"]:enabled {
++            background: linear-gradient(135deg, #b81760, #6f2fba) !important;
++            filter: none !important;
++        }
++
++        [data-testid="stMain"] :is(.stButton, .stDownloadButton, .stFormSubmitButton, [data-testid="stFileUploaderDropzone"]) button:enabled,
++        [data-testid="stMain"] :is(.stButton, .stDownloadButton, .stFormSubmitButton, [data-testid="stFileUploaderDropzone"]) button:enabled *,
++        [data-testid="stMain"] button[data-testid="stBaseButton-primary"]:enabled,
++        [data-testid="stMain"] button[data-testid="stBaseButton-primary"]:enabled * {
++            color: #ffffff !important;
++            -webkit-text-fill-color: #ffffff !important;
++        }
++
++        [data-testid="stMain"] :is(.stButton, .stDownloadButton, .stFormSubmitButton, [data-testid="stFileUploaderDropzone"]) button:enabled:hover,
++        [data-testid="stMain"] button[data-testid="stBaseButton-primary"]:enabled:hover {
++            background: linear-gradient(135deg, #a31454, #6129a3) !important;
++        }
++
++        [data-testid="stMain"] [data-testid="stFileUploaderDropzone"] button:disabled {
++            background:
++                linear-gradient(180deg, rgba(35,42,54,0.98), rgba(22,28,39,0.98)) !important;
++            box-shadow: none !important;
++            filter: none !important;
++        }
++
+         [data-testid="stSidebar"] button:disabled,
+         [data-testid="stSidebar"] button[disabled],
+         [data-testid="stSidebar"] button[aria-disabled="true"],
+         [data-testid="stSidebar"] [data-testid^="stBaseButton"]:disabled,
+         [data-testid="stSidebar"] [data-testid^="stBaseButton"][disabled],
+-        [data-testid="stSidebar"] .stButton > button:disabled,
+-        [data-testid="stSidebar"] .stDownloadButton > button:disabled,
+-        [data-testid="stSidebar"] .stFormSubmitButton > button:disabled,
+-        [data-testid="stSidebar"] .stButton > button[disabled],
+-        [data-testid="stSidebar"] .stDownloadButton > button[disabled],
+-        [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] {
++        [data-testid="stSidebar"] .stButton button:disabled,
++        [data-testid="stSidebar"] .stDownloadButton button:disabled,
++        [data-testid="stSidebar"] .stFormSubmitButton button:disabled,
++        [data-testid="stSidebar"] .stButton button[disabled],
++        [data-testid="stSidebar"] .stDownloadButton button[disabled],
++        [data-testid="stSidebar"] .stFormSubmitButton button[disabled] {
+             color: #dbeafe !important;
+             -webkit-text-fill-color: #dbeafe !important;
+             background-color: #172033 !important;
+@@ -834,12 +906,12 @@ def inject_global_cockpit_theme() -> None:
+         [data-testid="stSidebar"] button[aria-disabled="true"] *,
+         [data-testid="stSidebar"] [data-testid^="stBaseButton"]:disabled *,
+         [data-testid="stSidebar"] [data-testid^="stBaseButton"][disabled] *,
+-        [data-testid="stSidebar"] .stButton > button:disabled *,
+-        [data-testid="stSidebar"] .stDownloadButton > button:disabled *,
+-        [data-testid="stSidebar"] .stFormSubmitButton > button:disabled *,
+-        [data-testid="stSidebar"] .stButton > button[disabled] *,
+-        [data-testid="stSidebar"] .stDownloadButton > button[disabled] *,
+-        [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] * {
++        [data-testid="stSidebar"] .stButton button:disabled *,
++        [data-testid="stSidebar"] .stDownloadButton button:disabled *,
++        [data-testid="stSidebar"] .stFormSubmitButton button:disabled *,
++        [data-testid="stSidebar"] .stButton button[disabled] *,
++        [data-testid="stSidebar"] .stDownloadButton button[disabled] *,
++        [data-testid="stSidebar"] .stFormSubmitButton button[disabled] * {
+             color: #dbeafe !important;
+             -webkit-text-fill-color: #dbeafe !important;
+             opacity: 1 !important;
+diff --git a/tests/test_data_trust.py b/tests/test_data_trust.py
+index 44d55844a8be74dfa6c12c0297e6112b25711230..97e8a2443bad61b8a7d24368eb15936be9067b36 100644
+--- a/tests/test_data_trust.py
++++ b/tests/test_data_trust.py
+@@ -452,3 +452,29 @@ def test_imbalance_source_table_coalesces_null_metadata_values() -> None:
+ 
+ def test_imbalance_source_table_empty_when_no_sources() -> None:
+     assert build_imbalance_source_table({}).empty
++
++
++def test_data_trust_metric_row_wraps_at_its_container_width() -> None:
++    """The summary cards use the shared wrapping row, not fixed columns.
++
++    Browser-verified before the fix: at 960 CSS px with the sidebar expanded,
++    four fixed ``st.columns`` truncated "Avg Coverage" to "10…".
++    """
++    import ast
++    import inspect
++
++    import src.pages.data_trust as page
++
++    calls = [
++        node
++        for node in ast.walk(ast.parse(inspect.getsource(page.render)))
++        if isinstance(node, ast.Call)
++    ]
++    assert any(
++        isinstance(call.func, ast.Name) and call.func.id == "metric_columns"
++        for call in calls
++    )
++    assert not any(
++        isinstance(call.func, ast.Attribute) and call.func.attr == "columns"
++        for call in calls
++    )
+diff --git a/tests/test_ui_theme.py b/tests/test_ui_theme.py
+index f7f2354327cf2726bb4f1c0e070c828a4d1a5a8e..b1a7ee7c568131d190134f80eb5874df14fb334c 100644
+--- a/tests/test_ui_theme.py
++++ b/tests/test_ui_theme.py
+@@ -2,9 +2,12 @@
+ 
+ from __future__ import annotations
+ 
++import re
++
+ import pandas as pd
+ import plotly.graph_objects as go
+ import plotly.io as pio
++import pytest
+ import streamlit as st
+ 
+ import src.ui_theme as ui_theme
+@@ -209,8 +212,8 @@ def test_global_theme_guards_sidebar_disabled_button_contrast(monkeypatch) -> No
+ 
+     assert '[data-testid="stSidebar"] button:disabled' in css
+     assert '[data-testid="stSidebar"] [data-testid^="stBaseButton"]:disabled' in css
+-    assert '[data-testid="stSidebar"] .stButton > button:disabled' in css
+-    assert '[data-testid="stSidebar"] .stDownloadButton > button:disabled' in css
++    assert '[data-testid="stSidebar"] .stButton button:disabled' in css
++    assert '[data-testid="stSidebar"] .stDownloadButton button:disabled' in css
+     assert '[data-testid="stSidebar"] button:disabled *' in css
+     assert "background-color: #172033" in css
+     assert "-webkit-text-fill-color: #dbeafe" in css
+@@ -238,3 +241,86 @@ def test_global_theme_guards_inline_code_contrast(monkeypatch) -> None:
+     assert "background: rgba(0,163,255,0.14) !important" in css
+     assert "color: var(--bp-text) !important" in css
+     assert "-webkit-text-fill-color: var(--bp-text) !important" in css
++
++
++def test_button_rules_reach_buttons_inside_help_tooltip_wrappers(monkeypatch) -> None:
++    """A ``help=`` button is nested in tooltip spans, not a direct child.
++
++    Browser-verified before the fix: "Export Project Revenue Handoff JSON" sat in
++    ``.stDownloadButton > div > span[stTooltipIcon] > span[stTooltipHoverTarget]``
++    and rendered rgb(232,238,248) text on the light base theme's white button
++    (~1.17:1). Every wrapper rule must therefore use a descendant selector.
++    """
++    css = _injected_theme_css(monkeypatch)
++
++    for wrapper in (".stButton", ".stDownloadButton", ".stFormSubmitButton"):
++        assert f"{wrapper} > button" not in css
++        assert f"        {wrapper} button," in css
++        assert f'[data-testid="stSidebar"] {wrapper} button,' in css
++
++
++def test_main_canvas_file_uploader_owns_surface_and_text(monkeypatch) -> None:
++    """Uploaders outside the sidebar must own BOTH background and foreground.
++
++    Browser-verified before the fix: inside an expander the dropzone was
++    rgb(240,242,246) under forced rgb(234,243,255) text (~1.0:1), and the
++    Browse button was white under the same text.
++    """
++    css = _injected_theme_css(monkeypatch)
++    rule = css.split('        [data-testid="stFileUploaderDropzone"] {', 1)[1]
++    rule = rule.split("}", 1)[0]
++    assert "background:" in rule and "!important" in rule
++    assert "-webkit-text-fill-color: #eaf3ff !important" in rule
++
++    button = css.split('        [data-testid="stFileUploaderDropzone"] button {', 1)[1]
++    button = button.split("}", 1)[0]
++    assert "background:" in button
++    assert "-webkit-text-fill-color: #ffffff !important" in button
++    assert '[data-testid="stFileUploaderFile"] *' in css
++
++
++def _main_control_background(css: str, *, state: str) -> str:
++    """Read the final scoped declaration; browser evidence checks the cascade."""
++    backgrounds = []
++    for selectors, declarations in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
++        if '[data-testid="stMain"]' not in selectors or "button" not in selectors:
++            continue
++        if f":{state}" not in selectors:
++            continue
++        if state == "enabled" and ":hover" in selectors:
++            continue
++        match = re.search(r"background\s*:\s*([^;]+)", declarations)
++        if match:
++            backgrounds.append(match.group(1))
++    assert backgrounds, f"No main {state} button surface"
++    return backgrounds[-1]
++
++
++@pytest.mark.parametrize("state", ["enabled", "hover"])
++def test_main_button_gradient_keeps_normal_text_contrast(monkeypatch, state) -> None:
++    """Bound the whole opaque gradient, rather than averaging its endpoints.
++
++    Taking the largest channel from either stop bounds luminance above every
++    sRGB-interpolated color. This conservative background must still provide
++    4.5:1 for the white button text; browser checks verify the actual leaf fill.
++    """
++    background = _main_control_background(_injected_theme_css(monkeypatch), state=state)
++    stops = re.findall(r"#([0-9a-fA-F]{6})\b", background)
++    assert len(stops) == 2, "Use two opaque control colors, independent of base theme"
++    ceiling = [max(int(stop[i:i + 2], 16) for stop in stops) / 255 for i in (0, 2, 4)]
++    linear = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in ceiling]
++    luminance = sum(w * v for w, v in zip((0.2126, 0.7152, 0.0722), linear, strict=True))
++    assert 1.05 / (luminance + 0.05) >= 4.5
++
++
++def test_main_disabled_browse_has_a_separate_muted_surface(monkeypatch) -> None:
++    css = _injected_theme_css(monkeypatch)
++    enabled = _main_control_background(css, state="enabled")
++    disabled = _main_control_background(css, state="disabled")
++    assert enabled != disabled
++    # A disabled upload button must override the earlier uploader glow as well
++    # as its fill. Browser checks verify it remains disabled inside expanders.
++    rules = [declarations for selectors, declarations in re.findall(r"([^{}]+)\{([^{}]*)\}", css)
++             if '[data-testid="stMain"]' in selectors and "button:disabled" in selectors]
++    assert any("box-shadow: none !important" in rule and "filter: none !important" in rule
++               for rule in rules)

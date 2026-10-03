@@ -1,0 +1,1100 @@
+{
+  "name": "baseline-light",
+  "width": 1280,
+  "sidebar": [
+    {
+      "ariaDisabled": null,
+      "background": "rgba(0, 0, 0, 0)",
+      "color": "rgb(255, 255, 255)",
+      "disabled": false,
+      "fill": "",
+      "filter": "none",
+      "font": "16px",
+      "gradient": "linear-gradient(135deg, rgba(255, 45, 149, 0.96), rgba(184, 77, 255, 0.82))",
+      "hover": false,
+      "label": "Sidebar help button",
+      "opacity": "1",
+      "rect": {
+        "h": 40,
+        "w": 158.8046875,
+        "x": 22,
+        "y": 117.59375
+      },
+      "scope": "sidebar",
+      "shadow": "rgba(255, 45, 149, 0.22) 0px 10px 24px 0px",
+      "text": [
+        {
+          "background": "rgba(0, 0, 0, 0)",
+          "color": "rgb(232, 238, 248)",
+          "fill": "",
+          "filter": "none",
+          "font": "16px",
+          "gradient": "none",
+          "opacity": "1",
+          "rect": {
+            "h": 25.59375,
+            "w": 132.8046875,
+            "x": 35,
+            "y": 124.796875
+          },
+          "shadow": "none",
+          "text": "Sidebar help button",
+          "weight": "400"
+        }
+      ],
+      "weight": "750"
+    },
+    {
+      "ariaDisabled": null,
+      "background": "rgba(0, 0, 0, 0)",
+      "color": "rgb(255, 255, 255)",
+      "disabled": false,
+      "fill": "",
+      "filter": "none",
+      "font": "16px",
+      "gradient": "linear-gradient(135deg, rgb(255, 45, 149), rgb(184, 77, 255))",
+      "hover": false,
+      "label": "Browse files",
+      "opacity": "1",
+      "rect": {
+        "h": 40,
+        "w": 106.09375,
+        "x": 39,
+        "y": 278.5859375
+      },
+      "scope": "sidebar",
+      "shadow": "rgba(255, 45, 149, 0.22) 0px 10px 24px 0px",
+      "text": [],
+      "uploader": "Sidebar upload",
+      "weight": "400"
+    },
+    {
+      "ariaDisabled": null,
+      "background": "rgb(23, 32, 51)",
+      "color": "rgb(219, 234, 254)",
+      "disabled": true,
+      "fill": "",
+      "filter": "none",
+      "font": "16px",
+      "gradient": "linear-gradient(rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98))",
+      "hover": false,
+      "label": "Browse files",
+      "opacity": "1",
+      "rect": {
+        "h": 40,
+        "w": 106.09375,
+        "x": 39,
+        "y": 456.578125
+      },
+      "scope": "sidebar",
+      "shadow": "none",
+      "text": [],
+      "uploader": "Sidebar disabled upload",
+      "weight": "400"
+    }
+  ],
+  "normal": {
+    "buttons": [
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(255, 255, 255)",
+        "disabled": false,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(135deg, rgba(255, 45, 149, 0.96), rgba(184, 77, 255, 0.82))",
+        "hover": false,
+        "label": "Sidebar help button",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 158.8046875,
+          "x": 22,
+          "y": 117.59375
+        },
+        "scope": "sidebar",
+        "shadow": "rgba(255, 45, 149, 0.22) 0px 10px 24px 0px",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(232, 238, 248)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 132.8046875,
+              "x": 35,
+              "y": 124.796875
+            },
+            "shadow": "none",
+            "text": "Sidebar help button",
+            "weight": "400"
+          }
+        ],
+        "weight": "750"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(255, 255, 255)",
+        "disabled": false,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(135deg, rgb(255, 45, 149), rgb(184, 77, 255))",
+        "hover": false,
+        "label": "Browse files",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 106.09375,
+          "x": 39,
+          "y": 278.5859375
+        },
+        "scope": "sidebar",
+        "shadow": "rgba(255, 45, 149, 0.22) 0px 10px 24px 0px",
+        "text": [],
+        "uploader": "Sidebar upload",
+        "weight": "400"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgb(23, 32, 51)",
+        "color": "rgb(219, 234, 254)",
+        "disabled": true,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98))",
+        "hover": false,
+        "label": "Browse files",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 106.09375,
+          "x": 39,
+          "y": 456.578125
+        },
+        "scope": "sidebar",
+        "shadow": "none",
+        "text": [],
+        "uploader": "Sidebar disabled upload",
+        "weight": "400"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(255, 255, 255)",
+        "disabled": false,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(135deg, rgba(255, 45, 149, 0.96), rgba(184, 77, 255, 0.78))",
+        "hover": false,
+        "label": "Export Project Revenue Handoff JSON",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 278.828125,
+          "x": 380,
+          "y": 219.5859375
+        },
+        "scope": "main",
+        "shadow": "rgba(0, 0, 0, 0.24) 0px 10px 26px 0px",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(232, 238, 248)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 252.828125,
+              "x": 393,
+              "y": 226.7890625
+            },
+            "shadow": "none",
+            "text": "Export Project Revenue Handoff JSON",
+            "weight": "400"
+          }
+        ],
+        "weight": "750"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(255, 255, 255)",
+        "disabled": false,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(135deg, rgba(255, 45, 149, 0.96), rgba(184, 77, 255, 0.78))",
+        "hover": false,
+        "label": "Enabled help button",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 162.25,
+          "x": 380,
+          "y": 275.5859375
+        },
+        "scope": "main",
+        "shadow": "rgba(0, 0, 0, 0.24) 0px 10px 26px 0px",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(232, 238, 248)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 136.25,
+              "x": 393,
+              "y": 282.7890625
+            },
+            "shadow": "none",
+            "text": "Enabled help button",
+            "weight": "400"
+          }
+        ],
+        "weight": "750"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgba(234, 243, 255, 0.78)",
+        "disabled": true,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(rgba(35, 42, 54, 0.98), rgba(22, 28, 39, 0.98))",
+        "hover": false,
+        "label": "Disabled help button",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 165.5703125,
+          "x": 380,
+          "y": 331.5859375
+        },
+        "scope": "main",
+        "shadow": "rgba(0, 0, 0, 0.24) 0px 10px 26px 0px",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(232, 238, 248)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 139.5703125,
+              "x": 393,
+              "y": 338.7890625
+            },
+            "shadow": "none",
+            "text": "Disabled help button",
+            "weight": "400"
+          }
+        ],
+        "weight": "750"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(255, 255, 255)",
+        "disabled": false,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(135deg, rgb(255, 45, 149), rgb(184, 77, 255))",
+        "hover": false,
+        "label": "Browse files",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 106.09375,
+          "x": 1065.90625,
+          "y": 429.5859375
+        },
+        "scope": "main",
+        "shadow": "rgba(255, 45, 149, 0.22) 0px 10px 24px 0px",
+        "text": [],
+        "uploader": "Main upload",
+        "weight": "400"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(255, 255, 255)",
+        "disabled": true,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(135deg, rgb(255, 45, 149), rgb(184, 77, 255))",
+        "hover": false,
+        "label": "Browse files",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 106.09375,
+          "x": 1065.90625,
+          "y": 541.5859375
+        },
+        "scope": "main",
+        "shadow": "rgba(255, 45, 149, 0.22) 0px 10px 24px 0px",
+        "text": [],
+        "uploader": "Main disabled upload",
+        "weight": "400"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(234, 243, 255)",
+        "disabled": false,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(135deg, rgba(255, 45, 149, 0.96), rgba(184, 77, 255, 0.78))",
+        "hover": false,
+        "label": "Contract help button",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 165.015625,
+          "x": 398,
+          "y": 679.3828125
+        },
+        "scope": "expander",
+        "shadow": "rgba(0, 0, 0, 0.24) 0px 10px 26px 0px",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 139.015625,
+              "x": 411,
+              "y": 686.5859375
+            },
+            "shadow": "none",
+            "text": "Contract help button",
+            "weight": "400"
+          }
+        ],
+        "weight": "750"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(234, 243, 255)",
+        "disabled": false,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(135deg, rgb(255, 45, 149), rgb(184, 77, 255))",
+        "hover": false,
+        "label": "Browse files",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 106.09375,
+          "x": 1047.90625,
+          "y": 777.3828125
+        },
+        "scope": "expander",
+        "shadow": "rgba(255, 45, 149, 0.22) 0px 10px 24px 0px",
+        "text": [],
+        "uploader": "Source document",
+        "weight": "400"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(234, 243, 255)",
+        "disabled": true,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(135deg, rgb(255, 45, 149), rgb(184, 77, 255))",
+        "hover": false,
+        "label": "Browse files",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 106.09375,
+          "x": 1047.90625,
+          "y": 889.3828125
+        },
+        "scope": "expander",
+        "shadow": "rgba(255, 45, 149, 0.22) 0px 10px 24px 0px",
+        "text": [],
+        "uploader": "Contract disabled upload",
+        "weight": "400"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(255, 255, 255)",
+        "disabled": false,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(135deg, rgba(255, 45, 149, 0.96), rgba(184, 77, 255, 0.78))",
+        "hover": false,
+        "label": "Submit fixture",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 120.71875,
+          "x": 396,
+          "y": 993.3828125
+        },
+        "scope": "main",
+        "shadow": "rgba(0, 0, 0, 0.24) 0px 10px 26px 0px",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(232, 238, 248)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 94.71875,
+              "x": 409,
+              "y": 1000.5859375
+            },
+            "shadow": "none",
+            "text": "Submit fixture",
+            "weight": "400"
+          }
+        ],
+        "weight": "750"
+      }
+    ],
+    "exceptions": [],
+    "metrics": [],
+    "sidebarExpanded": "true",
+    "uploaders": [
+      {
+        "background": {
+          "background": "rgba(0, 0, 0, 0)",
+          "color": "rgb(234, 243, 255)",
+          "fill": "",
+          "filter": "none",
+          "font": "16px",
+          "gradient": "linear-gradient(rgba(19, 57, 88, 0.92), rgba(8, 25, 45, 0.96))",
+          "opacity": "1",
+          "rect": {
+            "h": 133.9921875,
+            "w": 255,
+            "x": 22,
+            "y": 201.59375
+          },
+          "shadow": "none",
+          "weight": "400"
+        },
+        "label": "Sidebar upload",
+        "scope": "sidebar",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 152.078125,
+              "x": 39,
+              "y": 218.59375
+            },
+            "shadow": "none",
+            "text": "Drag and drop file here",
+            "weight": "400"
+          },
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "14px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 22.3984375,
+              "w": 152.078125,
+              "x": 39,
+              "y": 248.1875
+            },
+            "shadow": "none",
+            "text": "Limit 200MB per file",
+            "weight": "400"
+          }
+        ]
+      },
+      {
+        "background": {
+          "background": "rgba(0, 0, 0, 0)",
+          "color": "rgb(234, 243, 255)",
+          "fill": "",
+          "filter": "none",
+          "font": "16px",
+          "gradient": "linear-gradient(rgba(19, 57, 88, 0.92), rgba(8, 25, 45, 0.96))",
+          "opacity": "1",
+          "rect": {
+            "h": 133.9921875,
+            "w": 255,
+            "x": 22,
+            "y": 379.5859375
+          },
+          "shadow": "none",
+          "weight": "400"
+        },
+        "label": "Sidebar disabled upload",
+        "scope": "sidebar",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 152.078125,
+              "x": 39,
+              "y": 396.5859375
+            },
+            "shadow": "none",
+            "text": "Drag and drop file here",
+            "weight": "400"
+          },
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "14px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 22.3984375,
+              "w": 152.078125,
+              "x": 39,
+              "y": 426.1796875
+            },
+            "shadow": "none",
+            "text": "Limit 200MB per file",
+            "weight": "400"
+          }
+        ]
+      },
+      {
+        "background": {
+          "background": "rgba(0, 0, 0, 0)",
+          "color": "rgb(234, 243, 255)",
+          "fill": "",
+          "filter": "none",
+          "font": "16px",
+          "gradient": "linear-gradient(rgba(17, 25, 37, 0.98), rgba(8, 13, 22, 0.98))",
+          "opacity": "1",
+          "rect": {
+            "h": 68,
+            "w": 809,
+            "x": 380,
+            "y": 415.5859375
+          },
+          "shadow": "none",
+          "weight": "400"
+        },
+        "label": "Main upload",
+        "scope": "main",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 152.078125,
+              "x": 449.796875,
+              "y": 425.59375
+            },
+            "shadow": "none",
+            "text": "Drag and drop file here",
+            "weight": "400"
+          },
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "14px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 22.3984375,
+              "w": 152.078125,
+              "x": 449.796875,
+              "y": 451.1875
+            },
+            "shadow": "none",
+            "text": "Limit 200MB per file",
+            "weight": "400"
+          }
+        ]
+      },
+      {
+        "background": {
+          "background": "rgba(0, 0, 0, 0)",
+          "color": "rgb(234, 243, 255)",
+          "fill": "",
+          "filter": "none",
+          "font": "16px",
+          "gradient": "linear-gradient(rgba(17, 25, 37, 0.98), rgba(8, 13, 22, 0.98))",
+          "opacity": "1",
+          "rect": {
+            "h": 68,
+            "w": 809,
+            "x": 380,
+            "y": 527.5859375
+          },
+          "shadow": "none",
+          "weight": "400"
+        },
+        "label": "Main disabled upload",
+        "scope": "main",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 152.078125,
+              "x": 449.796875,
+              "y": 537.59375
+            },
+            "shadow": "none",
+            "text": "Drag and drop file here",
+            "weight": "400"
+          },
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "14px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 22.3984375,
+              "w": 152.078125,
+              "x": 449.796875,
+              "y": 563.1875
+            },
+            "shadow": "none",
+            "text": "Limit 200MB per file",
+            "weight": "400"
+          }
+        ]
+      },
+      {
+        "background": {
+          "background": "rgba(0, 0, 0, 0)",
+          "color": "rgb(234, 243, 255)",
+          "fill": "",
+          "filter": "none",
+          "font": "16px",
+          "gradient": "linear-gradient(rgba(17, 25, 37, 0.98), rgba(8, 13, 22, 0.98))",
+          "opacity": "1",
+          "rect": {
+            "h": 68,
+            "w": 773,
+            "x": 398,
+            "y": 763.3828125
+          },
+          "shadow": "none",
+          "weight": "400"
+        },
+        "label": "Source document",
+        "scope": "expander",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 152.078125,
+              "x": 467.796875,
+              "y": 773.390625
+            },
+            "shadow": "none",
+            "text": "Drag and drop file here",
+            "weight": "400"
+          },
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "14px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 22.3984375,
+              "w": 152.078125,
+              "x": 467.796875,
+              "y": 798.984375
+            },
+            "shadow": "none",
+            "text": "Limit 200MB per file",
+            "weight": "400"
+          }
+        ]
+      },
+      {
+        "background": {
+          "background": "rgba(0, 0, 0, 0)",
+          "color": "rgb(234, 243, 255)",
+          "fill": "",
+          "filter": "none",
+          "font": "16px",
+          "gradient": "linear-gradient(rgba(17, 25, 37, 0.98), rgba(8, 13, 22, 0.98))",
+          "opacity": "1",
+          "rect": {
+            "h": 68,
+            "w": 773,
+            "x": 398,
+            "y": 875.3828125
+          },
+          "shadow": "none",
+          "weight": "400"
+        },
+        "label": "Contract disabled upload",
+        "scope": "expander",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 152.078125,
+              "x": 467.796875,
+              "y": 885.390625
+            },
+            "shadow": "none",
+            "text": "Drag and drop file here",
+            "weight": "400"
+          },
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "14px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 22.3984375,
+              "w": 152.078125,
+              "x": 467.796875,
+              "y": 910.984375
+            },
+            "shadow": "none",
+            "text": "Limit 200MB per file",
+            "weight": "400"
+          }
+        ]
+      }
+    ],
+    "viewport": {
+      "dpr": 1,
+      "height": 900,
+      "width": 1280
+    }
+  },
+  "hover": [],
+  "dataTrust": {
+    "buttons": [
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(255, 255, 255)",
+        "disabled": false,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(135deg, rgba(255, 45, 149, 0.96), rgba(184, 77, 255, 0.82))",
+        "hover": false,
+        "label": "Sidebar help button",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 158.8046875,
+          "x": 22,
+          "y": 117.59375
+        },
+        "scope": "sidebar",
+        "shadow": "rgba(255, 45, 149, 0.22) 0px 10px 24px 0px",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(232, 238, 248)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 132.8046875,
+              "x": 35,
+              "y": 124.796875
+            },
+            "shadow": "none",
+            "text": "Sidebar help button",
+            "weight": "400"
+          }
+        ],
+        "weight": "750"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgba(0, 0, 0, 0)",
+        "color": "rgb(255, 255, 255)",
+        "disabled": false,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(135deg, rgb(255, 45, 149), rgb(184, 77, 255))",
+        "hover": false,
+        "label": "Browse files",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 106.09375,
+          "x": 39,
+          "y": 278.5859375
+        },
+        "scope": "sidebar",
+        "shadow": "rgba(255, 45, 149, 0.22) 0px 10px 24px 0px",
+        "text": [],
+        "uploader": "Sidebar upload",
+        "weight": "400"
+      },
+      {
+        "ariaDisabled": null,
+        "background": "rgb(23, 32, 51)",
+        "color": "rgb(219, 234, 254)",
+        "disabled": true,
+        "fill": "",
+        "filter": "none",
+        "font": "16px",
+        "gradient": "linear-gradient(rgba(30, 41, 59, 0.98), rgba(15, 23, 42, 0.98))",
+        "hover": false,
+        "label": "Browse files",
+        "opacity": "1",
+        "rect": {
+          "h": 40,
+          "w": 106.09375,
+          "x": 39,
+          "y": 456.578125
+        },
+        "scope": "sidebar",
+        "shadow": "none",
+        "text": [],
+        "uploader": "Sidebar disabled upload",
+        "weight": "400"
+      }
+    ],
+    "exceptions": [],
+    "metrics": [
+      {
+        "text": "FETCHED ZONES |  | 1",
+        "truncated": []
+      },
+      {
+        "text": "AVG COVERAGE |  | 100.0%",
+        "truncated": []
+      },
+      {
+        "text": "SOURCE GAP INTERVALS |  | 0",
+        "truncated": []
+      },
+      {
+        "text": "UNRESOLVED MISSING |  | 0",
+        "truncated": []
+      }
+    ],
+    "sidebarExpanded": "true",
+    "uploaders": [
+      {
+        "background": {
+          "background": "rgba(0, 0, 0, 0)",
+          "color": "rgb(234, 243, 255)",
+          "fill": "",
+          "filter": "none",
+          "font": "16px",
+          "gradient": "linear-gradient(rgba(19, 57, 88, 0.92), rgba(8, 25, 45, 0.96))",
+          "opacity": "1",
+          "rect": {
+            "h": 133.9921875,
+            "w": 255,
+            "x": 22,
+            "y": 201.59375
+          },
+          "shadow": "none",
+          "weight": "400"
+        },
+        "label": "Sidebar upload",
+        "scope": "sidebar",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 152.078125,
+              "x": 39,
+              "y": 218.59375
+            },
+            "shadow": "none",
+            "text": "Drag and drop file here",
+            "weight": "400"
+          },
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "14px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 22.3984375,
+              "w": 152.078125,
+              "x": 39,
+              "y": 248.1875
+            },
+            "shadow": "none",
+            "text": "Limit 200MB per file",
+            "weight": "400"
+          }
+        ]
+      },
+      {
+        "background": {
+          "background": "rgba(0, 0, 0, 0)",
+          "color": "rgb(234, 243, 255)",
+          "fill": "",
+          "filter": "none",
+          "font": "16px",
+          "gradient": "linear-gradient(rgba(19, 57, 88, 0.92), rgba(8, 25, 45, 0.96))",
+          "opacity": "1",
+          "rect": {
+            "h": 133.9921875,
+            "w": 255,
+            "x": 22,
+            "y": 379.5859375
+          },
+          "shadow": "none",
+          "weight": "400"
+        },
+        "label": "Sidebar disabled upload",
+        "scope": "sidebar",
+        "text": [
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "16px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 25.59375,
+              "w": 152.078125,
+              "x": 39,
+              "y": 396.5859375
+            },
+            "shadow": "none",
+            "text": "Drag and drop file here",
+            "weight": "400"
+          },
+          {
+            "background": "rgba(0, 0, 0, 0)",
+            "color": "rgb(234, 243, 255)",
+            "fill": "",
+            "filter": "none",
+            "font": "14px",
+            "gradient": "none",
+            "opacity": "1",
+            "rect": {
+              "h": 22.3984375,
+              "w": 152.078125,
+              "x": 39,
+              "y": 426.1796875
+            },
+            "shadow": "none",
+            "text": "Limit 200MB per file",
+            "weight": "400"
+          }
+        ]
+      }
+    ],
+    "viewport": {
+      "dpr": 1,
+      "height": 900,
+      "width": 1280
+    }
+  }
+}

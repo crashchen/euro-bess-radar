@@ -1,0 +1,14 @@
+{
+  "files_checked": 26,
+  "before_after_equal": true,
+  "method": "SHA-256 for each file in the actual data/cache before and after. The fixture only reads a separate empty temporary cache; no .env or provider clients loaded.",
+  "synthetic_servers_stopped": [
+    8620,
+    8621,
+    8622,
+    8623
+  ],
+  "browser_tab_closed": true,
+  "viewport_restored": true,
+  "original_servers_8611_8612": "left unchanged"
+}
