@@ -2209,6 +2209,14 @@ def _convert_netztransparenz_activation_volumes(
             f"{source_name} is missing required column(s): {sorted(missing)}"
         )
     ts = _netztransparenz_timestamp_utc(df, source_name=source_name)
+    if len(ts) < 2:
+        # A window past the publication edge comes back with 0 or 1 rows, so
+        # the shared axis check below would fail closed without naming why.
+        raise DataSourceParseError(
+            f"{source_name} needs at least two timestamps; got {len(ts)}. "
+            "The quality-assured series lags roughly one month behind "
+            "delivery, so a recent window may not be published yet."
+        )
     _validate_netztransparenz_regular_15min(ts, source_name=source_name)
 
     frames: list[pd.DataFrame] = []
