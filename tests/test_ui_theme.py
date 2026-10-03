@@ -209,8 +209,8 @@ def test_global_theme_guards_sidebar_disabled_button_contrast(monkeypatch) -> No
 
     assert '[data-testid="stSidebar"] button:disabled' in css
     assert '[data-testid="stSidebar"] [data-testid^="stBaseButton"]:disabled' in css
-    assert '[data-testid="stSidebar"] .stButton > button:disabled' in css
-    assert '[data-testid="stSidebar"] .stDownloadButton > button:disabled' in css
+    assert '[data-testid="stSidebar"] .stButton button:disabled' in css
+    assert '[data-testid="stSidebar"] .stDownloadButton button:disabled' in css
     assert '[data-testid="stSidebar"] button:disabled *' in css
     assert "background-color: #172033" in css
     assert "-webkit-text-fill-color: #dbeafe" in css
@@ -238,3 +238,39 @@ def test_global_theme_guards_inline_code_contrast(monkeypatch) -> None:
     assert "background: rgba(0,163,255,0.14) !important" in css
     assert "color: var(--bp-text) !important" in css
     assert "-webkit-text-fill-color: var(--bp-text) !important" in css
+
+
+def test_button_rules_reach_buttons_inside_help_tooltip_wrappers(monkeypatch) -> None:
+    """A ``help=`` button is nested in tooltip spans, not a direct child.
+
+    Browser-verified before the fix: "Export Project Revenue Handoff JSON" sat in
+    ``.stDownloadButton > div > span[stTooltipIcon] > span[stTooltipHoverTarget]``
+    and rendered rgb(232,238,248) text on the light base theme's white button
+    (~1.17:1). Every wrapper rule must therefore use a descendant selector.
+    """
+    css = _injected_theme_css(monkeypatch)
+
+    for wrapper in (".stButton", ".stDownloadButton", ".stFormSubmitButton"):
+        assert f"{wrapper} > button" not in css
+        assert f"        {wrapper} button," in css
+        assert f'[data-testid="stSidebar"] {wrapper} button,' in css
+
+
+def test_main_canvas_file_uploader_owns_surface_and_text(monkeypatch) -> None:
+    """Uploaders outside the sidebar must own BOTH background and foreground.
+
+    Browser-verified before the fix: inside an expander the dropzone was
+    rgb(240,242,246) under forced rgb(234,243,255) text (~1.0:1), and the
+    Browse button was white under the same text.
+    """
+    css = _injected_theme_css(monkeypatch)
+    rule = css.split('        [data-testid="stFileUploaderDropzone"] {', 1)[1]
+    rule = rule.split("}", 1)[0]
+    assert "background:" in rule and "!important" in rule
+    assert "-webkit-text-fill-color: #eaf3ff !important" in rule
+
+    button = css.split('        [data-testid="stFileUploaderDropzone"] button {', 1)[1]
+    button = button.split("}", 1)[0]
+    assert "background:" in button
+    assert "-webkit-text-fill-color: #ffffff !important" in button
+    assert '[data-testid="stFileUploaderFile"] *' in css

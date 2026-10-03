@@ -340,9 +340,9 @@ def inject_global_cockpit_theme() -> None:
             -webkit-text-fill-color: #eaf3ff !important;
         }
 
-        [data-testid="stSidebar"] .stButton > button,
-        [data-testid="stSidebar"] .stDownloadButton > button,
-        [data-testid="stSidebar"] .stFormSubmitButton > button,
+        [data-testid="stSidebar"] .stButton button,
+        [data-testid="stSidebar"] .stDownloadButton button,
+        [data-testid="stSidebar"] .stFormSubmitButton button,
         [data-testid="stSidebar"] [data-testid="stBaseButton-primary"] {
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
@@ -352,9 +352,9 @@ def inject_global_cockpit_theme() -> None:
             box-shadow: 0 10px 24px rgba(255,45,149,0.22) !important;
         }
 
-        [data-testid="stSidebar"] .stButton > button:hover,
-        [data-testid="stSidebar"] .stDownloadButton > button:hover,
-        [data-testid="stSidebar"] .stFormSubmitButton > button:hover,
+        [data-testid="stSidebar"] .stButton button:hover,
+        [data-testid="stSidebar"] .stDownloadButton button:hover,
+        [data-testid="stSidebar"] .stFormSubmitButton button:hover,
         [data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover {
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
@@ -362,12 +362,12 @@ def inject_global_cockpit_theme() -> None:
             filter: brightness(1.08);
         }
 
-        [data-testid="stSidebar"] .stButton > button:disabled,
-        [data-testid="stSidebar"] .stDownloadButton > button:disabled,
-        [data-testid="stSidebar"] .stFormSubmitButton > button:disabled,
-        [data-testid="stSidebar"] .stButton > button[disabled],
-        [data-testid="stSidebar"] .stDownloadButton > button[disabled],
-        [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] {
+        [data-testid="stSidebar"] .stButton button:disabled,
+        [data-testid="stSidebar"] .stDownloadButton button:disabled,
+        [data-testid="stSidebar"] .stFormSubmitButton button:disabled,
+        [data-testid="stSidebar"] .stButton button[disabled],
+        [data-testid="stSidebar"] .stDownloadButton button[disabled],
+        [data-testid="stSidebar"] .stFormSubmitButton button[disabled] {
             color: rgba(234,243,255,0.88) !important;
             -webkit-text-fill-color: rgba(234,243,255,0.88) !important;
             background:
@@ -787,9 +787,51 @@ def inject_global_cockpit_theme() -> None:
             color: var(--bp-muted);
         }
 
-        .stButton > button,
-        .stDownloadButton > button,
-        .stFormSubmitButton > button,
+        /*
+         * Main-canvas file uploaders. Only the sidebar used to style them, so a
+         * light base theme painted the dropzone and its Browse button light
+         * while the expander rules above force near-white text: ~1.0:1 inside
+         * an expander, and an unreadable Browse button elsewhere. Own BOTH the
+         * surface and the text so neither base theme can supply one half; the
+         * more specific sidebar rules above still win in the sidebar.
+         */
+        [data-testid="stFileUploaderDropzone"] {
+            color: #eaf3ff !important;
+            -webkit-text-fill-color: #eaf3ff !important;
+            background:
+                linear-gradient(180deg, rgba(17,25,37,0.98), rgba(8,13,22,0.98)) !important;
+            border: 1px dashed rgba(0,205,255,0.34) !important;
+            border-radius: 14px !important;
+        }
+
+        [data-testid="stFileUploaderDropzone"] *,
+        [data-testid="stFileUploaderFile"],
+        [data-testid="stFileUploaderFile"] * {
+            color: #eaf3ff !important;
+            -webkit-text-fill-color: #eaf3ff !important;
+        }
+
+        [data-testid="stFileUploaderFileErrorMessage"],
+        [data-testid="stFileUploaderFileErrorMessage"] * {
+            color: #ff9db5 !important;
+            -webkit-text-fill-color: #ff9db5 !important;
+        }
+
+        [data-testid="stFileUploaderDropzone"] button {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            background:
+                linear-gradient(135deg, var(--bp-magenta), var(--bp-magenta-2)) !important;
+            border: 1px solid rgba(255,255,255,0.24) !important;
+            box-shadow: 0 10px 24px rgba(255,45,149,0.22) !important;
+        }
+
+        /* Descendant, not child: a button with help= sits inside Streamlit's
+           tooltip wrappers, and a child selector left it on the base theme's
+           white surface under the app's near-white text. */
+        .stButton button,
+        .stDownloadButton button,
+        .stFormSubmitButton button,
         [data-testid="stBaseButton-primary"] {
             color: #ffffff;
             border: 1px solid rgba(255,255,255,0.14);
@@ -799,9 +841,9 @@ def inject_global_cockpit_theme() -> None:
             box-shadow: 0 10px 26px rgba(0,0,0,0.24);
         }
 
-        .stButton > button:hover,
-        .stDownloadButton > button:hover,
-        .stFormSubmitButton > button:hover,
+        .stButton button:hover,
+        .stDownloadButton button:hover,
+        .stFormSubmitButton button:hover,
         [data-testid="stBaseButton-primary"]:hover {
             border-color: rgba(255,255,255,0.38);
             filter: brightness(1.08);
@@ -812,12 +854,12 @@ def inject_global_cockpit_theme() -> None:
         [data-testid="stSidebar"] button[aria-disabled="true"],
         [data-testid="stSidebar"] [data-testid^="stBaseButton"]:disabled,
         [data-testid="stSidebar"] [data-testid^="stBaseButton"][disabled],
-        [data-testid="stSidebar"] .stButton > button:disabled,
-        [data-testid="stSidebar"] .stDownloadButton > button:disabled,
-        [data-testid="stSidebar"] .stFormSubmitButton > button:disabled,
-        [data-testid="stSidebar"] .stButton > button[disabled],
-        [data-testid="stSidebar"] .stDownloadButton > button[disabled],
-        [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] {
+        [data-testid="stSidebar"] .stButton button:disabled,
+        [data-testid="stSidebar"] .stDownloadButton button:disabled,
+        [data-testid="stSidebar"] .stFormSubmitButton button:disabled,
+        [data-testid="stSidebar"] .stButton button[disabled],
+        [data-testid="stSidebar"] .stDownloadButton button[disabled],
+        [data-testid="stSidebar"] .stFormSubmitButton button[disabled] {
             color: #dbeafe !important;
             -webkit-text-fill-color: #dbeafe !important;
             background-color: #172033 !important;
@@ -834,12 +876,12 @@ def inject_global_cockpit_theme() -> None:
         [data-testid="stSidebar"] button[aria-disabled="true"] *,
         [data-testid="stSidebar"] [data-testid^="stBaseButton"]:disabled *,
         [data-testid="stSidebar"] [data-testid^="stBaseButton"][disabled] *,
-        [data-testid="stSidebar"] .stButton > button:disabled *,
-        [data-testid="stSidebar"] .stDownloadButton > button:disabled *,
-        [data-testid="stSidebar"] .stFormSubmitButton > button:disabled *,
-        [data-testid="stSidebar"] .stButton > button[disabled] *,
-        [data-testid="stSidebar"] .stDownloadButton > button[disabled] *,
-        [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] * {
+        [data-testid="stSidebar"] .stButton button:disabled *,
+        [data-testid="stSidebar"] .stDownloadButton button:disabled *,
+        [data-testid="stSidebar"] .stFormSubmitButton button:disabled *,
+        [data-testid="stSidebar"] .stButton button[disabled] *,
+        [data-testid="stSidebar"] .stDownloadButton button[disabled] *,
+        [data-testid="stSidebar"] .stFormSubmitButton button[disabled] * {
             color: #dbeafe !important;
             -webkit-text-fill-color: #dbeafe !important;
             opacity: 1 !important;

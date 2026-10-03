@@ -13,6 +13,7 @@ from src.data_trust import (
     build_intraday_source_table,
     build_zone_data_quality_table,
 )
+from src.ui_theme import metric_columns
 
 
 def render(
@@ -40,7 +41,7 @@ def render(
         st.info("Fetch at least one bidding zone to see data trust diagnostics.")
         return
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4 = metric_columns(4)
     c1.metric("Fetched Zones", f"{len(quality):,}")
     c2.metric("Avg Coverage", f"{quality['coverage_pct'].mean():.1f}%")
     c3.metric("Source Gap Intervals", f"{int(quality['source_gap_intervals'].sum()):,}")
