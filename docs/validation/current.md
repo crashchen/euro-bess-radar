@@ -4,8 +4,7 @@ Verified **2026-10-03** against main `68d3486`. That head is the ordinary
 merge of the three manual-acceptance follow-ups. Each merge's second parent is
 the approved PR head, and its first-parent diff equals that PR's patch. The
 previous merged-state snapshot is archived
-[verbatim](2026-09-28-forward-chart-followup-merged.md); this snapshot is a
-documentation update and does not re-run the full suite.
+[verbatim](2026-09-28-forward-chart-followup-merged.md).
 
 | PR | Change | Approved head | Merge |
 |---|---|---|---|
@@ -29,7 +28,7 @@ were merged on the user's explicit authorization.
 |---|---|
 | PR-head CI | `test` and `Python 3.11 / Streamlit 1.55.0 compatibility check` succeeded at each approved head (runs 37123714659, 37137170672, 37141644468). |
 | Main push CI | Succeeded for each merge commit: `3bbe9f0` (37142094921), `3ba2f40` (37142158888), `68d3486` (37142487313). |
-| Full local suite | Codex's review stacked the three first-round patches (#105 at `d5bf996`) on a clean base: **2134 passed / 2 skipped / 29 warnings**, including slow tests. #105 revision code commit `a32e707` alone: **2127 passed / 2 skipped / 29 warnings**, including 35 slow, 296.93s (its handoff). Neither is a re-run of the final merge tree; main push CI is the merged-head check. |
+| Full local suite | Clean `git archive 68d3486` (the final merge tree), 2026-10-03: **2137 passed / 2 skipped / 29 warnings**, including slow tests, 320.35s. Earlier runs: Codex's review stacked the three first-round patches (#105 at `d5bf996`) for 2134 passed / 2 skipped. #105 revision `a32e707` alone gave 2127 passed / 2 skipped. The two skips are the opt-in Kaleido chart checks; the warnings are the tracked Streamlit DataFrame-attrs and pandas empty-concat warnings. |
 | Browser acceptance | Agent-driven, not a human operator pass. All 52 checklist items executed: on `e28ee9c` in Chrome on 2026-10-02, and on `68d3486` in headless Chromium on 2026-10-03. 51 met their expectation within the stated scope. Item 37 has one open layout finding (F7): at 390 px the multi-day replay "Avg Annualized" value is ellipsized. The F1 fix was re-checked live on `68d3486`. Resizing populated panels sent no websocket frames (no rerun or solve). |
 | Radar → ESS | Items 44–47 against ESS `9bad91c`: the applied stream reconciles with Radar settled revenue × CPI. ESS consumer defects F5 (DA arbitrage double count via the grid-tariff fallback) and F6 (no asset-size check) belong to ESS. |
 | Real cache | `data/cache` 26/26 file hashes unchanged across the 2026-10-02 run, the #105 revision runs and the 2026-10-03 closeout. |
