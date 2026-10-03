@@ -20,9 +20,9 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, TypeVar
 
 import pandas as pd
 import streamlit as st
@@ -35,6 +35,7 @@ from src.project_case import (
     PROJECT_CASE_SCHEMA_VERSION,
     AnnualPreLifecycleStrategyCashFloor,
     AssetCase,
+    AugmentationEvent,
     BootstrapCase,
     CapacityMaintenanceBasis,
     ContractCase,
@@ -95,6 +96,13 @@ P90_LABEL: Final = "P90 (Upside)"
 PROBABILITY_LABEL: Final = "P(NPV > 0)"
 
 _CACHE_KEY: Final = "project_case_pc_c_cache"
+_INPUT_ERRORS: Final = (
+    AdapterUnavailableError,
+    ProjectCaseValidationError,
+    TypeError,
+    ValueError,
+)
+_T = TypeVar("_T")
 _P50_TABLE_CAPTION: Final = (
     "Representative cash-flow tables reconcile to the linear P50 NPV. "
     "Merchant-only cases use the linear P50 annual bootstrap draw; contracted "
@@ -519,6 +527,37 @@ def render_project_case_result(
     )
 
 
+class _InputErrors:
+    """Collect input errors so every later widget still renders in this run.
+
+    Streamlit discards the state of any widget a script run does not render.
+    Raising at the first invalid input would therefore reset every input after
+    it to its default once the user repaired the error.  Sections run through
+    :meth:`capture`; the panel blocks the run only after all widgets rendered.
+    """
+
+    def __init__(self) -> None:
+        self._errors: list[Exception] = []
+
+    def add(self, exc: Exception) -> None:
+        self._errors.append(exc)
+
+    def capture(self, build: Callable[[], _T]) -> _T | None:
+        """Return ``build()``, or record its input error and return ``None``."""
+        try:
+            return build()
+        except ExceptionGroup as group:
+            self._errors.extend(group.exceptions)
+        except _INPUT_ERRORS as exc:
+            self._errors.append(exc)
+        return None
+
+    def raise_if_any(self) -> None:
+        """Re-raise every collected error once the section's widgets rendered."""
+        if self._errors:
+            raise ExceptionGroup("Project Case input errors", self._errors)
+
+
 def _select_maintenance_basis() -> CapacityMaintenanceBasis:
     label = st.selectbox(
         "Capacity-maintenance basis",
@@ -610,8 +649,35 @@ def _projection_inputs(
     )
 
 
+def _augmentation_events(project_life_years: int) -> tuple[AugmentationEvent, ...]:
+    """Render the augmentation schedule upload and return its validated events."""
+    st.download_button(
+        "Download augmentation CSV template",
+        data=AUGMENTATION_TEMPLATE_CSV,
+        file_name="project_case_augmentation_schedule.csv",
+        mime="text/csv",
+        key="pc_augmentation_template_download",
+    )
+    upload = st.file_uploader(
+        "Upload augmentation/replacement schedule",
+        type=["csv"],
+        key="pc_augmentation_upload",
+    )
+    if upload is None:
+        raise ProjectCaseValidationError("Upload an augmentation schedule CSV")
+    events, preview = parse_augmentation_csv(upload.getvalue())
+    if any(event.year > project_life_years for event in events):
+        raise ProjectCaseValidationError(
+            "augmentation schedule contains a year beyond project life"
+        )
+    st.caption("Validated augmentation schedule preview")
+    st.dataframe(preview, width="stretch", hide_index=True)
+    return events
+
+
 def _lifecycle_inputs(project_life_years: int) -> LifecycleCase:
     basis = _select_maintenance_basis()
+    errors = _InputErrors()
     events = ()
     source = None
     as_of = None
@@ -628,27 +694,7 @@ def _lifecycle_inputs(project_life_years: int) -> LifecycleCase:
         )
         as_of = as_of_date.isoformat()
     if basis is CapacityMaintenanceBasis.SCHEDULED_NAMEPLATE_MAINTENANCE:
-        st.download_button(
-            "Download augmentation CSV template",
-            data=AUGMENTATION_TEMPLATE_CSV,
-            file_name="project_case_augmentation_schedule.csv",
-            mime="text/csv",
-            key="pc_augmentation_template_download",
-        )
-        upload = st.file_uploader(
-            "Upload augmentation/replacement schedule",
-            type=["csv"],
-            key="pc_augmentation_upload",
-        )
-        if upload is None:
-            raise ProjectCaseValidationError("Upload an augmentation schedule CSV")
-        events, preview = parse_augmentation_csv(upload.getvalue())
-        if any(event.year > project_life_years for event in events):
-            raise ProjectCaseValidationError(
-                "augmentation schedule contains a year beyond project life"
-            )
-        st.caption("Validated augmentation schedule preview")
-        st.dataframe(preview, width="stretch", hide_index=True)
+        events = errors.capture(lambda: _augmentation_events(project_life_years)) or ()
 
     c1, c2 = st.columns(2)
     eol_residual = c1.number_input(
@@ -665,6 +711,7 @@ def _lifecycle_inputs(project_life_years: int) -> LifecycleCase:
         step=10000.0,
         key="pc_decommissioning",
     )
+    errors.raise_if_any()
     return LifecycleCase(
         project_life_years=project_life_years,
         capacity_maintenance_basis=basis,
@@ -887,13 +934,14 @@ def _contract_inputs(
             key="pc_contract_tenor",
         ))
         final_year = start_year + tenor - 1
+        errors = _InputErrors()
         if final_year > project_life_years:
-            raise ProjectCaseValidationError(
+            errors.add(ProjectCaseValidationError(
                 f"contract term ends in project year {final_year}, beyond the "
                 f"{project_life_years}-year project life"
-            )
-        rates = _contract_rate_curve(tenor)
-        factors = _contract_entitlement_factors(tenor)
+            ))
+        rates = errors.capture(lambda: _contract_rate_curve(tenor))
+        factors = errors.capture(lambda: _contract_entitlement_factors(tenor))
 
         status_label = st.selectbox(
             "Quote status (user assertion)",
@@ -922,6 +970,7 @@ def _contract_inputs(
             f"(bound to the valuation base year); modelled whole-project power "
             f"{power_mw:g} MW (inherited from the asset case, never re-entered here)."
         )
+        errors.raise_if_any()
 
         terms = AnnualPreLifecycleStrategyCashFloor(
             contract_start_project_year=start_year,
@@ -1070,6 +1119,22 @@ def current_project_case_result() -> RunResult | None:
     return cached.result
 
 
+def _bootstrap_seed(text: str) -> int:
+    try:
+        return int(text)
+    except ValueError as exc:
+        raise ProjectCaseValidationError(
+            f"Bootstrap seed must be an integer; got {text!r}"
+        ) from exc
+
+
+def _block_on_input_errors(errors: Sequence[Exception]) -> None:
+    """Discard any cached result and show every reason the run is blocked."""
+    st.session_state.pop(_CACHE_KEY, None)
+    for exc in errors:
+        st.error(f"Project Case input unavailable: {exc}")
+
+
 def render_project_case_panel(
     *,
     primary_zone: str,
@@ -1095,6 +1160,7 @@ def render_project_case_panel(
         "This path uses one selected producer-issued realised strategy, never a "
         "comparison-table row. It reports screening and pre-tax unlevered lifecycle NPV."
     )
+    errors = _InputErrors()
     try:
         strategy_selection = _strategy_selection(
             primary_zone=primary_zone,
@@ -1137,22 +1203,24 @@ def render_project_case_panel(
             key="pc_fixed_om",
             help="Fixed O&M only. Dispatch VOM is already embedded and is not re-deducted.",
         )
-        lifecycle = _lifecycle_inputs(project_life)
-        projection = _projection_inputs(
+        # Every section renders even after an earlier one failed, so a transient
+        # validation error never resets the inputs below it (see _InputErrors).
+        lifecycle = errors.capture(lambda: _lifecycle_inputs(project_life))
+        projection = errors.capture(lambda: _projection_inputs(
             project_life,
             allow_non_flat=(
                 strategy_selection.adapter_id is ProducerAdapterId.PC_ADP_DA_ONLY
             ),
-        )
+        ))
 
-        contract = _contract_inputs(
+        contract = errors.capture(lambda: _contract_inputs(
             project_life_years=project_life,
             base_year=base_year,
             power_mw=power_mw,
-        )
+        ))
 
         c4, c5 = st.columns(2)
-        seed = int(c4.text_input("Bootstrap seed", "0", key="pc_bootstrap_seed"))
+        seed_text = c4.text_input("Bootstrap seed", "0", key="pc_bootstrap_seed")
         simulations = int(c5.number_input(
             "Bootstrap simulations",
             MIN_SIMULATIONS,
@@ -1161,6 +1229,8 @@ def render_project_case_panel(
             1000,
             key="pc_bootstrap_simulations",
         ))
+        seed = errors.capture(lambda: _bootstrap_seed(seed_text))
+        errors.raise_if_any()
         start = pd.Timestamp(start_date).date()
         end = pd.Timestamp(end_date).date()
         asset = AssetCase.from_capex_per_kwh(
@@ -1190,14 +1260,11 @@ def render_project_case_panel(
             CurrencyBasisMode.SOURCE_EUR_TREATED_AS_BASE_YEAR_REAL,
             base_year,
         )
-    except (
-        AdapterUnavailableError,
-        ProjectCaseValidationError,
-        TypeError,
-        ValueError,
-    ) as exc:
-        st.session_state.pop(_CACHE_KEY, None)
-        st.error(f"Project Case input unavailable: {exc}")
+    except ExceptionGroup as group:
+        _block_on_input_errors(group.exceptions)
+        return None
+    except _INPUT_ERRORS as exc:
+        _block_on_input_errors((exc,))
         return None
 
     cached = _cached_result(request_fingerprint)
