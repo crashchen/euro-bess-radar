@@ -1,4 +1,4 @@
-"""Offline controls plus the production Data Trust renderer; no market cache.
+"""Synthetic controls/prices plus the production Data Trust renderer.
 
 RADAR_UI_SOURCE selects a source checkout/archive. Run with Streamlit 1.55:
 RADAR_UI_SOURCE=<source> python -m streamlit run <this file> --theme.base light
@@ -15,8 +15,10 @@ from src import config, data_ingestion
 from src.pages import data_trust
 from src.ui_theme import inject_global_cockpit_theme
 
-# Readers use these module constants; use an empty disposable cache. Do not
-# load app.py, .env, provider clients, or the workstation's market database.
+# CACHE_DIR is redirected, but DB_PATH is not: Data Trust source diagnostics
+# can read the existing provenance database. config import also loads .env.
+# No app.py/provider client/fetch is invoked. The four KPI values below come
+# from synthetic prices; before/after hashes verify that real cache was not written.
 if 'fixture_cache' not in st.session_state:
     st.session_state.fixture_cache = tempfile.mkdtemp(prefix='radar-control-fixture-')
 config.CACHE_DIR = Path(st.session_state.fixture_cache)

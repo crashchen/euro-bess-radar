@@ -45,11 +45,10 @@ Project Case state or export calculation changes.
   their values and show no clipping.
 - Real market cache: **26/26 file hashes unchanged**. All revision servers and
   browser tabs are closed; viewport reset. Original 8611/8612 untouched.
-- Code-head remote compatibility check passed at `a32e707` (run
+- Both code-head remote jobs passed at `a32e707` (run
   [37140544596](https://github.com/crashchen/euro-bess-radar/actions/runs/37140544596)).
-  Its full job was still running when this handoff was written. Verify both
-  jobs on the latest documentation head before proposing merge; old-head CI
-  does not approve later bytes.
+  Verify both jobs on the latest documentation head before proposing merge;
+  code-head CI does not approve later documentation bytes.
 
 Revision patch SHA-256:
 `8cdf7e3f57549d959e42fdc55d958acdd70e036d3ad72c0204335a3edb54b177`.
@@ -75,7 +74,11 @@ The first reviewed patch is preserved with SHA-256
    Verify precise head CI and the two-file production/test increment.
 
 The browser fixture uses production CSS and the Data Trust renderer, not the
-complete real-data application or contract workflow. No file/error-state
+complete real-data application or contract workflow. CACHE_DIR was redirected,
+but DB_PATH was not; source diagnostics can read the existing provenance DB,
+and config import executes load_dotenv(). The real-cache hashes prove no
+write, not complete read isolation. No client or fetch was invoked.
+No file/error-state
 acceptance, all-52 manual acceptance or whole-app accessibility claim is made.
 The old sidebar gradient remains outside this scoped change. Original CC
 acceptance evidence in `outputs/` remains unchanged; the combined #104–#106

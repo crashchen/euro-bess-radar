@@ -42,8 +42,12 @@ No old head's green check is treated as evidence for this revision.
 the production Data Trust renderer. Controls are real Streamlit widgets with
 synthetic labels/content: a help-wrapped Handoff download, help buttons in the
 main area and an expander, a form submit and enabled/disabled uploaders. It
-uses a separate empty temporary cache. No provider client, .env, actual contract
-or real market cache is loaded. The harness does not execute Project Case or
+redirects CACHE_DIR to an empty temporary directory, but does not redirect
+DB_PATH: Data Trust source diagnostics can read the existing provenance
+database. Importing src.config also executes load_dotenv() against the source
+checkout. No provider client is created, no fetch is invoked and no actual
+contract is uploaded. The four KPI values come from the synthetic price frame;
+the 26/26 cache-hash comparison verifies no write, not absence of reads. The harness does not execute Project Case or
 assert a full production-page acceptance pass.
 
 Codex used the in-app browser via CUA, not a shell/headless browser driver.
