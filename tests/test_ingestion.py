@@ -2352,6 +2352,51 @@ class TestFetchActivationEnergy:
             )
         mock_client.return_value.query_activated_balancing_energy_prices.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "rows",
+        [
+            pytest.param([], id="header-only"),
+            pytest.param([("01.05.2026", "00:00", "00:15", 5.0, 0)], id="one-row"),
+        ],
+    )
+    @patch("src.data_ingestion.EntsoePandasClient")
+    @patch("src.data_ingestion.get_api_key", return_value="fake-key")
+    @patch("src.data_ingestion._call_netztransparenz_csv")
+    def test_unpublished_window_raises_with_lag_hint(
+        self,
+        mock_call: MagicMock,
+        _mock_key: MagicMock,
+        mock_client: MagicMock,
+        rows: list[tuple[str, str, str, object, object]],
+    ) -> None:
+        """A too-recent window returns fewer than two rows (acceptance F1).
+
+        The strict axis check still fails closed; the message must also name
+        the roughly one-month publication lag instead of only the row count.
+        """
+        mock_call.side_effect = [self._volume_csv(rows)]
+
+        with pytest.raises(DataSourceParseError) as excinfo:
+            fetch_activation_energy(
+                "DE_LU",
+                pd.Timestamp("2026-04-30T22:00:00Z"),
+                pd.Timestamp("2026-05-01T22:00:00Z"),
+            )
+        message = str(excinfo.value)
+        assert message.startswith("Aktivierte aFRR needs at least two timestamps")
+        assert f"got {len(rows)}" in message
+        assert "lags roughly one month behind delivery" in message
+        mock_client.return_value.query_activated_balancing_energy_prices.assert_not_called()
+
+    def test_short_imbalance_response_keeps_the_generic_axis_error(self) -> None:
+        """The shared 15-minute validator is unchanged for reBAP/NRV."""
+        from src import data_ingestion as di
+
+        ts = pd.Series(pd.to_datetime(["2026-05-01T00:00:00Z"]))
+        with pytest.raises(DataSourceParseError) as excinfo:
+            di._validate_netztransparenz_regular_15min(ts, source_name="NRV-Saldo")
+        assert str(excinfo.value) == "NRV-Saldo needs at least two timestamps"
+
     @patch("src.data_ingestion.EntsoePandasClient")
     @patch("src.data_ingestion.get_api_key", return_value="fake-key")
     @patch("src.data_ingestion._call_netztransparenz_csv")
