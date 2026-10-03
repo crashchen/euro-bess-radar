@@ -1,0 +1,17 @@
+{
+  "files_checked": 26,
+  "before_after_equal": true,
+  "method": "SHA-256 for every real data/cache file before and after: proves no modification. The fixture redirects CACHE_DIR only, not DB_PATH; Data Trust source diagnostics can read the existing provenance DB, and src.config import executes load_dotenv(). No provider client/fetch is invoked; four KPI values derive from synthetic prices.",
+  "synthetic_servers_stopped": [
+    8620,
+    8621,
+    8622,
+    8623
+  ],
+  "browser_tab_closed": true,
+  "viewport_restored": true,
+  "original_servers_8611_8612": "left unchanged",
+  "db_path_redirected": false,
+  "dotenv_import_behavior": "src.config executes load_dotenv()",
+  "claim": "no cache writes; not complete read isolation"
+}

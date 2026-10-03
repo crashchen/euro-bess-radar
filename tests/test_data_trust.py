@@ -452,3 +452,29 @@ def test_imbalance_source_table_coalesces_null_metadata_values() -> None:
 
 def test_imbalance_source_table_empty_when_no_sources() -> None:
     assert build_imbalance_source_table({}).empty
+
+
+def test_data_trust_metric_row_wraps_at_its_container_width() -> None:
+    """The summary cards use the shared wrapping row, not fixed columns.
+
+    Browser-verified before the fix: at 960 CSS px with the sidebar expanded,
+    four fixed ``st.columns`` truncated "Avg Coverage" to "10…".
+    """
+    import ast
+    import inspect
+
+    import src.pages.data_trust as page
+
+    calls = [
+        node
+        for node in ast.walk(ast.parse(inspect.getsource(page.render)))
+        if isinstance(node, ast.Call)
+    ]
+    assert any(
+        isinstance(call.func, ast.Name) and call.func.id == "metric_columns"
+        for call in calls
+    )
+    assert not any(
+        isinstance(call.func, ast.Attribute) and call.func.attr == "columns"
+        for call in calls
+    )

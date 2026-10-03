@@ -1,0 +1,101 @@
+{
+  "method": "Conservative channel-wise luminance ceiling across two opaque sRGB stops, using actual rendered leaf foreground. Normal and hover captured after real pointer movement; disabled controls excluded from the contrast threshold. Browser/fixture scope, not whole-app WCAG certification.",
+  "cases": [
+    {
+      "theme": "light",
+      "width": 390,
+      "normal_contrast_lower_bound": 5.055721764060934,
+      "hover_contrast_lower_bound": 6.170390879206953,
+      "enabled_buttons_each_state": 6,
+      "actual_hover_checks": 8,
+      "disabled_browse_separate": true,
+      "sidebar_unchanged": true,
+      "uploader_instructions_unchanged": true,
+      "metrics_unchanged_and_unclipped": true
+    },
+    {
+      "theme": "light",
+      "width": 960,
+      "normal_contrast_lower_bound": 5.055721764060934,
+      "hover_contrast_lower_bound": 6.170390879206953,
+      "enabled_buttons_each_state": 6,
+      "actual_hover_checks": 8,
+      "disabled_browse_separate": true,
+      "sidebar_unchanged": true,
+      "uploader_instructions_unchanged": true,
+      "metrics_unchanged_and_unclipped": true
+    },
+    {
+      "theme": "light",
+      "width": 1280,
+      "normal_contrast_lower_bound": 5.055721764060934,
+      "hover_contrast_lower_bound": 6.170390879206953,
+      "enabled_buttons_each_state": 6,
+      "actual_hover_checks": 8,
+      "disabled_browse_separate": true,
+      "sidebar_unchanged": true,
+      "uploader_instructions_unchanged": true,
+      "metrics_unchanged_and_unclipped": true
+    },
+    {
+      "theme": "light",
+      "width": 1440,
+      "normal_contrast_lower_bound": 5.055721764060934,
+      "hover_contrast_lower_bound": 6.170390879206953,
+      "enabled_buttons_each_state": 6,
+      "actual_hover_checks": 8,
+      "disabled_browse_separate": true,
+      "sidebar_unchanged": true,
+      "uploader_instructions_unchanged": true,
+      "metrics_unchanged_and_unclipped": true
+    },
+    {
+      "theme": "dark",
+      "width": 390,
+      "normal_contrast_lower_bound": 5.055721764060934,
+      "hover_contrast_lower_bound": 6.170390879206953,
+      "enabled_buttons_each_state": 6,
+      "actual_hover_checks": 8,
+      "disabled_browse_separate": true,
+      "sidebar_unchanged": true,
+      "uploader_instructions_unchanged": true,
+      "metrics_unchanged_and_unclipped": true
+    },
+    {
+      "theme": "dark",
+      "width": 960,
+      "normal_contrast_lower_bound": 5.055721764060934,
+      "hover_contrast_lower_bound": 6.170390879206953,
+      "enabled_buttons_each_state": 6,
+      "actual_hover_checks": 8,
+      "disabled_browse_separate": true,
+      "sidebar_unchanged": true,
+      "uploader_instructions_unchanged": true,
+      "metrics_unchanged_and_unclipped": true
+    },
+    {
+      "theme": "dark",
+      "width": 1280,
+      "normal_contrast_lower_bound": 5.055721764060934,
+      "hover_contrast_lower_bound": 6.170390879206953,
+      "enabled_buttons_each_state": 6,
+      "actual_hover_checks": 8,
+      "disabled_browse_separate": true,
+      "sidebar_unchanged": true,
+      "uploader_instructions_unchanged": true,
+      "metrics_unchanged_and_unclipped": true
+    },
+    {
+      "theme": "dark",
+      "width": 1440,
+      "normal_contrast_lower_bound": 5.055721764060934,
+      "hover_contrast_lower_bound": 6.170390879206953,
+      "enabled_buttons_each_state": 6,
+      "actual_hover_checks": 8,
+      "disabled_browse_separate": true,
+      "sidebar_unchanged": true,
+      "uploader_instructions_unchanged": true,
+      "metrics_unchanged_and_unclipped": true
+    }
+  ]
+}

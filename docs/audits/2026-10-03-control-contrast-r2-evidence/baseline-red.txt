@@ -1,0 +1,39 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.9, pytest-8.4.2, pluggy-1.6.0
+rootdir: /private<baseline-repo>
+configfile: pyproject.toml
+collected 45 items
+
+tests/test_ui_theme.py ...............FFF                                [ 40%]
+tests/test_data_trust.py ...........................                     [100%]
+
+=================================== FAILURES ===================================
+________ test_main_button_gradient_keeps_normal_text_contrast[enabled] _________
+tests/test_ui_theme.py:307: in test_main_button_gradient_keeps_normal_text_contrast
+    background = _main_control_background(_injected_theme_css(monkeypatch), state=state)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_ui_theme.py:295: in _main_control_background
+    assert backgrounds, f"No main {state} button surface"
+E   AssertionError: No main enabled button surface
+E   assert []
+_________ test_main_button_gradient_keeps_normal_text_contrast[hover] __________
+tests/test_ui_theme.py:307: in test_main_button_gradient_keeps_normal_text_contrast
+    background = _main_control_background(_injected_theme_css(monkeypatch), state=state)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_ui_theme.py:295: in _main_control_background
+    assert backgrounds, f"No main {state} button surface"
+E   AssertionError: No main hover button surface
+E   assert []
+____________ test_main_disabled_browse_has_a_separate_muted_surface ____________
+tests/test_ui_theme.py:318: in test_main_disabled_browse_has_a_separate_muted_surface
+    enabled = _main_control_background(css, state="enabled")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests/test_ui_theme.py:295: in _main_control_background
+    assert backgrounds, f"No main {state} button surface"
+E   AssertionError: No main enabled button surface
+E   assert []
+=========================== short test summary info ============================
+FAILED tests/test_ui_theme.py::test_main_button_gradient_keeps_normal_text_contrast[enabled]
+FAILED tests/test_ui_theme.py::test_main_button_gradient_keeps_normal_text_contrast[hover]
+FAILED tests/test_ui_theme.py::test_main_disabled_browse_has_a_separate_muted_surface
+========================= 3 failed, 42 passed in 0.47s =========================

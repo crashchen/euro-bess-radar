@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import re
+
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.io as pio
+import pytest
 import streamlit as st
 
 import src.ui_theme as ui_theme
@@ -209,8 +212,8 @@ def test_global_theme_guards_sidebar_disabled_button_contrast(monkeypatch) -> No
 
     assert '[data-testid="stSidebar"] button:disabled' in css
     assert '[data-testid="stSidebar"] [data-testid^="stBaseButton"]:disabled' in css
-    assert '[data-testid="stSidebar"] .stButton > button:disabled' in css
-    assert '[data-testid="stSidebar"] .stDownloadButton > button:disabled' in css
+    assert '[data-testid="stSidebar"] .stButton button:disabled' in css
+    assert '[data-testid="stSidebar"] .stDownloadButton button:disabled' in css
     assert '[data-testid="stSidebar"] button:disabled *' in css
     assert "background-color: #172033" in css
     assert "-webkit-text-fill-color: #dbeafe" in css
@@ -238,3 +241,86 @@ def test_global_theme_guards_inline_code_contrast(monkeypatch) -> None:
     assert "background: rgba(0,163,255,0.14) !important" in css
     assert "color: var(--bp-text) !important" in css
     assert "-webkit-text-fill-color: var(--bp-text) !important" in css
+
+
+def test_button_rules_reach_buttons_inside_help_tooltip_wrappers(monkeypatch) -> None:
+    """A ``help=`` button is nested in tooltip spans, not a direct child.
+
+    Browser-verified before the fix: "Export Project Revenue Handoff JSON" sat in
+    ``.stDownloadButton > div > span[stTooltipIcon] > span[stTooltipHoverTarget]``
+    and rendered rgb(232,238,248) text on the light base theme's white button
+    (~1.17:1). Every wrapper rule must therefore use a descendant selector.
+    """
+    css = _injected_theme_css(monkeypatch)
+
+    for wrapper in (".stButton", ".stDownloadButton", ".stFormSubmitButton"):
+        assert f"{wrapper} > button" not in css
+        assert f"        {wrapper} button," in css
+        assert f'[data-testid="stSidebar"] {wrapper} button,' in css
+
+
+def test_main_canvas_file_uploader_owns_surface_and_text(monkeypatch) -> None:
+    """Uploaders outside the sidebar must own BOTH background and foreground.
+
+    Browser-verified before the fix: inside an expander the dropzone was
+    rgb(240,242,246) under forced rgb(234,243,255) text (~1.0:1), and the
+    Browse button was white under the same text.
+    """
+    css = _injected_theme_css(monkeypatch)
+    rule = css.split('        [data-testid="stFileUploaderDropzone"] {', 1)[1]
+    rule = rule.split("}", 1)[0]
+    assert "background:" in rule and "!important" in rule
+    assert "-webkit-text-fill-color: #eaf3ff !important" in rule
+
+    button = css.split('        [data-testid="stFileUploaderDropzone"] button {', 1)[1]
+    button = button.split("}", 1)[0]
+    assert "background:" in button
+    assert "-webkit-text-fill-color: #ffffff !important" in button
+    assert '[data-testid="stFileUploaderFile"] *' in css
+
+
+def _main_control_background(css: str, *, state: str) -> str:
+    """Read the final scoped declaration; browser evidence checks the cascade."""
+    backgrounds = []
+    for selectors, declarations in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+        if '[data-testid="stMain"]' not in selectors or "button" not in selectors:
+            continue
+        if f":{state}" not in selectors:
+            continue
+        if state == "enabled" and ":hover" in selectors:
+            continue
+        match = re.search(r"background\s*:\s*([^;]+)", declarations)
+        if match:
+            backgrounds.append(match.group(1))
+    assert backgrounds, f"No main {state} button surface"
+    return backgrounds[-1]
+
+
+@pytest.mark.parametrize("state", ["enabled", "hover"])
+def test_main_button_gradient_keeps_normal_text_contrast(monkeypatch, state) -> None:
+    """Bound the whole opaque gradient, rather than averaging its endpoints.
+
+    Taking the largest channel from either stop bounds luminance above every
+    sRGB-interpolated color. This conservative background must still provide
+    4.5:1 for the white button text; browser checks verify the actual leaf fill.
+    """
+    background = _main_control_background(_injected_theme_css(monkeypatch), state=state)
+    stops = re.findall(r"#([0-9a-fA-F]{6})\b", background)
+    assert len(stops) == 2, "Use two opaque control colors, independent of base theme"
+    ceiling = [max(int(stop[i:i + 2], 16) for stop in stops) / 255 for i in (0, 2, 4)]
+    linear = [v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4 for v in ceiling]
+    luminance = sum(w * v for w, v in zip((0.2126, 0.7152, 0.0722), linear, strict=True))
+    assert 1.05 / (luminance + 0.05) >= 4.5
+
+
+def test_main_disabled_browse_has_a_separate_muted_surface(monkeypatch) -> None:
+    css = _injected_theme_css(monkeypatch)
+    enabled = _main_control_background(css, state="enabled")
+    disabled = _main_control_background(css, state="disabled")
+    assert enabled != disabled
+    # A disabled upload button must override the earlier uploader glow as well
+    # as its fill. Browser checks verify it remains disabled inside expanders.
+    rules = [declarations for selectors, declarations in re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+             if '[data-testid="stMain"]' in selectors and "button:disabled" in selectors]
+    assert any("box-shadow: none !important" in rule and "filter: none !important" in rule
+               for rule in rules)

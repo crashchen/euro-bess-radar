@@ -13,6 +13,16 @@ those preserved bytes as whitespace errors.
 The [current verification snapshot](../validation/current.md) is the single
 entry point for today's code-bound results. The records below remain historical.
 
+## Pending control revision
+
+PR [#105](https://github.com/crashchen/euro-bess-radar/pull/105) remains draft.
+Its main-control contrast and disabled Browse review findings are implemented
+at `a32e707`, awaiting user-invoked CC review. See the
+[revision handoff](2026-10-03-control-contrast-r2-handoff.md) and
+[frozen increment, baseline and browser matrix](2026-10-03-control-contrast-r2-evidence/README.md).
+This candidate does not replace the last merged verification snapshot or
+complete the outstanding manual acceptance.
+
 ## Review stages
 
 | Stage | Source reference | Record |

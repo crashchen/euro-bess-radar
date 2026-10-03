@@ -340,9 +340,9 @@ def inject_global_cockpit_theme() -> None:
             -webkit-text-fill-color: #eaf3ff !important;
         }
 
-        [data-testid="stSidebar"] .stButton > button,
-        [data-testid="stSidebar"] .stDownloadButton > button,
-        [data-testid="stSidebar"] .stFormSubmitButton > button,
+        [data-testid="stSidebar"] .stButton button,
+        [data-testid="stSidebar"] .stDownloadButton button,
+        [data-testid="stSidebar"] .stFormSubmitButton button,
         [data-testid="stSidebar"] [data-testid="stBaseButton-primary"] {
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
@@ -352,9 +352,9 @@ def inject_global_cockpit_theme() -> None:
             box-shadow: 0 10px 24px rgba(255,45,149,0.22) !important;
         }
 
-        [data-testid="stSidebar"] .stButton > button:hover,
-        [data-testid="stSidebar"] .stDownloadButton > button:hover,
-        [data-testid="stSidebar"] .stFormSubmitButton > button:hover,
+        [data-testid="stSidebar"] .stButton button:hover,
+        [data-testid="stSidebar"] .stDownloadButton button:hover,
+        [data-testid="stSidebar"] .stFormSubmitButton button:hover,
         [data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover {
             color: #ffffff !important;
             -webkit-text-fill-color: #ffffff !important;
@@ -362,12 +362,12 @@ def inject_global_cockpit_theme() -> None:
             filter: brightness(1.08);
         }
 
-        [data-testid="stSidebar"] .stButton > button:disabled,
-        [data-testid="stSidebar"] .stDownloadButton > button:disabled,
-        [data-testid="stSidebar"] .stFormSubmitButton > button:disabled,
-        [data-testid="stSidebar"] .stButton > button[disabled],
-        [data-testid="stSidebar"] .stDownloadButton > button[disabled],
-        [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] {
+        [data-testid="stSidebar"] .stButton button:disabled,
+        [data-testid="stSidebar"] .stDownloadButton button:disabled,
+        [data-testid="stSidebar"] .stFormSubmitButton button:disabled,
+        [data-testid="stSidebar"] .stButton button[disabled],
+        [data-testid="stSidebar"] .stDownloadButton button[disabled],
+        [data-testid="stSidebar"] .stFormSubmitButton button[disabled] {
             color: rgba(234,243,255,0.88) !important;
             -webkit-text-fill-color: rgba(234,243,255,0.88) !important;
             background:
@@ -787,9 +787,51 @@ def inject_global_cockpit_theme() -> None:
             color: var(--bp-muted);
         }
 
-        .stButton > button,
-        .stDownloadButton > button,
-        .stFormSubmitButton > button,
+        /*
+         * Main-canvas file uploaders. Only the sidebar used to style them, so a
+         * light base theme painted the dropzone and its Browse button light
+         * while the expander rules above force near-white text: ~1.0:1 inside
+         * an expander, and an unreadable Browse button elsewhere. Own BOTH the
+         * surface and the text so neither base theme can supply one half; the
+         * more specific sidebar rules above still win in the sidebar.
+         */
+        [data-testid="stFileUploaderDropzone"] {
+            color: #eaf3ff !important;
+            -webkit-text-fill-color: #eaf3ff !important;
+            background:
+                linear-gradient(180deg, rgba(17,25,37,0.98), rgba(8,13,22,0.98)) !important;
+            border: 1px dashed rgba(0,205,255,0.34) !important;
+            border-radius: 14px !important;
+        }
+
+        [data-testid="stFileUploaderDropzone"] *,
+        [data-testid="stFileUploaderFile"],
+        [data-testid="stFileUploaderFile"] * {
+            color: #eaf3ff !important;
+            -webkit-text-fill-color: #eaf3ff !important;
+        }
+
+        [data-testid="stFileUploaderFileErrorMessage"],
+        [data-testid="stFileUploaderFileErrorMessage"] * {
+            color: #ff9db5 !important;
+            -webkit-text-fill-color: #ff9db5 !important;
+        }
+
+        [data-testid="stFileUploaderDropzone"] button {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            background:
+                linear-gradient(135deg, var(--bp-magenta), var(--bp-magenta-2)) !important;
+            border: 1px solid rgba(255,255,255,0.24) !important;
+            box-shadow: 0 10px 24px rgba(255,45,149,0.22) !important;
+        }
+
+        /* Descendant, not child: a button with help= sits inside Streamlit's
+           tooltip wrappers, and a child selector left it on the base theme's
+           white surface under the app's near-white text. */
+        .stButton button,
+        .stDownloadButton button,
+        .stFormSubmitButton button,
         [data-testid="stBaseButton-primary"] {
             color: #ffffff;
             border: 1px solid rgba(255,255,255,0.14);
@@ -799,12 +841,42 @@ def inject_global_cockpit_theme() -> None:
             box-shadow: 0 10px 26px rgba(0,0,0,0.24);
         }
 
-        .stButton > button:hover,
-        .stDownloadButton > button:hover,
-        .stFormSubmitButton > button:hover,
+        .stButton button:hover,
+        .stDownloadButton button:hover,
+        .stFormSubmitButton button:hover,
         [data-testid="stBaseButton-primary"]:hover {
             border-color: rgba(255,255,255,0.38);
             filter: brightness(1.08);
+        }
+
+        /* Main controls need a darker, opaque surface for normal-size text.
+           Keep the brighter brand accents and the sidebar's existing palette.
+           The text rule also reaches children forced near-white by expanders.
+           Explicit hover colors avoid brightening the entire control/filter. */
+        [data-testid="stMain"] :is(.stButton, .stDownloadButton, .stFormSubmitButton, [data-testid="stFileUploaderDropzone"]) button:enabled,
+        [data-testid="stMain"] button[data-testid="stBaseButton-primary"]:enabled {
+            background: linear-gradient(135deg, #b81760, #6f2fba) !important;
+            filter: none !important;
+        }
+
+        [data-testid="stMain"] :is(.stButton, .stDownloadButton, .stFormSubmitButton, [data-testid="stFileUploaderDropzone"]) button:enabled,
+        [data-testid="stMain"] :is(.stButton, .stDownloadButton, .stFormSubmitButton, [data-testid="stFileUploaderDropzone"]) button:enabled *,
+        [data-testid="stMain"] button[data-testid="stBaseButton-primary"]:enabled,
+        [data-testid="stMain"] button[data-testid="stBaseButton-primary"]:enabled * {
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+        }
+
+        [data-testid="stMain"] :is(.stButton, .stDownloadButton, .stFormSubmitButton, [data-testid="stFileUploaderDropzone"]) button:enabled:hover,
+        [data-testid="stMain"] button[data-testid="stBaseButton-primary"]:enabled:hover {
+            background: linear-gradient(135deg, #a31454, #6129a3) !important;
+        }
+
+        [data-testid="stMain"] [data-testid="stFileUploaderDropzone"] button:disabled {
+            background:
+                linear-gradient(180deg, rgba(35,42,54,0.98), rgba(22,28,39,0.98)) !important;
+            box-shadow: none !important;
+            filter: none !important;
         }
 
         [data-testid="stSidebar"] button:disabled,
@@ -812,12 +884,12 @@ def inject_global_cockpit_theme() -> None:
         [data-testid="stSidebar"] button[aria-disabled="true"],
         [data-testid="stSidebar"] [data-testid^="stBaseButton"]:disabled,
         [data-testid="stSidebar"] [data-testid^="stBaseButton"][disabled],
-        [data-testid="stSidebar"] .stButton > button:disabled,
-        [data-testid="stSidebar"] .stDownloadButton > button:disabled,
-        [data-testid="stSidebar"] .stFormSubmitButton > button:disabled,
-        [data-testid="stSidebar"] .stButton > button[disabled],
-        [data-testid="stSidebar"] .stDownloadButton > button[disabled],
-        [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] {
+        [data-testid="stSidebar"] .stButton button:disabled,
+        [data-testid="stSidebar"] .stDownloadButton button:disabled,
+        [data-testid="stSidebar"] .stFormSubmitButton button:disabled,
+        [data-testid="stSidebar"] .stButton button[disabled],
+        [data-testid="stSidebar"] .stDownloadButton button[disabled],
+        [data-testid="stSidebar"] .stFormSubmitButton button[disabled] {
             color: #dbeafe !important;
             -webkit-text-fill-color: #dbeafe !important;
             background-color: #172033 !important;
@@ -834,12 +906,12 @@ def inject_global_cockpit_theme() -> None:
         [data-testid="stSidebar"] button[aria-disabled="true"] *,
         [data-testid="stSidebar"] [data-testid^="stBaseButton"]:disabled *,
         [data-testid="stSidebar"] [data-testid^="stBaseButton"][disabled] *,
-        [data-testid="stSidebar"] .stButton > button:disabled *,
-        [data-testid="stSidebar"] .stDownloadButton > button:disabled *,
-        [data-testid="stSidebar"] .stFormSubmitButton > button:disabled *,
-        [data-testid="stSidebar"] .stButton > button[disabled] *,
-        [data-testid="stSidebar"] .stDownloadButton > button[disabled] *,
-        [data-testid="stSidebar"] .stFormSubmitButton > button[disabled] * {
+        [data-testid="stSidebar"] .stButton button:disabled *,
+        [data-testid="stSidebar"] .stDownloadButton button:disabled *,
+        [data-testid="stSidebar"] .stFormSubmitButton button:disabled *,
+        [data-testid="stSidebar"] .stButton button[disabled] *,
+        [data-testid="stSidebar"] .stDownloadButton button[disabled] *,
+        [data-testid="stSidebar"] .stFormSubmitButton button[disabled] * {
             color: #dbeafe !important;
             -webkit-text-fill-color: #dbeafe !important;
             opacity: 1 !important;

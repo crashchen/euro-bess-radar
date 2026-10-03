@@ -65,6 +65,11 @@ streamlit run app.py
 
 ## Current behavior and review status
 
+Draft [#105](https://github.com/crashchen/euro-bess-radar/pull/105) now has a
+[control contrast revision](docs/audits/2026-10-03-control-contrast-r2-handoff.md)
+at `a32e707`, awaiting separate CC review. Its browser/test evidence is
+revision-bound; the merged-state snapshot below remains historical.
+
 The September corrections (Steps 1–4, #86–#93), [frontier result identity](docs/audits/2026-09-22-frontier-handoff.md) (#94), [frontier/floor export and retry state](docs/audits/2026-09-22-floor-followup-handoff.md) (#95), [multi-day/forecast-policy Excel provenance](docs/audits/2026-09-22-cockpit-export-handoff.md) (#96), [Cockpit strategy-name XLSX readability](docs/audits/2026-09-23-strategy-export-evidence/README.md) (#97), [remaining-page metric layout](docs/audits/2026-09-27-metric-layout-evidence/README.md) (#98), its documentation closeout (#99), the [Forward benchmark chart](docs/audits/2026-09-28-forward-chart-handoff.md) (#100), [Cockpit export copy](docs/audits/2026-09-28-cockpit-export-copy-handoff.md) (#101) and the [Forward chart review follow-up](docs/audits/2026-09-28-forward-chart-followup-handoff.md) (#102) are merged. The [current verification snapshot](docs/validation/current.md) records #102's reviewed and merged state. Earlier snapshots remain archived at their original revisions.
 
 - **Price statistics:** the overall Avg Price is weighted by verified native delivery durations. The chart's 30-Day MA covers 720 physical hours. Adjacent median and standard deviation retain their explicitly labelled row-based calculations. If delivery duration cannot be verified, duration-based figures show `n/a` with a reason; observed negative-price counts and prices are preserved. See the [delivery-duration contract](docs/design/delivery-duration-v1.md).

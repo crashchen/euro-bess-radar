@@ -2,7 +2,10 @@
 
 The [dated verification snapshot](current.md) records the Forward chart
 follow-up, merged in #102 as `01ea5cd`. Step 4 housekeeping and follow-ups
-#94–#102 are merged, and no review candidate is currently open. Historical
+#94–#102 are merged, with manual-acceptance follow-ups #104–#106 now open as draft candidates.
+#105's main-control contrast/disabled Browse revision at `a32e707` is
+implemented and awaiting user-invoked CC review; see its
+[handoff](../audits/2026-10-03-control-contrast-r2-handoff.md). Historical
 snapshots remain revision-bound: [#94](2026-09-22-frontier.md),
 [#95](2026-09-22-floor-followup.md),
 [#96](2026-09-22-cockpit-export.md),

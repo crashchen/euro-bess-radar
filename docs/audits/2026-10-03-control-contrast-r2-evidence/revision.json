@@ -1,0 +1,33 @@
+{
+  "pr": 105,
+  "pr_base": "e28ee9c4b439c31c519d07cf390bc22b6fbd46d6",
+  "reviewed_first_head": "d5bf99640f2a9f8ef9c3f5ed21ae60754f59c438",
+  "code_commit": "a32e707f4793d4c687b5f366f6d59ce6414051ff",
+  "hashes": {
+    "original-code.patch": "7513c25fc2c92d941cd2b5bb4081aca8fd4dc3948e6300c2f80426d8fd355e33",
+    "revision-code.patch": "8cdf7e3f57549d959e42fdc55d958acdd70e036d3ad72c0204335a3edb54b177",
+    "aggregate-code.patch": "42f959440cf38d64af90d47974960c27caab8a2f052fe7c324aa85a77a24fc52",
+    "baseline-red-tests.patch": "68d12a881955c37b72fdb37981a211cb78843c44c115fc73702c69296e913090"
+  },
+  "new_test_cases": 3,
+  "baseline_focused": {
+    "failed": 3,
+    "passed": 42
+  },
+  "candidate_focused": {
+    "passed": 45
+  },
+  "full_local": {
+    "passed": 2127,
+    "skipped": 2,
+    "warnings": 29,
+    "seconds": 296.93,
+    "slow_included": true,
+    "slow_cases": 35
+  },
+  "browser": "Codex in-app browser, native CUA pointer/viewport control. Six enabled controls per state, two disabled Browse controls; synthetic fixture with production CSS and Data Trust renderer.",
+  "matrix_cases": 16,
+  "candidate_actual_hover_checks": 64,
+  "cc_review": "pending, user invokes separately",
+  "merged": false
+}
